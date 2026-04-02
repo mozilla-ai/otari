@@ -323,7 +323,7 @@ async def chat_completions(
             user_id=user_id,
             error=str(e),
         )
-        logger.error(f"Provider call failed for {provider}:{model}: {e}")
+        logger.error("Provider call failed for %s:%s: %s", provider, model, e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="The request could not be completed by the provider",
