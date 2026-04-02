@@ -1,4 +1,4 @@
-.PHONY: help dev test test-unit test-integration lint
+.PHONY: help dev test test-unit test-integration lint typecheck
 
 help:
 	@printf "Available targets:\n"
@@ -7,6 +7,7 @@ help:
 	@printf "  test-unit Run unit tests\n"
 	@printf "  test-integration Run integration tests\n"
 	@printf "  lint Run Ruff lint checks\n"
+	@printf "  typecheck Run mypy type checks\n"
 
 dev:
 	@set -a; \
@@ -25,3 +26,6 @@ test-integration:
 
 lint:
 	uv run ruff check src tests scripts
+
+typecheck:
+	uv run mypy

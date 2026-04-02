@@ -55,3 +55,12 @@ select = ["E", "F", "I"]
 [tool.ruff.lint.per-file-ignores]
 "scripts/generate_openapi.py" = ["E402"]
 "tests/integration/conftest.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src", "tests", "scripts"]
+
+[[tool.mypy.overrides]]
+module = ["testcontainers.*"]
+ignore_missing_imports = true

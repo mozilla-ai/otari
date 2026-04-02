@@ -38,3 +38,6 @@ jobs:
 
     - name: Run Ruff lint
       run: uv run ruff check src tests scripts
+
+    - name: Run mypy type check
+      run: uv run mypy
