@@ -1,22 +1,20 @@
-"""Tests for budget enforcement with row locking."""
+"""Tests for budget enforcement behavior."""
 
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
 from gateway.models.entities import Budget, User
+from gateway.repositories.users_repository import get_active_user
 from gateway.services.budget_service import validate_user_budget
 
 
 @pytest.mark.asyncio
-async def test_validate_user_budget_uses_for_update(
+async def test_validate_user_budget_reads_user_without_locking(
     test_db: Any,
 ) -> None:
-    """Test that validate_user_budget queries with FOR UPDATE locking.
-
-    We verify this indirectly by confirming the budget check works correctly
-    for a user at their budget limit.
-    """
+    """validate_user_budget should allow under-limit users without lock contention."""
     budget = Budget(
         budget_id="race-budget",
         max_budget=10.0,
@@ -31,9 +29,14 @@ async def test_validate_user_budget_uses_for_update(
     test_db.add(user)
     test_db.commit()
 
-    # Should pass -- spend is under budget
-    result = await validate_user_budget(test_db, "race-user")
+    with patch(
+        "gateway.services.budget_service.get_active_user",
+        wraps=get_active_user,
+    ) as mock_get_active_user:
+        result = await validate_user_budget(test_db, "race-user")
+
     assert result.user_id == "race-user"
+    assert mock_get_active_user.call_args.kwargs.get("for_update", False) is False
 
 
 @pytest.mark.asyncio
