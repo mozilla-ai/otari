@@ -1,0 +1,40 @@
+name: Gateway Typecheck
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/gateway/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/gateway-typecheck.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/gateway/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/gateway-typecheck.yml'
+  workflow_dispatch:
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        python-version: 3.13
+        activate-environment: true
+
+    - name: Install dependencies
+      run: uv sync --dev --frozen
+
+    - name: Run mypy type check
+      run: uv run mypy

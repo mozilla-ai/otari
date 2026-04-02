@@ -13,6 +13,7 @@ import json
 import sys
 import tempfile
 from pathlib import Path
+from typing import cast
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
@@ -23,7 +24,7 @@ from gateway.core.config import GatewayConfig
 from gateway.main import create_app
 
 
-def generate_openapi_spec() -> dict:
+def generate_openapi_spec() -> dict[str, object]:
     """Generate OpenAPI specification from FastAPI app.
 
     Returns:
@@ -34,10 +35,10 @@ def generate_openapi_spec() -> dict:
         database_url = f"sqlite:///{Path(tmpdir) / 'openapi.db'}"
         config = GatewayConfig(database_url=database_url, bootstrap_api_key=False)
         app = create_app(config)
-        return app.openapi()
+        return cast(dict[str, object], app.openapi())
 
 
-def write_spec(spec: dict, output_path: Path) -> None:
+def write_spec(spec: dict[str, object], output_path: Path) -> None:
     """Write OpenAPI spec to file with pretty formatting.
 
     Args:
@@ -51,7 +52,7 @@ def write_spec(spec: dict, output_path: Path) -> None:
         f.write("\n")
 
 
-def check_spec(spec: dict, existing_path: Path) -> bool:
+def check_spec(spec: dict[str, object], existing_path: Path) -> bool:
     """Check if generated spec matches existing file.
 
     Args:
@@ -67,19 +68,24 @@ def check_spec(spec: dict, existing_path: Path) -> bool:
         return False
 
     with open(existing_path, encoding="utf-8") as f:
-        existing_spec = json.load(f)
+        existing_spec = cast(dict[str, object], json.load(f))
 
     # Create copies to avoid modifying originals
     spec_copy = spec.copy()
     existing_copy = existing_spec.copy()
 
     # Remove version from comparison since it's dynamically generated from git
-    if "info" in spec_copy and "version" in spec_copy["info"]:
-        spec_copy["info"] = spec_copy["info"].copy()
-        spec_copy["info"].pop("version")
-    if "info" in existing_copy and "version" in existing_copy["info"]:
-        existing_copy["info"] = existing_copy["info"].copy()
-        existing_copy["info"].pop("version")
+    spec_info = spec_copy.get("info")
+    if isinstance(spec_info, dict):
+        spec_info_copy = dict(spec_info)
+        spec_info_copy.pop("version", None)
+        spec_copy["info"] = spec_info_copy
+
+    existing_info = existing_copy.get("info")
+    if isinstance(existing_info, dict):
+        existing_info_copy = dict(existing_info)
+        existing_info_copy.pop("version", None)
+        existing_copy["info"] = existing_info_copy
 
     generated_json = json.dumps(spec_copy, indent=2, sort_keys=True)
     existing_json = json.dumps(existing_copy, indent=2, sort_keys=True)
