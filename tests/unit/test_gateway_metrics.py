@@ -4,8 +4,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from core.config import GatewayConfig
-from metrics import (
+from gateway.core.config import GatewayConfig
+from gateway.metrics import (
     REGISTRY,
     MetricsMiddleware,
     metrics_endpoint,
@@ -190,7 +190,7 @@ def test_active_requests_returns_to_zero() -> None:
 
 def test_rate_limiter_records_metric_on_429() -> None:
     """RateLimiter.check() records a metric before raising 429."""
-    from rate_limit import RateLimiter
+    from gateway.rate_limit import RateLimiter
 
     limiter = RateLimiter(rpm=1)
     limiter.check("metric-rl-user")

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gateway"
+version = "0.0.0"
+description = "any-llm gateway service"
+requires-python = ">=3.13"
+
+[project.scripts]
+gateway = "gateway.cli:main"
+any-llm-gateway = "gateway.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

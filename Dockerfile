@@ -6,6 +6,10 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+COPY pyproject.toml ./
+COPY src ./src
+RUN pip install --no-cache-dir -e .
+
 COPY . .
 
 RUN useradd -m -u 1000 gateway && \
@@ -21,4 +25,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 ENV GATEWAY_HOST=0.0.0.0
 ENV GATEWAY_PORT=8000
 
-CMD ["python", "cli.py", "serve"]
+CMD ["gateway", "serve"]

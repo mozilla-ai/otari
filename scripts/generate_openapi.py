@@ -15,11 +15,12 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+SRC_ROOT = REPO_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
-from core.config import GatewayConfig
-from main import create_app
+from gateway.core.config import GatewayConfig
+from gateway.main import create_app
 
 
 def generate_openapi_spec() -> dict:

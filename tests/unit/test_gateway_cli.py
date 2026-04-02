@@ -2,8 +2,8 @@ import sys
 
 import pytest
 
-import cli as gateway_cli
-from core.config import GatewayConfig
+import gateway.cli as gateway_cli
+from gateway.core.config import GatewayConfig
 
 
 def test_main_warns_for_deprecated_binary_name(

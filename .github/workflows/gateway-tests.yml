@@ -4,48 +4,24 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'api/**'
-      - 'auth/**'
-      - 'core/**'
-      - 'db/**'
-      - 'models/**'
-      - 'repositories/**'
-      - 'services/**'
+      - 'src/gateway/**'
       - 'alembic/**'
-      - 'main.py'
-      - 'cli.py'
-      - 'dev.py'
-      - 'metrics.py'
-      - 'rate_limit.py'
-      - 'streaming.py'
-      - 'version.py'
-      - 'tests/gateway/**'
+      - 'tests/integration/**'
       - 'tests/unit/**'
       - 'scripts/**'
       - 'requirements*.txt'
+      - 'pyproject.toml'
       - '.github/workflows/gateway-tests.yml'
   pull_request:
     branches: [ main ]
     paths:
-      - 'api/**'
-      - 'auth/**'
-      - 'core/**'
-      - 'db/**'
-      - 'models/**'
-      - 'repositories/**'
-      - 'services/**'
+      - 'src/gateway/**'
       - 'alembic/**'
-      - 'main.py'
-      - 'cli.py'
-      - 'dev.py'
-      - 'metrics.py'
-      - 'rate_limit.py'
-      - 'streaming.py'
-      - 'version.py'
-      - 'tests/gateway/**'
+      - 'tests/integration/**'
       - 'tests/unit/**'
       - 'scripts/**'
       - 'requirements*.txt'
+      - 'pyproject.toml'
       - '.github/workflows/gateway-tests.yml'
   workflow_dispatch:
 
@@ -64,13 +40,13 @@ jobs:
 
     - name: Install dependencies
       run: |
-         uv pip install -r requirements-dev.txt
+         uv pip install -r requirements-dev.txt -e .
 
     - name: Run gateway integration tests
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
-        uv run pytest tests/gateway tests/unit -v --cov --cov-report=xml --cov-append -n auto
+        uv run pytest tests/integration tests/unit -v --cov --cov-report=xml --cov-append -n auto
 
     - name: Upload coverage
       uses: codecov/codecov-action@v5
@@ -90,7 +66,7 @@ jobs:
         activate-environment: true
 
     - name: Install dependencies
-      run: uv pip install -r requirements.txt
+      run: uv pip install -r requirements.txt -e .
 
     - name: Verify OpenAPI spec is up to date
       run: uv run python scripts/generate_openapi.py --check

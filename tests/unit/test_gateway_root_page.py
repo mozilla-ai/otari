@@ -2,8 +2,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from core.config import GatewayConfig
-from main import create_app
+from gateway.core.config import GatewayConfig
+from gateway.main import create_app
 
 
 def test_root_tutorial_page_is_available(tmp_path: Path) -> None:

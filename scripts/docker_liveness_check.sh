@@ -64,7 +64,7 @@ docker run -d --name "$GATEWAY_CONTAINER" \
     -p 8000:8000 \
     -v "$CONFIG_FILE":/app/config.yml \
     "$IMAGE_TAG" \
-    python cli.py serve --config /app/config.yml
+    gateway serve --config /app/config.yml
 
 echo "Waiting for gateway to be healthy..."
 for i in {1..60}; do

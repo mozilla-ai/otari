@@ -8,14 +8,14 @@ budget enforcement, usage tracking, and OpenAI-compatible endpoints.
 ```bash
 uv venv
 source .venv/bin/activate
-uv pip install -r requirements-dev.txt
+uv pip install -r requirements-dev.txt -e .
 ```
 
 ## Run locally
 
 ```bash
 cp config.example.yml config.yml
-uv run python cli.py serve --config config.yml
+uv run gateway serve --config config.yml
 ```
 
 Or use the dev target:

@@ -3,9 +3,9 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from core.config import GatewayConfig
-from db import APIKey, User
-from main import create_app
+from gateway.core.config import GatewayConfig
+from gateway.db import APIKey, User
+from gateway.main import create_app
 
 
 def test_create_app_bootstraps_first_api_key(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from repositories.users_repository import get_active_user
+from gateway.repositories.users_repository import get_active_user
 
 
 def test_get_active_user_skips_for_update_on_sqlite() -> None:

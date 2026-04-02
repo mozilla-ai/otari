@@ -5,18 +5,13 @@ on:
     branches:
       - 'main'
     paths:
-      - 'api/**'
-      - 'auth/**'
-      - 'core/**'
-      - 'db/**'
-      - 'models/**'
-      - 'repositories/**'
-      - 'services/**'
+      - 'src/gateway/**'
       - 'alembic/**'
       - 'Dockerfile'
       - 'docker-compose*.yml'
       - 'config.example.yml'
       - 'requirements*.txt'
+      - 'pyproject.toml'
       - 'scripts/docker_liveness_check.sh'
       - '.github/workflows/gateway-docker.yml'
   release:
