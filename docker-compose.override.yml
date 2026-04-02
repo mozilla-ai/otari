@@ -1,0 +1,7 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    image: gateway:local
