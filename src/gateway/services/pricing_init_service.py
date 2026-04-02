@@ -27,7 +27,7 @@ def initialize_pricing_from_config(config: GatewayConfig, db: Session) -> None:
         logger.debug("No pricing configuration found in config file")
         return
 
-    logger.info(f"Loading pricing configuration for {len(config.pricing)} model(s)")
+    logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
 
     for raw_model_key, pricing_config in config.pricing.items():
         provider, model_name = AnyLLM.split_model_provider(raw_model_key)
@@ -43,7 +43,9 @@ def initialize_pricing_from_config(config: GatewayConfig, db: Session) -> None:
         input_price = pricing_config.input_price_per_million
         output_price = pricing_config.output_price_per_million
 
-        existing_pricing = db.query(ModelPricing).filter(ModelPricing.model_key == model_key).first()
+        existing_pricing = (
+            db.query(ModelPricing).filter(ModelPricing.model_key == model_key).first()
+        )
 
         if existing_pricing:
             logger.warning(
@@ -60,7 +62,12 @@ def initialize_pricing_from_config(config: GatewayConfig, db: Session) -> None:
             output_price_per_million=output_price,
         )
         db.add(new_pricing)
-        logger.info(f"Added pricing for '{model_key}': input=${input_price}/M, output=${output_price}/M")
+        logger.info(
+            "Added pricing for '%s': input=$%s/M, output=$%s/M",
+            model_key,
+            input_price,
+            output_price,
+        )
 
     try:
         db.commit()

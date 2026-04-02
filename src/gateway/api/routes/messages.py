@@ -204,7 +204,7 @@ async def create_message(
             user_id=user_id,
             error=str(e),
         )
-        logger.error(f"Provider call failed for {provider}:{model}: {e}")
+        logger.error("Provider call failed for %s:%s: %s", provider, model, e)
         raise _anthropic_error(
             _ERR_API,
             _PROVIDER_ERROR,

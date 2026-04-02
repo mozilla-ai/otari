@@ -67,7 +67,7 @@ async def health_readiness() -> dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Database connectivity check failed: {e}")
+        logger.error("Database connectivity check failed: %s", e)
         raise HTTPException(
             status_code=503,
             detail={
