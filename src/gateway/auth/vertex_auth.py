@@ -40,10 +40,10 @@ def setup_vertex_environment(
                 if os.path.exists(credentials):
                     with open(credentials, encoding="utf-8") as f:
                         json_obj = json.load(f)
-                    kwargs["credentials"] = service_account.Credentials.from_service_account_file(credentials)
+                    kwargs["credentials"] = service_account.Credentials.from_service_account_file(credentials)  # type: ignore[no-untyped-call]
                 else:
                     json_obj = json.loads(credentials)
-                    kwargs["credentials"] = service_account.Credentials.from_service_account_info(json_obj)
+                    kwargs["credentials"] = service_account.Credentials.from_service_account_info(json_obj)  # type: ignore[no-untyped-call]
             except Exception as e:  # noqa: BLE001
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -52,7 +52,7 @@ def setup_vertex_environment(
         elif isinstance(credentials, dict):
             json_obj = credentials
             try:
-                kwargs["credentials"] = service_account.Credentials.from_service_account_info(credentials)
+                kwargs["credentials"] = service_account.Credentials.from_service_account_info(credentials)  # type: ignore[no-untyped-call]
             except Exception as e:  # noqa: BLE001
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

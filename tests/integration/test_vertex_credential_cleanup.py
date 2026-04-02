@@ -5,6 +5,7 @@ from unittest.mock import sentinel
 
 import pytest
 from fastapi import HTTPException
+from google.oauth2 import service_account
 
 from gateway.auth.vertex_auth import setup_vertex_environment
 
@@ -18,7 +19,6 @@ def test_setup_vertex_environment_returns_kwargs_without_env_mutation() -> None:
     os.environ["GOOGLE_CLOUD_LOCATION"] = "europe-west1"
 
     try:
-        from gateway.auth import vertex_auth
 
         def _fake_from_info(info: dict[str, object]) -> object:
             assert info["project_id"] == "config-project"
@@ -26,7 +26,7 @@ def test_setup_vertex_environment_returns_kwargs_without_env_mutation() -> None:
 
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(
-                vertex_auth.service_account.Credentials,
+                service_account.Credentials,
                 "from_service_account_info",
                 _fake_from_info,
             )
