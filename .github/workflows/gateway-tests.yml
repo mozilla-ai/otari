@@ -1,0 +1,96 @@
+name: Gateway Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'api/**'
+      - 'auth/**'
+      - 'core/**'
+      - 'db/**'
+      - 'models/**'
+      - 'repositories/**'
+      - 'services/**'
+      - 'alembic/**'
+      - 'main.py'
+      - 'cli.py'
+      - 'dev.py'
+      - 'metrics.py'
+      - 'rate_limit.py'
+      - 'streaming.py'
+      - 'version.py'
+      - 'tests/gateway/**'
+      - 'tests/unit/**'
+      - 'scripts/**'
+      - 'requirements*.txt'
+      - '.github/workflows/gateway-tests.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'api/**'
+      - 'auth/**'
+      - 'core/**'
+      - 'db/**'
+      - 'models/**'
+      - 'repositories/**'
+      - 'services/**'
+      - 'alembic/**'
+      - 'main.py'
+      - 'cli.py'
+      - 'dev.py'
+      - 'metrics.py'
+      - 'rate_limit.py'
+      - 'streaming.py'
+      - 'version.py'
+      - 'tests/gateway/**'
+      - 'tests/unit/**'
+      - 'scripts/**'
+      - 'requirements*.txt'
+      - '.github/workflows/gateway-tests.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    environment: integration-tests
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        python-version: 3.13
+        activate-environment: true
+
+    - name: Install dependencies
+      run: |
+         uv pip install -r requirements-dev.txt
+
+    - name: Run gateway integration tests
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      run: |
+        uv run pytest tests/gateway tests/unit -v --cov --cov-report=xml --cov-append -n auto
+
+    - name: Upload coverage
+      uses: codecov/codecov-action@v5
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+
+  openapi-spec:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        python-version: 3.13
+        activate-environment: true
+
+    - name: Install dependencies
+      run: uv pip install -r requirements.txt
+
+    - name: Verify OpenAPI spec is up to date
+      run: uv run python scripts/generate_openapi.py --check
