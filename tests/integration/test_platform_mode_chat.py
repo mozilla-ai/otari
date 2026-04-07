@@ -1,3 +1,4 @@
+from collections.abc import Generator
 from typing import Any
 
 import httpx
@@ -17,7 +18,7 @@ from gateway.main import create_app
 
 
 @pytest.fixture
-def platform_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "gw_test_token")
     app = create_app(
         GatewayConfig(
