@@ -147,15 +147,18 @@ def create_app(config: GatewayConfig) -> FastAPI:
         Configured FastAPI application
 
     """
-    init_db(config.database_url, auto_migrate=config.auto_migrate)
+    config.validate_mode_selection()
     set_config(config)
 
-    db = next(get_db())
-    try:
-        bootstrap_first_api_key(config, db)
-        initialize_pricing_from_config(config, db)
-    finally:
-        db.close()
+    if not config.is_platform_mode:
+        init_db(config.database_url, auto_migrate=config.auto_migrate)
+
+        db = next(get_db())
+        try:
+            bootstrap_first_api_key(config, db)
+            initialize_pricing_from_config(config, db)
+        finally:
+            db.close()
 
     app = FastAPI(
         title="any-llm-gateway",
@@ -194,7 +197,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
     else:
         app.state.rate_limiter = None
 
-    register_routers(app)
+    app.state.gateway_mode = config.effective_mode
+
+    register_routers(app, config)
 
     if config.enable_metrics:
         from gateway.metrics import metrics_endpoint

@@ -69,3 +69,40 @@ def test_load_config_skips_duplicate_dotenv_paths(tmp_path: Path, monkeypatch: p
     load_config(str(config_file))
 
     assert calls == [env_file]
+
+
+def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("mode: platform\n", encoding="utf-8")
+
+    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "gw_test_token")
+    monkeypatch.setenv("PLATFORM_BASE_URL", "http://localhost:8100/api/v1")
+    monkeypatch.setenv("PLATFORM_RESOLVE_TIMEOUT_MS", "1234")
+    monkeypatch.setenv("PLATFORM_USAGE_TIMEOUT_MS", "2345")
+    monkeypatch.setenv("PLATFORM_USAGE_MAX_RETRIES", "7")
+
+    config = load_config(str(config_file))
+
+    assert config.is_platform_mode
+    assert config.platform["base_url"] == "http://localhost:8100/api/v1"
+    assert config.platform["resolve_timeout_ms"] == 1234
+    assert config.platform["usage_timeout_ms"] == 2345
+    assert config.platform["usage_max_retries"] == 7
+
+
+def test_load_config_rejects_platform_mode_without_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("mode: platform\n", encoding="utf-8")
+    monkeypatch.delenv("ANY_LLM_PLATFORM_TOKEN", raising=False)
+
+    with pytest.raises(ValueError, match="ANY_LLM_PLATFORM_TOKEN"):
+        load_config(str(config_file))
+
+
+def test_load_config_rejects_conflicting_mode_and_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("mode: standalone\n", encoding="utf-8")
+    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "gw_test_token")
+
+    with pytest.raises(ValueError, match="GATEWAY_MODE=standalone"):
+        load_config(str(config_file))
