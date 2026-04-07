@@ -44,9 +44,7 @@ def cli() -> None:
 @click.option(
     "--log-level",
     default=logging.INFO,
-    type=click.Choice(
-        [logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL]
-    ),
+    type=click.Choice([logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL]),
     help="Logging level",
 )
 def serve(
@@ -60,7 +58,10 @@ def serve(
     log_level: int,
 ) -> None:
     """Start the gateway server."""
-    gateway_config = load_config(config)
+    try:
+        gateway_config = load_config(config)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
     setup_logger(level=log_level)
 
     if host:
@@ -74,23 +75,32 @@ def serve(
     if auto_migrate is not None:
         gateway_config.auto_migrate = auto_migrate
 
+    gateway_config.validate_mode_selection()
+
+    if gateway_config.is_platform_mode:
+        platform_base_url = gateway_config.platform.get("base_url")
+        if not platform_base_url:
+            raise click.ClickException("platform.base_url is required when platform mode is active")
+        if gateway_config.providers:
+            raise click.ClickException(
+                "Local provider credentials are not supported in platform mode. Remove configured providers."
+            )
+        logger.info("Platform mode active. Base URL: %s", platform_base_url)
+
     if not gateway_config.master_key:
         logger.warning(
             "No master key configured. Key management endpoints will be unavailable.",
         )
-        logger.warning(
-            "Set GATEWAY_MASTER_KEY environment variable or use --master-key flag."
-        )
+        logger.warning("Set GATEWAY_MASTER_KEY environment variable or use --master-key flag.")
 
-    logger.info(
-        "Starting any-llm-gateway on %s:%s", gateway_config.host, gateway_config.port
-    )
-    logger.info("Database: %s", gateway_config.database_url)
+    logger.info("Starting any-llm-gateway on %s:%s", gateway_config.host, gateway_config.port)
+    if gateway_config.is_platform_mode:
+        logger.info("Database: disabled (platform mode)")
+    else:
+        logger.info("Database: %s", gateway_config.database_url)
 
     if gateway_config.providers:
-        logger.info(
-            "Configured providers: %s", ", ".join(gateway_config.providers.keys())
-        )
+        logger.info("Configured providers: %s", ", ".join(gateway_config.providers.keys()))
 
     app = create_app(gateway_config)
 
@@ -107,9 +117,7 @@ def serve(
 
 
 @cli.command()
-@click.option(
-    "--config", "-c", type=click.Path(exists=True), help="Path to config YAML file"
-)
+@click.option("--config", "-c", type=click.Path(exists=True), help="Path to config YAML file")
 @click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")
 def init_db(config: str | None, database_url: str | None) -> None:
     """Initialize the database schema."""
@@ -128,9 +136,7 @@ def init_db(config: str | None, database_url: str | None) -> None:
 
 
 @cli.command()
-@click.option(
-    "--config", "-c", type=click.Path(exists=True), help="Path to config YAML file"
-)
+@click.option("--config", "-c", type=click.Path(exists=True), help="Path to config YAML file")
 @click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")
 @click.option("--revision", default="head", help="Target revision (default: head)")
 def migrate(config: str | None, database_url: str | None, revision: str) -> None:

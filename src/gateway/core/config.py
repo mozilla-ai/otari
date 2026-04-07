@@ -62,6 +62,41 @@ class GatewayConfig(BaseSettings):
         default=True,
         description="Create a first-use API key on startup when no API keys exist",
     )
+    mode: str = Field(default="standalone", description="Gateway operating mode: standalone or platform")
+    platform: dict[str, Any] = Field(default_factory=dict, description="Platform integration settings")
+
+    @property
+    def platform_token(self) -> str | None:
+        token = os.getenv("ANY_LLM_PLATFORM_TOKEN", "").strip()
+        return token if token else None
+
+    @property
+    def effective_mode(self) -> str:
+        if self.platform_token:
+            return "platform"
+        return "standalone"
+
+    @property
+    def is_platform_mode(self) -> bool:
+        return self.effective_mode == "platform"
+
+    def validate_mode_selection(self) -> None:
+        configured_mode = self.mode.strip().lower()
+        if configured_mode not in {"standalone", "platform"}:
+            msg = "Invalid GATEWAY_MODE value. Expected 'standalone' or 'platform'."
+            raise ValueError(msg)
+
+        token_present = self.platform_token is not None
+        if configured_mode == "platform" and not token_present:
+            msg = "GATEWAY_MODE=platform requires ANY_LLM_PLATFORM_TOKEN to be set."
+            raise ValueError(msg)
+
+        if configured_mode == "standalone" and token_present:
+            msg = (
+                "ANY_LLM_PLATFORM_TOKEN is set but GATEWAY_MODE=standalone. "
+                "Remove the token or switch to platform mode."
+            )
+            raise ValueError(msg)
 
 
 def load_config(config_path: str | None = None) -> GatewayConfig:
@@ -84,7 +119,33 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
             if yaml_config:
                 config_dict = _resolve_env_vars(yaml_config)
 
-    return GatewayConfig(**config_dict)
+    _apply_platform_env_overrides(config_dict)
+
+    config = GatewayConfig(**config_dict)
+    config.validate_mode_selection()
+    return config
+
+
+def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
+    platform = config.get("platform")
+    if not isinstance(platform, dict):
+        platform = {}
+
+    env_mappings: dict[str, tuple[str, type[Any]]] = {
+        "PLATFORM_BASE_URL": ("base_url", str),
+        "PLATFORM_RESOLVE_TIMEOUT_MS": ("resolve_timeout_ms", int),
+        "PLATFORM_USAGE_TIMEOUT_MS": ("usage_timeout_ms", int),
+        "PLATFORM_USAGE_MAX_RETRIES": ("usage_max_retries", int),
+    }
+
+    for env_name, (field_name, caster) in env_mappings.items():
+        value = os.getenv(env_name)
+        if value is None or value == "":
+            continue
+        platform[field_name] = caster(value)
+
+    if platform:
+        config["platform"] = platform
 
 
 def _load_dotenv(config_path: str | None = None) -> None:

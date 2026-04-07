@@ -1,9 +1,10 @@
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 
-from gateway.api.deps import get_db
+from gateway.api.deps import get_config, get_db
+from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.version import __version__
 
@@ -11,13 +12,16 @@ router = APIRouter(prefix="/health", tags=["health"])
 
 
 @router.get("")
-async def health_check() -> dict[str, str]:
+async def health_check(config: GatewayConfig = Depends(get_config)) -> dict[str, str]:
     """General health check endpoint.
 
     Returns basic health status. For infrastructure monitoring,
     use /health/readiness or /health/liveness instead.
     """
-    return {"status": "healthy"}
+    payload: dict[str, str] = {"status": "healthy"}
+    if config.is_platform_mode:
+        payload["mode"] = "platform"
+    return payload
 
 
 @router.get("/liveness")
@@ -35,7 +39,7 @@ async def health_liveness() -> str:
 
 
 @router.get("/readiness")
-async def health_readiness() -> dict[str, Any]:
+async def health_readiness(config: GatewayConfig = Depends(get_config)) -> dict[str, Any]:
     """Readiness probe endpoint.
 
     Checks if the gateway is ready to serve requests by validating:
@@ -52,6 +56,13 @@ async def health_readiness() -> dict[str, Any]:
         HTTPException: 503 if service is not ready
 
     """
+    if config.is_platform_mode:
+        return {
+            "status": "healthy",
+            "mode": "platform",
+            "version": __version__,
+        }
+
     try:
         db_gen = get_db()
         db = next(db_gen)
