@@ -20,7 +20,7 @@ on:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: mozilla-ai/gateway
+  IMAGE_NAME: mzdotai/gateway
 
 jobs:
   build-and-push-image:
