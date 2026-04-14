@@ -58,11 +58,14 @@ class SingleLogWriter:
 class BatchLogWriter:
     """Queue usage logs and flush in batches."""
 
+    _STOP_TIMEOUT = 10.0
+
     def __init__(self, max_batch: int = 100, flush_interval: float = 1.0) -> None:
         self._queue: asyncio.Queue[UsageLog] = asyncio.Queue()
         self._max_batch = max_batch
         self._flush_interval = flush_interval
         self._task: asyncio.Task[None] | None = None
+        self._stop_event = asyncio.Event()
 
     async def put(self, log: UsageLog) -> None:
         await self._queue.put(log)
@@ -72,38 +75,61 @@ class BatchLogWriter:
         self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
-        if self._task:
+        # Graceful shutdown: signal the loop, let it finish the in-flight flush
+        # and drain the queue, then exit cleanly. Cancelling mid-flush would
+        # lose the batch (items are task_done()'d before commit).
+        if self._task is None:
+            return
+        self._stop_event.set()
+        try:
+            await asyncio.wait_for(self._task, self._STOP_TIMEOUT)
+        except asyncio.TimeoutError:
+            logger.error("BatchLogWriter stop timed out after %.1fs; cancelling", self._STOP_TIMEOUT)
             self._task.cancel()
             try:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        await self._flush_all()
 
     async def _run(self) -> None:
-        while True:
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    batch = await self._collect_batch()
+                    if batch:
+                        await self._flush(batch)
+                except Exception as e:  # pragma: no cover - defensive logging
+                    logger.error("BatchLogWriter loop error: %s", e)
+        finally:
             try:
-                batch = await self._collect_batch()
-                if batch:
-                    await self._flush(batch)
-            except asyncio.CancelledError:  # pragma: no cover - cooperative cancel
-                break
+                await self._flush_all()
             except Exception as e:  # pragma: no cover - defensive logging
-                logger.error("BatchLogWriter loop error: %s", e)
+                logger.error("BatchLogWriter final drain failed: %s", e)
 
     async def _collect_batch(self) -> list[UsageLog]:
-        batch: list[UsageLog] = []
+        # Wait for first item, stop signal, or flush interval - whichever first.
+        get_task = asyncio.ensure_future(self._queue.get())
+        stop_task = asyncio.ensure_future(self._stop_event.wait())
         try:
-            item = await asyncio.wait_for(self._queue.get(), timeout=self._flush_interval)
-            batch.append(item)
+            done, _ = await asyncio.wait(
+                {get_task, stop_task},
+                timeout=self._flush_interval,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            if not stop_task.done():
+                stop_task.cancel()
+            if not get_task.done():
+                get_task.cancel()
+
+        batch: list[UsageLog] = []
+        if get_task in done:
+            batch.append(get_task.result())
             self._queue.task_done()
-        except asyncio.TimeoutError:
-            return batch
 
         while len(batch) < self._max_batch:
             try:
-                item = self._queue.get_nowait()
-                batch.append(item)
+                batch.append(self._queue.get_nowait())
                 self._queue.task_done()
             except asyncio.QueueEmpty:
                 break
@@ -132,12 +158,12 @@ class BatchLogWriter:
 
     async def _flush_all(self) -> None:
         batch: list[UsageLog] = []
-        while not self._queue.empty():
+        while True:
             try:
                 batch.append(self._queue.get_nowait())
-                self._queue.task_done()
             except asyncio.QueueEmpty:
                 break
+            self._queue.task_done()
         if batch:
             await self._flush(batch)
 
