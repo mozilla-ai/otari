@@ -99,9 +99,10 @@ async def log_batch_usage(
 @router.post("", response_model=None)
 async def create_batch(
     raw_request: Request,
+    background_tasks: BackgroundTasks,
     request: CreateBatchRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> dict[str, Any]:
@@ -189,7 +190,7 @@ async def retrieve_batch(
     provider: str,
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> dict[str, Any]:
     """Retrieve the status of a batch."""
@@ -220,7 +221,7 @@ async def cancel_batch(
     provider: str,
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> dict[str, Any]:
     """Cancel a batch."""
@@ -250,7 +251,7 @@ async def list_batches(
     provider: str,
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     after: str | None = None,
     limit: int | None = None,
@@ -288,7 +289,7 @@ async def retrieve_batch_results(
     provider: str,
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> dict[str, Any]:
