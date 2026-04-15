@@ -133,6 +133,20 @@ def test_create_batch_empty_requests(
     assert resp.status_code == 422
 
 
+def test_create_batch_invalid_model_format(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """POST /v1/batches returns 400 when model has no provider prefix."""
+    resp = client.post(
+        "/v1/batches",
+        json=_create_batch_body(model="gpt-4o-mini"),
+        headers=api_key_header,
+    )
+    assert resp.status_code == 400
+    assert "Invalid request" in resp.json()["detail"]
+
+
 def test_create_batch_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -307,7 +321,13 @@ def test_retrieve_batch_results(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """GET /v1/batches/{batch_id}/results returns batch data when completed."""
+    """GET /v1/batches/{batch_id}/results returns batch data when completed.
+
+    NOTE: This tests the current workaround behaviour where ``aretrieve_batch``
+    is used instead of ``aretrieve_batch_results`` (which the SDK does not yet
+    export). Once the SDK ships the batch results API, this test should be
+    updated to verify per-request results serialized via ``BatchResultResponse``.
+    """
     mock_batch = _mock_batch(status="completed", output_file_id="file-output-123")
 
     with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=mock_batch):
@@ -334,6 +354,29 @@ def test_retrieve_batch_results_not_complete(
     assert "not yet complete" in detail
     assert "in_progress" in detail
     assert "batch_abc123" in detail
+
+
+def test_retrieve_batch_results_logs_usage(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """GET /v1/batches/{batch_id}/results creates a usage log entry."""
+    mock_batch = _mock_batch(status="completed", output_file_id="file-output-123")
+    user_id = api_key_obj["user_id"]
+
+    with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=mock_batch):
+        resp = client.get("/v1/batches/batch_abc123/results?provider=openai", headers=api_key_header)
+
+    assert resp.status_code == 200
+
+    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    assert usage_resp.status_code == 200
+    logs = usage_resp.json()
+    results_logs = [log for log in logs if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) >= 1
+    assert results_logs[0]["status"] == "success"
 
 
 # ---------------------------------------------------------------------------
