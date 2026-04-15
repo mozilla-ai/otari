@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from any_llm.exceptions import BatchNotCompleteError
 from any_llm.types.batch import BatchResult, BatchResultError, BatchResultItem
 from fastapi.testclient import TestClient
-from openai.types.batch import Batch, BatchRequestCounts
+from openai.types.batch import Batch
+from openai.types.batch_request_counts import BatchRequestCounts
 
 
 def _mock_batch(**overrides: Any) -> Batch:
