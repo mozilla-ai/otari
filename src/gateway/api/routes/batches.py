@@ -293,24 +293,7 @@ async def retrieve_batch_results(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> dict[str, Any]:
-    """Retrieve the results of a completed batch.
-
-    .. note::
-
-       The spec requires calling ``aretrieve_batch_results`` from ``any_llm.api``
-       and returning a ``BatchResult`` object with per-request results. However,
-       the SDK does not yet export ``aretrieve_batch_results``, ``BatchResult``,
-       ``BatchResultItem``, ``BatchResultError``, or ``BatchNotCompleteError``.
-
-       As a workaround this endpoint uses ``aretrieve_batch`` to check the batch
-       status and returns the batch metadata. Once the SDK ships the batch results
-       API this handler should be updated to call ``aretrieve_batch_results`` and
-       return the per-request results serialized via ``BatchResultResponse``.
-    """
-    # FIXME: Replace with aretrieve_batch_results once the SDK exports it.
-    # See: any_llm.api — currently missing aretrieve_batch_results
-    #      any_llm.types.batch — currently missing BatchResult, BatchResultItem, BatchResultError
-    #      any_llm.exceptions — currently missing BatchNotCompleteError
+    """Retrieve the results of a completed batch."""
     api_key, is_master_key = auth_result
     api_key_id = api_key.id if api_key else None
     user_id = api_key.user_id if api_key else None
@@ -319,28 +302,27 @@ async def retrieve_batch_results(
     provider_kwargs = get_provider_kwargs(config, provider_enum)
 
     try:
-        batch: Batch = await aretrieve_batch(
+        result = await aretrieve_batch_results(
             provider=provider_enum,
             batch_id=batch_id,
             **provider_kwargs,
         )
     except HTTPException:
         raise
+    except BatchNotCompleteError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Batch '{batch_id}' is not yet complete (status: {e.batch_status}). "
+                f"Call GET /v1/batches/{batch_id}?provider={provider} to check the current status."
+            ),
+        ) from e
     except Exception as e:
         logger.error("Batch results retrieve failed for %s: %s", provider, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="LLM provider error",
         ) from e
-
-    if batch.status != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                f"Batch '{batch_id}' is not yet complete (status: {batch.status}). "
-                f"Call GET /v1/batches/{batch_id}?provider={provider} to check the current status."
-            ),
-        )
 
     await log_batch_usage(
         log_writer=log_writer,
@@ -351,4 +333,13 @@ async def retrieve_batch_results(
         user_id=user_id,
     )
 
-    return batch.model_dump()
+    return {
+        "results": [
+            {
+                "custom_id": item.custom_id,
+                "result": item.result.model_dump() if item.result else None,
+                "error": {"code": item.error.code, "message": item.error.message} if item.error else None,
+            }
+            for item in result.results
+        ]
+    }
