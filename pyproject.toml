@@ -66,3 +66,6 @@ files = ["src", "tests", "scripts"]
 [[tool.mypy.overrides]]
 module = ["testcontainers.*"]
 ignore_missing_imports = true
+
+[tool.uv.sources]
+any-llm-sdk = { path = "../any-llm", editable = true }
