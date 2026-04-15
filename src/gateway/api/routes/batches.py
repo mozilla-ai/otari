@@ -68,7 +68,6 @@ class BatchResultResponse(BaseModel):
 
 
 async def log_batch_usage(
-    db: AsyncSession,
     log_writer: LogWriter,
     api_key_id: str | None,
     model: str,
@@ -154,7 +153,6 @@ async def create_batch(
         raise
     except Exception as e:
         await log_batch_usage(
-            db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
             model=model,
@@ -172,7 +170,6 @@ async def create_batch(
         os.unlink(tmp_path)
 
     await log_batch_usage(
-        db=db,
         log_writer=log_writer,
         api_key_id=api_key_id,
         model=model,
@@ -345,10 +342,9 @@ async def retrieve_batch_results(
         )
 
     await log_batch_usage(
-        db=db,
         log_writer=log_writer,
         api_key_id=api_key_id,
-        model="batch",
+        model="",
         provider=provider,
         endpoint="/v1/batches/results",
         user_id=user_id,
