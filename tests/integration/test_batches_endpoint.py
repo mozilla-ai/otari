@@ -138,11 +138,15 @@ def test_create_batch_invalid_model_format(
     api_key_header: dict[str, str],
 ) -> None:
     """POST /v1/batches returns 400 when model has no provider prefix."""
-    resp = client.post(
-        "/v1/batches",
-        json=_create_batch_body(model="gpt-4o-mini"),
-        headers=api_key_header,
-    )
+    with patch(
+        "gateway.api.routes.batches.AnyLLM.split_model_provider",
+        side_effect=ValueError("Model must be in 'provider:model' format"),
+    ):
+        resp = client.post(
+            "/v1/batches",
+            json=_create_batch_body(model="gpt-4o-mini"),
+            headers=api_key_header,
+        )
     assert resp.status_code == 400
     assert "Invalid request" in resp.json()["detail"]
 
