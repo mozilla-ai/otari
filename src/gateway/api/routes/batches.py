@@ -5,11 +5,10 @@ import os
 import tempfile
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.api import acancel_batch, acreate_batch, alist_batches, aretrieve_batch
-from any_llm.types.batch import Batch
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +19,9 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
 from gateway.services.log_writer import LogWriter
+
+if TYPE_CHECKING:
+    from any_llm.types.batch import Batch
 
 router = APIRouter(prefix="/v1/batches", tags=["batches"])
 
@@ -67,6 +69,7 @@ class BatchResultResponse(BaseModel):
 
 
 async def log_batch_usage(
+    db: AsyncSession,
     log_writer: LogWriter,
     api_key_id: str | None,
     model: str,
@@ -109,13 +112,19 @@ async def create_batch(
     api_key_id = api_key.id if api_key else None
     user_id = api_key.user_id if api_key else None
 
-    provider, model = AnyLLM.split_model_provider(request.model)
+    try:
+        provider, model = AnyLLM.split_model_provider(request.model)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid request: {e}",
+        ) from e
 
     # Validate provider supports batch operations
     provider_class = AnyLLM.get_provider_class(provider)
     if not getattr(provider_class, "SUPPORTS_BATCH", False):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=f"Provider '{provider.value}' does not support batch operations",
         )
 
@@ -146,6 +155,7 @@ async def create_batch(
         raise
     except Exception as e:
         await log_batch_usage(
+            db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
             model=model,
@@ -163,6 +173,7 @@ async def create_batch(
         os.unlink(tmp_path)
 
     await log_batch_usage(
+        db=db,
         log_writer=log_writer,
         api_key_id=api_key_id,
         model=model,
@@ -285,11 +296,31 @@ async def retrieve_batch_results(
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> dict[str, Any]:
-    """Retrieve the results of a completed batch."""
+    """Retrieve the results of a completed batch.
+
+    .. note::
+
+       The spec requires calling ``aretrieve_batch_results`` from ``any_llm.api``
+       and returning a ``BatchResult`` object with per-request results. However,
+       the SDK does not yet export ``aretrieve_batch_results``, ``BatchResult``,
+       ``BatchResultItem``, ``BatchResultError``, or ``BatchNotCompleteError``.
+
+       As a workaround this endpoint uses ``aretrieve_batch`` to check the batch
+       status and returns the batch metadata. Once the SDK ships the batch results
+       API this handler should be updated to call ``aretrieve_batch_results`` and
+       return the per-request results serialized via ``BatchResultResponse``.
+    """
+    # FIXME: Replace with aretrieve_batch_results once the SDK exports it.
+    # See: any_llm.api — currently missing aretrieve_batch_results
+    #      any_llm.types.batch — currently missing BatchResult, BatchResultItem, BatchResultError
+    #      any_llm.exceptions — currently missing BatchNotCompleteError
+    api_key, is_master_key = auth_result
+    api_key_id = api_key.id if api_key else None
+    user_id = api_key.user_id if api_key else None
+
     provider_enum = LLMProvider.from_string(provider)
     provider_kwargs = get_provider_kwargs(config, provider_enum)
 
-    # First retrieve the batch to check its status
     try:
         batch: Batch = await aretrieve_batch(
             provider=provider_enum,
@@ -314,5 +345,14 @@ async def retrieve_batch_results(
             ),
         )
 
-    # Return the batch data including output_file_id for the caller to retrieve results
+    await log_batch_usage(
+        db=db,
+        log_writer=log_writer,
+        api_key_id=api_key_id,
+        model="batch",
+        provider=provider,
+        endpoint="/v1/batches/results",
+        user_id=user_id,
+    )
+
     return batch.model_dump()
