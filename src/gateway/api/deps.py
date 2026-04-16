@@ -42,9 +42,8 @@ def reset_config() -> None:
 def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
     """Extract and validate Bearer token from request header.
 
-    Checks X-AnyLLM-Key first, then falls back to standard Authorization header
-    for OpenAI client compatibility, then falls back to x-api-key header
-    for Anthropic client compatibility.
+    Checks the canonical AnyLLM-Key header first, then falls back to the
+    standard Authorization header.
     """
     auth_header = request.headers.get(API_KEY_HEADER) or request.headers.get("Authorization")
 
@@ -56,11 +55,6 @@ def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
                 detail="Invalid header format. Expected 'Bearer <token>'",
             )
         return auth_header[7:]
-
-    # Fallback: x-api-key header (Anthropic client compatibility, no Bearer prefix)
-    api_key = request.headers.get("x-api-key")
-    if api_key:
-        return api_key
 
     record_auth_failure("missing_credentials")
     raise HTTPException(
@@ -130,7 +124,7 @@ async def verify_api_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> APIKey:
-    """Verify API key from X-AnyLLM-Key header.
+    """Verify API key from AnyLLM-Key header.
 
     Args:
         request: FastAPI request object
@@ -152,7 +146,7 @@ async def verify_master_key(
     request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> None:
-    """Verify master key from X-AnyLLM-Key header.
+    """Verify master key from AnyLLM-Key header.
 
     Args:
         request: FastAPI request object
@@ -182,7 +176,7 @@ async def verify_api_key_or_master_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> tuple[APIKey | None, bool]:
-    """Verify either API key or master key from X-AnyLLM-Key header.
+    """Verify either API key or master key from AnyLLM-Key header.
 
     Args:
         request: FastAPI request object

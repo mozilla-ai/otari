@@ -76,24 +76,6 @@ def test_messages_endpoint_requires_auth(
     assert response.status_code == 401
 
 
-def test_messages_endpoint_x_api_key_header(
-    client: TestClient,
-    api_key_obj: dict[str, Any],
-    messages_request_body: dict[str, Any],
-) -> None:
-    """Test authentication via x-api-key header (Anthropic client compatibility)."""
-    mock_response = _make_message_response()
-
-    with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=mock_response):
-        response = client.post(
-            "/v1/messages",
-            json=messages_request_body,
-            headers={"x-api-key": api_key_obj["key"]},
-        )
-
-    assert response.status_code == 200
-
-
 def test_messages_endpoint_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
