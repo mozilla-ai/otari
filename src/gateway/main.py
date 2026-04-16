@@ -211,7 +211,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 "Content-Type",
                 "Authorization",
                 API_KEY_HEADER,
-                "x-api-key",
             ],
         )
 

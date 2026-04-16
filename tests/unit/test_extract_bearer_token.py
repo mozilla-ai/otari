@@ -44,12 +44,6 @@ def test_authorization_header_returns_token(config: GatewayConfig) -> None:
     assert _extract_bearer_token(request, config) == "token-auth"
 
 
-def test_x_api_key_returns_raw_key(config: GatewayConfig) -> None:
-    request = _make_request({"x-api-key": "raw-anthropic-key"})
-
-    assert _extract_bearer_token(request, config) == "raw-anthropic-key"
-
-
 def test_canonical_takes_precedence_over_authorization(config: GatewayConfig) -> None:
     request = _make_request(
         {
@@ -59,28 +53,6 @@ def test_canonical_takes_precedence_over_authorization(config: GatewayConfig) ->
     )
 
     assert _extract_bearer_token(request, config) == "canonical-wins"
-
-
-def test_canonical_takes_precedence_over_x_api_key(config: GatewayConfig) -> None:
-    request = _make_request(
-        {
-            API_KEY_HEADER: "Bearer canonical-wins",
-            "x-api-key": "x-api-key-loses",
-        }
-    )
-
-    assert _extract_bearer_token(request, config) == "canonical-wins"
-
-
-def test_authorization_takes_precedence_over_x_api_key(config: GatewayConfig) -> None:
-    request = _make_request(
-        {
-            "Authorization": "Bearer authorization-wins",
-            "x-api-key": "x-api-key-loses",
-        }
-    )
-
-    assert _extract_bearer_token(request, config) == "authorization-wins"
 
 
 def test_malformed_canonical_header_raises_401(config: GatewayConfig) -> None:

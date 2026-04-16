@@ -9,8 +9,6 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# HTTP request header name for gateway Bearer authentication. Follows RFC 6648
-# (no `X-` prefix).
 API_KEY_HEADER = "AnyLLM-Key"
 
 
