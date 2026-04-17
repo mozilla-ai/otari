@@ -4,8 +4,9 @@ import logging
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-from any_llm.types.moderation import ModerationResponse, ModerationResult
 from fastapi.testclient import TestClient
+
+from gateway.types.moderation import ModerationResponse, ModerationResult
 
 
 def _mock_moderation_response() -> ModerationResponse:
