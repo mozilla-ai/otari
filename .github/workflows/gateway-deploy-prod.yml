@@ -1,0 +1,47 @@
+name: Deploy Gateway to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        type: string
+        description: 'Image tag to deploy (e.g. sha-abc1234)'
+        required: true
+
+env:
+  AWS_REGION: us-east-2
+  IMAGE_NAME: mzdotai/gateway
+
+jobs:
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.PROD_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.PROD_AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition any-llm-platform-gateway-task-production \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Update image in task definition
+        run: |
+          cat task-definition.json \
+            | jq --arg IMAGE "docker.io/${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}" \
+              '.containerDefinitions[0].image = $IMAGE' \
+            > new-task-definition.json
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: new-task-definition.json
+          service: any-llm-platform-gateway-service-production
+          cluster: any-llm-platform-cluster-production
+          wait-for-service-stability: true
