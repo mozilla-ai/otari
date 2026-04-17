@@ -146,6 +146,7 @@ Gateway will be available at `http://localhost:8000`.
 - `GET /health`
 - `POST /v1/chat/completions`
 - `POST /v1/embeddings`
+- `POST /v1/moderations`
 - `GET /v1/models`
 - `POST/GET /v1/keys`
 - `POST/GET /v1/users`
