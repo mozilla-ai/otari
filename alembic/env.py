@@ -26,7 +26,7 @@ target_metadata = Base.metadata
 # Get database URL from config (if already set programmatically) or environment variables
 # Priority: Programmatically set URL -> GATEWAY_DATABASE_URL -> DATABASE_URL -> default
 if config.get_main_option("sqlalchemy.url") is None:
-    database_url = os.getenv("GATEWAY_DATABASE_URL") or os.getenv("DATABASE_URL") or "sqlite:///./any-llm-gateway.db"
+    database_url = os.getenv("GATEWAY_DATABASE_URL") or os.getenv("DATABASE_URL") or "sqlite:///./otari-gateway.db"
     config.set_main_option("sqlalchemy.url", database_url)
 
 # other values from the config, defined by the needs of env.py,

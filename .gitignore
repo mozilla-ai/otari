@@ -15,6 +15,6 @@ build/
 config.yml
 service_account.json
 gateway.db
-any-llm-gateway.db
+otari-gateway.db
 
 .DS_Store

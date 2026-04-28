@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "gateway"
 version = "0.0.0"
-description = "any-llm gateway service"
+description = "otari gateway service"
 requires-python = ">=3.13"
 dependencies = [
     "any-llm-sdk[all]",
@@ -38,7 +38,6 @@ dev = [
 
 [project.scripts]
 gateway = "gateway.cli:main"
-any-llm-gateway = "gateway.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

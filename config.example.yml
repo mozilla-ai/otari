@@ -1,4 +1,4 @@
-# Configuration for any-llm-gateway
+# Configuration for otari-gateway
 
 # Database connection URL
 database_url: "postgresql://gateway:gateway@postgres:5432/gateway"

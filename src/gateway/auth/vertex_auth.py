@@ -13,7 +13,7 @@ def setup_vertex_environment(
     project: str | None = None,
     location: str | None = None,
 ) -> dict[str, Any]:
-    """Build request-local Vertex AI client kwargs for any-llm.
+    """Build request-local Vertex AI client kwargs for otari.
 
     The Vertex provider passes these kwargs directly to `google.genai.Client`,
     so this function avoids process-global environment mutation.

@@ -8,7 +8,7 @@ from gateway.main import create_app
 
 
 def test_platform_mode_starts_without_database(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "gw_test_token")
+    monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "gw_test_token")
 
     config = GatewayConfig(
         mode="platform",
@@ -31,7 +31,7 @@ def test_platform_mode_starts_without_database(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_platform_mode_disables_local_management_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "gw_test_token")
+    monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "gw_test_token")
 
     config = GatewayConfig(
         mode="platform",
@@ -60,7 +60,7 @@ def test_platform_mode_disables_local_management_endpoints(monkeypatch: pytest.M
 
 
 def test_platform_mode_health_reports_reachability(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "gw_test_token")
+    monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "gw_test_token")
 
     async def _reachable(_: GatewayConfig) -> bool:
         return True
@@ -87,7 +87,7 @@ def test_platform_mode_health_reports_reachability(monkeypatch: pytest.MonkeyPat
 
 
 def test_platform_mode_readiness_fails_when_platform_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "gw_test_token")
+    monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "gw_test_token")
 
     async def _unreachable(_: GatewayConfig) -> bool:
         return False

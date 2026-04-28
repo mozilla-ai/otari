@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-API_KEY_HEADER = "AnyLLM-Key"
-LEGACY_API_KEY_HEADER = "X-AnyLLM-Key"  # Back-compat alias; prefer API_KEY_HEADER.
+API_KEY_HEADER = "Otari-Key"
+LEGACY_API_KEY_HEADERS = ("AnyLLM-Key", "X-AnyLLM-Key")  # Back-compat aliases; prefer API_KEY_HEADER.
 
 
 class PricingConfig(BaseModel):
@@ -35,7 +35,7 @@ class GatewayConfig(BaseSettings):
     )
 
     database_url: str = Field(
-        default="sqlite:///./any-llm-gateway.db",
+        default="sqlite:///./otari-gateway.db",
         description="Database connection URL (SQLite default for local use; PostgreSQL recommended for production)",
     )
     auto_migrate: bool = Field(
@@ -104,7 +104,9 @@ class GatewayConfig(BaseSettings):
 
     @property
     def platform_token(self) -> str | None:
-        token = os.getenv("ANY_LLM_PLATFORM_TOKEN", "").strip()
+        token = os.getenv("OTARI_PLATFORM_TOKEN", "").strip()
+        if not token:
+            token = os.getenv("ANY_LLM_PLATFORM_TOKEN", "").strip()
         return token if token else None
 
     @property
@@ -125,7 +127,7 @@ class GatewayConfig(BaseSettings):
 
         token_present = self.platform_token is not None
         if configured_mode == "platform" and not token_present:
-            msg = "GATEWAY_MODE=platform requires ANY_LLM_PLATFORM_TOKEN to be set."
+            msg = "GATEWAY_MODE=platform requires OTARI_PLATFORM_TOKEN to be set."
             raise ValueError(msg)
 
 

@@ -1402,8 +1402,8 @@
     }
   },
   "info": {
-    "description": "A clean FastAPI gateway for any-llm with API key management",
-    "title": "any-llm-gateway",
+    "description": "A clean FastAPI gateway for otari with API key management",
+    "title": "otari-gateway",
     "version": "0.0.0-dev"
   },
   "openapi": "3.1.0",
@@ -1712,7 +1712,7 @@
     },
     "/v1/chat/completions": {
       "post": {
-        "description": "OpenAI-compatible chat completions endpoint.\n\nSupports both streaming and non-streaming responses.\nHandles reasoning content from any-llm providers.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "description": "OpenAI-compatible chat completions endpoint.\n\nSupports both streaming and non-streaming responses.\nHandles reasoning content from otari providers.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
         "operationId": "chat_completions_v1_chat_completions_post",
         "requestBody": {
           "content": {
