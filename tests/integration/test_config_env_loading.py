@@ -75,7 +75,7 @@ def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("mode: platform\n", encoding="utf-8")
 
-    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "gw_test_token")
+    monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "gw_test_token")
     monkeypatch.setenv("PLATFORM_BASE_URL", "http://localhost:8100/api/v1")
     monkeypatch.setenv("PLATFORM_RESOLVE_TIMEOUT_MS", "1234")
     monkeypatch.setenv("PLATFORM_USAGE_TIMEOUT_MS", "2345")
@@ -93,16 +93,17 @@ def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.
 def test_load_config_rejects_platform_mode_without_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("mode: platform\n", encoding="utf-8")
+    monkeypatch.delenv("OTARI_PLATFORM_TOKEN", raising=False)
     monkeypatch.delenv("ANY_LLM_PLATFORM_TOKEN", raising=False)
 
-    with pytest.raises(ValueError, match="ANY_LLM_PLATFORM_TOKEN"):
+    with pytest.raises(ValueError, match="OTARI_PLATFORM_TOKEN"):
         load_config(str(config_file))
 
 
 def test_load_config_prefers_platform_mode_when_token_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("mode: standalone\n", encoding="utf-8")
-    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "gw_test_token")
+    monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "gw_test_token")
 
     config = load_config(str(config_file))
 

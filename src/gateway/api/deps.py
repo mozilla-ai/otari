@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
-from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
 from gateway.core.database import get_db
 from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
@@ -42,15 +42,18 @@ def reset_config() -> None:
 def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
     """Extract and validate Bearer token from request header.
 
-    Checks the canonical AnyLLM-Key header first, then the legacy
-    X-AnyLLM-Key alias (back-compat), then falls back to the standard
-    Authorization header.
+    Checks the canonical Otari-Key header first, then the legacy
+    AnyLLM-Key / X-AnyLLM-Key aliases (back-compat), then falls back
+    to the standard Authorization header.
     """
-    auth_header = (
-        request.headers.get(API_KEY_HEADER)
-        or request.headers.get(LEGACY_API_KEY_HEADER)
-        or request.headers.get("Authorization")
-    )
+    auth_header = request.headers.get(API_KEY_HEADER)
+    if not auth_header:
+        for legacy in LEGACY_API_KEY_HEADERS:
+            auth_header = request.headers.get(legacy)
+            if auth_header:
+                break
+    if not auth_header:
+        auth_header = request.headers.get("Authorization")
 
     if auth_header:
         if not auth_header.startswith("Bearer "):
@@ -129,7 +132,7 @@ async def verify_api_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> APIKey:
-    """Verify API key from AnyLLM-Key header.
+    """Verify API key from Otari-Key header.
 
     Args:
         request: FastAPI request object
@@ -151,7 +154,7 @@ async def verify_master_key(
     request: Request,
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> None:
-    """Verify master key from AnyLLM-Key header.
+    """Verify master key from Otari-Key header.
 
     Args:
         request: FastAPI request object
@@ -181,7 +184,7 @@ async def verify_api_key_or_master_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> tuple[APIKey | None, bool]:
-    """Verify either API key or master key from AnyLLM-Key header.
+    """Verify either API key or master key from Otari-Key header.
 
     Args:
         request: FastAPI request object

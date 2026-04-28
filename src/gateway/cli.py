@@ -16,7 +16,7 @@ from gateway.main import create_app
 
 @click.group()
 def cli() -> None:
-    """any-llm-gateway CLI."""
+    """otari-gateway CLI."""
 
 
 @cli.command()
@@ -93,7 +93,7 @@ def serve(
         )
         logger.warning("Set GATEWAY_MASTER_KEY environment variable or use --master-key flag.")
 
-    logger.info("Starting any-llm-gateway on %s:%s", gateway_config.host, gateway_config.port)
+    logger.info("Starting otari-gateway on %s:%s", gateway_config.host, gateway_config.port)
     if gateway_config.is_platform_mode:
         logger.info("Database: disabled (platform mode)")
     else:
@@ -178,9 +178,6 @@ def migrate(config: str | None, database_url: str | None, revision: str) -> None
 
 def main() -> None:
     """Entry point for the CLI."""
-    invoked_as = os.path.basename(sys.argv[0])
-    if invoked_as == "any-llm-gateway":
-        click.echo("'any-llm-gateway' is deprecated. Use 'gateway' instead.", err=True)
     cli()
 
 

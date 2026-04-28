@@ -1,6 +1,6 @@
 <p align="center">
   <picture>
-    <img src="https://raw.githubusercontent.com/mozilla-ai/any-llm/refs/heads/main/docs/public/images/any-llm-logo-mark.png" width="18%" alt="Project logo"/>
+    <img src="https://raw.githubusercontent.com/mozilla-ai/otari/refs/heads/main/docs/public/images/otari-logo-mark.png" width="18%" alt="Project logo"/>
   </picture>
 </p>
 
@@ -59,12 +59,12 @@ Open API docs at `http://localhost:8000/docs`.
 
 ## Start in platform mode
 
-Platform mode is enabled automatically when `ANY_LLM_PLATFORM_TOKEN` is set.
+Platform mode is enabled automatically when `OTARI_PLATFORM_TOKEN` is set.
 
 1) Export platform env vars:
 
 ```bash
-export ANY_LLM_PLATFORM_TOKEN=gw_xxx
+export OTARI_PLATFORM_TOKEN=gw_xxx
 export PLATFORM_BASE_URL=https://your-platform.example/api/v1
 ```
 
@@ -76,8 +76,8 @@ uv run gateway serve --config config.yml
 
 Notes:
 
-- `GATEWAY_MODE` is optional; effective mode is derived from `ANY_LLM_PLATFORM_TOKEN`.
-- If you explicitly set `GATEWAY_MODE=platform`, startup fails unless `ANY_LLM_PLATFORM_TOKEN` is also set.
+- `GATEWAY_MODE` is optional; effective mode is derived from `OTARI_PLATFORM_TOKEN`.
+- If you explicitly set `GATEWAY_MODE=platform`, startup fails unless `OTARI_PLATFORM_TOKEN` is also set.
 - In platform mode, local `providers` configuration is not used.
 
 ## First request (OpenAI SDK)

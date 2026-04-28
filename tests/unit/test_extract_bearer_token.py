@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from gateway.api.deps import _extract_bearer_token
-from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
 
 
 def _make_request(headers: dict[str, str]) -> Request:
@@ -56,7 +56,7 @@ def test_canonical_takes_precedence_over_authorization(config: GatewayConfig) ->
 
 
 def test_legacy_header_returns_token(config: GatewayConfig) -> None:
-    request = _make_request({LEGACY_API_KEY_HEADER: "Bearer token-legacy"})
+    request = _make_request({LEGACY_API_KEY_HEADERS[0]: "Bearer token-legacy"})
 
     assert _extract_bearer_token(request, config) == "token-legacy"
 
@@ -65,7 +65,7 @@ def test_canonical_takes_precedence_over_legacy(config: GatewayConfig) -> None:
     request = _make_request(
         {
             API_KEY_HEADER: "Bearer canonical-wins",
-            LEGACY_API_KEY_HEADER: "Bearer legacy-loses",
+            LEGACY_API_KEY_HEADERS[0]: "Bearer legacy-loses",
         }
     )
 
@@ -75,7 +75,7 @@ def test_canonical_takes_precedence_over_legacy(config: GatewayConfig) -> None:
 def test_legacy_takes_precedence_over_authorization(config: GatewayConfig) -> None:
     request = _make_request(
         {
-            LEGACY_API_KEY_HEADER: "Bearer legacy-wins",
+            LEGACY_API_KEY_HEADERS[0]: "Bearer legacy-wins",
             "Authorization": "Bearer authorization-loses",
         }
     )
@@ -84,7 +84,7 @@ def test_legacy_takes_precedence_over_authorization(config: GatewayConfig) -> No
 
 
 def test_malformed_legacy_header_raises_401(config: GatewayConfig) -> None:
-    request = _make_request({LEGACY_API_KEY_HEADER: "NotBearer token-bad"})
+    request = _make_request({LEGACY_API_KEY_HEADERS[0]: "NotBearer token-bad"})
 
     with pytest.raises(HTTPException) as exc_info:
         _extract_bearer_token(request, config)

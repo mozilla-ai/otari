@@ -19,7 +19,7 @@ from gateway.main import create_app
 
 @pytest.fixture
 def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
-    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "gw_test_token")
+    monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "gw_test_token")
     app = create_app(
         GatewayConfig(
             mode="platform",

@@ -356,7 +356,7 @@ async def chat_completions(
     """OpenAI-compatible chat completions endpoint.
 
     Supports both streaming and non-streaming responses.
-    Handles reasoning content from any-llm providers.
+    Handles reasoning content from otari providers.
 
     Authentication modes:
     - Master key + user field: Use specified user (must exist)

@@ -10,7 +10,7 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
-from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.rate_limit import RateLimiter
 from gateway.services.bootstrap_service import bootstrap_first_api_key
@@ -78,7 +78,7 @@ _ROOT_TUTORIAL_HTML = """<!doctype html>
     <main>
       <h1>AI Gateway (Proxy Server)</h1>
       <div class="sub">
-        <a class="link" href="https://mozilla-ai.github.io/any-llm/gateway/quickstart/">Gateway Quickstart</a>
+        <a class="link" href="https://mozilla-ai.github.io/otari/gateway/quickstart/">Gateway Quickstart</a>
       </div>
 
       <p class="note">
@@ -185,8 +185,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
     set_config(config)
 
     app = FastAPI(
-        title="any-llm-gateway",
-        description="A clean FastAPI gateway for any-llm with API key management",
+        title="otari-gateway",
+        description="A clean FastAPI gateway for otari with API key management",
         version=__version__,
         docs_url="/docs" if config.enable_docs else None,
         redoc_url="/redoc" if config.enable_docs else None,
@@ -211,7 +211,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 "Content-Type",
                 "Authorization",
                 API_KEY_HEADER,
-                LEGACY_API_KEY_HEADER,
+                *LEGACY_API_KEY_HEADERS,
             ],
         )
 

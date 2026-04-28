@@ -128,7 +128,7 @@ jobs:
       - name: Download task definition
         run: |
           aws ecs describe-task-definition \
-            --task-definition any-llm-platform-gateway-task-development \
+            --task-definition otari-platform-gateway-task-development \
             --query taskDefinition \
             > task-definition.json
 
@@ -143,6 +143,6 @@ jobs:
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
           task-definition: new-task-definition.json
-          service: any-llm-platform-gateway-service-development
-          cluster: any-llm-platform-cluster-development
+          service: otari-platform-gateway-service-development
+          cluster: otari-platform-cluster-development
           wait-for-service-stability: true
