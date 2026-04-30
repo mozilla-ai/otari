@@ -65,3 +65,6 @@ files = ["src", "tests", "scripts"]
 [[tool.mypy.overrides]]
 module = ["testcontainers.*"]
 ignore_missing_imports = true
+
+[tool.uv.sources]
+any-llm-sdk = { git = "https://github.com/mozilla-ai/any-llm.git", branch = "add-batch-api-support" }
