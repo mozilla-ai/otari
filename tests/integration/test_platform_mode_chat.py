@@ -84,12 +84,19 @@ def test_platform_mode_sets_correlation_id_and_reports_usage(
             return httpx.Response(
                 200,
                 json={
-                    "provider": "openai",
-                    "model": "gpt-4o-mini",
-                    "api_key": "sk-platform-key",
-                    "api_base": "https://api.openai.com/v1",
-                    "managed": True,
-                    "correlation_id": "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68",
+                    "request_id": "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68",
+                    "fallback_enabled": False,
+                    "attempts": [
+                        {
+                            "attempt_id": "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68",
+                            "position": 0,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-platform-key",
+                            "api_base": "https://api.openai.com/v1",
+                            "managed": True,
+                        }
+                    ],
                 },
             )
 
@@ -138,10 +145,17 @@ def test_platform_mode_sets_correlation_id_and_reports_usage(
     ]
 
 
-def test_platform_mode_maps_provider_timeout(
+def test_platform_mode_accepts_legacy_resolve_shape(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """An older otari (pre-fallback) returns a flat resolve payload.
+
+    Gateway must accept it and treat it as a single-attempt route so deployments
+    where the platform side hasn't been upgraded yet still work.
+    """
+    usage_reports: list[dict[str, Any]] = []
+
     async def fake_post_platform(
         url: str,
         headers: dict[str, str],
@@ -157,7 +171,73 @@ def test_platform_mode_maps_provider_timeout(
                     "api_key": "sk-platform-key",
                     "api_base": "https://api.openai.com/v1",
                     "managed": True,
-                    "correlation_id": "41a9667f-0af7-4ddf-8468-65c5f5c2af57",
+                    "correlation_id": "9b2cce4a-5e91-4c19-9ad5-17a83f72b001",
+                },
+            )
+
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return ChatCompletion(
+            id="chatcmpl-legacy",
+            object="chat.completion",
+            created=1700000000,
+            model="gpt-4o-mini",
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="hi"),
+                    finish_reason="stop",
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=4, completion_tokens=2, total_tokens=6),
+        )
+
+    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    # Gateway maps the legacy correlation_id onto attempt_id, so X-Correlation-ID
+    # still carries the same value as before.
+    assert response.headers["X-Correlation-ID"] == "9b2cce4a-5e91-4c19-9ad5-17a83f72b001"
+    assert usage_reports[0]["correlation_id"] == "9b2cce4a-5e91-4c19-9ad5-17a83f72b001"
+    assert usage_reports[0]["status"] == "success"
+
+
+def test_platform_mode_maps_provider_timeout(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "41a9667f-0af7-4ddf-8468-65c5f5c2af57",
+                    "fallback_enabled": False,
+                    "attempts": [
+                        {
+                            "attempt_id": "41a9667f-0af7-4ddf-8468-65c5f5c2af57",
+                            "position": 0,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-platform-key",
+                            "api_base": "https://api.openai.com/v1",
+                            "managed": True,
+                        }
+                    ],
                 },
             )
 
@@ -220,12 +300,19 @@ def test_platform_mode_usage_retries_only_transient_failures(
             return httpx.Response(
                 200,
                 json={
-                    "provider": "openai",
-                    "model": "gpt-4o-mini",
-                    "api_key": "sk-platform-key",
-                    "api_base": "https://api.openai.com/v1",
-                    "managed": True,
-                    "correlation_id": "e655dc9a-6d90-4207-b371-f58d521a7a81",
+                    "request_id": "e655dc9a-6d90-4207-b371-f58d521a7a81",
+                    "fallback_enabled": False,
+                    "attempts": [
+                        {
+                            "attempt_id": "e655dc9a-6d90-4207-b371-f58d521a7a81",
+                            "position": 0,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-platform-key",
+                            "api_base": "https://api.openai.com/v1",
+                            "managed": True,
+                        }
+                    ],
                 },
             )
 
