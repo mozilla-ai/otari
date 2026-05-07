@@ -567,33 +567,79 @@ async def chat_completions(
         if completion_kwargs.get("stream_options") is None:
             completion_kwargs["stream_options"] = {"include_usage": True}
 
-        return await _run_streaming(
-            completion_kwargs=completion_kwargs,
-            provider=provider,
-            model=model,
-            platform_mode=platform_mode,
-            correlation_id=correlation_id_for_stream,
-            config=config,
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            user_id=user_id,
-            rate_limit_info=rate_limit_info,
-        )
+        try:
+            return await _run_streaming(
+                completion_kwargs=completion_kwargs,
+                provider=provider,
+                model=model,
+                platform_mode=platform_mode,
+                correlation_id=correlation_id_for_stream,
+                config=config,
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                user_id=user_id,
+                rate_limit_info=rate_limit_info,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            # Stream-creation failures (invalid model, missing API key, etc.)
+            # surface here before the StreamingResponse is yielded. Map to the
+            # same 504/502 envelope the non-streaming path uses so clients see
+            # a consistent error shape regardless of stream:true/false.
+            if platform_mode and correlation_id_for_stream:
+                background_tasks.add_task(
+                    _report_platform_usage,
+                    config,
+                    correlation_id_for_stream,
+                    "error",
+                    None,
+                    _classify_upstream_error(exc)[1],
+                )
+            elif db is not None:
+                await log_usage(
+                    db=db,
+                    log_writer=log_writer,
+                    api_key_id=api_key_id,
+                    model=model,
+                    provider=provider,
+                    endpoint="/v1/chat/completions",
+                    user_id=user_id,
+                    error=str(exc),
+                )
+            logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
+            if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                    detail="LLM provider timeout",
+                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="LLM provider error",
+            ) from exc
 
     # ------------------------------------------------------------------
     # Non-streaming path: walk attempts on retryable failures.
     # ------------------------------------------------------------------
     if platform_mode:
-        assert route is not None
-        attempts_to_try = route.attempts
+        # Bind to a non-Optional local so mypy can narrow inside the retry loop
+        # below — assert-based narrowing doesn't survive across function calls
+        # in some mypy configurations.
+        if route is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Internal error: missing route context",
+            )
+        platform_route = route
+        attempts_to_try = platform_route.attempts
         if not attempts_to_try:
             # A spec-compliant platform always returns at least one attempt;
             # treating an empty list as a server bug is more useful than letting
             # the loop fall through silently with no `last_exc`.
             logger.error(
                 "Platform returned empty attempts list request_id=%s",
-                route.request_id,
+                platform_route.request_id,
             )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -646,7 +692,7 @@ async def chat_completions(
                 )
                 logger.warning(
                     "Provider call failed request_id=%s position=%d provider=%s model=%s error=%s retryable=%s",
-                    route.request_id,
+                    platform_route.request_id,
                     attempt.position,
                     attempt.provider,
                     attempt.model,
@@ -682,7 +728,7 @@ async def chat_completions(
         # All attempts exhausted with retryable errors.
         logger.error(
             "All upstream attempts failed request_id=%s failures=%s",
-            route.request_id,
+            platform_route.request_id,
             failures,
         )
         is_single_attempt = len(attempts_to_try) <= 1
