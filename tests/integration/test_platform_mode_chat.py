@@ -488,6 +488,10 @@ def test_platform_mode_streaming_falls_through_on_first_attempt_failure(
 
     assert response.status_code == 200
     assert response.headers["X-Correlation-ID"] == "stream-att-openai"
+    # StreamingResponse builds its own response object, so X-Otari-Request-ID
+    # has to be set in the StreamingResponse headers directly — assigning to
+    # the dependency-injected Response object doesn't propagate.
+    assert response.headers["X-Otari-Request-ID"] == "stream-req-1"
     # Both attempts were tried in order — anthropic first, then openai succeeded.
     assert [m for m in calls if "anthropic" in m or "openai" in m] == [
         "anthropic:claude-haiku-4-5",

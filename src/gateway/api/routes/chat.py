@@ -632,6 +632,7 @@ async def chat_completions(
             model=model,
             platform_mode=False,
             correlation_id=None,
+            request_id=None,
             config=config,
             db=db,
             log_writer=log_writer,
@@ -824,6 +825,7 @@ def _build_streaming_response(
     model: str,
     platform_mode: bool,
     correlation_id: str | None,
+    request_id: str | None,
     config: GatewayConfig,
     db: AsyncSession | None,
     log_writer: LogWriter | None,
@@ -900,6 +902,8 @@ def _build_streaming_response(
     headers = dict(rl_headers)
     if platform_mode and correlation_id:
         headers["X-Correlation-ID"] = correlation_id
+    if platform_mode and request_id:
+        headers["X-Otari-Request-ID"] = request_id
     return StreamingResponse(
         streaming_generator(
             stream=stream,
@@ -979,13 +983,13 @@ async def _run_streaming_with_fallback(
         first_chunk_timeout_seconds=first_chunk_timeout_seconds,
     )
 
-    response.headers["X-Correlation-ID"] = chosen.attempt_id
     return _build_streaming_response(
         stream=stream,
         provider=LLMProvider(chosen.provider),
         model=chosen.model,
         platform_mode=True,
         correlation_id=chosen.attempt_id,
+        request_id=route.request_id,
         config=config,
         db=None,  # platform mode doesn't use the local DB
         log_writer=None,  # unused when db is None
