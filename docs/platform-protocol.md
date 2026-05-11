@@ -160,11 +160,43 @@ those are treated as terminal client errors.
 
 ## Streaming
 
-Streaming requests (`stream: true`) only ever try `attempts[0]`. Mid-stream
-failover would require either buffering the prefix (delaying the first byte)
-or a custom SSE event signalling the client to discard the partial response.
-Both options are out of scope for this version of the protocol. If the first
-attempt fails for a streaming request, the error propagates to the client.
+Streaming requests (`stream: true`) walk `attempts` just like non-streaming
+requests, with one structural difference: **the gateway can only fall through
+before any bytes have been flushed to the client.** Once an attempt yields its
+first chunk, the gateway commits to that attempt; any further error
+propagates to the SSE channel as today.
+
+The mechanism is a per-attempt **first-chunk gate**. For each attempt:
+
+1. Open the upstream stream (`acompletion(stream=True, ...)`). If this raises
+   — provider returned `401` / `5xx` / network error before the stream even
+   opened — classify the error: retryable failures move to the next attempt;
+   non-retryable failures propagate.
+2. Wait for the first chunk with a bounded timeout
+   (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS`, default 2000 ms). If the
+   upstream raises before yielding or the wait times out, move to the next
+   attempt.
+3. Once a first chunk is in hand, commit. Stitch it back onto the iterator
+   and start flushing SSE chunks to the client.
+
+**Latency contract:** zero added latency in the success case — the first
+chunk is held only for the microseconds it takes to call the SSE response
+builder. In the failure case, each abandoned attempt costs at most
+`first_chunk_timeout_seconds`.
+
+**What this catches:** auth errors (`401`/`403`), rate-limits (`429`),
+upstream `5xx`, connection failures, hung connections, "stream opens but
+errors before yielding."
+
+**What this doesn't catch:** errors that arrive *after* the first chunk has
+flushed (mid-stream connection drops, refusal messages embedded in normal
+content chunks). These are out of reach without either prefix-buffering
+(which would add visible latency on every request) or a client-cooperative
+restart event (which would break OpenAI SDK compatibility).
+
+Mid-stream failover is not currently planned. If a future client SDK starts
+honouring a custom restart event, it could be added behind that capability
+flag.
 
 ## Configuration
 
@@ -175,3 +207,4 @@ attempt fails for a streaming request, the error propagates to the client.
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Per-resolve timeout. |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |
+| `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. |

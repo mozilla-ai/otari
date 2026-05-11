@@ -1,13 +1,29 @@
 """Shared SSE streaming utilities for gateway routes."""
 
+import asyncio
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 from any_llm.types.completion import CompletionUsage
 
 from gateway.log_config import logger
+
+A = TypeVar("A")  # Attempt-like, opaque to this module
+C = TypeVar("C")  # Chunk type emitted by the upstream stream
+
+
+DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS = 2.0
+
+
+@dataclass(frozen=True)
+class StreamingAttemptFailure:
+    """The reason an attempt was abandoned before any bytes were flushed."""
+
+    error_class: str
+    exception: BaseException
 
 
 @dataclass(frozen=True)
@@ -96,3 +112,99 @@ async def streaming_generator(
         except Exception as log_err:
             logger.error("Failed to log streaming error usage: %s", log_err)
         logger.error("Streaming error for %s: %s", label, e)
+
+
+async def walk_streaming_attempts(
+    attempts: Sequence[A],
+    build_stream: Callable[[A], Awaitable[AsyncIterator[C]]],
+    classify_error: Callable[[BaseException], tuple[bool, str]],
+    on_attempt_failed: Callable[[A, StreamingAttemptFailure], Awaitable[None]],
+    first_chunk_timeout_seconds: float = DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS,
+) -> tuple[A, AsyncIterator[C]]:
+    """Walk ``attempts`` until one yields its first chunk; return that attempt
+    and an iterator that re-emits the chunk followed by the rest of the stream.
+
+    For each attempt:
+
+    1. ``build_stream(attempt)`` is awaited — typically wraps ``acompletion``.
+       If it raises, classify the error: retryable errors call
+       ``on_attempt_failed`` and continue; non-retryable errors propagate.
+    2. The first chunk is awaited with a ``first_chunk_timeout_seconds`` cap.
+       If the timeout fires or the upstream raises before yielding, the same
+       classification logic applies and we move on.
+    3. Once a first chunk is in hand, we commit — the function returns and
+       the caller flushes the response. Errors after this point reach the
+       client; they cannot be hidden without buffering the entire stream.
+
+    This is the streaming-mode analogue of the non-streaming retry loop in
+    ``chat.py``. The contract is identical: skip-and-continue on retryable
+    failures, raise on the first non-retryable failure, raise the last
+    exception if every attempt is exhausted.
+
+    Latency contract: zero added latency in the success case — we hold the
+    first chunk only long enough to call this function's caller. In the
+    failure case, each abandoned attempt costs at most
+    ``first_chunk_timeout_seconds``.
+    """
+    last_exception: BaseException | None = None
+
+    for attempt in attempts:
+        try:
+            stream = await build_stream(attempt)
+        except BaseException as exc:
+            retryable, error_class = classify_error(exc)
+            await on_attempt_failed(attempt, StreamingAttemptFailure(error_class, exc))
+            last_exception = exc
+            if not retryable:
+                raise
+            continue
+
+        try:
+            first_chunk: C = await asyncio.wait_for(
+                stream.__anext__(),
+                timeout=first_chunk_timeout_seconds,
+            )
+        except StopAsyncIteration:
+            # Stream completed without yielding. Unusual but valid — commit
+            # with an empty iterator so the caller still gets a clean SSE
+            # close sequence rather than another upstream attempt.
+            return attempt, _empty_async_iter()
+        except asyncio.TimeoutError as exc:
+            await on_attempt_failed(
+                attempt, StreamingAttemptFailure("timeout", exc),
+            )
+            await _close_stream_quietly(stream)
+            last_exception = exc
+            continue
+        except BaseException as exc:
+            retryable, error_class = classify_error(exc)
+            await on_attempt_failed(attempt, StreamingAttemptFailure(error_class, exc))
+            await _close_stream_quietly(stream)
+            last_exception = exc
+            if not retryable:
+                raise
+            continue
+
+        return attempt, _stitched(first_chunk, stream)
+
+    if last_exception is not None:
+        raise last_exception
+    raise RuntimeError("walk_streaming_attempts: no attempts provided")
+
+
+async def _stitched(first: C, remaining: AsyncIterator[C]) -> AsyncIterator[C]:
+    yield first
+    async for chunk in remaining:
+        yield chunk
+
+
+async def _empty_async_iter() -> AsyncIterator[C]:
+    return
+    yield  # unreachable; makes this a generator
+
+
+async def _close_stream_quietly(stream: AsyncIterator[Any]) -> None:
+    close = getattr(stream, "aclose", None)
+    if callable(close):
+        with suppress(BaseException):
+            await close()

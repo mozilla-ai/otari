@@ -168,6 +168,15 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
         "PLATFORM_RESOLVE_TIMEOUT_MS": ("resolve_timeout_ms", int),
         "PLATFORM_USAGE_TIMEOUT_MS": ("usage_timeout_ms", int),
         "PLATFORM_USAGE_MAX_RETRIES": ("usage_max_retries", int),
+        # Per-attempt budget for streaming fallback: how long to wait for the
+        # first chunk from each attempt before treating it as hung and moving
+        # to the next entry in the routing policy. Tunable per deployment;
+        # v1.2 will move this onto the routing_policy schema for per-policy
+        # control.
+        "STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS": (
+            "streaming_first_chunk_timeout_ms",
+            int,
+        ),
     }
 
     for env_name, (field_name, caster) in env_mappings.items():

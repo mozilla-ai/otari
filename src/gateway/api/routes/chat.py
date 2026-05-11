@@ -28,7 +28,12 @@ from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budget_service import validate_user_budget
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing
-from gateway.streaming import OPENAI_STREAM_FORMAT, streaming_generator
+from gateway.streaming import (
+    OPENAI_STREAM_FORMAT,
+    StreamingAttemptFailure,
+    streaming_generator,
+    walk_streaming_attempts,
+)
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
 
@@ -537,67 +542,69 @@ async def chat_completions(
     # ------------------------------------------------------------------
     if request.stream:
         if platform_mode:
-            assert route is not None
-            if not route.attempts:
-                logger.error(
-                    "Platform returned empty attempts list request_id=%s",
-                    route.request_id,
-                )
+            if route is None or not route.attempts:
+                if route is not None:
+                    logger.error(
+                        "Platform returned empty attempts list request_id=%s",
+                        route.request_id,
+                    )
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail="Authorization service returned no resolvable provider",
                 )
-            attempt = route.attempts[0]
-            provider = LLMProvider(attempt.provider)
-            model = attempt.model
-            provider_kwargs: dict[str, Any] = {"api_key": attempt.api_key}
-            if attempt.api_base:
-                provider_kwargs["api_base"] = attempt.api_base
-            correlation_id_for_stream: str | None = attempt.attempt_id
-            response.headers["X-Correlation-ID"] = attempt.attempt_id
-        else:
-            provider, model = AnyLLM.split_model_provider(request.model)
-            provider_kwargs = get_provider_kwargs(config, provider)
-            correlation_id_for_stream = None
+            try:
+                return await _run_streaming_with_fallback(
+                    route=route,
+                    request=request,
+                    response=response,
+                    config=config,
+                    background_tasks=background_tasks,
+                    rate_limit_info=rate_limit_info,
+                )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                # Every attempt failed before any bytes were flushed.
+                logger.error(
+                    "All streaming attempts failed request_id=%s: %s",
+                    route.request_id,
+                    exc,
+                )
+                if isinstance(
+                    exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                        detail=(
+                            "LLM provider timeout"
+                            if len(route.attempts) <= 1
+                            else "All upstream providers timed out"
+                        ),
+                    ) from exc
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=(
+                        "LLM provider error"
+                        if len(route.attempts) <= 1
+                        else "All upstream providers failed"
+                    ),
+                ) from exc
+
+        # Standalone path: single attempt, no fallback (unchanged from v1.0).
+        provider, model = AnyLLM.split_model_provider(request.model)
+        provider_kwargs = get_provider_kwargs(config, provider)
 
         request_fields = request.model_dump(exclude_unset=True)
-        if platform_mode:
-            request_fields["model"] = f"{provider.value}:{model}"
         completion_kwargs = {**provider_kwargs, **request_fields}
         if completion_kwargs.get("stream_options") is None:
             completion_kwargs["stream_options"] = {"include_usage": True}
 
         try:
-            return await _run_streaming(
-                completion_kwargs=completion_kwargs,
-                provider=provider,
-                model=model,
-                platform_mode=platform_mode,
-                correlation_id=correlation_id_for_stream,
-                config=config,
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                user_id=user_id,
-                rate_limit_info=rate_limit_info,
-            )
+            stream: AsyncIterator[ChatCompletionChunk] = await acompletion(**completion_kwargs)  # type: ignore[assignment]
         except HTTPException:
             raise
         except Exception as exc:
-            # Stream-creation failures (invalid model, missing API key, etc.)
-            # surface here before the StreamingResponse is yielded. Map to the
-            # same 504/502 envelope the non-streaming path uses so clients see
-            # a consistent error shape regardless of stream:true/false.
-            if platform_mode and correlation_id_for_stream:
-                background_tasks.add_task(
-                    _report_platform_usage,
-                    config,
-                    correlation_id_for_stream,
-                    "error",
-                    None,
-                    _classify_upstream_error(exc)[1],
-                )
-            elif db is not None:
+            if db is not None:
                 await log_usage(
                     db=db,
                     log_writer=log_writer,
@@ -618,6 +625,20 @@ async def chat_completions(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="LLM provider error",
             ) from exc
+
+        return _build_streaming_response(
+            stream=stream,
+            provider=provider,
+            model=model,
+            platform_mode=False,
+            correlation_id=None,
+            config=config,
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            user_id=user_id,
+            rate_limit_info=rate_limit_info,
+        )
 
     # ------------------------------------------------------------------
     # Non-streaming path: walk attempts on retryable failures.
@@ -796,21 +817,21 @@ async def chat_completions(
     return completion
 
 
-async def _run_streaming(
+def _build_streaming_response(
     *,
-    completion_kwargs: dict[str, Any],
+    stream: AsyncIterator[ChatCompletionChunk],
     provider: LLMProvider,
     model: str,
     platform_mode: bool,
     correlation_id: str | None,
     config: GatewayConfig,
     db: AsyncSession | None,
-    log_writer: LogWriter,
+    log_writer: LogWriter | None,
     api_key_id: str | None,
     user_id: str | None,
     rate_limit_info: RateLimitInfo | None,
 ) -> StreamingResponse:
-    """Stream from a single attempt — no fallback in v1."""
+    """Wrap an already-opened upstream stream in an SSE response."""
 
     def _format_chunk(chunk: ChatCompletionChunk) -> str:
         return f"data: {chunk.model_dump_json()}\n\n"
@@ -835,7 +856,7 @@ async def _run_streaming(
                 )
             )
             return
-        if db is None:
+        if db is None or log_writer is None:
             return
         await log_usage(
             db=db,
@@ -859,7 +880,7 @@ async def _run_streaming(
                 )
             )
             return
-        if db is None:
+        if db is None or log_writer is None:
             return
         await log_usage(
             db=db,
@@ -872,8 +893,13 @@ async def _run_streaming(
             error=error,
         )
 
-    stream: AsyncIterator[ChatCompletionChunk] = await acompletion(**completion_kwargs)  # type: ignore[assignment]
     rl_headers = rate_limit_headers(rate_limit_info) if rate_limit_info else {}
+    # StreamingResponse builds its own response object, so headers we want on
+    # the wire have to be passed in here — assigning to the dependency-injected
+    # `Response` object doesn't propagate to streaming responses.
+    headers = dict(rl_headers)
+    if platform_mode and correlation_id:
+        headers["X-Correlation-ID"] = correlation_id
     return StreamingResponse(
         streaming_generator(
             stream=stream,
@@ -885,5 +911,85 @@ async def _run_streaming(
             label=f"{provider}:{model}",
         ),
         media_type="text/event-stream",
-        headers=rl_headers,
+        headers=headers,
+    )
+
+
+async def _run_streaming_with_fallback(
+    *,
+    route: ResolvedRoute,
+    request: ChatCompletionRequest,
+    response: Response,
+    config: GatewayConfig,
+    background_tasks: BackgroundTasks,
+    rate_limit_info: RateLimitInfo | None,
+) -> StreamingResponse:
+    """Walk route.attempts for a streaming request, falling through on any
+    attempt that fails before its first chunk arrives.
+
+    Once an attempt yields its first chunk, we commit and start flushing to the
+    client — errors past that point propagate to the SSE channel as today.
+    """
+    base_request_fields = request.model_dump(exclude_unset=True)
+    first_chunk_timeout_seconds = (
+        int(config.platform.get("streaming_first_chunk_timeout_ms", 2000)) / 1000
+    )
+
+    async def _build_for_attempt(
+        attempt: ResolvedAttempt,
+    ) -> AsyncIterator[ChatCompletionChunk]:
+        attempt_provider = LLMProvider(attempt.provider)
+        provider_kwargs: dict[str, Any] = {"api_key": attempt.api_key}
+        if attempt.api_base:
+            provider_kwargs["api_base"] = attempt.api_base
+        completion_kwargs = {
+            **provider_kwargs,
+            **base_request_fields,
+            "model": f"{attempt_provider.value}:{attempt.model}",
+        }
+        if completion_kwargs.get("stream_options") is None:
+            completion_kwargs["stream_options"] = {"include_usage": True}
+        return await acompletion(**completion_kwargs)  # type: ignore[return-value]
+
+    async def _on_attempt_failed(
+        attempt: ResolvedAttempt, failure: StreamingAttemptFailure
+    ) -> None:
+        background_tasks.add_task(
+            _report_platform_usage,
+            config,
+            attempt.attempt_id,
+            "error",
+            None,
+            failure.error_class,
+        )
+        logger.warning(
+            "Streaming attempt failed request_id=%s position=%d provider=%s model=%s error=%s",
+            route.request_id,
+            attempt.position,
+            attempt.provider,
+            attempt.model,
+            failure.error_class,
+        )
+
+    chosen, stream = await walk_streaming_attempts(
+        attempts=route.attempts,
+        build_stream=_build_for_attempt,
+        classify_error=_classify_upstream_error,
+        on_attempt_failed=_on_attempt_failed,
+        first_chunk_timeout_seconds=first_chunk_timeout_seconds,
+    )
+
+    response.headers["X-Correlation-ID"] = chosen.attempt_id
+    return _build_streaming_response(
+        stream=stream,
+        provider=LLMProvider(chosen.provider),
+        model=chosen.model,
+        platform_mode=True,
+        correlation_id=chosen.attempt_id,
+        config=config,
+        db=None,  # platform mode doesn't use the local DB
+        log_writer=None,  # unused when db is None
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=rate_limit_info,
     )

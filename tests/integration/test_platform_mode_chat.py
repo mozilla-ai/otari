@@ -371,3 +371,197 @@ def test_platform_mode_maps_resolve_validation_error_to_bad_gateway(
 
     assert response.status_code == 502
     assert response.json() == {"detail": "Authorization service unavailable"}
+
+
+# ---------------------------------------------------------------------------
+# Streaming fallback (v1.1)
+# ---------------------------------------------------------------------------
+
+
+def test_platform_mode_streaming_falls_through_on_first_attempt_failure(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Streaming request whose first attempt errors before any chunk → falls
+    through to the second attempt; client sees a clean 200 SSE stream from
+    the second provider."""
+    from collections.abc import AsyncIterator
+
+    from any_llm.types.completion import ChatCompletionChunk
+
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "stream-req-1",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "stream-att-anthropic",
+                            "position": 0,
+                            "provider": "anthropic",
+                            "model": "claude-haiku-4-5",
+                            "api_key": "sk-ant-broken",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "stream-att-openai",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-openai-real",
+                            "api_base": "https://api.openai.com/v1",
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    calls: list[str] = []
+
+    class _FakeApiStatusError(Exception):
+        # status_code on the exception is what _classify_upstream_error reads;
+        # 401 is in _FALLBACK_RETRYABLE_STATUS_CODES so the gateway will move
+        # on to the next attempt.
+        status_code = 401
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        model = kwargs.get("model", "")
+        calls.append(model)
+        if "anthropic" in model:
+            raise _FakeApiStatusError("simulated upstream 401")
+
+        async def _success_stream() -> AsyncIterator[ChatCompletionChunk]:
+            yield ChatCompletionChunk.model_validate(
+                {
+                    "id": "chunk-1",
+                    "object": "chat.completion.chunk",
+                    "created": 1700000000,
+                    "model": "gpt-4o-mini",
+                    "choices": [
+                        {"index": 0, "delta": {"content": "hi"}, "finish_reason": None}
+                    ],
+                }
+            )
+            yield ChatCompletionChunk.model_validate(
+                {
+                    "id": "chunk-2",
+                    "object": "chat.completion.chunk",
+                    "created": 1700000000,
+                    "model": "gpt-4o-mini",
+                    "choices": [
+                        {"index": 0, "delta": {}, "finish_reason": "stop"}
+                    ],
+                    "usage": {
+                        "prompt_tokens": 5,
+                        "completion_tokens": 1,
+                        "total_tokens": 6,
+                    },
+                }
+            )
+
+        return _success_stream()
+
+    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"] == "stream-att-openai"
+    # Both attempts were tried in order — anthropic first, then openai succeeded.
+    assert [m for m in calls if "anthropic" in m or "openai" in m] == [
+        "anthropic:claude-haiku-4-5",
+        "openai:gpt-4o-mini",
+    ]
+    # The body should be a valid SSE stream from openai.
+    body = response.text
+    assert "data:" in body
+    assert "hi" in body
+
+    # The failed anthropic attempt should have reported an error to the platform.
+    error_reports = [r for r in usage_reports if r.get("status") == "error"]
+    assert len(error_reports) == 1
+    assert error_reports[0]["correlation_id"] == "stream-att-anthropic"
+
+
+def test_platform_mode_streaming_returns_502_when_all_attempts_fail(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If every attempt fails before yielding, the gateway returns 502 with
+    the multi-attempt error wording instead of starting an SSE stream."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "stream-req-fail",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "att-a",
+                            "position": 0,
+                            "provider": "anthropic",
+                            "model": "claude-haiku-4-5",
+                            "api_key": "sk-ant-broken",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "att-b",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-openai-broken",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        raise RuntimeError("simulated upstream failure")
+
+    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "All upstream providers failed"}
