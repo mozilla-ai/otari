@@ -17,6 +17,8 @@ The gateway calls two endpoints, both rooted at `PLATFORM_BASE_URL`:
 | `POST {base}/gateway/provider-keys/resolve` | Authorize a request and return one or more provider credentials to try |
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
 
+`{base}` here means whatever you set `PLATFORM_BASE_URL` to — the gateway concatenates literally. The peer service is responsible for including any API-version prefix it exposes its own routes under. For the reference any-llm-platform deployment that prefix is `/api/v1`, so `PLATFORM_BASE_URL` is set to `http://backend:8000/api/v1` and the gateway ends up POSTing to `http://backend:8000/api/v1/gateway/provider-keys/resolve`.
+
 ## Authentication
 
 Both endpoints require `X-Gateway-Token: <gw_...>` in the request headers. This
