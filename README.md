@@ -71,6 +71,7 @@ Notes:
 - `GATEWAY_MODE` is optional; effective mode is derived from `OTARI_PLATFORM_TOKEN`.
 - If you explicitly set `GATEWAY_MODE=platform`, startup fails unless `OTARI_PLATFORM_TOKEN` is also set.
 - In platform mode, local `providers` configuration is not used.
+- The gateway/platform wire contract (resolve and usage endpoints, request/response shapes, retry semantics) is documented in [`docs/platform-protocol.md`](docs/platform-protocol.md).
 
 ## First request (OpenAI SDK)
 
