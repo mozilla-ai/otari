@@ -443,6 +443,7 @@ async def chat_completions(
     rate_limit_info: RateLimitInfo | None = None
     platform_mode = config.is_platform_mode
     correlation_id: str | None = None
+    user_token: str | None = None  # set inside the platform_mode branch; referenced again later
 
     if platform_mode:
         user_token = _extract_platform_user_token(raw_request)
@@ -507,6 +508,7 @@ async def chat_completions(
 
     resolved_mcp_servers: list[McpServerConfig] = []
     if platform_mode and request.mcp_server_ids:
+        assert user_token is not None  # guaranteed by the platform_mode branch above
         resolved_mcp_servers = await _resolve_platform_mcp_servers(
             config=config,
             user_token=user_token,

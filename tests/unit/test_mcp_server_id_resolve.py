@@ -29,7 +29,9 @@ def _ok_response(servers: list[dict[str, Any]]) -> httpx.Response:
 async def test_resolve_returns_configs(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 
-    async def fake_post(*, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float) -> httpx.Response:
+    async def fake_post(
+        *, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
         captured["url"] = url
         captured["headers"] = headers
         captured["body"] = body
