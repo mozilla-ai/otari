@@ -23,8 +23,6 @@ from any_llm.types.completion import (
     ChoiceDeltaToolCallFunction as DeltaFn,
 )
 
-_FinishReason = Literal["stop", "length", "tool_calls", "content_filter", "function_call"]
-
 from gateway.services import mcp_loop as mcp_loop_module
 from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
@@ -34,6 +32,8 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
+
+_FinishReason = Literal["stop", "length", "tool_calls", "content_filter", "function_call"]
 
 
 class _FakePool:
@@ -297,6 +297,43 @@ async def test_loop_foreign_tool_returns_to_caller_without_execution(monkeypatch
     )
     assert out.choices[0].finish_reason == "tool_calls"
     assert pool.calls == []
+
+
+@pytest.mark.asyncio
+async def test_loop_handles_duck_typed_tool_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: ensure the loop dispatches tool_calls produced by *any* SDK whose
+    function-tool-call class isn't the one any_llm aliases. The OpenAI SDK returns
+    its own class; an isinstance check against any_llm's class would silently skip
+    every call. The loop must duck-type."""
+
+    from types import SimpleNamespace
+
+    sdk_tool_call = SimpleNamespace(
+        id="call_alien",
+        type="function",
+        function=SimpleNamespace(name="fetch_url", arguments='{"u":"x"}'),
+    )
+    first = _completion(finish="tool_calls")
+    # Replace the test helper's any_llm-typed tool_calls with a foreign-class duck-typed object.
+    first.choices[0].message.tool_calls = cast(Any, [sdk_tool_call])
+
+    responses = iter([first, _completion(finish="stop", content="done")])
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "fetch"}]},
+        pool=pool,  # type: ignore[arg-type]
+        max_iterations=5,
+    )
+    assert out.choices[0].finish_reason == "stop"
+    assert pool.calls == [("fetch_url", {"u": "x"})], (
+        "loop must execute duck-typed function tool_calls"
+    )
 
 
 @pytest.mark.asyncio

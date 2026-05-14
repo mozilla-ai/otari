@@ -18,7 +18,6 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from any_llm import acompletion
-from any_llm.types.completion import ChatCompletionMessageFunctionToolCall
 
 from gateway.log_config import logger
 
@@ -196,6 +195,10 @@ async def mcp_tool_loop(
             return completion
 
         sdk_calls = choice.message.tool_calls or []
+        # Duck-type the SDK tool-call: any object with a `.function` attribute is a
+        # function tool-call. We avoid `isinstance` here because `acompletion`'s
+        # return type uses the OpenAI SDK's class, while any_llm exposes a
+        # same-named but distinct class alias.
         tool_calls = [
             {
                 "id": tc.id,
@@ -203,7 +206,7 @@ async def mcp_tool_loop(
                 "function": {"name": tc.function.name, "arguments": tc.function.arguments},
             }
             for tc in sdk_calls
-            if isinstance(tc, ChatCompletionMessageFunctionToolCall)
+            if hasattr(tc, "function")
         ]
         mcp_calls, has_foreign = _execute_split(tool_calls, pool)
         if has_foreign or not mcp_calls:
