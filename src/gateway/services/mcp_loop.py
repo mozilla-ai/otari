@@ -29,6 +29,11 @@ if TYPE_CHECKING:
 MAX_TOOL_ITERATIONS_CAP = 25
 DEFAULT_MAX_TOOL_ITERATIONS = 10
 
+# Lead-in for the per-server purpose-hint block we prepend to the system message.
+# Surfaced as a constant so phrasing can be tuned for different model families
+# (open-weight models in particular benefit from more directive language).
+PURPOSE_HINT_HEADER = "You have access to the following MCP tool servers:"
+
 
 class MaxToolIterationsExceeded(Exception):
     """Raised when the loop fails to reach a non-tool-call finish in N rounds."""
@@ -39,7 +44,7 @@ def inject_purpose_hints(messages: list[dict[str, Any]], hints: list[tuple[str, 
     if not hints:
         return messages
 
-    lines = ["You have access to the following MCP tool servers:"]
+    lines = [PURPOSE_HINT_HEADER]
     for name, hint in hints:
         lines.append(f"- {name}: {hint}")
     block = "\n".join(lines)
@@ -90,7 +95,13 @@ def _execute_split(tool_calls: list[dict[str, Any]], pool: MCPClientPool) -> tup
 
 
 async def _execute_mcp_calls(pool: MCPClientPool, mcp_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Run each MCP tool call and return the resulting tool-role messages."""
+    """Run each MCP tool call and return the resulting tool-role messages.
+
+    Tool failures (network errors, server errors, schema mismatches) are converted to a
+    ``[tool error] …`` message so the model can recover. Cancellation and programming
+    errors (KeyboardInterrupt, asyncio.CancelledError, MemoryError) are left to propagate —
+    those are not "the tool failed, retry"; the request itself is going away.
+    """
     out: list[dict[str, Any]] = []
     for tc in mcp_calls:
         name = tc["function"]["name"]
@@ -100,7 +111,7 @@ async def _execute_mcp_calls(pool: MCPClientPool, mcp_calls: list[dict[str, Any]
             args = {}
         try:
             text = await pool.call_tool(name, args)
-        except Exception as exc:  # noqa: BLE001 — surface failure as tool error for the model
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError) as exc:
             logger.warning("MCP tool %s execution failed: %s", name, exc)
             text = f"[tool error] {exc}"
         out.append({"role": "tool", "tool_call_id": tc["id"] or "", "content": text})
