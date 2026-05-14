@@ -74,6 +74,33 @@
             ],
             "title": "Max Tokens"
           },
+          "max_tool_iterations": {
+            "anyOf": [
+              {
+                "maximum": 25.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tool Iterations"
+          },
+          "mcp_servers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/McpServerConfig"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mcp Servers"
+          },
           "messages": {
             "items": {
               "additionalProperties": true,
@@ -544,6 +571,65 @@
           "metadata"
         ],
         "title": "KeyInfo",
+        "type": "object"
+      },
+      "McpServerConfig": {
+        "description": "Inline MCP server configuration accepted on the chat completions request.\n\nStreamable HTTP transport. The `url` must be reachable from the gateway process.\n\nURL safety is enforced at parse time:\n\n* SSRF guard rejects private, link-local, and reserved IP ranges. Loopback is\n  allowed by default (sidecars, dev) \u2014 set ``GATEWAY_MCP_ALLOW_LOOPBACK=false`` to disable.\n* Plain ``http://`` is rejected when ``authorization_token`` is set, to keep\n  bearer tokens off the wire in cleartext.",
+        "properties": {
+          "allowed_tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Tools"
+          },
+          "authorization_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization Token"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "purpose_hint": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose Hint"
+          },
+          "url": {
+            "minLength": 1,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ],
+        "title": "McpServerConfig",
         "type": "object"
       },
       "MessagesRequest": {
