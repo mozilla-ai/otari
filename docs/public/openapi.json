@@ -87,6 +87,21 @@
             ],
             "title": "Max Tool Iterations"
           },
+          "mcp_server_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mcp Server Ids"
+          },
           "mcp_servers": {
             "anyOf": [
               {
