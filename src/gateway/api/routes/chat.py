@@ -78,6 +78,7 @@ class ChatCompletionRequest(BaseModel):
     tool_choice: str | dict[str, Any] | None = None
     response_format: dict[str, Any] | None = None
     mcp_servers: list[McpServerConfig] | None = None
+    mcp_server_ids: list[uuid.UUID] | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
 
 
@@ -305,6 +306,62 @@ async def _resolve_platform_credentials(
     )
 
 
+async def _resolve_platform_mcp_servers(
+    config: GatewayConfig,
+    user_token: str,
+    mcp_server_ids: list[uuid.UUID],
+) -> list[McpServerConfig]:
+    """Swap workspace-scoped MCP server ids for inline configs by calling the platform."""
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Platform mode is misconfigured",
+        )
+
+    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
+    resolve_url = _platform_url(platform_base_url, "/gateway/mcp-servers/resolve")
+    headers = {
+        "X-Gateway-Token": config.platform_token or "",
+        "X-User-Token": user_token,
+    }
+    body: dict[str, Any] = {"mcp_server_ids": [str(uid) for uid in mcp_server_ids]}
+
+    try:
+        response = await _post_platform(
+            url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000
+        )
+    except (httpx.TimeoutException, httpx.NetworkError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        ) from None
+
+    if response.status_code == 200:
+        payload = response.json()
+        return [
+            McpServerConfig(
+                name=s["name"],
+                url=s["url"],
+                authorization_token=s.get("authorization_token"),
+                purpose_hint=s.get("purpose_hint"),
+                allowed_tools=s.get("allowed_tools"),
+            )
+            for s in payload.get("servers", [])
+        ]
+
+    if response.status_code in {401, 403, 404}:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=_safe_detail_from_platform(response, "MCP server resolution failed"),
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Authorization service unavailable",
+    )
+
+
 async def _report_platform_usage(
     config: GatewayConfig,
     correlation_id: str,
@@ -442,7 +499,23 @@ async def chat_completions(
         provider, model = AnyLLM.split_model_provider(request.model)
         provider_kwargs = get_provider_kwargs(config, provider)
 
-    mcp_server_configs = request.mcp_servers
+    if request.mcp_server_ids and not platform_mode:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="mcp_server_ids is only available in platform mode",
+        )
+
+    resolved_mcp_servers: list[McpServerConfig] = []
+    if platform_mode and request.mcp_server_ids:
+        resolved_mcp_servers = await _resolve_platform_mcp_servers(
+            config=config,
+            user_token=user_token,
+            mcp_server_ids=request.mcp_server_ids,
+        )
+
+    merged_mcp = (request.mcp_servers or []) + resolved_mcp_servers
+    mcp_server_configs: list[McpServerConfig] | None = merged_mcp if merged_mcp else None
+
     max_tool_iterations = min(
         request.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
         MAX_TOOL_ITERATIONS_CAP,
@@ -451,6 +524,7 @@ async def chat_completions(
     # User request fields take precedence over provider config defaults
     request_fields = request.model_dump(exclude_unset=True)
     request_fields.pop("mcp_servers", None)
+    request_fields.pop("mcp_server_ids", None)
     request_fields.pop("max_tool_iterations", None)
     if platform_mode:
         request_fields["model"] = f"{provider.value}:{model}"
