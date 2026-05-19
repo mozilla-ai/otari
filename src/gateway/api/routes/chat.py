@@ -31,8 +31,8 @@ from gateway.services.pricing_service import find_model_pricing
 from gateway.streaming import (
     OPENAI_STREAM_FORMAT,
     StreamingAttemptFailure,
+    iterate_streaming_attempts,
     streaming_generator,
-    walk_streaming_attempts,
 )
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
@@ -642,7 +642,7 @@ async def chat_completions(
         )
 
     # ------------------------------------------------------------------
-    # Non-streaming path: walk attempts on retryable failures.
+    # Non-streaming path: iterate attempts on retryable failures.
     # ------------------------------------------------------------------
     if platform_mode:
         # Bind to a non-Optional local so mypy can narrow inside the retry loop
@@ -928,7 +928,7 @@ async def _run_streaming_with_fallback(
     background_tasks: BackgroundTasks,
     rate_limit_info: RateLimitInfo | None,
 ) -> StreamingResponse:
-    """Walk route.attempts for a streaming request, falling through on any
+    """Iterate route.attempts for a streaming request, falling through on any
     attempt that fails before its first chunk arrives.
 
     Once an attempt yields its first chunk, we commit and start flushing to the
@@ -975,7 +975,7 @@ async def _run_streaming_with_fallback(
             failure.error_class,
         )
 
-    chosen, stream = await walk_streaming_attempts(
+    chosen, stream = await iterate_streaming_attempts(
         attempts=route.attempts,
         build_stream=_build_for_attempt,
         classify_error=_classify_upstream_error,

@@ -114,15 +114,16 @@ async def streaming_generator(
         logger.error("Streaming error for %s: %s", label, e)
 
 
-async def walk_streaming_attempts(
+async def iterate_streaming_attempts(
     attempts: Sequence[A],
     build_stream: Callable[[A], Awaitable[AsyncIterator[C]]],
     classify_error: Callable[[BaseException], tuple[bool, str]],
     on_attempt_failed: Callable[[A, StreamingAttemptFailure], Awaitable[None]],
     first_chunk_timeout_seconds: float = DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS,
 ) -> tuple[A, AsyncIterator[C]]:
-    """Walk ``attempts`` until one yields its first chunk; return that attempt
-    and an iterator that re-emits the chunk followed by the rest of the stream.
+    """Iterate over ``attempts`` until one yields its first chunk; return that
+    attempt and an iterator that re-emits the chunk followed by the rest of
+    the stream.
 
     For each attempt:
 
@@ -189,7 +190,7 @@ async def walk_streaming_attempts(
 
     if last_exception is not None:
         raise last_exception
-    raise RuntimeError("walk_streaming_attempts: no attempts provided")
+    raise RuntimeError("iterate_streaming_attempts: no attempts provided")
 
 
 async def _stitched(first: C, remaining: AsyncIterator[C]) -> AsyncIterator[C]:

@@ -72,7 +72,7 @@ Content-Type: application/json
 }
 ```
 
-The gateway walks `attempts` in order. On a retryable failure it moves to the
+The gateway iterates `attempts` in order. On a retryable failure it moves to the
 next entry; on success it stops. The `attempt_id` of the entry that ultimately
 succeeded (or the last one tried, on total failure) is what the gateway echoes
 back via `X-Correlation-ID` and reports through `/gateway/usage`.
@@ -139,7 +139,7 @@ Content-Type: application/json
 }
 ```
 
-A multi-attempt request that walks two attempts produces two usage reports —
+A multi-attempt request that iterates two attempts produces two usage reports —
 one per attempt — sharing the same `request_id` (recoverable via the original
 resolve response). The platform is responsible for correlating them.
 
@@ -162,7 +162,7 @@ those are treated as terminal client errors.
 
 ## Streaming
 
-Streaming requests (`stream: true`) walk `attempts` just like non-streaming
+Streaming requests (`stream: true`) iterate `attempts` just like non-streaming
 requests, with one structural difference: **the gateway can only fall through
 before any bytes have been flushed to the client.** Once an attempt yields its
 first chunk, the gateway commits to that attempt; any further error
