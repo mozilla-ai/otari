@@ -170,39 +170,56 @@ class SandboxBackend:
 def _flatten_result_block(block: dict[str, Any]) -> str:
     """Render the sandbox's structured result as a single string for the model.
 
-    The sandbox returns Anthropic-shaped ``code_execution_tool_result`` content
-    blocks with stdout/stderr/return_code fields. We collapse that into a plain
-    string the model can read; full structured output is a future enhancement
-    that lands alongside the Anthropic-content-block lift.
+    The sandbox returns an Anthropic-shaped tool-result block — see
+    ``infra/sandbox-image/sandbox/models.py``:
+
+        {
+          "type": "code_execution_tool_result"
+                  | "bash_code_execution_tool_result"
+                  | "text_editor_code_execution_tool_result",
+          "tool_use_id": "...",
+          "content": {
+            "type": "code_execution_result",
+            "stdout": "...",
+            "stderr": "...",
+            "return_code": 0,
+            "content": [file refs]
+          }
+        }
+
+    Note ``content`` is a single ``CodeExecutionResultContent`` object, NOT a
+    list of mixed blocks. Errors come through as a non-zero ``return_code``
+    or a non-empty ``stderr``; there is no top-level ``is_error`` flag.
+
+    Full structured output (file refs, separate exit codes per step) is a
+    future enhancement that lands alongside the Anthropic-content-block lift.
     """
-    is_error = bool(block.get("is_error"))
-    content = block.get("content", [])
-    if not isinstance(content, list):
+    content = block.get("content")
+    if not isinstance(content, dict):
         return str(block)
 
-    parts: list[str] = []
-    for entry in content:
-        if not isinstance(entry, dict):
-            parts.append(str(entry))
-            continue
-        kind = entry.get("type")
-        if kind == "text":
-            text = entry.get("text", "")
-            if text:
-                parts.append(text)
-            continue
-        # code_execution_output and similar carry stdout/stderr/return_code
-        stdout = entry.get("stdout") or ""
-        stderr = entry.get("stderr") or ""
-        rc = entry.get("return_code")
-        if stdout:
-            parts.append(f"stdout:\n{stdout}")
-        if stderr:
-            parts.append(f"stderr:\n{stderr}")
-        if rc not in (None, 0):
-            parts.append(f"return_code: {rc}")
+    stdout = content.get("stdout") or ""
+    stderr = content.get("stderr") or ""
+    return_code = content.get("return_code")
+    file_refs = content.get("content") or []
 
-    flattened = "\n".join(p for p in parts if p)
-    if is_error:
+    parts: list[str] = []
+    if stdout:
+        parts.append(f"stdout:\n{stdout}")
+    if stderr:
+        parts.append(f"stderr:\n{stderr}")
+    if return_code not in (None, 0):
+        parts.append(f"return_code: {return_code}")
+    if isinstance(file_refs, list) and file_refs:
+        names = [f.get("filename", "?") for f in file_refs if isinstance(f, dict)]
+        if names:
+            parts.append("files: " + ", ".join(names))
+
+    flattened = "\n".join(parts)
+    if not flattened:
+        return "(no output)"
+    # Treat non-zero return_code or stderr-only output as error-shaped so the
+    # model gets a clear signal it can recover from.
+    if (return_code not in (None, 0)) or (stderr and not stdout):
         return f"[tool error] {flattened}"
     return flattened

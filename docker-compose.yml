@@ -74,7 +74,12 @@ services:
     build:
       context: ./infra/sandbox-image
     ports:
-      - "8180:8080"  # exposed for ad-hoc curl/debugging
+      # Bound to localhost only: the sandbox runs arbitrary user-supplied
+      # code, so an open port on the host network would be an RCE surface
+      # to anyone on the LAN. The gateway container reaches it via the
+      # Docker network at `sandbox:8080`; this host-side mapping is just
+      # for ad-hoc curl/debugging from the operator's own machine.
+      - "127.0.0.1:8180:8080"
     environment:
       - SANDBOX_SESSIONS_ROOT=/var/sandbox/sessions
       - SANDBOX_SESSION_IDLE_TIMEOUT=900

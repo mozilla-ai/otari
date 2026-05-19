@@ -20,7 +20,17 @@ T = TypeVar("T")
 
 
 def _run(coro: Awaitable[T]) -> T:
-    return asyncio.new_event_loop().run_until_complete(coro)
+    """Run ``coro`` on a fresh event loop and close it cleanly.
+
+    Using a dedicated loop per call keeps individual tests isolated; closing
+    it in ``finally`` avoids "unclosed event loop" warnings + leaked socket
+    handles when the suite grows.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _new_manager(sessions_root: Path, *, max_sessions: int = 10) -> SessionManager:

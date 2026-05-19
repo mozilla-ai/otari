@@ -54,6 +54,14 @@ _RUNNER_SCRIPT = str(Path(__file__).resolve().parent / "runner.py")
 # execution can produce in practice.
 _STREAM_BUFFER_LIMIT = 16 * 1024 * 1024
 
+# Best-effort stdout drain after a runner timeout: read in 1 MiB chunks with
+# a short per-read timeout so we can pick up partial ``print()`` output
+# without resorting to ``StreamReader._buffer`` (asyncio-internal). 50 ms is
+# enough to clear typical pipe buffers without meaningfully delaying the
+# kill path.
+_DRAIN_CHUNK_BYTES = 1024 * 1024
+_DRAIN_POLL_SECONDS = 0.05
+
 logger = logging.getLogger(__name__)
 
 
@@ -238,7 +246,7 @@ class RunnerProcess:
             except asyncio.TimeoutError:
                 # Kill the runner so we don't read its output for the
                 # next call. The respawn happens lazily on the next start().
-                partial_stdout = self._drain_partial_stdout()
+                partial_stdout = await self._drain_partial_stdout()
                 await self.stop()
                 truncated_partial, partial_dropped = truncate_output(
                     partial_stdout, max_bytes=self._limits.max_output_bytes
@@ -361,11 +369,15 @@ class RunnerProcess:
             # Lines outside any section are silently dropped (shouldn't
             # happen with a well-behaved runner; protocol-noise tolerance).
 
-    def _drain_partial_stdout(self) -> str:
-        """Best-effort grab of buffered stdout after a timeout.
+    async def _drain_partial_stdout(self) -> str:
+        """Best-effort grab of any stdout the runner produced before timeout.
 
-        Used to surface partial print output captured before the runner was
-        killed. Returns ``""`` if no buffered data is available.
+        Reads non-blockingly via short-timeout ``asyncio.wait_for`` calls,
+        so we surface partial ``print()`` output without reaching into
+        ``StreamReader._buffer`` — that attribute is asyncio internal and
+        can change between Python versions/implementations. The 50ms
+        per-iteration timeout is small enough not to extend the kill path
+        meaningfully but long enough to clear typical pipe buffers.
         """
         if (
             self._proc is None
@@ -373,11 +385,19 @@ class RunnerProcess:
             or self._proc.returncode is not None
         ):
             return ""
-        try:
-            buffered = self._proc.stdout._buffer  # type: ignore[attr-defined]
-        except AttributeError:
-            return ""
-        try:
-            return bytes(buffered).decode("utf-8", errors="replace")
-        except Exception:  # noqa: BLE001 - best effort
-            return ""
+
+        chunks: list[bytes] = []
+        while True:
+            try:
+                data = await asyncio.wait_for(
+                    self._proc.stdout.read(_DRAIN_CHUNK_BYTES),
+                    timeout=_DRAIN_POLL_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                break
+            except Exception:  # noqa: BLE001 — best effort
+                break
+            if not data:
+                break
+            chunks.append(data)
+        return b"".join(chunks).decode("utf-8", errors="replace")

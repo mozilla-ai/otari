@@ -90,8 +90,9 @@ WORKDIR /opt/sandbox
 
 EXPOSE 8080
 
-# Health check uses the /health endpoint, which reports both server liveness
-# and runner subprocess status.
+# Health check uses the /health endpoint, which reports server liveness only
+# (HTTP 200 + session-count metadata). Per-runner subprocess health isn't
+# included — runner state is reported per request via the /exec response.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8080/health || exit 1
 

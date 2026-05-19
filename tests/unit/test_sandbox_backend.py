@@ -67,16 +67,19 @@ async def test_creates_session_on_enter_and_destroys_on_exit(monkeypatch: pytest
 
 @pytest.mark.asyncio
 async def test_call_tool_dispatches_code_to_sandbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Shape mirrors what the sandbox actually returns — see
+    # ``infra/sandbox-image/sandbox/models.py``: ``result_block.content`` is
+    # a single ``CodeExecutionResultContent`` object, not a list.
     result_block = {
-        "is_error": False,
-        "content": [
-            {
-                "type": "code_execution_output",
-                "stdout": "42\n",
-                "stderr": "",
-                "return_code": 0,
-            }
-        ],
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "42\n",
+            "stderr": "",
+            "return_code": 0,
+            "content": [],
+        },
     }
     transport = _patched_async_client(
         {
@@ -90,6 +93,7 @@ async def test_call_tool_dispatches_code_to_sandbox(monkeypatch: pytest.MonkeyPa
     async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(6 * 7)"})
 
+    assert "stdout:" in result
     assert "42" in result
     exec_request = next(r for r in transport.captured if r.url.path == "/sessions/s1/exec")
     body = exec_request.read().decode()
@@ -99,15 +103,15 @@ async def test_call_tool_dispatches_code_to_sandbox(monkeypatch: pytest.MonkeyPa
 @pytest.mark.asyncio
 async def test_call_tool_surfaces_stderr_and_nonzero_return_code(monkeypatch: pytest.MonkeyPatch) -> None:
     result_block = {
-        "is_error": False,
-        "content": [
-            {
-                "type": "code_execution_output",
-                "stdout": "",
-                "stderr": "NameError: name 'foo' is not defined\n",
-                "return_code": 1,
-            }
-        ],
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "",
+            "stderr": "NameError: name 'foo' is not defined\n",
+            "return_code": 1,
+            "content": [],
+        },
     }
     _patched_async_client(
         {
@@ -121,16 +125,31 @@ async def test_call_tool_surfaces_stderr_and_nonzero_return_code(monkeypatch: py
     async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(foo)"})
 
+    # Non-zero return_code or stderr-only output is marked as [tool error]
+    # so the model gets a clear failure signal.
+    assert result.startswith("[tool error]")
     assert "stderr" in result
     assert "NameError" in result
     assert "return_code: 1" in result
 
 
 @pytest.mark.asyncio
-async def test_is_error_result_block_is_marked(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_stderr_only_treated_as_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``return_code=0`` with stderr-only output still surfaces as a tool error.
+
+    Some runners emit warnings via stderr without a non-zero exit code; the
+    model should still see them as failure-shaped so it can recover.
+    """
     result_block = {
-        "is_error": True,
-        "content": [{"type": "text", "text": "timeout"}],
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "",
+            "stderr": "DeprecationWarning: ...",
+            "return_code": 0,
+            "content": [],
+        },
     }
     _patched_async_client(
         {
@@ -145,7 +164,7 @@ async def test_is_error_result_block_is_marked(monkeypatch: pytest.MonkeyPatch) 
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
 
     assert result.startswith("[tool error]")
-    assert "timeout" in result
+    assert "DeprecationWarning" in result
 
 
 @pytest.mark.asyncio

@@ -606,24 +606,26 @@ async def chat_completions(
 
     # Per-request opt-in for sandboxed code execution. Matches Anthropic /
     # OpenAI's wire shape: caller adds {"type": "code_execution"} to their
-    # `tools` array. Optional per-entry `sandbox_url` carries an inline
-    # override; absence falls back to the operator's GATEWAY_SANDBOX_URL.
+    # `tools` array. The sandbox endpoint is operator-controlled — set
+    # GATEWAY_SANDBOX_URL in the gateway's environment. We deliberately do
+    # NOT honour a per-request URL override (e.g. `sandbox_url` on the tool
+    # entry) because that would let an untrusted caller use the gateway as
+    # an open HTTP client (SSRF / arbitrary-POST surface). Operators that
+    # want per-tenant sandbox isolation should stand up multiple gateway
+    # instances or proxy at a layer they control.
     # Mutually exclusive with `mcp_servers` for now (multi-backend dispatch
     # is the next iteration); the multi-attempt routing-policy fallback is
     # also bypassed when sandbox is in use.
     sandbox_tool_entry, remaining_user_tools = _extract_code_execution_tool(request.tools)
-    default_sandbox_url = os.environ.get("GATEWAY_SANDBOX_URL") or None
-    sandbox_url: str | None = None
+    sandbox_url: str | None = os.environ.get("GATEWAY_SANDBOX_URL") or None
     use_sandbox = False
     if sandbox_tool_entry is not None:
-        sandbox_url = sandbox_tool_entry.get("sandbox_url") or default_sandbox_url
         if sandbox_url is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
                     "code_execution tool requested but no sandbox is configured on this gateway. "
-                    "Set GATEWAY_SANDBOX_URL, supply `sandbox_url` on the tool entry, or remove "
-                    "code_execution from `tools`."
+                    "Set GATEWAY_SANDBOX_URL on the gateway, or remove code_execution from `tools`."
                 ),
             )
         if request.mcp_servers:

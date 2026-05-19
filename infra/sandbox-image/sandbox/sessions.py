@@ -129,7 +129,13 @@ class SessionManager:
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
     ) -> Session:
-        """Allocate a new session and start its REPL."""
+        """Allocate a session record and a fresh ``RunnerProcess``.
+
+        The REPL is *not* started here — callers are responsible for awaiting
+        ``session.runner.start()`` (typically on the first ``/exec`` call).
+        Lazy start keeps ``POST /sessions`` cheap and predictable: an idle
+        session that never executes anything doesn't fork a Python interpreter.
+        """
         async with self._lock:
             if len(self._sessions) >= self._max_sessions:
                 raise SessionLimitExceededError(

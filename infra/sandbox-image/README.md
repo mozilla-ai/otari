@@ -38,10 +38,15 @@ make run       # docker run -p 8080:8080
 
 ```
 POST   /sessions                       -> create session
+GET    /sessions/{id}                  -> session metadata
 POST   /sessions/{id}/exec             -> run code in session
-POST   /sessions/{id}/exec/stream      -> SSE: stdout/stderr deltas
 DELETE /sessions/{id}                  -> destroy session
+GET    /sessions/{id}/files            -> download a file from the workspace
+GET    /sessions/{id}/files/list       -> list workspace files
 GET    /health                         -> 200 if server alive
 ```
+
+A streaming exec endpoint (SSE stdout/stderr deltas) is a planned follow-up;
+the current ``/exec`` is request/response only.
 
 The full request/response schemas live in `sandbox/models.py`.
