@@ -19,6 +19,20 @@ _config: GatewayConfig | None = None
 _LAST_USED_UPDATE_INTERVAL_SECONDS = 300
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Return ``value`` as a timezone-aware datetime in UTC.
+
+    SQLite stores ``DateTime(timezone=True)`` columns as naive strings and
+    returns them naive on read. PostgreSQL returns them as aware. Normalising
+    here keeps the subtraction/comparison call sites identical across both
+    backends — a naive value is *assumed* to be UTC, which matches how the
+    gateway writes them (always ``datetime.now(UTC)``).
+    """
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)
+
+
 def set_config(config: GatewayConfig) -> None:
     """Set the global config instance."""
     global _config  # noqa: PLW0603
@@ -99,7 +113,8 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str) -> APIKey:
             detail="API key is inactive",
         )
 
-    if api_key.expires_at and api_key.expires_at < datetime.now(UTC):
+    expires_at = _as_utc(api_key.expires_at)
+    if expires_at is not None and expires_at < datetime.now(UTC):
         record_auth_failure("expired_key")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -107,9 +122,10 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str) -> APIKey:
         )
 
     now = datetime.now(UTC)
+    last_used_at = _as_utc(api_key.last_used_at)
     should_update_last_used = (
-        api_key.last_used_at is None
-        or (now - api_key.last_used_at).total_seconds() >= _LAST_USED_UPDATE_INTERVAL_SECONDS
+        last_used_at is None
+        or (now - last_used_at).total_seconds() >= _LAST_USED_UPDATE_INTERVAL_SECONDS
     )
 
     if should_update_last_used:
