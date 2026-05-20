@@ -171,4 +171,4 @@ async def create_moderation(
         for key, value in rate_limit_headers(rate_limit_info).items():
             response.headers[key] = value
 
-    return result  # type: ignore[return-value]
+    return result

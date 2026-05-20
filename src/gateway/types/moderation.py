@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class ModerationResult(BaseModel):
+class _LocalModerationResult(BaseModel):
     """Single moderation result (one per input item).
 
     Mirrors the OpenAI moderation result shape. Extra provider-specific
@@ -30,27 +30,23 @@ class ModerationResult(BaseModel):
     category_applied_input_types: dict[str, list[str]] | None = None
 
 
-class ModerationResponse(BaseModel):
+class _LocalModerationResponse(BaseModel):
     """OpenAI-compatible moderation response envelope."""
 
     model_config = ConfigDict(extra="allow")
 
     id: str
     model: str
-    results: list[ModerationResult]
+    results: list[_LocalModerationResult]
     raw: dict[str, Any] | None = None
 
 
-# When a future any-llm-sdk release ships native moderation types, prefer
-# those to stay wire-compatible. This runs at import time and is a no-op
-# on older SDK releases.
-try:  # pragma: no cover - exercised only when SDK exposes moderation types
-    from any_llm.types.moderation import (  # type: ignore[assignment]
-        ModerationResponse,  # noqa: F811
-        ModerationResult,  # noqa: F811
-    )
+# Prefer SDK types when available; fall back to local shims otherwise.
+try:
+    from any_llm.types.moderation import ModerationResponse, ModerationResult
 except ImportError:
-    pass
+    ModerationResult = _LocalModerationResult  # type: ignore[misc,assignment]
+    ModerationResponse = _LocalModerationResponse  # type: ignore[misc,assignment]
 
 
 __all__ = ["ModerationResponse", "ModerationResult"]
