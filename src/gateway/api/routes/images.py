@@ -105,7 +105,7 @@ async def create_image(
     try:
         result: ImagesResponse = await aimage_generation(**image_kwargs)
 
-        n_images = len(result.data) if result.data else 1
+        n_images = len(result.data) if result.data else (request.n or 1)
 
         usage_log = UsageLog(
             id=str(uuid.uuid4()),
