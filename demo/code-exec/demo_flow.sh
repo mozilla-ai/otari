@@ -64,7 +64,7 @@ ${DIM}  No llamafile is reachable and \$LLAMAFILE_BIN is not set.
   \$LLAMAFILE_BIN at it:
 
       curl -L -o /tmp/qwen3-4b.llamafile \\
-          https://huggingface.co/Mozilla/Qwen3-4B-Instruct-2507-llamafile/resolve/main/Qwen3-4B-Instruct-2507-Q5_K_S.llamafile
+          https://huggingface.co/mozilla-ai/Qwen3-4B-llamafile/resolve/main/Qwen_Qwen3-4B-Q5_K_M.llamafile
       chmod +x /tmp/qwen3-4b.llamafile
       export LLAMAFILE_BIN=/tmp/qwen3-4b.llamafile
 
@@ -75,7 +75,11 @@ EOF
   echo "${DIM}auto-starting llamafile from ${LLAMAFILE_BIN##*/} (≈30s warmup)…${RST}"
   # `-ngl 0` keeps CPU-only inference predictable across machines; users who
   # want GPU offload can pre-start their own llamafile and skip auto-start.
+  # `--alias local-llamafile` sets the model id surfaced via /v1/models —
+  # newer llama.cpp builds leave it empty by default, which breaks the
+  # demo's model-id lookup.
   "$LLAMAFILE_BIN" --server --port 8080 --host 0.0.0.0 -ngl 0 \
+    --alias local-llamafile \
     > /tmp/llamafile-demo.log 2>&1 &
   _LLAMAFILE_PID=$!
   for _ in $(seq 1 90); do
@@ -164,10 +168,43 @@ provider_model() {
     anthropic) echo "anthropic:claude-sonnet-4-6" ;;
     openai)    echo "openai:gpt-4o-mini" ;;
     llamafile)
-      local base probe
+      local base probe raw model_id
       base=${LLAMAFILE_API_BASE:-http://host.docker.internal:8080/v1}
       probe=${base/host.docker.internal/127.0.0.1}
-      echo "llamafile:$(curl -sS "${probe}/models" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"][0]["id"])')"
+      raw=$(curl -sS --fail "${probe}/models" 2>&1) || {
+        echo "ERROR_LOOKUP" >&2
+        echo "${YEL}  failed to query ${probe}/models — output was: ${raw:0:200}${RST}" >&2
+        return 1
+      }
+      # llama.cpp's /v1/models has historically been either:
+      #   {"object":"list","data":[{"id":"…"}]}   (openai-compatible)
+      #   {"data":[{"id":"…"}]}                   (newer builds)
+      # Either way we pull data[0].id. Print the parse error to stderr so
+      # the demo's run loop can flag the problem instead of silently
+      # producing a `llamafile:` (empty) model string.
+      model_id=$(printf '%s' "$raw" | python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.stdin.read() or "null")
+    data = (d or {}).get("data") or []
+    if not data:
+        sys.stderr.write("models response had no data[0]\n")
+        sys.exit(1)
+    print(data[0].get("id", ""))
+except Exception as e:
+    sys.stderr.write(f"parse error: {e}\n")
+    sys.exit(1)
+') || {
+        echo "${YEL}  /v1/models response was not the shape we expected — raw: ${raw:0:200}${RST}" >&2
+        return 1
+      }
+      # llama.cpp's /v1/models returns id="" when no --alias was passed.
+      # Fall back to a placeholder — llamafile only serves one model at a
+      # time and accepts any value in the request's `model` field anyway.
+      if [[ -z "$model_id" ]]; then
+        model_id="local-llamafile"
+      fi
+      echo "llamafile:$model_id"
       ;;
   esac
 }
@@ -355,7 +392,10 @@ present "Code-execution end to end — ${N} provider$( [[ $N -gt 1 ]] && echo s 
         "Same question, same sandbox. Each call uses the SDK keyword native" \
         "to its provider — proving the gateway recognises all three."
 for p in "${ENABLED[@]}"; do
-  model=$(provider_model "$p")
+  if ! model=$(provider_model "$p"); then
+    echo "${YEL}── $p ── skipped (couldn't resolve a model id)${RST}"
+    continue
+  fi
   tool_type=$(provider_tool_type "$p")
   extra=$(provider_extra "$p")
 
