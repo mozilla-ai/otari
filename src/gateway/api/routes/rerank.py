@@ -4,12 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from any_llm import AnyLLM
-
-try:
-    from any_llm import arerank  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover – available once any-llm ships rerank support
-    arerank = None
+from any_llm import AnyLLM, arerank
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,12 +93,6 @@ async def create_rerank(
         rerank_kwargs["top_n"] = request.top_n
     if request.max_tokens_per_doc is not None:
         rerank_kwargs["max_tokens_per_doc"] = request.max_tokens_per_doc
-
-    if arerank is None:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Rerank is not available — the installed any-llm SDK does not include rerank support",
-        )
 
     try:
         result = await arerank(**rerank_kwargs)
