@@ -42,8 +42,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      sandbox:
-        condition: service_healthy
     restart: unless-stopped
 
   postgres:
@@ -73,7 +71,15 @@ services:
   # `mzdotai/otari-sandbox-container:{latest,<sha>}` on Docker Hub on every
   # push to that repo's main branch.
   # Override the tag via $OTARI_SANDBOX_IMAGE if you need a specific build.
+  #
+  # Opt-in via the `code-exec` compose profile so operators who don't use
+  # code_execution aren't forced to pull this image or wait on its health
+  # check. Bring it up with `docker compose --profile code-exec up` (the
+  # demo's start.sh passes this flag automatically). When the sandbox is
+  # not running, the gateway returns a clean 502 to any request that
+  # actually tries to dispatch `code_execution`.
   sandbox:
+    profiles: ["code-exec"]
     image: ${OTARI_SANDBOX_IMAGE:-docker.io/mzdotai/otari-sandbox-container:latest}
     ports:
       # Bound to localhost only: the sandbox runs arbitrary user-supplied

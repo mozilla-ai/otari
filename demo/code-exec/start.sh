@@ -19,4 +19,7 @@ if grep -qE '^[A-Z_]+=.*REPLACE_ME' "$ENV_FILE"; then
 fi
 
 cd "$GATEWAY_ROOT"
-exec docker compose --env-file "$ENV_FILE" up "$@"
+# --profile code-exec opts the sandbox container in (gateway's compose
+# leaves it opt-in so operators who don't run code_execution aren't forced
+# to pull the image). The demo needs it, so request it here.
+exec docker compose --env-file "$ENV_FILE" --profile code-exec up "$@"

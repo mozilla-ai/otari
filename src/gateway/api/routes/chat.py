@@ -39,7 +39,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.services.pricing_service import find_model_pricing
-from gateway.services.sandbox_backend import SandboxBackend
+from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.streaming import (
     OPENAI_STREAM_FORMAT,
     StreamingAttemptFailure,
@@ -77,6 +77,48 @@ def _is_code_execution_tool_type(type_value: Any) -> bool:
         return False
     return (
         type_value == "code_execution" or type_value == "code_interpreter" or type_value.startswith("code_execution_")
+    )
+
+
+# Gateway-internal fields the provider SDKs (any-llm, anthropic, openai, …)
+# don't accept as ``acompletion`` kwargs. Strip these from the model_dump
+# before forwarding to upstream — Anthropic in particular rejects unknown
+# kwargs with a hard error.
+_GATEWAY_INTERNAL_FIELDS = ("mcp_servers", "tools_header", "max_tool_iterations", "user")
+
+
+def _strip_gateway_fields(
+    fields: dict[str, Any],
+    *,
+    sandbox_tool_entry: dict[str, Any] | None = None,
+    remaining_user_tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Strip gateway-internal fields from a ``request.model_dump(...)`` payload.
+
+    Mutates ``fields`` in place and returns it for chaining. When a sandbox
+    tool entry was extracted from ``tools``, the entry is replaced with the
+    remaining user-supplied tools (or popped entirely if none).
+    """
+    for k in _GATEWAY_INTERNAL_FIELDS:
+        fields.pop(k, None)
+    if sandbox_tool_entry is not None:
+        if remaining_user_tools:
+            fields["tools"] = remaining_user_tools
+        else:
+            fields.pop("tools", None)
+    return fields
+
+
+def _resolve_sandbox_purpose_hint(sandbox_tool_entry: dict[str, Any] | None) -> str | None:
+    """Resolve the per-tool ``purpose_hint`` for the sandbox.
+
+    Priority: tool entry's ``purpose_hint`` → ``GATEWAY_SANDBOX_PURPOSE_HINT``
+    env → ``None`` (SandboxBackend falls back to its built-in default).
+    """
+    return (
+        (sandbox_tool_entry.get("purpose_hint") if sandbox_tool_entry else None)
+        or os.environ.get("GATEWAY_SANDBOX_PURPOSE_HINT")
+        or None
     )
 
 
@@ -708,19 +750,11 @@ async def chat_completions(
             MAX_TOOL_ITERATIONS_CAP,
         )
 
-        request_fields = request.model_dump(exclude_unset=True)
-        request_fields.pop("mcp_servers", None)
-        request_fields.pop("tools_header", None)
-        request_fields.pop("max_tool_iterations", None)
-        # `user` is gateway accounting only — Anthropic's SDK rejects unknown kwargs.
-        request_fields.pop("user", None)
-        # The thin code_execution tool entry is gateway syntax — the
-        # SandboxBackend re-injects a full function-tool definition.
-        if sandbox_tool_entry is not None:
-            if remaining_user_tools:
-                request_fields["tools"] = remaining_user_tools
-            else:
-                request_fields.pop("tools", None)
+        request_fields = _strip_gateway_fields(
+            request.model_dump(exclude_unset=True),
+            sandbox_tool_entry=sandbox_tool_entry,
+            remaining_user_tools=remaining_user_tools,
+        )
         completion_kwargs = {**provider_kwargs, **request_fields}
         if completion_kwargs.get("stream_options") is None:
             completion_kwargs["stream_options"] = {"include_usage": True}
@@ -751,36 +785,52 @@ async def chat_completions(
                 stream: AsyncIterator[ChatCompletionChunk] = _mcp_stream()
             elif use_sandbox:
                 # SandboxBackend duck-types as MCPClientPool — same tool-loop helper.
-                sandbox_url_local = sandbox_url  # narrow for closure
-                assert sandbox_url_local is not None
-                sandbox_hint = (
-                    (sandbox_tool_entry.get("purpose_hint") if sandbox_tool_entry else None)
-                    or os.environ.get("GATEWAY_SANDBOX_PURPOSE_HINT")
-                    or None
-                )
+                # Eagerly open the backend *before* constructing the
+                # StreamingResponse so that a failure to reach the sandbox
+                # surfaces synchronously as an HTTP error. A lazy `async with`
+                # inside the generator would only run after the response
+                # was committed, and SandboxNotReachableError would land in
+                # the SSE channel after a 200 OK header — confusing for
+                # clients that expected a normal HTTP failure.
+                assert sandbox_url is not None
+                sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
+                sandbox_backend = SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint)
+                await sandbox_backend.__aenter__()  # may raise SandboxNotReachableError
 
                 async def _sandbox_stream() -> AsyncIterator[ChatCompletionChunk]:
-                    async with SandboxBackend(sandbox_url=sandbox_url_local, purpose_hint=sandbox_hint) as backend:
+                    try:
                         kwargs = {
                             **completion_kwargs,
                             "messages": inject_purpose_hints(
                                 completion_kwargs["messages"],
-                                backend.purpose_hints(),
+                                sandbox_backend.purpose_hints(),
                                 header=request.tools_header,
                             ),
                         }
                         async for chunk in mcp_tool_loop_stream(
                             completion_kwargs=kwargs,
-                            pool=backend,  # type: ignore[arg-type]
+                            pool=sandbox_backend,  # type: ignore[arg-type]
                             max_iterations=max_tool_iterations,
                         ):
                             yield chunk
+                    finally:
+                        await sandbox_backend.__aexit__(None, None, None)
 
                 stream = _sandbox_stream()
             else:
                 stream = await acompletion(**completion_kwargs)  # type: ignore[assignment]
         except HTTPException:
             raise
+        except SandboxNotReachableError as exc:
+            # The sandbox is part of the gateway's own infra, not the LLM
+            # provider — surface a clearer status so operators don't chase
+            # a "provider outage" that's actually the sandbox container
+            # being down. 502 keeps "upstream dependency failed" semantics.
+            logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
+            ) from exc
         except Exception as exc:
             if db is not None:
                 await log_usage(
@@ -869,16 +919,11 @@ async def chat_completions(
     last_exc: BaseException | None = None
 
     if platform_mode:
-        base_request_fields = request.model_dump(exclude_unset=True)
-        base_request_fields.pop("mcp_servers", None)
-        base_request_fields.pop("tools_header", None)
-        base_request_fields.pop("max_tool_iterations", None)
-        base_request_fields.pop("user", None)
-        if sandbox_tool_entry is not None:
-            if remaining_user_tools:
-                base_request_fields["tools"] = remaining_user_tools
-            else:
-                base_request_fields.pop("tools", None)
+        base_request_fields = _strip_gateway_fields(
+            request.model_dump(exclude_unset=True),
+            sandbox_tool_entry=sandbox_tool_entry,
+            remaining_user_tools=remaining_user_tools,
+        )
         for attempt in attempts_to_try:
             attempt_provider = LLMProvider(attempt.provider)
             attempt_model = attempt.model
@@ -910,11 +955,7 @@ async def chat_completions(
                         )
                 elif use_sandbox:
                     assert sandbox_url is not None
-                    sandbox_hint = (
-                        (sandbox_tool_entry.get("purpose_hint") if sandbox_tool_entry else None)
-                        or os.environ.get("GATEWAY_SANDBOX_PURPOSE_HINT")
-                        or None
-                    )
+                    sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
                     async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
                         sandbox_kwargs = {
                             **completion_kwargs,
@@ -1014,16 +1055,11 @@ async def chat_completions(
     # the MCP tool-use loop; if `tools` includes a code_execution entry, the
     # request goes through the SandboxBackend tool-use loop; otherwise a
     # single ``acompletion`` call.
-    request_fields = request.model_dump(exclude_unset=True)
-    request_fields.pop("mcp_servers", None)
-    request_fields.pop("tools_header", None)
-    request_fields.pop("max_tool_iterations", None)
-    request_fields.pop("user", None)
-    if sandbox_tool_entry is not None:
-        if remaining_user_tools:
-            request_fields["tools"] = remaining_user_tools
-        else:
-            request_fields.pop("tools", None)
+    request_fields = _strip_gateway_fields(
+        request.model_dump(exclude_unset=True),
+        sandbox_tool_entry=sandbox_tool_entry,
+        remaining_user_tools=remaining_user_tools,
+    )
     completion_kwargs = {**provider_kwargs, **request_fields}
 
     try:
@@ -1044,11 +1080,7 @@ async def chat_completions(
                 )
         elif use_sandbox:
             assert sandbox_url is not None
-            sandbox_hint = (
-                (sandbox_tool_entry.get("purpose_hint") if sandbox_tool_entry else None)
-                or os.environ.get("GATEWAY_SANDBOX_PURPOSE_HINT")
-                or None
-            )
+            sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
             async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
                 sandbox_kwargs = {
                     **completion_kwargs,
@@ -1078,6 +1110,15 @@ async def chat_completions(
             )
     except HTTPException:
         raise
+    except SandboxNotReachableError as exc:
+        # Sandbox is gateway-side infra, not an LLM provider. Clearer detail
+        # so operators don't chase a provider outage that's really the
+        # sandbox container being down.
+        logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
+        ) from exc
     except MaxToolIterationsExceeded as e:
         # Gateway-owned cap, not an upstream provider failure. 422 lets
         # callers distinguish a runaway tool loop from a real outage.
@@ -1244,7 +1285,10 @@ async def _run_streaming_with_fallback(
     Once an attempt yields its first chunk, we commit and start flushing to the
     client — errors past that point propagate to the SSE channel as today.
     """
-    base_request_fields = request.model_dump(exclude_unset=True)
+    # Strip gateway-internal fields the upstream SDKs don't accept (Anthropic
+    # in particular rejects unknown kwargs). This path runs in platform mode
+    # with neither MCP nor sandbox, so we don't pass remaining_user_tools.
+    base_request_fields = _strip_gateway_fields(request.model_dump(exclude_unset=True))
     first_chunk_timeout_seconds = int(config.platform.get("streaming_first_chunk_timeout_ms", 2000)) / 1000
 
     async def _build_for_attempt(
