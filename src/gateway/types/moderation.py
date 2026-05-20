@@ -45,7 +45,7 @@ class ModerationResponse(BaseModel):
 # those to stay wire-compatible. This runs at import time and is a no-op
 # on older SDK releases.
 try:  # pragma: no cover - exercised only when SDK exposes moderation types
-    from any_llm.types.moderation import (  # type: ignore[import-not-found,no-redef]
+    from any_llm.types.moderation import (  # type: ignore[assignment]
         ModerationResponse,  # noqa: F811
         ModerationResult,  # noqa: F811
     )

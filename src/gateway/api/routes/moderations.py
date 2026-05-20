@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from any_llm import AnyLLM
+from any_llm import AnyLLM, amoderation
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,17 +20,6 @@ from gateway.services.budget_service import validate_user_budget
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing
 from gateway.types.moderation import ModerationResponse
-
-try:
-    from any_llm import amoderation  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover - exercised only when SDK lacks moderation
-    # Fallback stub used when the installed any-llm-sdk predates the
-    # moderation API. Raising NotImplementedError routes through the
-    # endpoint's locked-phrasing 400 handler.
-    async def amoderation(**kwargs: Any) -> Any:
-        provider = kwargs.get("provider") or "unknown"
-        raise NotImplementedError(f"Provider {provider} does not support moderation")
-
 
 # Locked phrasing — cross-SDK error contract. Do not reword.
 UNSUPPORTED_MODERATION_SUBSTRING = "does not support moderation"
@@ -106,7 +95,7 @@ async def create_moderation(
     }
 
     try:
-        result: ModerationResponse = await amoderation(**moderation_kwargs)
+        result = await amoderation(**moderation_kwargs)
 
         usage_log = UsageLog(
             id=str(uuid.uuid4()),
@@ -182,4 +171,4 @@ async def create_moderation(
         for key, value in rate_limit_headers(rate_limit_info).items():
             response.headers[key] = value
 
-    return result
+    return result  # type: ignore[return-value]
