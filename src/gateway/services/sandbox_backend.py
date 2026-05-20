@@ -4,8 +4,8 @@ A backend the tool-use loop in :mod:`gateway.services.mcp_loop` dispatches
 to whenever the model emits a ``code_execution(code=…)`` call. The sandbox
 container lives in its own repo
 (https://github.com/mozilla-ai/otari-sandbox-container) and is pulled from
-GHCR (``ghcr.io/mozilla-ai/otari-sandbox-container``). It runs a Python
-REPL with a curated set of data-science libraries pre-installed.
+Docker Hub (``mzdotai/otari-sandbox-container``). It runs a Python REPL
+with a curated set of data-science libraries pre-installed.
 
 Wire shape against the sandbox container:
 

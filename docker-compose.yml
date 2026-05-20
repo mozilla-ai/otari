@@ -69,11 +69,12 @@ services:
 
   # Code-execution sandbox — a Python REPL container the gateway dispatches
   # `code_execution` tool calls to. Source + build live in their own repo:
-  # https://github.com/mozilla-ai/otari-sandbox-container — the image gets
-  # published to GHCR on every push to that repo's main branch.
+  # https://github.com/mozilla-ai/otari-sandbox-container — CI publishes
+  # `mzdotai/otari-sandbox-container:{latest,<sha>}` on Docker Hub on every
+  # push to that repo's main branch.
   # Override the tag via $OTARI_SANDBOX_IMAGE if you need a specific build.
   sandbox:
-    image: ${OTARI_SANDBOX_IMAGE:-ghcr.io/mozilla-ai/otari-sandbox-container:latest}
+    image: ${OTARI_SANDBOX_IMAGE:-docker.io/mzdotai/otari-sandbox-container:latest}
     ports:
       # Bound to localhost only: the sandbox runs arbitrary user-supplied
       # code, so an open port on the host network would be an RCE surface
