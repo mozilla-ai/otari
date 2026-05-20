@@ -9,13 +9,12 @@ from typing import Annotated, Any
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.api import acancel_batch, acreate_batch, alist_batches, aretrieve_batch, aretrieve_batch_results
-from any_llm.exceptions import BatchNotCompleteError
+from any_llm.exceptions import BatchNotCompleteError, UnsupportedProviderError
 from any_llm.types.batch import Batch
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key
+from gateway.api.deps import get_config, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes.chat import get_provider_kwargs
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -40,26 +39,6 @@ class CreateBatchRequest(BaseModel):
     requests: list[BatchRequestItem] = Field(min_length=1, max_length=10_000)
     completion_window: str = "24h"
     metadata: dict[str, str] | None = None
-
-
-# ---------------------------------------------------------------------------
-# Response models (for OpenAPI doc generation)
-# ---------------------------------------------------------------------------
-
-
-class BatchResultErrorResponse(BaseModel):
-    code: str
-    message: str
-
-
-class BatchResultItemResponse(BaseModel):
-    custom_id: str
-    result: dict[str, Any] | None = None
-    error: BatchResultErrorResponse | None = None
-
-
-class BatchResultResponse(BaseModel):
-    results: list[BatchResultItemResponse]
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +71,22 @@ async def log_batch_usage(
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_provider(provider: str) -> LLMProvider:
+    """Parse a provider string into an LLMProvider enum, raising 400 on invalid values."""
+    try:
+        return LLMProvider.from_string(provider)
+    except UnsupportedProviderError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+
+# ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
 
@@ -102,7 +97,6 @@ async def create_batch(
     background_tasks: BackgroundTasks,
     request: CreateBatchRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> dict[str, Any]:
@@ -168,7 +162,10 @@ async def create_batch(
             detail="LLM provider error",
         ) from e
     finally:
-        os.unlink(tmp_path)
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            logger.warning("Failed to remove temp file %s", tmp_path)
 
     await log_batch_usage(
         log_writer=log_writer,
@@ -190,11 +187,10 @@ async def retrieve_batch(
     provider: str,
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> dict[str, Any]:
     """Retrieve the status of a batch."""
-    provider_enum = LLMProvider.from_string(provider)
+    provider_enum = _parse_provider(provider)
     provider_kwargs = get_provider_kwargs(config, provider_enum)
 
     try:
@@ -223,11 +219,10 @@ async def cancel_batch(
     provider: str,
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> dict[str, Any]:
     """Cancel a batch."""
-    provider_enum = LLMProvider.from_string(provider)
+    provider_enum = _parse_provider(provider)
     provider_kwargs = get_provider_kwargs(config, provider_enum)
 
     try:
@@ -255,13 +250,12 @@ async def list_batches(
     provider: str,
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     after: str | None = None,
     limit: int | None = None,
 ) -> dict[str, Any]:
     """List batches for a provider."""
-    provider_enum = LLMProvider.from_string(provider)
+    provider_enum = _parse_provider(provider)
     provider_kwargs = get_provider_kwargs(config, provider_enum)
 
     list_kwargs: dict[str, Any] = {**provider_kwargs}
@@ -287,13 +281,19 @@ async def list_batches(
     return {"data": [{**batch.model_dump(), "provider": provider} for batch in batches]}
 
 
-@router.get("/{batch_id}/results", response_model=None)
+@router.get(
+    "/{batch_id}/results",
+    response_model=None,
+    responses={
+        status.HTTP_409_CONFLICT: {"description": "Batch is not yet complete"},
+        status.HTTP_502_BAD_GATEWAY: {"description": "LLM provider error"},
+    },
+)
 async def retrieve_batch_results(
     batch_id: str,
     provider: str,
     raw_request: Request,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> dict[str, Any]:
@@ -302,7 +302,7 @@ async def retrieve_batch_results(
     api_key_id = api_key.id if api_key else None
     user_id = api_key.user_id if api_key else None
 
-    provider_enum = LLMProvider.from_string(provider)
+    provider_enum = _parse_provider(provider)
     provider_kwargs = get_provider_kwargs(config, provider_enum)
 
     try:
@@ -328,10 +328,17 @@ async def retrieve_batch_results(
             detail="LLM provider error",
         ) from e
 
+    # Extract model from the first successful result if available
+    batch_model = "batch"
+    for item in result.results:
+        if item.result is not None:
+            batch_model = item.result.model
+            break
+
     await log_batch_usage(
         log_writer=log_writer,
         api_key_id=api_key_id,
-        model="",
+        model=batch_model,
         provider=provider,
         endpoint="/v1/batches/results",
         user_id=user_id,

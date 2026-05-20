@@ -334,6 +334,7 @@ def test_retrieve_batch_results(
 ) -> None:
     """GET /v1/batches/{batch_id}/results returns per-request results."""
     mock_completion = MagicMock()
+    mock_completion.model = "gpt-4o-mini"
     mock_completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
 
     mock_result = BatchResult(
