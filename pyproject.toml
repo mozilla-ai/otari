@@ -51,6 +51,8 @@ where = ["src"]
 target-version = "py313"
 line-length = 120
 src = ["src", "tests", "scripts"]
+# `demo/` is shell scripts; nothing for ruff to do there.
+extend-exclude = ["demo/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
