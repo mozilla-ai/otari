@@ -565,3 +565,290 @@ def test_platform_mode_streaming_returns_502_when_all_attempts_fail(
 
     assert response.status_code == 502
     assert response.json() == {"detail": "All upstream providers failed"}
+
+
+# ---------------------------------------------------------------------------
+# Tool-loop fallback (pre-lock-in)
+# ---------------------------------------------------------------------------
+#
+# Contract: when a request uses an inline tool backend (mcp_servers /
+# sandbox / web_search), per-attempt fallback still applies as long as the
+# chosen attempt has not yet returned its first assistant message. Once it
+# has — i.e. the tool loop has "locked in" — subsequent upstream failures
+# terminate the request; we never silently swap providers between tool-use
+# rounds.
+
+
+class _FakeMcpPool:
+    """Minimal MCPClientPool duck-type for the fallback-flow tests. We don't
+    actually want to dial out to an MCP server here — only to exercise the
+    chat route's per-attempt iteration around the tool loop."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> "_FakeMcpPool":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {"name": "remote_search", "description": "", "parameters": {}},
+            }
+        ]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "remote_search"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        return "tool ran"
+
+
+def _two_attempt_resolve_response(*, request_id: str) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "request_id": request_id,
+            "fallback_enabled": True,
+            "attempts": [
+                {
+                    "attempt_id": "tool-att-anthropic",
+                    "position": 0,
+                    "provider": "anthropic",
+                    "model": "claude-haiku-4-5",
+                    "api_key": "sk-ant-broken",
+                    "api_base": None,
+                    "managed": False,
+                },
+                {
+                    "attempt_id": "tool-att-openai",
+                    "position": 1,
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "api_key": "sk-openai-real",
+                    "api_base": "https://api.openai.com/v1",
+                    "managed": False,
+                },
+            ],
+        },
+    )
+
+
+def test_platform_mode_tool_loop_falls_through_pre_lock_in(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-streaming MCP request: first attempt errors before any tool round
+    completes → the gateway falls through to the second attempt and returns
+    its successful completion."""
+
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _two_attempt_resolve_response(request_id="tool-req-1")
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    calls: list[str] = []
+
+    class _FakeAuthError(Exception):
+        status_code = 401
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        model = kwargs.get("model", "")
+        calls.append(model)
+        if "anthropic" in model:
+            raise _FakeAuthError("simulated upstream 401 on anthropic")
+        return ChatCompletion(
+            id="cmpl-1",
+            object="chat.completion",
+            created=0,
+            model="openai:gpt-4o-mini",
+            choices=[
+                Choice(
+                    finish_reason="stop",
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="hello from openai"),
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        )
+
+    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.MCPClientPool", _FakeMcpPool)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:18080/mcp"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"] == "tool-att-openai"
+    body = response.json()
+    assert body["choices"][0]["message"]["content"] == "hello from openai"
+    # Both attempts were tried in order — confirms the [:1] collapse is gone.
+    assert calls == ["anthropic:claude-haiku-4-5", "openai:gpt-4o-mini"]
+    # The first attempt's failure was reported to the platform as `error`.
+    error_reports = [r for r in usage_reports if r.get("status") == "error"]
+    assert len(error_reports) == 1
+    assert error_reports[0]["correlation_id"] == "tool-att-anthropic"
+
+
+def test_platform_mode_tool_loop_no_fallback_after_lock_in(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-streaming MCP request: first attempt returns a tool_call (lock-in
+    fires), then upstream dies on round 2. The gateway must NOT try the
+    second attempt — that would replay a provider-specific transcript on a
+    different provider."""
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _two_attempt_resolve_response(request_id="tool-req-2")
+        return httpx.Response(204)
+
+    calls: list[str] = []
+    state = {"round": 0}
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs.get("model", ""))
+        state["round"] += 1
+        if state["round"] == 1:
+            return ChatCompletion(
+                id="cmpl-round1",
+                object="chat.completion",
+                created=0,
+                model="anthropic:claude-haiku-4-5",
+                choices=[
+                    Choice(
+                        finish_reason="tool_calls",
+                        index=0,
+                        message=ChatCompletionMessage(
+                            role="assistant",
+                            content=None,
+                            tool_calls=[
+                                {  # type: ignore[list-item]
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {"name": "remote_search", "arguments": "{}"},
+                                }
+                            ],
+                        ),
+                    )
+                ],
+                usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+            )
+        # Round 2 (still on attempt 1 — lock-in is in effect) — upstream dies.
+        raise RuntimeError("simulated upstream 5xx on round 2")
+
+    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.MCPClientPool", _FakeMcpPool)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:18080/mcp"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 502
+    # Both calls were to attempt 1 (rounds 1 and 2 of the tool loop). The
+    # second attempt (openai) is never tried because lock-in fired on round 1.
+    assert calls == ["anthropic:claude-haiku-4-5", "anthropic:claude-haiku-4-5"]
+
+
+def test_platform_mode_tool_loop_streaming_falls_through_pre_lock_in(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Streaming MCP request: first attempt errors before yielding any
+    chunk → gateway falls through to the second attempt and streams its
+    response. Same pre-lock-in semantics as the non-streaming case."""
+    from collections.abc import AsyncIterator
+
+    from any_llm.types.completion import ChatCompletionChunk
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _two_attempt_resolve_response(request_id="tool-stream-req-1")
+        return httpx.Response(204)
+
+    calls: list[str] = []
+
+    class _FakeAuthError(Exception):
+        status_code = 401
+
+    async def fake_loop_acompletion(**kwargs: Any) -> Any:
+        model = kwargs.get("model", "")
+        calls.append(model)
+        if "anthropic" in model:
+            raise _FakeAuthError("simulated upstream 401")
+
+        async def _stream() -> AsyncIterator[ChatCompletionChunk]:
+            yield ChatCompletionChunk.model_validate(
+                {
+                    "id": "chunk-1",
+                    "object": "chat.completion.chunk",
+                    "created": 1700000000,
+                    "model": "openai:gpt-4o-mini",
+                    "choices": [{"index": 0, "delta": {"content": "hello"}, "finish_reason": None}],
+                }
+            )
+            yield ChatCompletionChunk.model_validate(
+                {
+                    "id": "chunk-2",
+                    "object": "chat.completion.chunk",
+                    "created": 1700000000,
+                    "model": "openai:gpt-4o-mini",
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+                }
+            )
+
+        return _stream()
+
+    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.MCPClientPool", _FakeMcpPool)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:18080/mcp"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"] == "tool-att-openai"
+    assert calls == ["anthropic:claude-haiku-4-5", "openai:gpt-4o-mini"]
+    assert "hello" in response.text

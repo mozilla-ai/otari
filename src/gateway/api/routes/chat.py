@@ -3,6 +3,7 @@ import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
+from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from typing import Annotated, Any, NamedTuple
 
@@ -51,6 +52,16 @@ from gateway.streaming import (
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
 
 _USAGE_NON_RETRYABLE_STATUS_CODES = {401, 404, 409, 422}
+
+# Streaming first-chunk timeouts (platform-mode fallback). Plain LLM streams
+# rarely take long to produce a first token, so a tight cap keeps failed-
+# attempt latency low. Tool-loop streams may reason before emitting tokens
+# or a tool_call (especially with extended thinking), so they get more
+# headroom. Both are operator-tunable via `config.platform`.
+_DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS = 2000
+_DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP = 30000
+_STREAM_FIRST_CHUNK_TIMEOUT_MS_KEY = "streaming_first_chunk_timeout_ms"
+_STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY = "streaming_first_chunk_timeout_ms_tool_loop"
 
 
 def rate_limit_headers(info: RateLimitInfo) -> dict[str, str]:
@@ -916,10 +927,10 @@ async def chat_completions(
     # Errors after first chunk propagate to the client.
     # ------------------------------------------------------------------
     if request.stream:
-        # Sandbox / web_search paths collapse to the standalone streaming block
-        # below so the tool loop sees a single set of credentials; multi-attempt
-        # fallback is intentionally not layered around them (see comment above).
-        if platform_mode and not use_sandbox and not use_web_search:
+        # Platform-mode streaming — tool modes (sandbox / web_search / MCP)
+        # also flow through here so they get per-attempt fallback up to the
+        # lock-in point (first chunk = first assistant message).
+        if platform_mode:
             if route is None or not route.attempts:
                 if route is not None:
                     logger.error(
@@ -930,6 +941,11 @@ async def chat_completions(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail="Authorization service returned no resolvable provider",
                 )
+            stream_mcp_configs = request.mcp_servers
+            stream_max_tool_iterations = min(
+                request.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
+                MAX_TOOL_ITERATIONS_CAP,
+            )
             try:
                 return await _run_streaming_with_fallback(
                     route=route,
@@ -938,9 +954,31 @@ async def chat_completions(
                     config=config,
                     background_tasks=background_tasks,
                     rate_limit_info=rate_limit_info,
+                    mcp_server_configs=stream_mcp_configs,
+                    use_sandbox=use_sandbox,
+                    sandbox_url=sandbox_url,
+                    sandbox_tool_entry=sandbox_tool_entry,
+                    use_web_search=use_web_search,
+                    web_search_url=web_search_url,
+                    web_search_tool_entry=web_search_tool_entry,
+                    remaining_user_tools=remaining_user_tools,
+                    tools_extracted=sandbox_tool_entry is not None or web_search_tool_entry is not None,
+                    max_tool_iterations=stream_max_tool_iterations,
                 )
             except HTTPException:
                 raise
+            except SandboxNotReachableError as exc:
+                logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
+                ) from exc
+            except WebSearchNotReachableError as exc:
+                logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
+                ) from exc
             except Exception as exc:
                 # Every attempt failed before any bytes were flushed.
                 logger.error(
@@ -960,15 +998,13 @@ async def chat_completions(
                     detail=("LLM provider error" if len(route.attempts) <= 1 else "All upstream providers failed"),
                 ) from exc
 
-        # Standalone path: single attempt, no fallback (unchanged from v1.0).
+        # Standalone path: single attempt, no fallback (no `route.attempts`).
+        # Platform-mode requests (including tool modes) take the multi-attempt
+        # branch above; this block runs only when `model` is a literal
+        # ``provider:model`` selector and no routing policy applies.
         provider, model = AnyLLM.split_model_provider(request.model)
         provider_kwargs = get_provider_kwargs(config, provider)
 
-        # Standalone streaming path: single attempt, optionally wrapped in
-        # the MCP tool-use loop. When `mcp_servers` is set the tool loop owns
-        # the stream and re-emits chunks; the multi-attempt fallback
-        # (`_run_streaming_with_fallback`) is intentionally not used because
-        # an MCP-driven request shouldn't silently swap providers mid-loop.
         mcp_server_configs = request.mcp_servers
         max_tool_iterations = min(
             request.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
@@ -1131,11 +1167,12 @@ async def chat_completions(
         )
 
     # ------------------------------------------------------------------
-    # Non-streaming path. Routing-policy fallback (`route.attempts`) and MCP
-    # tool-use loops are mutually exclusive: when `mcp_servers` is set we run
-    # a single MCP loop against the primary attempt's credentials and skip
-    # the per-attempt retry walk (see PR design note — an MCP-driven request
-    # shouldn't silently swap providers between tool-use rounds).
+    # Non-streaming path. Iterates `route.attempts` with pre-lock-in
+    # fallback semantics: if a tool-loop attempt fails *before* the model
+    # has returned its first assistant message, we fall through to the
+    # next attempt. Once locked in (first assistant message received),
+    # subsequent failures terminate the request — we never swap providers
+    # between tool-use rounds.
     # ------------------------------------------------------------------
     mcp_server_configs = request.mcp_servers
     max_tool_iterations = min(
@@ -1160,11 +1197,6 @@ async def chat_completions(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="Authorization service returned no resolvable provider",
             )
-        # MCP / sandbox / web_search modes: collapse to the primary attempt,
-        # no per-attempt fallback (a tool-use loop shouldn't silently swap
-        # providers between rounds).
-        if mcp_server_configs or use_sandbox or use_web_search:
-            attempts_to_try = attempts_to_try[:1]
     else:
         provider, model = AnyLLM.split_model_provider(request.model)
         provider_kwargs = get_provider_kwargs(config, provider)
@@ -1198,6 +1230,24 @@ async def chat_completions(
                 "model": f"{attempt_provider.value}:{attempt_model}",
             }
 
+            # Per-attempt lock-in flag. Flipped the moment the upstream
+            # returns its first assistant message. After that, any failure
+            # terminates the request — fallback would replay a provider-
+            # specific transcript on a different provider, which has
+            # undefined semantics.
+            locked_in = False
+
+            def _mark_locked_in(_pos: int = attempt.position) -> None:
+                nonlocal locked_in
+                locked_in = True
+                logger.info(
+                    "Tool-loop lock-in request_id=%s position=%d provider=%s model=%s",
+                    platform_route.request_id,
+                    _pos,
+                    attempt.provider,
+                    attempt.model,
+                )
+
             try:
                 if mcp_server_configs:
                     async with MCPClientPool(mcp_server_configs) as pool:
@@ -1213,6 +1263,7 @@ async def chat_completions(
                             completion_kwargs=mcp_kwargs,
                             pool=pool,
                             max_iterations=max_tool_iterations,
+                            on_first_response=_mark_locked_in,
                         )
                 elif use_sandbox:
                     assert sandbox_url is not None
@@ -1230,6 +1281,7 @@ async def chat_completions(
                             completion_kwargs=sandbox_kwargs,
                             pool=backend,  # type: ignore[arg-type]
                             max_iterations=max_tool_iterations,
+                            on_first_response=_mark_locked_in,
                         )
                 elif use_web_search:
                     assert web_search_url is not None
@@ -1250,6 +1302,7 @@ async def chat_completions(
                             completion_kwargs=web_kwargs,
                             pool=web_backend,  # type: ignore[arg-type]
                             max_iterations=max_tool_iterations,
+                            on_first_response=_mark_locked_in,
                         )
                 else:
                     completion = await acompletion(**completion_kwargs)  # type: ignore[assignment]
@@ -1280,15 +1333,27 @@ async def chat_completions(
                     error_class,
                 )
                 logger.warning(
-                    "Provider call failed request_id=%s position=%d provider=%s model=%s error=%s retryable=%s",
+                    "Provider call failed request_id=%s position=%d provider=%s model=%s "
+                    "error=%s retryable=%s locked_in=%s",
                     platform_route.request_id,
                     attempt.position,
                     attempt.provider,
                     attempt.model,
                     error_class,
                     retryable,
+                    locked_in,
                 )
                 last_exc = exc
+                # Locked-in: at least one tool-loop round produced an
+                # assistant message on this attempt. Subsequent failures
+                # cannot be transparently retried on another provider — the
+                # conversation now contains provider-specific tool_call ids
+                # and reasoning blocks. Surface immediately.
+                if locked_in:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="LLM provider error",
+                    ) from exc
                 if not retryable:
                     raise HTTPException(
                         status_code=status.HTTP_502_BAD_GATEWAY,
@@ -1587,18 +1652,95 @@ async def _run_streaming_with_fallback(
     config: GatewayConfig,
     background_tasks: BackgroundTasks,
     rate_limit_info: RateLimitInfo | None,
+    mcp_server_configs: list[McpServerConfig] | None = None,
+    use_sandbox: bool = False,
+    sandbox_url: str | None = None,
+    sandbox_tool_entry: dict[str, Any] | None = None,
+    use_web_search: bool = False,
+    web_search_url: str | None = None,
+    web_search_tool_entry: dict[str, Any] | None = None,
+    remaining_user_tools: list[dict[str, Any]] | None = None,
+    tools_extracted: bool = False,
+    max_tool_iterations: int = DEFAULT_MAX_TOOL_ITERATIONS,
 ) -> StreamingResponse:
     """Iterate route.attempts for a streaming request, falling through on any
     attempt that fails before its first chunk arrives.
 
-    Once an attempt yields its first chunk, we commit and start flushing to the
-    client — errors past that point propagate to the SSE channel as today.
+    Once an attempt yields its first chunk, we commit and start flushing to
+    the client — errors past that point propagate to the SSE channel as
+    today. This is the streaming analogue of the non-streaming
+    pre-lock-in-fallback flow in the request handler above.
+
+    Tool-loop modes (sandbox / web_search / MCP) are layered on top using
+    the same pre-first-chunk fallback semantics: the upstream
+    ``acompletion(stream=True)`` call inside ``mcp_tool_loop_stream`` runs
+    lazily when ``iterate_streaming_attempts`` pulls the first chunk; if
+    that call fails (or any retryable error fires before a chunk arrives)
+    we move to the next attempt with a clean conversation slate.
     """
-    # Strip gateway-internal fields the upstream SDKs don't accept (Anthropic
-    # in particular rejects unknown kwargs). This path runs in platform mode
-    # with neither MCP nor sandbox, so we don't pass remaining_user_tools.
-    base_request_fields = _strip_gateway_fields(request.model_dump(exclude_unset=True))
-    first_chunk_timeout_seconds = int(config.platform.get("streaming_first_chunk_timeout_ms", 2000)) / 1000
+    tool_mode = bool(mcp_server_configs) or use_sandbox or use_web_search
+
+    base_request_fields = _strip_gateway_fields(
+        request.model_dump(exclude_unset=True),
+        tools_extracted=tools_extracted,
+        remaining_user_tools=remaining_user_tools,
+    )
+
+    # Tool-mode streams need more headroom on first-chunk wait: the model
+    # may reason briefly before emitting tokens or a tool_call, especially
+    # with extended thinking. Keep the existing tight default for plain
+    # streams so failed-attempt latency stays low when no tools are in play.
+    if tool_mode:
+        first_chunk_timeout_seconds = (
+            int(
+                config.platform.get(
+                    _STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY,
+                    _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP,
+                )
+            )
+            / 1000
+        )
+    else:
+        first_chunk_timeout_seconds = (
+            int(
+                config.platform.get(
+                    _STREAM_FIRST_CHUNK_TIMEOUT_MS_KEY,
+                    _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS,
+                )
+            )
+            / 1000
+        )
+
+    # Open the tool backend(s) once before iterating attempts. Eager open
+    # lets gateway-side dependency failures (sandbox unreachable, web
+    # search backend unreachable) surface as a normal HTTP error instead
+    # of as a mid-SSE error event after the 200 OK header. The exit stack
+    # is closed when streaming completes (success or error path inside
+    # the wrapped iterator) or, if no attempt commits, in the outer
+    # except handler below.
+    backend_stack = AsyncExitStack()
+    pool_for_loop: Any = None
+    try:
+        if mcp_server_configs is not None:
+            pool_for_loop = await backend_stack.enter_async_context(MCPClientPool(mcp_server_configs))
+        elif use_sandbox:
+            assert sandbox_url is not None
+            sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
+            pool_for_loop = await backend_stack.enter_async_context(
+                SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint),
+            )
+        elif use_web_search:
+            assert web_search_url is not None
+            assert web_search_tool_entry is not None
+            pool_for_loop = await backend_stack.enter_async_context(
+                _build_web_search_backend(base_url=web_search_url, tool_entry=web_search_tool_entry),
+            )
+    except BaseException:
+        # Eager-open failure (e.g. SandboxNotReachableError) — propagate so
+        # the route handler maps it to the existing HTTP status. Nothing to
+        # clean up on the stack yet because the entry failed.
+        await backend_stack.aclose()
+        raise
 
     async def _build_for_attempt(
         attempt: ResolvedAttempt,
@@ -1614,7 +1756,21 @@ async def _run_streaming_with_fallback(
         }
         if completion_kwargs.get("stream_options") is None:
             completion_kwargs["stream_options"] = {"include_usage": True}
-        return await acompletion(**completion_kwargs)  # type: ignore[return-value]
+        if pool_for_loop is None:
+            return await acompletion(**completion_kwargs)  # type: ignore[return-value]
+        kwargs = {
+            **completion_kwargs,
+            "messages": inject_purpose_hints(
+                completion_kwargs["messages"],
+                pool_for_loop.purpose_hints(),
+                header=request.tools_header,
+            ),
+        }
+        return mcp_tool_loop_stream(
+            completion_kwargs=kwargs,
+            pool=pool_for_loop,
+            max_iterations=max_tool_iterations,
+        )
 
     async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
         background_tasks.add_task(
@@ -1634,16 +1790,43 @@ async def _run_streaming_with_fallback(
             failure.error_class,
         )
 
-    chosen, stream = await iterate_streaming_attempts(
-        attempts=route.attempts,
-        build_stream=_build_for_attempt,
-        classify_error=_classify_upstream_error,
-        on_attempt_failed=_on_attempt_failed,
-        first_chunk_timeout_seconds=first_chunk_timeout_seconds,
-    )
+    try:
+        chosen, stream = await iterate_streaming_attempts(
+            attempts=route.attempts,
+            build_stream=_build_for_attempt,
+            classify_error=_classify_upstream_error,
+            on_attempt_failed=_on_attempt_failed,
+            first_chunk_timeout_seconds=first_chunk_timeout_seconds,
+        )
+    except BaseException:
+        # No attempt yielded a first chunk — close the tool backend before
+        # propagating the failure. The route handler maps it to HTTP.
+        await backend_stack.aclose()
+        raise
+
+    if tool_mode:
+        logger.info(
+            "Tool-loop streaming lock-in request_id=%s position=%d provider=%s model=%s",
+            route.request_id,
+            chosen.position,
+            chosen.provider,
+            chosen.model,
+        )
+
+    if pool_for_loop is not None:
+        async def _stream_with_backend_cleanup() -> AsyncIterator[ChatCompletionChunk]:
+            try:
+                async for chunk in stream:
+                    yield chunk
+            finally:
+                await backend_stack.aclose()
+
+        stream_to_return: AsyncIterator[ChatCompletionChunk] = _stream_with_backend_cleanup()
+    else:
+        stream_to_return = stream
 
     return _build_streaming_response(
-        stream=stream,
+        stream=stream_to_return,
         provider=LLMProvider(chosen.provider),
         model=chosen.model,
         platform_mode=True,

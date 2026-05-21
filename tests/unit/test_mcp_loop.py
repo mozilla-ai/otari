@@ -501,3 +501,127 @@ async def test_loop_mixed_tools_executes_mcp_and_returns_only_foreign(
     remaining = out.choices[0].message.tool_calls or []
     remaining_names = [tc.function.name for tc in remaining if hasattr(tc, "function")]
     assert remaining_names == ["user_tool"]
+
+
+# ---------- on_first_response lock-in signal ----------
+#
+# These tests pin the contract used by the platform-mode attempt loop in
+# chat.py to decide when a tool-loop attempt has "committed" to a provider.
+# The route handler MUST be able to tell apart:
+#   * the first upstream acompletion raised → free to fall back to the next
+#     attempt with a clean conversation slate
+#   * the first upstream acompletion returned → request is locked in;
+#     downstream failures must surface, not swap providers
+
+
+@pytest.mark.asyncio
+async def test_loop_on_first_response_fires_once_after_first_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Callback fires exactly once, immediately after the first acompletion
+    returns — before MCP execution, before later rounds. Multi-round loops
+    must not double-fire."""
+    responses = iter(
+        [
+            _completion(finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")]),
+            _completion(finish="stop", content="done"),
+        ]
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    invocations: list[int] = []
+
+    def _on_first() -> None:
+        invocations.append(1)
+
+    await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=_FakePool(tool_names=["fetch_url"]),  # type: ignore[arg-type]
+        max_iterations=5,
+        on_first_response=_on_first,
+    )
+    # Two rounds (tool_calls then stop) — callback must still only fire on round 1.
+    assert invocations == [1]
+
+
+@pytest.mark.asyncio
+async def test_loop_on_first_response_not_called_when_first_acompletion_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the first acompletion raises (auth, billing, network), the callback
+    must NOT fire — the route handler relies on this to decide whether
+    fallback to the next attempt is safe."""
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        raise RuntimeError("simulated upstream auth error")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    invocations: list[int] = []
+
+    def _on_first() -> None:
+        invocations.append(1)
+
+    with pytest.raises(RuntimeError):
+        await mcp_tool_loop(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=_FakePool(tool_names=["fetch_url"]),  # type: ignore[arg-type]
+            max_iterations=5,
+            on_first_response=_on_first,
+        )
+    assert invocations == []
+
+
+@pytest.mark.asyncio
+async def test_loop_on_first_response_fires_before_second_round_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If round 1 succeeds and round 2 raises, callback fired on round 1.
+    The route handler sees ``locked_in=True`` and surfaces the round-2
+    failure as an error rather than falling back — that's the "no silent
+    swap mid-loop" guarantee."""
+    state = {"round": 0}
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        state["round"] += 1
+        if state["round"] == 1:
+            return _completion(finish="tool_calls", tool_calls=[("c1", "fetch_url", "{}")])
+        raise RuntimeError("simulated upstream 5xx on round 2")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    invocations: list[int] = []
+
+    def _on_first() -> None:
+        invocations.append(1)
+
+    with pytest.raises(RuntimeError):
+        await mcp_tool_loop(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=_FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"}),  # type: ignore[arg-type]
+            max_iterations=5,
+            on_first_response=_on_first,
+        )
+    # Callback fired exactly once on round 1, even though round 2 failed.
+    assert invocations == [1]
+
+
+@pytest.mark.asyncio
+async def test_loop_omitting_on_first_response_is_backward_compatible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Existing callers that don't pass on_first_response continue to work."""
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return _completion(finish="stop", content="ok")
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=_FakePool(tool_names=["fetch_url"]),  # type: ignore[arg-type]
+        max_iterations=5,
+    )
+    assert out.choices[0].message.content == "ok"
