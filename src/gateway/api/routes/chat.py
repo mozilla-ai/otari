@@ -84,7 +84,13 @@ def _is_code_execution_tool_type(type_value: Any) -> bool:
 # don't accept as ``acompletion`` kwargs. Strip these from the model_dump
 # before forwarding to upstream — Anthropic in particular rejects unknown
 # kwargs with a hard error.
-_GATEWAY_INTERNAL_FIELDS = ("mcp_servers", "tools_header", "max_tool_iterations", "user")
+_GATEWAY_INTERNAL_FIELDS = (
+    "mcp_servers",
+    "mcp_server_ids",
+    "tools_header",
+    "max_tool_iterations",
+    "user",
+)
 
 
 def _strip_gateway_fields(
@@ -176,6 +182,7 @@ class ChatCompletionRequest(BaseModel):
     tool_choice: str | dict[str, Any] | None = None
     response_format: dict[str, Any] | None = None
     mcp_servers: list[McpServerConfig] | None = None
+    mcp_server_ids: list[uuid.UUID] | None = None
     tools_header: str | None = Field(
         default=None,
         max_length=4000,
@@ -512,6 +519,73 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
     return False, "unknown"
 
 
+async def _resolve_platform_mcp_servers(
+    config: GatewayConfig,
+    user_token: str,
+    mcp_server_ids: list[uuid.UUID],
+) -> list[McpServerConfig]:
+    """Swap workspace-scoped MCP server ids for inline configs by calling the platform."""
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Platform mode is misconfigured",
+        )
+
+    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
+    resolve_url = _platform_url(platform_base_url, "/gateway/mcp-servers/resolve")
+    headers = {
+        "X-Gateway-Token": config.platform_token or "",
+        "X-User-Token": user_token,
+    }
+    body: dict[str, Any] = {"mcp_server_ids": [str(uid) for uid in mcp_server_ids]}
+
+    try:
+        response = await _post_platform(
+            url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000
+        )
+    except (httpx.TimeoutException, httpx.NetworkError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        ) from None
+
+    if response.status_code == 200:
+        payload = response.json()
+        return [
+            McpServerConfig(
+                name=s["name"],
+                url=s["url"],
+                authorization_token=s.get("authorization_token"),
+                purpose_hint=s.get("purpose_hint"),
+                allowed_tools=s.get("allowed_tools"),
+            )
+            for s in payload.get("servers", [])
+        ]
+
+    # Mirror the status-code semantics of `_resolve_platform_credentials`:
+    # client errors (auth/quota/not-found/rate-limit) are forwarded so the
+    # caller sees the real status (and can honour Retry-After on 429), while
+    # the platform's server-side or unexpected responses collapse to 502.
+    if response.status_code in {401, 402, 403, 404, 429}:
+        detail = _safe_detail_from_platform(response, "MCP server resolution failed")
+        response_headers: dict[str, str] | None = None
+        if response.status_code == 429 and response.headers.get("Retry-After"):
+            response_headers = {"Retry-After": response.headers["Retry-After"]}
+        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
+
+    if response.status_code == 422 or response.status_code >= 500:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Authorization service unavailable",
+    )
+
+
 async def _report_platform_usage(
     config: GatewayConfig,
     correlation_id: str,
@@ -596,6 +670,7 @@ async def chat_completions(
     rate_limit_info: RateLimitInfo | None = None
     platform_mode = config.is_platform_mode
     route: ResolvedRoute | None = None
+    user_token: str | None = None  # set inside the platform_mode branch; referenced again later
 
     if platform_mode:
         user_token = _extract_platform_user_token(raw_request)
@@ -645,6 +720,27 @@ async def chat_completions(
         _ = await validate_user_budget(db, user_id, request.model, strategy=config.budget_strategy)
         if config.budget_strategy == "for_update":
             await db.rollback()
+
+    # Workspace-scoped MCP server references (platform mode only). Callers
+    # pass `mcp_server_ids: [uuid, ...]` instead of inlining each config; we
+    # resolve them against the platform's `/gateway/mcp-servers/resolve`
+    # endpoint and merge with any inline `mcp_servers` so the downstream
+    # MCP loop sees a single list. In standalone mode there's no platform
+    # to consult, so we reject the field with a 400 rather than silently
+    # ignoring it.
+    if request.mcp_server_ids and not platform_mode:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="mcp_server_ids is only available in platform mode",
+        )
+    if platform_mode and request.mcp_server_ids:
+        assert user_token is not None  # guaranteed by the platform_mode branch above
+        resolved_mcp_servers = await _resolve_platform_mcp_servers(
+            config=config,
+            user_token=user_token,
+            mcp_server_ids=request.mcp_server_ids,
+        )
+        request.mcp_servers = (request.mcp_servers or []) + resolved_mcp_servers
 
     # Per-request opt-in for sandboxed code execution. Matches Anthropic /
     # OpenAI's wire shape: caller adds {"type": "code_execution"} to their
