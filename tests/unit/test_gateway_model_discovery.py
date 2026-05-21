@@ -1,6 +1,7 @@
 """Unit tests for the model discovery cache and service."""
 
 import time
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -141,7 +142,9 @@ class TestSupportsListModels:
 
 
 class TestDiscoverAllModels:
-    def _make_config(self, providers: dict | None = None, discovery: bool = True, ttl: int = 300) -> GatewayConfig:
+    def _make_config(
+        self, providers: dict[str, Any] | None = None, discovery: bool = True, ttl: int = 300
+    ) -> GatewayConfig:
         return GatewayConfig(
             providers=providers or {},
             model_discovery=discovery,
@@ -224,7 +227,7 @@ class TestDiscoverAllModels:
 
         openai_models = [_make_model("gpt-4o")]
 
-        async def mock_alist(provider, **kwargs):
+        async def mock_alist(provider: Any, **kwargs: Any) -> list[Model]:
             if provider.value == "openai":
                 return openai_models
             raise ConnectionError("upstream unreachable")
