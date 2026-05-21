@@ -125,3 +125,58 @@ async def test_resolve_misconfigured_platform_500() -> None:
     with pytest.raises(HTTPException) as ei:
         await _resolve_platform_mcp_servers(_config(base_url=None), "tk", [uuid.uuid4()])
     assert ei.value.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_resolve_429_passthrough_with_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A platform 429 should forward verbatim (status + Retry-After header)
+    so clients can back off correctly, matching `_resolve_platform_credentials`."""
+
+    async def fake_post(**kwargs: Any) -> httpx.Response:
+        return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "30"})
+
+    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as ei:
+        await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
+    assert ei.value.status_code == 429
+    assert ei.value.headers == {"Retry-After": "30"}
+    assert ei.value.detail == "slow down"
+
+
+@pytest.mark.asyncio
+async def test_resolve_402_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
+    """402 (payment required / quota) should forward verbatim, matching
+    `_resolve_platform_credentials`'s behaviour for the same code."""
+
+    async def fake_post(**kwargs: Any) -> httpx.Response:
+        return httpx.Response(402, json={"detail": "quota exhausted"})
+
+    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as ei:
+        await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
+    assert ei.value.status_code == 402
+    assert ei.value.detail == "quota exhausted"
+
+
+@pytest.mark.asyncio
+async def test_resolve_422_collapses_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
+    """422 from the platform indicates a gateway↔platform schema mismatch,
+    not something the caller can usefully act on — collapse to 502 like
+    `_resolve_platform_credentials` does."""
+
+    async def fake_post(**kwargs: Any) -> httpx.Response:
+        return httpx.Response(422, json={"detail": "schema mismatch"})
+
+    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as ei:
+        await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
+    assert ei.value.status_code == 502

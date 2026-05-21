@@ -563,10 +563,21 @@ async def _resolve_platform_mcp_servers(
             for s in payload.get("servers", [])
         ]
 
-    if response.status_code in {401, 403, 404}:
+    # Mirror the status-code semantics of `_resolve_platform_credentials`:
+    # client errors (auth/quota/not-found/rate-limit) are forwarded so the
+    # caller sees the real status (and can honour Retry-After on 429), while
+    # the platform's server-side or unexpected responses collapse to 502.
+    if response.status_code in {401, 402, 403, 404, 429}:
+        detail = _safe_detail_from_platform(response, "MCP server resolution failed")
+        response_headers: dict[str, str] | None = None
+        if response.status_code == 429 and response.headers.get("Retry-After"):
+            response_headers = {"Retry-After": response.headers["Retry-After"]}
+        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
+
+    if response.status_code == 422 or response.status_code >= 500:
         raise HTTPException(
-            status_code=response.status_code,
-            detail=_safe_detail_from_platform(response, "MCP server resolution failed"),
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
         )
 
     raise HTTPException(
