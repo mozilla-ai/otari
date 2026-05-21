@@ -22,6 +22,7 @@ dependencies = [
     "python-multipart>=0.0.18",
     "pyyaml>=6.0",
     "sqlalchemy[asyncio]>=2.0.0",
+    "trafilatura>=2.0.0",
     "uvicorn[standard]>=0.30.0",
 ]
 
@@ -68,5 +69,9 @@ files = ["src", "tests", "scripts"]
 
 [[tool.mypy.overrides]]
 module = ["testcontainers.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["trafilatura.*"]
 ignore_missing_imports = true
 

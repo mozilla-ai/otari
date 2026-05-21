@@ -1,6 +1,9 @@
 services:
   gateway:
-    # if pulling from Docker Hub, use the following instead, and comment out the build section:
+    # Pulls from Docker Hub by default. Contributors testing a feature branch
+    # with unreleased code should build the image locally first:
+    #     docker build -t mzdotai/otari:latest .
+    # Docker prefers the local image over the registry tag once it exists.
     image: docker.io/mzdotai/otari:latest
 
     # If you want to use a different port, change it here and in the config.yml file.
@@ -25,6 +28,16 @@ services:
       # back to a Python/pandas/numpy-flavoured default if unset. Per-request
       # tools[i].purpose_hint still wins over this.
       - GATEWAY_SANDBOX_PURPOSE_HINT=${GATEWAY_SANDBOX_PURPOSE_HINT:-}
+      # In-network URL of the web-search backend — any HTTP service exposing
+      # a SearXNG-compatible /search?format=json endpoint. The bundled
+      # `searxng` profile container is the default; swap by changing this URL
+      # to point at any other adapter (commercial-API fronting service etc.).
+      - GATEWAY_WEB_SEARCH_URL=${GATEWAY_WEB_SEARCH_URL:-http://searxng:8080}
+      # Optional knobs. Defaults are conservative — see web_search_backend.py.
+      - GATEWAY_WEB_SEARCH_ENGINES=${GATEWAY_WEB_SEARCH_ENGINES:-}
+      - GATEWAY_WEB_SEARCH_MAX_RESULTS=${GATEWAY_WEB_SEARCH_MAX_RESULTS:-}
+      - GATEWAY_WEB_SEARCH_EXTRACT=${GATEWAY_WEB_SEARCH_EXTRACT:-}
+      - GATEWAY_WEB_SEARCH_PURPOSE_HINT=${GATEWAY_WEB_SEARCH_PURPOSE_HINT:-}
       # Optional operator-level header for the per-tool hint block in the system
       # message. Falls back to "You have access to the following tools:" if unset.
       # Useful for tone/translation/deployment-wide preferences. Not per-request:
@@ -98,6 +111,43 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    restart: unless-stopped
+
+  # Web-search backend — a SearXNG instance the gateway dispatches `web_search`
+  # tool calls to. SearXNG is a metasearch front-end over many upstream
+  # engines; the gateway's default engine list deliberately excludes Google,
+  # Bing, Yahoo and Brave (which forbid automated querying or sell a paid
+  # API) and uses duckduckgo/mojeek/qwant/wikipedia — the most defensible
+  # OSS combination. Operators who enable scraping-of-major-engines do so
+  # consciously and should review the upstream engines' Terms of Service.
+  #
+  # For commercial / production use, swap this container for a service that
+  # uses a licensed API (Tavily, Brave Search API with key, Exa, Linkup,
+  # Serper). Any HTTP service that exposes a SearXNG-compatible
+  # /search?format=json shape is a drop-in replacement — just change
+  # GATEWAY_WEB_SEARCH_URL in the gateway's environment.
+  #
+  # Opt-in via the `web-search` compose profile so operators who don't use
+  # the web_search tool aren't forced to pull this image. Bring it up with
+  # `docker compose --profile web-search up`. When the searxng container is
+  # not running, the gateway returns a clean 502 to any request that tries
+  # to dispatch `web_search`.
+  searxng:
+    profiles: ["web-search"]
+    image: docker.io/searxng/searxng:latest
+    ports:
+      # Bound to localhost only — like sandbox, this is internal infra. The
+      # gateway reaches it via the Docker network at `searxng:8080`; the
+      # host mapping is just for ad-hoc curl/debugging.
+      - "127.0.0.1:8181:8080"
+    volumes:
+      - ./scripts/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+      # SearXNG uses a per-instance secret for CSRF tokens etc. The default
+      # below is fine for a single-tenant gateway-internal deployment; rotate
+      # via $SEARXNG_SECRET for multi-tenant or public-facing setups.
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-otari-gateway-local-dev-secret}
     restart: unless-stopped
 
 volumes:

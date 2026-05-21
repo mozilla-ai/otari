@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bring up the OSS gateway demo (gateway + sandbox + postgres) with the keys
+# Bring up the OSS gateway demo (gateway + searxng + postgres) with the keys
 # and ports configured in this folder's .env. Loads .env via docker-compose's
 # --env-file so the API keys never need to live in shell history.
 
@@ -33,7 +33,7 @@ if [[ -n "$branch" && "$branch" != "main" ]]; then
 EOF
 fi
 
-# --profile code-exec opts the sandbox container in (gateway's compose
-# leaves it opt-in so operators who don't run code_execution aren't forced
+# --profile web-search opts the searxng container in (gateway's compose
+# leaves it opt-in so operators who don't run web_search aren't forced
 # to pull the image). The demo needs it, so request it here.
-exec docker compose --env-file "$ENV_FILE" --profile code-exec up "$@"
+exec docker compose --env-file "$ENV_FILE" --profile web-search up "$@"

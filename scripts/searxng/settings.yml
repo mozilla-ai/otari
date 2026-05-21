@@ -1,0 +1,73 @@
+# SearXNG settings — gateway-bundled default.
+#
+# Mounted at /etc/searxng/settings.yml by docker-compose.yml's `searxng`
+# service (web-search profile). The gateway's WebSearchBackend calls this
+# instance's /search?format=json endpoint.
+#
+# Engine selection is deliberately conservative. Google, Bing, Yahoo and
+# Brave (and any other engine whose ToS forbids automated querying, or whose
+# operator monetises via a paid API) are NOT enabled here. The default mix
+# (duckduckgo, mojeek, qwant, wikipedia) is the most defensible OSS
+# combination; operators who enable major-engine scraping should review the
+# upstream ToS first. Commercial / production deployments should swap this
+# container for a licensed-API backend — see docker-compose.yml.
+#
+# Reference: https://docs.searxng.org/admin/settings/index.html
+
+use_default_settings: true
+
+general:
+  instance_name: "otari-gateway-search"
+  privacypolicy_url: false
+  donation_url: false
+  contact_url: false
+  enable_metrics: false
+
+server:
+  # The gateway reaches this service over the Docker network and uses
+  # only the JSON API. CORS / host limits don't matter for that path,
+  # but tighten just in case the host port mapping is exposed.
+  bind_address: "0.0.0.0"
+  port: 8080
+  base_url: false
+  limiter: false
+  public_instance: false
+  # Required for the JSON API. SearXNG's default settings disable JSON.
+  method: "GET"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+ui:
+  static_use_hash: true
+
+# Engines: explicitly enabled (everything else stays at the default-settings
+# value, which for major engines is disabled-by-default for many of them
+# anyway — but we list ours by name to make the intent loud).
+engines:
+  - name: duckduckgo
+    disabled: false
+
+  - name: mojeek
+    disabled: false
+
+  - name: qwant
+    disabled: false
+
+  - name: wikipedia
+    disabled: false
+
+  # Major engines explicitly disabled here for clarity. Re-enable at your
+  # own risk and with awareness of each engine's Terms of Service.
+  - name: google
+    disabled: true
+  - name: bing
+    disabled: true
+  - name: yahoo
+    disabled: true
+  - name: brave
+    disabled: true

@@ -19,6 +19,7 @@ OpenAI-compatible LLM gateway with API key management, budget enforcement, and u
 - User and budget controls (`/v1/users`, `/v1/budgets`)
 - Usage and pricing tracking (`/v1/messages`, `/v1/pricing`)
 - Health and metrics endpoints (`/health`, optional `/metrics`)
+- Built-in tools dispatched server-side — `code_execution` (sandboxed Python REPL) and `web_search`. See [Built-in tools](#built-in-tools).
 
 ## Quickstart
 
@@ -140,6 +141,63 @@ docker run --rm \
 ```
 
 Gateway will be available at `http://localhost:8000`.
+
+## Built-in tools
+
+The gateway dispatches a couple of tools server-side so any model — including
+open-weight ones — gets parity with what frontier APIs expose as managed
+tools. Both are opt-in via the request's `tools` array (matching OpenAI's and
+Anthropic's wire shape) and run inside docker-compose profiles so operators
+who don't use them don't pull extra images.
+
+### `code_execution` — sandboxed Python REPL
+
+```json
+{
+  "model": "anthropic:claude-sonnet-4-6",
+  "messages": [{"role": "user", "content": "Compute 23 factorial."}],
+  "tools": [{"type": "code_execution"}]
+}
+```
+
+`code_interpreter` (OpenAI) and `code_execution_<date>` (Anthropic) are
+accepted as aliases. Bring up with `docker compose --profile code-exec up`.
+See `demo/code-exec/` for a runnable walkthrough.
+
+### `web_search` — current-information search
+
+```json
+{
+  "model": "anthropic:claude-sonnet-4-6",
+  "messages": [{"role": "user", "content": "What's the latest stable Python release?"}],
+  "tools": [{"type": "web_search"}]
+}
+```
+
+`web_search_<date>` (Anthropic) is accepted as an alias. Bring up with
+`docker compose --profile web-search up`. See `demo/web-search/` for a
+runnable walkthrough.
+
+The bundled backend is a SearXNG metasearch container restricted to engines
+that don't forbid automated querying (duckduckgo, mojeek, qwant, wikipedia)
+— see `scripts/searxng/settings.yml`. Top results are fetched and content
+is extracted via trafilatura in-process so the model sees LLM-ready
+Markdown, not raw SERP snippets.
+
+**For commercial or production use**, swap the SearXNG container for a
+backend that uses a licensed API (Tavily, Brave Search API, Exa, Linkup,
+Serper). `WebSearchBackend` is configured purely by URL
+(`GATEWAY_WEB_SEARCH_URL`), so any HTTP service that exposes a
+SearXNG-compatible `/search?format=json` endpoint is a drop-in replacement
+— including thin adapters in front of commercial APIs. Adapters that
+already extract content can pass it through on the optional
+`extracted_content` result field to bypass the gateway-side extraction.
+
+Per-tool overrides (`max_results`, `allowed_domains`, `blocked_domains`,
+`purpose_hint`) live on the tool entry; operator-level env knobs
+(`GATEWAY_WEB_SEARCH_ENGINES`, `GATEWAY_WEB_SEARCH_MAX_RESULTS`,
+`GATEWAY_WEB_SEARCH_EXTRACT`, `GATEWAY_WEB_SEARCH_PURPOSE_HINT`) live
+alongside `GATEWAY_WEB_SEARCH_URL`.
 
 ## API surface
 

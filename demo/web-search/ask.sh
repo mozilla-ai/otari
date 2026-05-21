@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Send a single chat completion to the OSS gateway with a code-execution-eligible
-# question. Streams the SSE response and highlights tool calls + results as
-# they land. Use `--no-stream` for backends that don't support streaming
+# Send a single chat completion to the OSS gateway with web_search enabled.
+# Streams the SSE response and highlights tool calls + results as they land.
+# Use `--no-stream` for backends that don't support streaming
 # (e.g. the llamafile path).
 #
 # Env vars:
@@ -10,9 +10,9 @@
 #   GATEWAY_USER — default 'demo'
 #
 # Usage:
-#   ./ask.sh "What is 23 factorial?"
-#   ./ask.sh --model openai:gpt-4o-mini --tool-type code_interpreter "..."
-#   ./ask.sh --model llamafile:Qwen3-... --tool-type code_execution_20250825 --no-stream "..."
+#   ./ask.sh "What's the latest stable release of Python?"
+#   ./ask.sh --model openai:gpt-4o-mini --tool-type web_search "..."
+#   ./ask.sh --model llamafile:Qwen3-... --tool-type web_search_20250305 --no-stream "..."
 
 set -euo pipefail
 
@@ -29,7 +29,7 @@ fi
 # survives renaming the repo directory). Empty fallback when the service is
 # not running; callers tolerate it via `|| echo 0` / 2>&1.
 GATEWAY_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q gateway 2>/dev/null | head -1 || true)
-SANDBOX_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q sandbox 2>/dev/null | head -1 || true)
+SEARXNG_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q searxng 2>/dev/null | head -1 || true)
 
 GATEWAY_PORT=${GATEWAY_PORT:-8000}
 GATEWAY_URL=${GATEWAY_URL:-http://localhost:${GATEWAY_PORT}}
@@ -37,7 +37,7 @@ GATEWAY_KEY=${GATEWAY_KEY:-demo-master-key}
 GATEWAY_USER=${GATEWAY_USER:-demo}
 
 MODEL="anthropic:claude-sonnet-4-6"
-TOOL_TYPE="code_execution"
+TOOL_TYPE="web_search"
 stream=1
 
 while [[ $# -gt 0 ]]; do
@@ -68,10 +68,22 @@ curl -sf -X POST "$GATEWAY_URL/v1/users" \
 
 body=$(python3 -c '
 import json, sys
+# Per-tool purpose_hint override. The gateway-default hint is intentionally
+# soft ("Prefer web_search for..."); that suits frontier models but small
+# open-weight models (Qwen3-4B etc.) often hedge ("I do not have real-time
+# access") instead of calling the tool. A directive demo-side override makes
+# the loop reliable across model sizes without coercing every caller.
 print(json.dumps({
     "model": sys.argv[1],
     "messages": [{"role": "user", "content": sys.argv[2]}],
-    "tools": [{"type": sys.argv[5]}],
+    "tools": [{
+        "type": sys.argv[5],
+        "purpose_hint": (
+            "If the user asks about current state, recent events, news, prices, "
+            "or anything time-sensitive, you MUST call web_search FIRST. "
+            "Do not answer from training memory for such questions."
+        ),
+    }],
     "stream": sys.argv[3] == "1",
     "user": sys.argv[4],
 }))
@@ -79,21 +91,21 @@ print(json.dumps({
 
 echo "──────────────────────────────────────────────────────────"
 echo "Q: $query"
-echo "    model:     $MODEL"
-echo "    tool-type: $TOOL_TYPE"
-echo "    sandbox:   enabled in the gateway (GATEWAY_SANDBOX_URL set in compose)"
+echo "    model:      $MODEL"
+echo "    tool-type:  $TOOL_TYPE"
+echo "    web_search: enabled in the gateway (GATEWAY_WEB_SEARCH_URL set in compose)"
 echo "──────────────────────────────────────────────────────────"
 echo
 
 _gw_before=$(docker logs $GATEWAY_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
-_sbx_before=$(docker logs $SANDBOX_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
+_sx_before=$(docker logs $SEARXNG_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 
 if [[ "$stream" == "1" ]]; then
   curl -sN -X POST "$GATEWAY_URL/v1/chat/completions" \
     -H "Authorization: Bearer $GATEWAY_KEY" \
     -H "Content-Type: application/json" \
     -d "$body" -D /tmp/.ask-headers | python3 -u -c '
-import json, os, sys
+import json, sys
 
 BOLD="\033[1m"; DIM="\033[2m"; YEL="\033[33m"; CYN="\033[36m"; GRN="\033[32m"; RED="\033[31m"; RST="\033[0m"
 
@@ -115,14 +127,13 @@ def emit_complete_tool_calls() -> None:
     for slot in slots.values():
         name = slot.get("name", "?")
         args = slot.get("args", "")
-        if name == "code_execution":
+        if name == "web_search":
             try:
-                code = json.loads(args).get("code", args)
+                q = json.loads(args).get("query", args)
             except Exception:
-                code = args
-            print(f"\n{YEL}{BOLD}▶ code_execution{RST}")
-            for line in code.splitlines():
-                print(f"  {CYN}{line}{RST}")
+                q = args
+            print(f"\n{YEL}{BOLD}▶ web_search{RST}")
+            print(f"  {CYN}query: {q}{RST}")
         else:
             print(f"\n{DIM}▶ {name}({args}){RST}")
     slots.clear()
@@ -169,26 +180,23 @@ else
     -d "$body" | python3 -c '
 import json, sys
 
-BOLD="\033[1m"; DIM="\033[2m"; YEL="\033[33m"; CYN="\033[36m"; RED="\033[31m"; RST="\033[0m"
+BOLD="\033[1m"; YEL="\033[33m"; CYN="\033[36m"; RED="\033[31m"; RST="\033[0m"
 
 r = json.load(sys.stdin)
 if "choices" not in r:
     print(f"{RED}{BOLD}!! gateway returned an error:{RST}\n{json.dumps(r, indent=2)}", file=sys.stderr)
     sys.exit(2)
 msg = r["choices"][0]["message"]
-# Surface tool calls the assistant made along the way (non-streaming path
-# only has the final assistant message, so this reflects the *last* round).
 for tc in msg.get("tool_calls") or []:
     fn = tc.get("function") or {}
     args = fn.get("arguments") or ""
-    if fn.get("name") == "code_execution":
+    if fn.get("name") == "web_search":
         try:
-            code = json.loads(args).get("code", args)
+            q = json.loads(args).get("query", args)
         except Exception:
-            code = args
-        print(f"{YEL}{BOLD}▶ code_execution{RST}")
-        for line in code.splitlines():
-            print(f"  {CYN}{line}{RST}")
+            q = args
+        print(f"{YEL}{BOLD}▶ web_search{RST}")
+        print(f"  {CYN}query: {q}{RST}")
         print()
 print(msg.get("content") or "(no content)")
 '
@@ -203,9 +211,9 @@ docker logs $GATEWAY_CONTAINER 2>&1 \
   | sed "s/^/${DIM}  /; s/$/${RST}/" \
   || true
 echo
-echo "${BOLD}${DIM}── sandbox saw ──${RST}"
-docker logs $SANDBOX_CONTAINER 2>&1 \
-  | tail -n +$((_sbx_before + 1)) \
-  | grep -iE "POST|DELETE" \
+echo "${BOLD}${DIM}── searxng saw ──${RST}"
+docker logs $SEARXNG_CONTAINER 2>&1 \
+  | tail -n +$((_sx_before + 1)) \
+  | grep -iE "search|engine|ERROR|WARNING" \
   | sed "s/^/${DIM}  /; s/$/${RST}/" \
   || true

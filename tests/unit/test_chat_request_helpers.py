@@ -8,7 +8,7 @@ provider-native shapes (OpenAI `code_interpreter`, Anthropic versioned
 
 from __future__ import annotations
 
-from gateway.api.routes.chat import _extract_code_execution_tool
+from gateway.api.routes.chat import _extract_code_execution_tool, _extract_web_search_tool
 
 
 def test_extracts_gateway_native_short_form() -> None:
@@ -72,3 +72,44 @@ def test_does_not_match_unrelated_types_starting_with_code() -> None:
 def test_non_string_type_does_not_match() -> None:
     entry, _ = _extract_code_execution_tool([{"type": None}, {"type": 42}])
     assert entry is None
+
+
+# --- web_search extraction ---------------------------------------------------
+
+
+def test_web_search_extracts_gateway_native_short_form() -> None:
+    entry, remaining = _extract_web_search_tool([{"type": "web_search"}])
+    assert entry == {"type": "web_search"}
+    assert remaining is None
+
+
+def test_web_search_extracts_anthropic_versioned_alias() -> None:
+    entry, remaining = _extract_web_search_tool([{"type": "web_search_20250305"}])
+    assert entry == {"type": "web_search_20250305"}
+    assert remaining is None
+
+
+def test_web_search_extracts_future_anthropic_version_by_prefix() -> None:
+    entry, _ = _extract_web_search_tool([{"type": "web_search_20991231"}])
+    assert entry is not None
+
+
+def test_web_search_passes_through_unrelated_tools() -> None:
+    user_tool = {"type": "function", "function": {"name": "get_weather"}}
+    entry, remaining = _extract_web_search_tool([user_tool, {"type": "web_search"}])
+    assert entry == {"type": "web_search"}
+    assert remaining == [user_tool]
+
+
+def test_web_search_does_not_match_code_execution() -> None:
+    entry, _ = _extract_web_search_tool([{"type": "code_execution"}])
+    assert entry is None
+
+
+def test_web_search_carries_per_tool_config_through() -> None:
+    entry, _ = _extract_web_search_tool(
+        [{"type": "web_search", "max_results": 3, "allowed_domains": ["docs.python.org"]}]
+    )
+    assert entry is not None
+    assert entry["max_results"] == 3
+    assert entry["allowed_domains"] == ["docs.python.org"]

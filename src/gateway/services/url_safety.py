@@ -1,16 +1,19 @@
-"""URL safety checks for inline MCP server endpoints.
+"""URL safety checks for outbound HTTP fetches the gateway makes on behalf of a request.
 
-Two concerns:
+Two distinct call sites with overlapping but not identical threat models:
 
-1. **SSRF.** A request body could otherwise point the gateway at internal services
-   (AWS IMDS, internal databases, cluster-local endpoints) and exfiltrate data via
-   the tool-list response. We resolve the host and reject private, link-local, and
-   reserved IP ranges. Loopback is allowed by default since it's genuinely useful
-   for local dev and same-host sidecar deployments — set ``GATEWAY_MCP_ALLOW_LOOPBACK=false``
-   to disable.
+* **MCP server endpoints** (:func:`validate_mcp_url`) — URL comes from the
+  request body. We block private/link-local/reserved IPs to prevent SSRF.
+  Loopback is allowed by default (useful for same-host sidecar deployments)
+  and gated by ``GATEWAY_MCP_ALLOW_LOOPBACK``. Also enforces TLS when a
+  bearer token is supplied.
 
-2. **TLS-with-token.** A bearer token over an ``http://`` URL is exfiltratable by
-   any on-path observer. If the caller provides a token, the URL must be HTTPS.
+* **Web-search result URLs** (:func:`validate_outbound_fetch_url`) — URL
+  comes from a third-party search engine via the configured search backend.
+  Tighter defaults: loopback is blocked too (the gateway has no legitimate
+  reason to fetch search results from itself). Gated by
+  ``GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`` for operators with unusual
+  setups (private indexes etc.).
 
 These checks are intentionally conservative: DNS rebinding can defeat host-based
 allowlists. Production deployments should also enforce egress policy at the
@@ -19,6 +22,7 @@ network layer.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import os
 import socket
@@ -118,3 +122,69 @@ def _blocked_reason(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str 
     if addr.is_reserved:
         return "in a reserved range"
     return None
+
+
+def _allow_web_search_private_hosts() -> bool:
+    return os.environ.get("GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS", "false").lower() in {"1", "true", "yes"}
+
+
+async def _resolve_all_async(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """Async DNS resolution. Off-loads to the loop's default resolver so the
+    event loop isn't blocked while we wait — critical when the per-fetch
+    fan-out can trigger many lookups concurrently.
+    """
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await loop.getaddrinfo(host, None)
+    except socket.gaierror:
+        return []
+    out: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
+    for info in infos:
+        sockaddr = info[4]
+        try:
+            out.append(ipaddress.ip_address(sockaddr[0]))
+        except ValueError:
+            continue
+    return out
+
+
+async def validate_outbound_fetch_url(url: str) -> None:
+    """Reject URLs that are unsafe for the gateway to fetch on behalf of a request.
+
+    Used for per-page fetches that the gateway initiates against URLs supplied
+    by third-party content (search-engine results, etc.). Stricter than
+    :func:`validate_mcp_url`: loopback is blocked by default because the
+    gateway has no legitimate reason to fetch user-search results from itself.
+
+    Async to keep the event loop unblocked under fan-out — see
+    :func:`_resolve_all_async`. Raises :class:`UnsafeURLError` on rejection.
+    """
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise UnsafeURLError(f"fetch URL must use http or https, got {scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise UnsafeURLError("fetch URL must include a hostname")
+
+    if _allow_web_search_private_hosts():
+        return
+
+    try:
+        literal = ipaddress.ip_address(host)
+        addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [literal]
+    except ValueError:
+        addresses = await _resolve_all_async(host)
+        if not addresses:
+            raise UnsafeURLError(
+                f"fetch host {host!r} could not be resolved; rejecting to avoid "
+                "DNS-rebinding. Set GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS=true to override."
+            ) from None
+
+    for addr in addresses:
+        reason = _blocked_reason(addr)
+        if reason is not None:
+            raise UnsafeURLError(
+                f"fetch host {host!r} resolves to {addr} which is {reason}; "
+                "rejecting to prevent SSRF. Set GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS=true to override."
+            )

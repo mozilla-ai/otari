@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Walkthrough for code execution against the OSS gateway.
+# Walkthrough for web search against the OSS gateway.
 #
-# The gateway accepts three equivalent tool-array shapes for code execution:
-#   * {"type": "code_execution"}              — gateway short form
-#   * {"type": "code_interpreter"}            — OpenAI Responses/Assistants
-#   * {"type": "code_execution_20250825"}     — Anthropic, versioned
+# The gateway accepts two equivalent tool-array shapes for web search:
+#   * {"type": "web_search"}              — gateway short form (matches OpenAI)
+#   * {"type": "web_search_20250305"}     — Anthropic, versioned (and future
+#                                           web_search_20260209 etc., matched
+#                                           by prefix)
 #
-# All three map to the same sandbox backend, so swapping the OpenAI/Anthropic
+# Both map to the same WebSearchBackend, so swapping the OpenAI/Anthropic
 # SDK's `base_url` to the gateway keeps existing client code working.
 #
 # Usage:
@@ -19,10 +20,6 @@
 #   --openai      needs OPENAI_API_KEY in .env
 #   --llamafile   needs a llamafile server reachable from the gateway container
 #                 (LLAMAFILE_API_BASE; default http://host.docker.internal:8080/v1)
-#                 If no server is already running and $LLAMAFILE_BIN points at
-#                 an executable *.llamafile, the script will boot it on
-#                 :8080 and kill it on exit. Otherwise it prints a download
-#                 command and skips the --llamafile leg.
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -112,9 +109,6 @@ while [[ $# -gt 0 ]]; do
     --openai)    PROVIDERS+=("openai");    shift ;;
     --llamafile) PROVIDERS+=("llamafile"); shift ;;
     -h|--help)
-      # Print the leading comment block (everything between the shebang and
-      # the first blank line). Stops there so inline `# …` comments later
-      # in the file don't bleed into the help text.
       awk 'NR==1 && /^#!/ {next} /^$/ {exit} /^# ?/ {sub(/^# ?/, ""); print}' "$0"
       exit 0
       ;;
@@ -178,15 +172,8 @@ provider_model() {
       probe=${base/host.docker.internal/127.0.0.1}
       raw=$(curl -sS --fail "${probe}/models" 2>&1) || {
         echo "ERROR_LOOKUP" >&2
-        echo "${YEL}  failed to query ${probe}/models — output was: ${raw:0:200}${RST}" >&2
         return 1
       }
-      # llama.cpp's /v1/models has historically been either:
-      #   {"object":"list","data":[{"id":"…"}]}   (openai-compatible)
-      #   {"data":[{"id":"…"}]}                   (newer builds)
-      # Either way we pull data[0].id. Print the parse error to stderr so
-      # the demo's run loop can flag the problem instead of silently
-      # producing a `llamafile:` (empty) model string.
       model_id=$(printf '%s' "$raw" | python3 -c '
 import json, sys
 try:
@@ -199,13 +186,7 @@ try:
 except Exception as e:
     sys.stderr.write(f"parse error: {e}\n")
     sys.exit(1)
-') || {
-        echo "${YEL}  /v1/models response was not the shape we expected — raw: ${raw:0:200}${RST}" >&2
-        return 1
-      }
-      # llama.cpp's /v1/models returns id="" when no --alias was passed.
-      # Fall back to a placeholder — llamafile only serves one model at a
-      # time and accepts any value in the request's `model` field anyway.
+') || return 1
       if [[ -z "$model_id" ]]; then
         model_id="local-llamafile"
       fi
@@ -215,9 +196,9 @@ except Exception as e:
 }
 provider_tool_type() {
   case "$1" in
-    anthropic) echo "code_execution_20250825" ;;  # Anthropic's native versioned shape
-    openai)    echo "code_interpreter" ;;          # OpenAI's native shape
-    llamafile) echo "code_execution" ;;            # gateway-native short form
+    anthropic) echo "web_search_20250305" ;;  # Anthropic's native versioned shape
+    openai)    echo "web_search" ;;            # OpenAI's native shape (and gateway-native)
+    llamafile) echo "web_search" ;;            # gateway-native short form
   esac
 }
 provider_extra() {
@@ -255,47 +236,68 @@ ${BOLD}what's running${RST} (all via \`docker compose up\` in the gateway repo)
             │   OSS Gateway                    │ ──────▶ │  Postgres   │
             │                                  │  state  └─────────────┘
             │   tool-use loop:                 │
-            │    • detects code_execution /    │
-            │      code_interpreter /          │
-            │      code_execution_<ver>        │
+            │    • detects web_search /        │
+            │      web_search_<ver>            │
             │    • adds it to model's tools[]  │
-            │    • on tool_call: POST sandbox  │
-            │    • feed stdout/stderr back     │
+            │    • on tool_call: HTTP to       │
+            │      configured search backend   │
+            │    • fetch+extract content       │
+            │    • feed results back to model  │
             │    • stream SSE to client        │
             └────┬───────────────────────┬─────┘
                  │                       │
-       Provider chat API        sandbox HTTP API
+       Provider chat API        web-search HTTP API
                  │                       │
                  ▼                       ▼
        ┌─────────────────┐    ┌──────────────────────────┐
-       │  Any model      │    │  Sandbox container       │
-       │  any-llm        │    │  Python REPL,            │
-       │  routes to      │    │  pandas/numpy/scipy …    │
+       │  Any model      │    │  SearXNG container       │
+       │  any-llm        │    │  metasearch over         │
+       │  routes to      │    │  DDG/mojeek/qwant/wiki   │
        └─────────────────┘    └──────────────────────────┘
+EOF
+}
+
+show_engine_note() {
+  cat <<EOF
+${BOLD}engine selection${RST} (bundled SearXNG defaults)
+
+  ${DIM}This demo runs a SearXNG metasearch instance over engines that don't${RST}
+  ${DIM}forbid automated querying — duckduckgo, mojeek, qwant, wikipedia.${RST}
+  ${DIM}Major engines (Google, Bing, Yahoo, Brave) are deliberately disabled${RST}
+  ${DIM}in scripts/searxng/settings.yml. Operators who enable them should${RST}
+  ${DIM}review the upstream Terms of Service first.${RST}
+
+  ${DIM}For commercial / production use, swap the searxng container for a${RST}
+  ${DIM}licensed-API backend (Tavily, Brave Search API, Exa, Linkup, Serper):${RST}
+  ${DIM}any HTTP service exposing /search?format=json is a drop-in replacement.${RST}
+  ${DIM}Just change GATEWAY_WEB_SEARCH_URL in the gateway's environment.${RST}
 EOF
 }
 
 show_request_shapes() {
   local query="$1"
   cat <<EOF
-${BOLD}three shapes the gateway accepts${RST} — same backend, different SDKs:
+${BOLD}two shapes the gateway accepts${RST} — same backend, different SDKs:
 
-  ${DIM}# Gateway-native (terse):${RST}
+  ${DIM}# Gateway-native / OpenAI Responses (terse):${RST}
   ${CYN}{${RST}
   ${CYN}  "messages": [{ "role": "user", "content": "$query" }],${RST}
-  ${GRN}  "tools": [{ "type": "code_execution" }]${RST}
+  ${GRN}  "tools": [{ "type": "web_search" }]${RST}
   ${CYN}}${RST}
 
-  ${DIM}# OpenAI SDK code — switch base_url to the gateway, no code change:${RST}
+  ${DIM}# Anthropic SDK code — versioned tool type:${RST}
   ${CYN}{${RST}
   ${CYN}  "messages": [{ "role": "user", "content": "$query" }],${RST}
-  ${GRN}  "tools": [{ "type": "code_interpreter" }]${RST}
+  ${GRN}  "tools": [{ "type": "web_search_20250305" }]${RST}
   ${CYN}}${RST}
 
-  ${DIM}# Anthropic SDK code — same idea, versioned tool type:${RST}
+  ${DIM}# Optional per-tool overrides (max_results, allowed_domains, blocked_domains, purpose_hint):${RST}
   ${CYN}{${RST}
-  ${CYN}  "messages": [{ "role": "user", "content": "$query" }],${RST}
-  ${GRN}  "tools": [{ "type": "code_execution_20250825" }]${RST}
+  ${GRN}  "tools": [{${RST}
+  ${GRN}    "type": "web_search",${RST}
+  ${YEL}    "max_results": 3,${RST}
+  ${YEL}    "allowed_domains": ["docs.python.org"]${RST}
+  ${GRN}  }]${RST}
   ${CYN}}${RST}
 EOF
 }
@@ -307,7 +309,7 @@ show_what_llm_receives() {
   echo
   printf "${CYN}{${RST}\n"
   printf "${CYN}  \"messages\": [{ \"role\": \"user\", \"content\": \"%s\" }],${RST}\n" "$query"
-  printf "${GRN}  \"tools\": [{ \"type\": \"code_execution\" }]${RST}\n"
+  printf "${GRN}  \"tools\": [{ \"type\": \"web_search\" }]${RST}\n"
   printf "${CYN}}${RST}\n"
   echo
   echo "${DIM}  system message the gateway prepends:${RST}"
@@ -315,9 +317,9 @@ show_what_llm_receives() {
 import sys
 sys.path.insert(0, '/app/src')
 from gateway.services.mcp_loop import inject_purpose_hints
-from gateway.services.sandbox_backend import SandboxBackend
+from gateway.services.web_search_backend import WebSearchBackend
 
-backend = SandboxBackend(sandbox_url='http://sandbox:8080')
+backend = WebSearchBackend(base_url='http://searxng:8080')
 print(inject_purpose_hints(
     [{'role': 'user', 'content': sys.argv[1]}],
     backend.purpose_hints(),
@@ -330,8 +332,8 @@ print(inject_purpose_hints(
   printf "${CYN}{${RST}\n"
   printf "${CYN}  \"messages\": [{ \"role\": \"user\", \"content\": \"%s\" }],${RST}\n" "$query"
   printf "${GRN}  \"tools\": [{${RST}\n"
-  printf "${GRN}    \"type\": \"code_execution\",${RST}\n"
-  printf "${YEL}    \"purpose_hint\": \"Only use code_execution for math involving large numbers.\"${RST}\n"
+  printf "${GRN}    \"type\": \"web_search\",${RST}\n"
+  printf "${YEL}    \"purpose_hint\": \"Use web_search only for questions about events after January 2026.\"${RST}\n"
   printf "${GRN}  }]${RST}\n"
   printf "${CYN}}${RST}\n"
   echo
@@ -340,11 +342,11 @@ print(inject_purpose_hints(
 import sys
 sys.path.insert(0, '/app/src')
 from gateway.services.mcp_loop import inject_purpose_hints
-from gateway.services.sandbox_backend import SandboxBackend
+from gateway.services.web_search_backend import WebSearchBackend
 
-backend = SandboxBackend(
-    sandbox_url='http://sandbox:8080',
-    purpose_hint='Only use code_execution for math involving large numbers.',
+backend = WebSearchBackend(
+    base_url='http://searxng:8080',
+    purpose_hint='Use web_search only for questions about events after January 2026.',
 )
 print(inject_purpose_hints(
     [{'role': 'user', 'content': sys.argv[1]}],
@@ -355,12 +357,12 @@ print(inject_purpose_hints(
   echo
   echo "${DIM}Knobs that shape the system message — priority order:${RST}"
   echo
-  echo "${DIM}  Per-tool hint (e.g. 'Use this for math'):${RST}"
-  echo "${DIM}    1. tools[i].purpose_hint              (per-request)${RST}"
-  echo "${DIM}    2. GATEWAY_SANDBOX_PURPOSE_HINT       (env, per-deployment)${RST}"
+  echo "${DIM}  Per-tool hint (e.g. 'Use this for current events'):${RST}"
+  echo "${DIM}    1. tools[i].purpose_hint                  (per-request)${RST}"
+  echo "${DIM}    2. GATEWAY_WEB_SEARCH_PURPOSE_HINT        (env, per-deployment)${RST}"
   echo "${DIM}    3. built-in default${RST}"
   echo
-  echo "${DIM}  List header (e.g. 'Prefer MCP tools over code_execution'):${RST}"
+  echo "${DIM}  List header (e.g. 'Prefer MCP tools over web_search'):${RST}"
   echo "${DIM}    1. tools_header (top-level request field)  (per-request)${RST}"
   echo "${DIM}    2. GATEWAY_TOOLS_HEADER                     (env, per-deployment)${RST}"
   echo "${DIM}    3. 'You have access to the following tools:'  (built-in)${RST}"
@@ -372,19 +374,33 @@ pause
 
 
 # ───────────────────────────────────────────────────────────────────────
-QUERY="Compute 23! and 50! using code_execution. Show both."
+present "Engine selection & legal landscape" \
+        "Which engines the bundled SearXNG instance is configured to query," \
+        "and how to swap it for a licensed-API backend in production."
+show_engine_note
+pause
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Pick a query that's reliably *after* a 4B-class open-weight model's
+# training cutoff. Small models with optional tools often answer from
+# training memory when they think they know — which makes the demo
+# silently look like web_search wasn't exercised. Asking for current
+# state (top HN story, today's weather, breaking news of the day)
+# forces the model to actually call the tool.
+QUERY="What is the current top story on Hacker News right now? Summarize it in one sentence."
 
 present "Under the hood: what the LLM actually receives" \
         "Two things the gateway adds before forwarding to the model:" \
         " (a) a system message naming each tool source and its purpose hint" \
-        " (b) a tools[] entry for code_execution" \
-        "The client never mentions code_execution — the gateway injects it."
+        " (b) a tools[] entry for web_search" \
+        "The client never sees web_search executed — the gateway runs it."
 show_what_llm_receives "$QUERY"
 pause
 
 
 # ───────────────────────────────────────────────────────────────────────
-present "Same gateway, three request shapes" \
+present "Same gateway, two request shapes" \
         "The gateway accepts the keyword each SDK already emits, so swapping" \
         "the SDK's base_url to the gateway keeps existing code working."
 show_request_shapes "$QUERY"
@@ -393,9 +409,9 @@ pause
 
 # ───────────────────────────────────────────────────────────────────────
 N=${#ENABLED[@]}
-present "Code-execution end to end — ${N} provider$( [[ $N -gt 1 ]] && echo s )" \
-        "Same question, same sandbox. Each call uses the SDK keyword native" \
-        "to its provider — proving the gateway recognises all three."
+present "Web-search end to end — ${N} provider$( [[ $N -gt 1 ]] && echo s )" \
+        "Same question, same SearXNG instance. Each call uses the SDK keyword" \
+        "native to its provider — proving the gateway recognises both shapes."
 for p in "${ENABLED[@]}"; do
   if ! model=$(provider_model "$p"); then
     echo "${YEL}── $p ── skipped (couldn't resolve a model id)${RST}"
