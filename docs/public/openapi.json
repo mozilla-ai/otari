@@ -1190,6 +1190,138 @@
         "title": "ModelPricingInfo",
         "type": "object"
       },
+      "ModerationRequest": {
+        "description": "OpenAI-compatible moderation request.",
+        "properties": {
+          "input": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            ],
+            "description": "Text, list of texts, or list of content-part dicts to moderate",
+            "title": "Input"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
+          }
+        },
+        "required": [
+          "model",
+          "input"
+        ],
+        "title": "ModerationRequest",
+        "type": "object"
+      },
+      "ModerationResponse": {
+        "description": "Normalized moderation response across providers.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/ModerationResult"
+            },
+            "title": "Results",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "model",
+          "results"
+        ],
+        "title": "ModerationResponse",
+        "type": "object"
+      },
+      "ModerationResult": {
+        "description": "A single moderation decision, typically one per input item.",
+        "properties": {
+          "categories": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "title": "Categories",
+            "type": "object"
+          },
+          "category_applied_input_types": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Applied Input Types"
+          },
+          "category_scores": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Category Scores",
+            "type": "object"
+          },
+          "flagged": {
+            "title": "Flagged",
+            "type": "boolean"
+          },
+          "provider_raw": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Raw"
+          }
+        },
+        "required": [
+          "flagged"
+        ],
+        "title": "ModerationResult",
+        "type": "object"
+      },
       "PricingResponse": {
         "description": "Response model for model pricing.",
         "properties": {
@@ -1227,6 +1359,75 @@
           "updated_at"
         ],
         "title": "PricingResponse",
+        "type": "object"
+      },
+      "RerankRequest": {
+        "description": "Rerank request.",
+        "properties": {
+          "documents": {
+            "description": "List of document strings to rerank",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Documents",
+            "type": "array"
+          },
+          "max_tokens_per_doc": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-document truncation limit",
+            "title": "Max Tokens Per Doc"
+          },
+          "model": {
+            "description": "Provider-prefixed model ID, e.g. 'cohere:rerank-v3.5'",
+            "title": "Model",
+            "type": "string"
+          },
+          "query": {
+            "description": "The search query to rerank documents against",
+            "title": "Query",
+            "type": "string"
+          },
+          "top_n": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum number of results to return",
+            "title": "Top N"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User ID for usage attribution",
+            "title": "User"
+          }
+        },
+        "required": [
+          "model",
+          "query",
+          "documents"
+        ],
+        "title": "RerankRequest",
         "type": "object"
       },
       "ResponsesRequest": {
@@ -3008,6 +3209,60 @@
         ]
       }
     },
+    "/v1/moderations": {
+      "post": {
+        "description": "OpenAI-compatible moderations endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "operationId": "create_moderation_v1_moderations_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_raw",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Raw",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModerationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModerationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Moderation",
+        "tags": [
+          "moderations"
+        ]
+      }
+    },
     "/v1/pricing": {
       "get": {
         "description": "List all model pricing.",
@@ -3268,6 +3523,46 @@
         "summary": "Get Pricing History",
         "tags": [
           "pricing"
+        ]
+      }
+    },
+    "/v1/rerank": {
+      "post": {
+        "description": "Rerank documents by relevance to a query.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "operationId": "create_rerank_v1_rerank_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RerankRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Rerank",
+        "tags": [
+          "rerank"
         ]
       }
     },

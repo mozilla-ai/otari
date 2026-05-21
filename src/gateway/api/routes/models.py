@@ -107,13 +107,13 @@ async def list_models(
             logger.exception("Model discovery failed unexpectedly")
             discovered = []
 
-        for model in discovered:
-            model_key = f"{model.owned_by}:{model.id}" if ":" not in model.id else model.id
+        for provider_name, model in discovered:
+            model_key = f"{provider_name}:{model.id}"
             pricing = pricing_map.pop(model_key, None)
             merged[model_key] = ModelObject(
                 id=model_key,
                 created=model.created,
-                owned_by=model.owned_by,
+                owned_by=provider_name,
                 pricing=ModelPricingInfo(
                     input_price_per_million=pricing.input_price_per_million,
                     output_price_per_million=pricing.output_price_per_million,
@@ -147,15 +147,18 @@ async def get_model(
     )
     pricing = (await db.execute(stmt)).scalar_one_or_none()
 
-    # Check the discovery cache for this model.
+    # Check the discovery cache for this model (respecting TTL).
     discovered_model = None
+    discovered_provider = None
     if config.model_discovery:
         cache = get_model_cache()
-        for models in cache.get_all_cached().values():
+        ttl = config.model_cache_ttl_seconds
+        for provider_name, models in cache.get_all_cached(ttl=ttl).items():
             for model in models:
-                cache_key = f"{model.owned_by}:{model.id}" if ":" not in model.id else model.id
+                cache_key = f"{provider_name}:{model.id}"
                 if cache_key == model_id:
                     discovered_model = model
+                    discovered_provider = provider_name
                     break
             if discovered_model:
                 break
@@ -168,15 +171,12 @@ async def get_model(
 
     # Build the response, merging both sources.
     if discovered_model:
-        model_key = (
-            f"{discovered_model.owned_by}:{discovered_model.id}"
-            if ":" not in discovered_model.id
-            else discovered_model.id
-        )
+        assert discovered_provider is not None
+        model_key = f"{discovered_provider}:{discovered_model.id}"
         return ModelObject(
             id=model_key,
             created=discovered_model.created,
-            owned_by=discovered_model.owned_by,
+            owned_by=discovered_provider,
             pricing=ModelPricingInfo(
                 input_price_per_million=pricing.input_price_per_million,
                 output_price_per_million=pricing.output_price_per_million,

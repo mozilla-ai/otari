@@ -29,7 +29,10 @@ class ModelCache:
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def get(self, provider: str, ttl: int) -> list[Model] | None:
-        """Return cached models if still valid, otherwise None."""
+        """Return cached models if still valid, otherwise None.
+
+        Returns a shallow copy so callers cannot mutate the internal cache.
+        """
         entry = self._store.get(provider)
         if entry is None:
             return None
@@ -38,15 +41,29 @@ class ModelCache:
         elapsed = time.monotonic() - entry.cached_at
         if elapsed >= ttl:
             return None
-        return entry.models
+        return list(entry.models)
 
     def set(self, provider: str, models: list[Model]) -> None:
         """Store a provider's model list with the current timestamp."""
         self._store[provider] = _CacheEntry(models=list(models), cached_at=time.monotonic())
 
-    def get_all_cached(self) -> dict[str, list[Model]]:
-        """Return all currently stored entries (regardless of TTL)."""
-        return {provider: entry.models for provider, entry in self._store.items()}
+    def get_all_cached(self, ttl: int | None = None) -> dict[str, list[Model]]:
+        """Return stored entries, optionally filtering by TTL.
+
+        Returns shallow copies so callers cannot mutate the internal cache.
+
+        Args:
+            ttl: If set, only return entries that are still valid. If None, return all.
+        """
+        result: dict[str, list[Model]] = {}
+        now = time.monotonic()
+        for provider, entry in self._store.items():
+            if ttl is not None:
+                elapsed = now - entry.cached_at
+                if ttl <= 0 or elapsed >= ttl:
+                    continue
+            result[provider] = list(entry.models)
+        return result
 
     def clear(self, provider: str | None = None) -> None:
         """Invalidate one or all providers."""
@@ -100,7 +117,7 @@ async def _discover_for_provider(
 async def discover_all_models(
     config: GatewayConfig,
     provider_filter: str | None = None,
-) -> list[Model]:
+) -> list[tuple[str, Model]]:
     """Discover models from configured providers with caching.
 
     Args:
@@ -108,7 +125,8 @@ async def discover_all_models(
         provider_filter: If set, only discover models for this provider.
 
     Returns:
-        Combined list of Model objects from all eligible providers.
+        List of (provider_name, Model) tuples so callers can build model_key
+        from the configured provider key rather than relying on ``owned_by``.
 
     """
     cache = get_model_cache()
@@ -120,13 +138,13 @@ async def discover_all_models(
         providers_to_query = list(config.providers.keys())
 
     # Separate providers into cache-hit and cache-miss groups.
-    result_models: list[Model] = []
+    result_models: list[tuple[str, Model]] = []
     providers_needing_fetch: list[str] = []
 
     for provider_name in providers_to_query:
         cached = cache.get(provider_name, ttl)
         if cached is not None:
-            result_models.extend(cached)
+            result_models.extend((provider_name, m) for m in cached)
         else:
             if _supports_list_models(provider_name):
                 providers_needing_fetch.append(provider_name)
@@ -143,7 +161,7 @@ async def discover_all_models(
         for provider_name in providers_needing_fetch:
             cached = cache.get(provider_name, ttl)
             if cached is not None:
-                result_models.extend(cached)
+                result_models.extend((provider_name, m) for m in cached)
             else:
                 still_needed.append(provider_name)
 
@@ -162,6 +180,6 @@ async def discover_all_models(
                     continue
                 _, models = result
                 cache.set(provider_name, models)
-                result_models.extend(models)
+                result_models.extend((provider_name, m) for m in models)
 
     return result_models

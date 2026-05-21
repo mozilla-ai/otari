@@ -92,6 +92,42 @@ class TestModelCache:
         assert len(all_cached["openai"]) == 1
         assert len(all_cached["anthropic"]) == 1
 
+    def test_get_all_cached_respects_ttl(self) -> None:
+        """get_all_cached with ttl filters out expired entries."""
+        cache = ModelCache()
+        cache.set("openai", [_make_model("gpt-4o")])
+        cache.set("anthropic", [_make_model("claude-3-opus")])
+
+        # Backdate the openai entry so it appears expired.
+        cache._store["openai"].cached_at = time.monotonic() - 400
+
+        all_cached = cache.get_all_cached(ttl=300)
+        assert "openai" not in all_cached
+        assert "anthropic" in all_cached
+
+    def test_get_all_cached_returns_shallow_copy(self) -> None:
+        """Mutating the returned list should not affect the cache."""
+        cache = ModelCache()
+        cache.set("openai", [_make_model("gpt-4o")])
+
+        returned = cache.get_all_cached()
+        returned["openai"].append(_make_model("gpt-3.5"))
+
+        # Internal cache should still have only 1 model.
+        assert len(cache._store["openai"].models) == 1
+
+    def test_get_returns_shallow_copy(self) -> None:
+        """Mutating the returned list should not affect the cache."""
+        cache = ModelCache()
+        cache.set("openai", [_make_model("gpt-4o")])
+
+        returned = cache.get("openai", ttl=300)
+        assert returned is not None
+        returned.append(_make_model("gpt-3.5"))
+
+        # Internal cache should still have only 1 model.
+        assert len(cache._store["openai"].models) == 1
+
     def test_set_copies_list(self) -> None:
         """Mutating the original list should not affect the cached copy."""
         cache = ModelCache()
@@ -160,6 +196,31 @@ class TestDiscoverAllModels:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_returns_provider_qualified_tuples(self) -> None:
+        """discover_all_models returns (provider_name, Model) tuples."""
+        config = self._make_config(providers={"openai": {"api_key": "sk-test"}})
+        expected_models = [_make_model("gpt-4o")]
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                new_callable=AsyncMock,
+                return_value=expected_models,
+            ),
+            patch("gateway.services.model_discovery_service.get_provider_kwargs", return_value={"api_key": "sk-test"}),
+        ):
+            cache = ModelCache()
+            mock_cache_fn.return_value = cache
+            result = await discover_all_models(config)
+
+        assert len(result) == 1
+        provider_name, model = result[0]
+        assert provider_name == "openai"
+        assert model.id == "gpt-4o"
+
+    @pytest.mark.asyncio
     async def test_discovers_models_from_provider(self) -> None:
         config = self._make_config(providers={"openai": {"api_key": "sk-test"}})
         expected_models = [_make_model("gpt-4o"), _make_model("gpt-4o-mini")]
@@ -179,7 +240,8 @@ class TestDiscoverAllModels:
             result = await discover_all_models(config)
 
         assert len(result) == 2
-        assert result[0].id == "gpt-4o"
+        assert result[0][0] == "openai"
+        assert result[0][1].id == "gpt-4o"
 
     @pytest.mark.asyncio
     async def test_uses_cache_on_hit(self) -> None:
@@ -197,7 +259,8 @@ class TestDiscoverAllModels:
             result = await discover_all_models(config)
 
         assert len(result) == 1
-        assert result[0].id == "gpt-4o"
+        assert result[0][0] == "openai"
+        assert result[0][1].id == "gpt-4o"
         mock_supports.assert_not_called()
         mock_alist.assert_not_called()
 
@@ -246,7 +309,8 @@ class TestDiscoverAllModels:
 
         # Only openai models should be returned; mistral failure is swallowed.
         assert len(result) == 1
-        assert result[0].id == "gpt-4o"
+        assert result[0][0] == "openai"
+        assert result[0][1].id == "gpt-4o"
 
     @pytest.mark.asyncio
     async def test_provider_filter_limits_query(self) -> None:

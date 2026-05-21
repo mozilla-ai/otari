@@ -1,5 +1,6 @@
 """Integration tests for model auto-discovery in the GET /v1/models endpoint."""
 
+import asyncio
 from collections.abc import AsyncGenerator, Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -70,10 +71,13 @@ def _make_client(config: GatewayConfig) -> Generator[TestClient]:
         with TestClient(app) as test_client:
             yield test_client
     finally:
+        # Dispose the async engine to avoid leaking connections/tasks.
+        asyncio.run(async_engine.dispose())
         Base.metadata.drop_all(bind=engine)
         with engine.connect() as conn:
             conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
             conn.commit()
+        engine.dispose()
 
 
 @pytest.fixture
