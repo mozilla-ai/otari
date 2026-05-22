@@ -143,7 +143,12 @@ services:
     volumes:
       - ./scripts/searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
-      - SEARXNG_BASE_URL=http://localhost:8080/
+      # Public-facing base URL SearXNG uses for self-references (OpenSearch
+      # descriptor, UI links, CSP origins). Must match the host port mapping
+      # above so ad-hoc curl / browser access lines up; the gateway itself
+      # reaches SearXNG over the Docker network at ``searxng:8080`` and
+      # doesn't use this value.
+      - SEARXNG_BASE_URL=http://localhost:8181/
       # SearXNG uses a per-instance secret for CSRF tokens etc. The default
       # below is fine for a single-tenant gateway-internal deployment; rotate
       # via $SEARXNG_SECRET for multi-tenant or public-facing setups.

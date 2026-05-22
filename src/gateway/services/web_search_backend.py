@@ -112,7 +112,12 @@ class WebSearchBackend:
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._engines = engines
-        self._max_results = min(max_results, _MAX_RESULTS_CAP)
+        # Clamp to [1, _MAX_RESULTS_CAP]. Sub-1 values (e.g. ``0`` or ``-1``
+        # from a misconfigured env var) would otherwise reach
+        # ``results[: self._max_results]`` and produce surprising slicing
+        # behaviour (empty list or "drop the last hit") instead of a useful
+        # bound.
+        self._max_results = max(1, min(max_results, _MAX_RESULTS_CAP))
         self._allowed_domains = tuple(d.lower() for d in allowed_domains)
         self._blocked_domains = tuple(d.lower() for d in blocked_domains)
         self._extract_content = extract_content
@@ -328,15 +333,22 @@ class WebSearchBackend:
                     continue
                 if response.status_code >= 400:
                     return None
-                chunks: list[bytes] = []
-                total = 0
+                # Accumulate directly into a bytearray and truncate the
+                # chunk that crosses the cap to the remaining budget. The
+                # previous list-of-chunks + ``b"".join(...)`` pattern (a)
+                # overshot by up to one chunk-size and (b) briefly held
+                # two copies during join — under fetch concurrency, peak
+                # memory was ~2× the cap. bytearray + decode is one copy.
+                buf = bytearray()
                 async for chunk in response.aiter_bytes(chunk_size=65536):
-                    chunks.append(chunk)
-                    total += len(chunk)
-                    if total >= _FETCH_MAX_BYTES:
+                    remaining = _FETCH_MAX_BYTES - len(buf)
+                    if remaining <= 0:
+                        break
+                    buf.extend(chunk if len(chunk) <= remaining else chunk[:remaining])
+                    if len(buf) >= _FETCH_MAX_BYTES:
                         break
                 # Best-effort decode: trafilatura tolerates partial / encoding-noisy HTML.
-                return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace")
+                return buf.decode(response.encoding or "utf-8", errors="replace")
         # Exceeded redirect budget without reaching a terminal response.
         logger.debug("web_search: redirect budget exhausted for %s", url)
         return None

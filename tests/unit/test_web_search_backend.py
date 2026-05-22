@@ -431,3 +431,72 @@ async def test_fetch_capped_truncates_huge_response(monkeypatch: pytest.MonkeyPa
     # as long as we returned in finite time and finite memory.
     assert "[1] Huge" in result
     assert "https://example.com/huge" in result
+
+
+@pytest.mark.asyncio
+async def test_fetch_capped_buffer_never_exceeds_max_bytes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The internal buffer is capped strictly at ``_FETCH_MAX_BYTES``.
+
+    Earlier the loop appended each chunk in full before checking the cap,
+    so the buffer could overshoot by up to one chunk-size and then peak
+    at ~2x while ``b"".join(...)`` materialised the final bytestring.
+    Now the overshooting chunk is truncated to the remaining budget.
+    """
+    from gateway.services import web_search_backend as wsb_module
+
+    monkeypatch.setattr(wsb_module, "_FETCH_MAX_BYTES", 1024)
+    payload = b"<html>" + b"A" * 4096 + b"</html>"
+    _patched_async_client(
+        {
+            ("searxng", "/search"): httpx.Response(
+                200,
+                json={"results": [{"url": "https://example.com/p", "title": "T", "content": "snip"}]},
+            ),
+            ("example.com", "/p"): httpx.Response(200, content=payload),
+        },
+        monkeypatch,
+    )
+
+    captured_buffers: list[bytearray] = []
+    original_fetch = wsb_module.WebSearchBackend._fetch_capped
+
+    async def spy_fetch(self: wsb_module.WebSearchBackend, url: str) -> str | None:
+        out = await original_fetch(self, url)
+        # _fetch_capped returns a decoded str; we cannot inspect the bytes
+        # buffer post-decode, so assert via the str length cap (utf-8 is a
+        # superset of ASCII so 1 byte = 1 char here, giving us a precise
+        # bound).
+        if out is not None:
+            captured_buffers.append(bytearray(out, "utf-8"))
+        return out
+
+    monkeypatch.setattr(wsb_module.WebSearchBackend, "_fetch_capped", spy_fetch)
+
+    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=True) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "x"})
+
+    assert captured_buffers, "fetch was not invoked"
+    assert all(len(b) <= 1024 for b in captured_buffers), (
+        f"_fetch_capped buffer exceeded cap: sizes={[len(b) for b in captured_buffers]}"
+    )
+
+
+@pytest.mark.parametrize("bad_value", [0, -1, -100])
+def test_max_results_clamps_subone_to_one(bad_value: int) -> None:
+    """``WebSearchBackend.__init__`` clamps non-positive ``max_results`` to 1.
+
+    Reaches via env var (``GATEWAY_WEB_SEARCH_MAX_RESULTS=-1``) or a
+    malformed per-tool entry; downstream the value reaches
+    ``results[: self._max_results]`` and would otherwise produce silently-
+    wrong slicing (empty list for 0, drop-last for -1).
+    """
+    backend = WebSearchBackend(base_url="http://searxng:8080", max_results=bad_value)
+    assert backend._max_results == 1  # noqa: SLF001 — invariant under test
+
+
+def test_max_results_clamps_above_cap_to_max_results_cap() -> None:
+    """Values above the cap clamp down (existing behaviour, regression guard)."""
+    from gateway.services.web_search_backend import _MAX_RESULTS_CAP
+
+    backend = WebSearchBackend(base_url="http://searxng:8080", max_results=10_000)
+    assert backend._max_results == _MAX_RESULTS_CAP  # noqa: SLF001
