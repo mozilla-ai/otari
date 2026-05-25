@@ -71,3 +71,14 @@ engines:
     disabled: true
   - name: brave
     disabled: true
+
+  # Default-enabled upstream engines we don't use. Disabled to silence
+  # noisy init errors: ahmia/torch require a Tor proxy we don't provide;
+  # radio browser hits a SearXNG SQLite cache race on cold start and
+  # isn't a web-search engine anyway.
+  - name: ahmia
+    disabled: true
+  - name: torch
+    disabled: true
+  - name: radio browser
+    disabled: true
