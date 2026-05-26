@@ -60,9 +60,6 @@ Platform mode is enabled automatically when `OTARI_PLATFORM_TOKEN` is set.
 export OTARI_PLATFORM_TOKEN=gw_xxx
 ```
 
-`PLATFORM_BASE_URL` defaults to `https://api.otari.ai/api/v1`.
-Set it only if your otari.ai deployment uses a different base URL.
-
 2) Start the gateway:
 
 ```bash

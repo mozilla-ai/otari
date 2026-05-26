@@ -72,7 +72,7 @@ pricing:
 | `log_writer_strategy` | string | `"single"` | Usage log writing: `"single"` (inline) or `"batch"` (background) |
 | `budget_strategy` | string | `"for_update"` | Budget validation: `"for_update"`, `"cas"`, or `"disabled"` |
 | `mode` | string | `"standalone"` | Configured mode (`"standalone"` or `"platform"`). Effective behavior is driven by presence of `OTARI_PLATFORM_TOKEN`. |
-| `platform` | dict | `{}` | otari.ai integration settings (`base_url`, timeouts, retries). `base_url` defaults to `https://api.otari.ai/api/v1` when connected. |
+| `platform` | dict | `{}` | otari.ai integration settings (`base_url`, timeouts, retries) |
 
 ## Environment variables
 
@@ -116,7 +116,6 @@ These are only relevant when running connected to [otari.ai](https://otari.ai). 
 |----------|---------|-------------|
 | `OTARI_PLATFORM_TOKEN` | -- | Gateway token from otari.ai (enables platform connection) |
 | `ANY_LLM_PLATFORM_TOKEN` | -- | Legacy alias for `OTARI_PLATFORM_TOKEN` |
-| `PLATFORM_BASE_URL` | `https://api.otari.ai/api/v1` | Base URL for the otari.ai API |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Timeout for provider resolution calls |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Timeout for usage reporting calls |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage reporting failures |

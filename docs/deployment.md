@@ -84,9 +84,6 @@ Pass them as environment variables. Create a `.env` file:
 OTARI_PLATFORM_TOKEN=gw_your_token_here
 ```
 
-By default, `PLATFORM_BASE_URL` is `https://api.otari.ai/api/v1`.
-Set `PLATFORM_BASE_URL` only if your otari.ai deployment uses a different base URL.
-
 ### 3. Start the gateway
 
 ```bash
@@ -171,6 +168,5 @@ Provider API keys can be passed as environment variables instead of putting them
 | `GATEWAY_PORT` | Host port for the gateway (default: `8000`) |
 | `GATEWAY_MASTER_KEY` | Master key for management endpoints |
 | `OTARI_PLATFORM_TOKEN` | otari.ai gateway token |
-| `PLATFORM_BASE_URL` | otari.ai API base URL |
 
 See [Configuration](configuration.md) for the full reference.
