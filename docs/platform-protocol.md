@@ -89,10 +89,9 @@ own behaviour.
 `attempts` MUST contain at least one entry. An empty list is treated as a
 platform bug and surfaced as `502 Bad Gateway`.
 
-### Response — legacy single-attempt shape
+### Response — single-attempt shape
 
-For backwards compatibility with older platform deployments, the gateway also
-accepts a flat payload:
+The gateway also accepts a flat payload:
 
 ```json
 {
@@ -211,7 +210,7 @@ flag.
 
 | Env var | Default | Notes |
 |---|---|---|
-| `OTARI_AI_TOKEN` | — | Setting this enables platform mode. Legacy aliases: `OTARI_PLATFORM_TOKEN`, `ANY_LLM_PLATFORM_TOKEN`. |
+| `OTARI_AI_TOKEN` | — | Setting this enables platform mode. |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Per-resolve timeout. |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |

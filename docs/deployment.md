@@ -82,9 +82,6 @@ Pass them as environment variables. Create a `.env` file:
 
 ```bash
 OTARI_AI_TOKEN=gw_your_token_here
-
-# legacy alias (still supported):
-# OTARI_PLATFORM_TOKEN=gw_your_token_here
 ```
 
 ### 3. Start the gateway

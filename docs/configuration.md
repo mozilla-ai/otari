@@ -115,14 +115,10 @@ These are only relevant when running connected to [otari.ai](https://otari.ai). 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OTARI_AI_TOKEN` | -- | Gateway token from otari.ai (enables platform connection) |
-| `OTARI_PLATFORM_TOKEN` | -- | Legacy alias for `OTARI_AI_TOKEN` |
-| `ANY_LLM_PLATFORM_TOKEN` | -- | Legacy alias for `OTARI_AI_TOKEN` |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Timeout for provider resolution calls |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Timeout for usage reporting calls |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage reporting failures |
 | `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt timeout waiting for first streamed chunk |
-
-`OTARI_AI_TOKEN` takes precedence. `OTARI_PLATFORM_TOKEN` and `ANY_LLM_PLATFORM_TOKEN` are supported for backward compatibility.
 
 ## Provider configuration
 

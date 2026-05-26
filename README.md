@@ -58,9 +58,6 @@ Platform mode is enabled automatically when `OTARI_AI_TOKEN` is set.
 
 ```bash
 export OTARI_AI_TOKEN=gw_xxx
-
-# legacy alias (still supported):
-# export OTARI_PLATFORM_TOKEN=gw_xxx
 ```
 
 2) Start the gateway:

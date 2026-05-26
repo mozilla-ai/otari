@@ -40,9 +40,6 @@ This mode activates automatically when `OTARI_AI_TOKEN` is set.
 
 ```bash
 export OTARI_AI_TOKEN=gw_your_token_here
-
-# legacy alias (still supported):
-# export OTARI_PLATFORM_TOKEN=gw_your_token_here
 ```
 
 See [Deployment](deployment.md) for the full Docker setup.
