@@ -175,7 +175,9 @@ def test_load_config_accepts_legacy_platform_token_aliases(tmp_path: Path, monke
     assert config.platform_token == "legacy-token"
 
 
-def test_load_config_prefers_otari_ai_token_over_legacy_aliases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_config_prefers_otari_ai_token_over_legacy_aliases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("mode: standalone\n", encoding="utf-8")
 
