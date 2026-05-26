@@ -8,14 +8,23 @@ Anthropic shape, and the per-tool dispatch into the right backend.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm.types.messages import (
+    ContentBlockDeltaEvent,
+    MessageDelta,
+    MessageDeltaEvent,
+    MessageDeltaUsage,
     MessageResponse,
+    MessageStartEvent,
+    MessageStopEvent,
+    MessageStreamEvent,
     MessageUsage,
     TextBlock,
+    TextDelta,
 )
 from fastapi.testclient import TestClient
 
@@ -446,6 +455,216 @@ def test_sandbox_unreachable_returns_502_anthropic_body(
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "go"}],
                 "max_tokens": 100,
+                "tools": [{"type": "code_execution_20250825"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 502
+    _assert_anthropic_error(resp.json(), error_type="api_error", message_substr="sandbox unreachable")
+
+
+# ---------- streaming dispatch ----------
+
+
+def _stream_message_start() -> MessageStartEvent:
+    return MessageStartEvent(
+        type="message_start",
+        message=cast(Any, _text_response("")),
+    )
+
+
+def _stream_text_delta(text: str) -> ContentBlockDeltaEvent:
+    return ContentBlockDeltaEvent(
+        type="content_block_delta",
+        index=0,
+        delta=cast(Any, TextDelta(type="text_delta", text=text)),
+    )
+
+
+def _stream_message_delta() -> MessageDeltaEvent:
+    return MessageDeltaEvent(
+        type="message_delta",
+        delta=MessageDelta(stop_reason=cast(Any, "end_turn"), stop_sequence=None),
+        usage=MessageDeltaUsage(
+            input_tokens=None,
+            output_tokens=1,
+            cache_creation_input_tokens=None,
+            cache_read_input_tokens=None,
+            server_tool_use=None,
+        ),
+    )
+
+
+def _stream_message_stop() -> MessageStopEvent:
+    return MessageStopEvent(type="message_stop")
+
+
+async def _stream_iter(*events: MessageStreamEvent) -> AsyncIterator[MessageStreamEvent]:
+    for event in events:
+        yield event
+
+
+def test_stream_no_tools_returns_sse_response(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """``stream: true`` with no gateway tools wraps the upstream stream in an
+    SSE response. The route should NOT call the tool loop.
+    """
+
+    async def fake_amessages(**_kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return _stream_iter(_stream_message_start(), _stream_message_stop())
+
+    tool_loop_called = False
+
+    async def fake_loop_stream(**_kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        nonlocal tool_loop_called
+        tool_loop_called = True
+        # Async-generator shape to match anthropic_tool_loop_stream.
+        return
+        yield  # noqa: F811 — needed to classify this as an async generator
+
+    with (
+        patch("gateway.api.routes.messages.amessages", new=fake_amessages),
+        patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
+    ):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 100,
+                "stream": True,
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    assert tool_loop_called is False
+
+
+def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """``stream: true`` with ``mcp_servers`` routes through
+    ``anthropic_tool_loop_stream`` rather than calling ``amessages`` directly.
+    """
+    seen: dict[str, Any] = {}
+
+    async def fake_loop_stream(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int
+    ) -> AsyncIterator[MessageStreamEvent]:
+        seen["pool"] = pool
+        seen["max_iterations"] = max_iterations
+        yield _stream_message_stop()
+
+    plain_amessages_called = False
+
+    async def fake_amessages(**_kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        nonlocal plain_amessages_called
+        plain_amessages_called = True
+        return _stream_iter()
+
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
+        patch("gateway.api.routes.messages.amessages", new=fake_amessages),
+        patch(
+            "gateway.services.mcp_client.MCPClientPool.__aenter__",
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+        ),
+        patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
+    ):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 100,
+                "stream": True,
+                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:9999/mcp"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    assert seen.get("pool") is not None, "anthropic_tool_loop_stream was not invoked"
+    assert plain_amessages_called is False
+
+
+def test_stream_code_execution_dispatches_through_sandbox(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``stream: true`` with ``code_execution_*`` opens the sandbox backend
+    and feeds it to ``anthropic_tool_loop_stream``.
+    """
+    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+
+    pool_seen: list[Any] = []
+
+    async def fake_loop_stream(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int
+    ) -> AsyncIterator[MessageStreamEvent]:
+        pool_seen.append(pool)
+        yield _stream_message_stop()
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_backend.__aenter__ = AsyncMock(return_value=fake_backend)
+    fake_backend.__aexit__ = AsyncMock(return_value=None)
+
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
+        patch("gateway.api.routes.messages.SandboxBackend", return_value=fake_backend),
+    ):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "compute"}],
+                "max_tokens": 100,
+                "stream": True,
+                "tools": [{"type": "code_execution_20250825"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    assert pool_seen == [fake_backend], "tool loop didn't receive the SandboxBackend"
+
+
+def test_stream_sandbox_unreachable_returns_502_anthropic_body(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test for the eager-open error mapping bug: when the
+    streaming sandbox eager-open fails, the route must return a 502 with the
+    Anthropic error envelope rather than a 500 (which is what would happen
+    if the streaming dispatch wasn't wrapped in the error-mapping
+    try/except).
+    """
+    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+
+    from gateway.services.sandbox_backend import SandboxNotReachableError
+
+    with patch(
+        "gateway.api.routes.messages.SandboxBackend",
+        return_value=AsyncMock(__aenter__=AsyncMock(side_effect=SandboxNotReachableError("boom"))),
+    ):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "go"}],
+                "max_tokens": 100,
+                "stream": True,
                 "tools": [{"type": "code_execution_20250825"}],
             },
             headers=api_key_header,

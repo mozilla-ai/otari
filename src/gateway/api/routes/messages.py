@@ -471,22 +471,40 @@ async def _stream_messages(
             error=error,
         )
 
-    if not use_tool_loop:
-        msg_stream = await amessages(**call_kwargs)
-        msg_stream_typed: AsyncIterator[MessageStreamEvent] = msg_stream  # type: ignore[assignment]
-    else:
-        msg_stream_typed = await _open_tool_loop_stream(
-            call_kwargs=call_kwargs,
-            tools_header=request.tools_header,
-            mcp_server_configs=mcp_server_configs,
-            use_sandbox=use_sandbox,
-            sandbox_tool_entry=sandbox_tool_entry,
-            sandbox_url=sandbox_url,
-            use_web_search=use_web_search,
-            web_search_tool_entry=web_search_tool_entry,
-            web_search_url=web_search_url,
-            max_tool_iterations=max_tool_iterations,
-        )
+    try:
+        if not use_tool_loop:
+            msg_stream = await amessages(**call_kwargs)
+            msg_stream_typed: AsyncIterator[MessageStreamEvent] = msg_stream  # type: ignore[assignment]
+        else:
+            msg_stream_typed = await _open_tool_loop_stream(
+                call_kwargs=call_kwargs,
+                tools_header=request.tools_header,
+                mcp_server_configs=mcp_server_configs,
+                use_sandbox=use_sandbox,
+                sandbox_tool_entry=sandbox_tool_entry,
+                sandbox_url=sandbox_url,
+                use_web_search=use_web_search,
+                web_search_tool_entry=web_search_tool_entry,
+                web_search_url=web_search_url,
+                max_tool_iterations=max_tool_iterations,
+            )
+    except SandboxNotReachableError as exc:
+        # Surfaced here (rather than from the in-band SSE channel) because the
+        # backend is opened eagerly — see ``_open_tool_loop_stream``'s
+        # docstring. Mirrors the non-streaming error mapping.
+        logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
+        raise _anthropic_error(
+            _ERR_API,
+            "code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
+            status.HTTP_502_BAD_GATEWAY,
+        ) from exc
+    except WebSearchNotReachableError as exc:
+        logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
+        raise _anthropic_error(
+            _ERR_API,
+            "web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
+            status.HTTP_502_BAD_GATEWAY,
+        ) from exc
 
     rl_headers = rate_limit_headers(rate_limit_info) if rate_limit_info else {}
     return StreamingResponse(
