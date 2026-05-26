@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.metrics import record_cost, record_tokens
@@ -39,6 +38,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.services.pricing_service import find_model_pricing
+from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchBackend, WebSearchNotReachableError
 from gateway.streaming import (
@@ -298,46 +298,6 @@ class ChatCompletionRequest(BaseModel):
         ),
     )
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
-
-
-def get_provider_kwargs(
-    config: GatewayConfig,
-    provider: LLMProvider,
-) -> dict[str, Any]:
-    """Get provider kwargs from config for acompletion calls.
-
-    Args:
-        config: Gateway configuration
-        provider: Provider name
-
-    Returns:
-        Dictionary of provider kwargs (credentials, client_args, etc.)
-
-    """
-    kwargs: dict[str, Any] = {}
-    if provider.value in config.providers:
-        provider_config = config.providers[provider.value]
-
-        if provider == LLMProvider.VERTEXAI:
-            vertex_creds = provider_config.get("credentials")
-            vertex_project = provider_config.get("project")
-            vertex_location = provider_config.get("location")
-
-            kwargs.update(
-                setup_vertex_environment(
-                    credentials=vertex_creds,
-                    project=vertex_project,
-                    location=vertex_location,
-                )
-            )
-            if "client_args" in provider_config:
-                kwargs["client_args"] = provider_config["client_args"]
-        else:
-            kwargs = {k: v for k, v in provider_config.items() if k != "client_args"}
-            if "client_args" in provider_config:
-                kwargs["client_args"] = provider_config["client_args"]
-
-    return kwargs
 
 
 async def log_usage(

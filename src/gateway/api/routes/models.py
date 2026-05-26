@@ -148,20 +148,21 @@ async def get_model(
     pricing = (await db.execute(stmt)).scalar_one_or_none()
 
     # Check the discovery cache for this model (respecting TTL).
+    # Parse provider from model_id ("provider:model_name") for a targeted lookup
+    # instead of scanning all cached providers.
     discovered_model = None
     discovered_provider = None
-    if config.model_discovery:
+    if config.model_discovery and ":" in model_id:
+        provider_prefix, model_name = model_id.split(":", 1)
         cache = get_model_cache()
         ttl = config.model_cache_ttl_seconds
-        for provider_name, models in cache.get_all_cached(ttl=ttl).items():
-            for model in models:
-                cache_key = f"{provider_name}:{model.id}"
-                if cache_key == model_id:
+        cached_models = cache.get(provider_prefix, ttl)
+        if cached_models is not None:
+            for model in cached_models:
+                if model.id == model_name:
                     discovered_model = model
-                    discovered_provider = provider_name
+                    discovered_provider = provider_prefix
                     break
-            if discovered_model:
-                break
 
     if not pricing and not discovered_model:
         raise HTTPException(

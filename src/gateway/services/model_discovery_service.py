@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 from any_llm import AnyLLM, LLMProvider, alist_models
 from any_llm.types.model import Model
 
-from gateway.api.routes.chat import get_provider_kwargs
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.services.provider_kwargs import get_provider_kwargs
 
 
 @dataclass
@@ -57,7 +57,7 @@ class ModelCache:
         """
         result: dict[str, list[Model]] = {}
         now = time.monotonic()
-        for provider, entry in self._store.items():
+        for provider, entry in list(self._store.items()):
             if ttl is not None:
                 elapsed = now - entry.cached_at
                 if ttl <= 0 or elapsed >= ttl:
