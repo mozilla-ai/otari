@@ -75,6 +75,23 @@ service_account.json
 
 # Docker files (keep Dockerfile in context)
 .dockerignore
+docker-compose*.yml
+
+# Demo / scripts (not needed in image)
+demo/
+scripts/
+
+# Config / tooling files
+Makefile
+pytest.ini
+codecov.yml
+.pre-commit-config.yaml
+config.yaml
+config.example.yml
+
+# Database files
+*.db
+*.sqlite
 
 # Misc
 *.log
