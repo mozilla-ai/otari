@@ -90,6 +90,8 @@ jobs:
           build-args: |
             GATEWAY_VERSION=${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
           cache-from: type=gha
+          provenance: mode=max
+          sbom: true
 
       - name: Set image output
         id: image-output
