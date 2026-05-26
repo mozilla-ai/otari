@@ -5,7 +5,7 @@
 # (e.g. the llamafile path).
 #
 # Env vars:
-#   GATEWAY_URL  — default http://localhost:${GATEWAY_PORT:-8000}
+#   GATEWAY_URL  — default http://localhost:${OTARI_PORT:-8000}
 #   GATEWAY_KEY  — default 'demo-master-key'  (your master key or API key)
 #   GATEWAY_USER — default 'demo'
 #
@@ -31,7 +31,7 @@ fi
 GATEWAY_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q gateway 2>/dev/null | head -1 || true)
 SANDBOX_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q sandbox 2>/dev/null | head -1 || true)
 
-GATEWAY_PORT=${GATEWAY_PORT:-8000}
+GATEWAY_PORT=${OTARI_PORT:-${GATEWAY_PORT:-8000}}
 GATEWAY_URL=${GATEWAY_URL:-http://localhost:${GATEWAY_PORT}}
 GATEWAY_KEY=${GATEWAY_KEY:-demo-master-key}
 GATEWAY_USER=${GATEWAY_USER:-demo}

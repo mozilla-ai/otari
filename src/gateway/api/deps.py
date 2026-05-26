@@ -182,7 +182,7 @@ async def verify_master_key(
     if not config.master_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Master key not configured. Set GATEWAY_MASTER_KEY environment variable.",
+            detail="Master key not configured. Set OTARI_MASTER_KEY environment variable.",
         )
 
     token = _extract_bearer_token(request, config)

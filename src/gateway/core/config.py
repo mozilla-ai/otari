@@ -17,6 +17,14 @@ PLATFORM_TOKEN_ENV_VARS = (
     "OTARI_PLATFORM_TOKEN",
     "ANY_LLM_PLATFORM_TOKEN",
 )
+OTARI_ENV_ALIASES_TO_GATEWAY = {
+    "OTARI_MASTER_KEY": ("master_key", str),
+    "OTARI_DATABASE_URL": ("database_url", str),
+    "OTARI_HOST": ("host", str),
+    "OTARI_PORT": ("port", int),
+    "OTARI_AUTO_MIGRATE": ("auto_migrate", bool),
+    "OTARI_BOOTSTRAP_API_KEY": ("bootstrap_api_key", bool),
+}
 
 
 def _get_platform_token_from_env() -> str | None:
@@ -165,11 +173,33 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
             if yaml_config:
                 config_dict = _resolve_env_vars(yaml_config)
 
+    _apply_otari_env_overrides(config_dict)
     _apply_platform_env_overrides(config_dict)
 
     config = GatewayConfig(**config_dict)
     config.validate_mode_selection()
     return config
+
+
+def _parse_bool_env(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    msg = f"Invalid boolean value for environment variable: {value!r}"
+    raise ValueError(msg)
+
+
+def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
+    for env_name, (field_name, caster) in OTARI_ENV_ALIASES_TO_GATEWAY.items():
+        value = os.getenv(env_name)
+        if value is None or value == "":
+            continue
+        if caster is bool:
+            config[field_name] = _parse_bool_env(value)
+        else:
+            config[field_name] = caster(value)
 
 
 def _apply_platform_env_overrides(config: dict[str, Any]) -> None:

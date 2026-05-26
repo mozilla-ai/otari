@@ -8,9 +8,9 @@ services:
 
     # If you want to use a different port, change it here and in the config.yml file.
     ports:
-      # Host port 8000 by default. Override via $GATEWAY_PORT when other
+      # Host port 8000 by default. Override via $OTARI_PORT when other
       # services on the host already own :8000 (e.g. another local backend).
-      - "${GATEWAY_PORT:-8000}:8000"
+      - "${OTARI_PORT:-${GATEWAY_PORT:-8000}}:8000"
     volumes:
       # Default `./config.yml` matches the existing operator convention
       # (gitignored, operator-supplied). The demo overrides this via

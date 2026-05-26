@@ -32,7 +32,7 @@ def cli() -> None:
 @click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")
 @click.option(
     "--master-key",
-    envvar="GATEWAY_MASTER_KEY",
+    envvar="OTARI_MASTER_KEY",
     help="Master key for management endpoints",
 )
 @click.option(
@@ -91,7 +91,7 @@ def serve(
         logger.warning(
             "No master key configured. Key management endpoints will be unavailable.",
         )
-        logger.warning("Set GATEWAY_MASTER_KEY environment variable or use --master-key flag.")
+        logger.warning("Set OTARI_MASTER_KEY environment variable or use --master-key flag.")
 
     logger.info("Starting otari-gateway on %s:%s", gateway_config.host, gateway_config.port)
     if gateway_config.is_platform_mode:
@@ -159,7 +159,7 @@ def migrate(config: str | None, database_url: str | None, revision: str) -> None
     click.echo(f"Target revision: {revision}")
 
     env = os.environ.copy()
-    env["GATEWAY_DATABASE_URL"] = gateway_config.database_url
+    env["OTARI_DATABASE_URL"] = gateway_config.database_url
 
     try:
         result = subprocess.run(  # noqa: S603 validated up a few lines

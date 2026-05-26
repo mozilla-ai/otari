@@ -9,10 +9,11 @@ from gateway.core.config import load_config
 
 def test_load_config_loads_provider_env_vars_from_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     env_file = tmp_path / ".env"
-    env_file.write_text("ANTHROPIC_API_KEY=from-dotenv\nGATEWAY_MASTER_KEY=gateway-master\n", encoding="utf-8")
+    env_file.write_text("ANTHROPIC_API_KEY=from-dotenv\nOTARI_MASTER_KEY=gateway-master\n", encoding="utf-8")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OTARI_MASTER_KEY", raising=False)
     monkeypatch.delenv("GATEWAY_MASTER_KEY", raising=False)
 
     config = load_config()
@@ -52,7 +53,7 @@ def test_load_config_prefers_dotenv_near_config_file(tmp_path: Path, monkeypatch
 
 def test_load_config_skips_duplicate_dotenv_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     env_file = tmp_path / ".env"
-    env_file.write_text("GATEWAY_MASTER_KEY=gateway-master\n", encoding="utf-8")
+    env_file.write_text("OTARI_MASTER_KEY=gateway-master\n", encoding="utf-8")
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("{}\n", encoding="utf-8")
 
@@ -69,6 +70,41 @@ def test_load_config_skips_duplicate_dotenv_paths(tmp_path: Path, monkeypatch: p
     load_config(str(config_file))
 
     assert calls == [env_file]
+
+
+def test_load_config_reads_otari_prefixed_env_aliases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_MASTER_KEY", "otari-master")
+    monkeypatch.setenv("OTARI_DATABASE_URL", "sqlite:///./otari.db")
+    monkeypatch.setenv("OTARI_HOST", "127.0.0.1")
+    monkeypatch.setenv("OTARI_PORT", "9001")
+    monkeypatch.setenv("OTARI_AUTO_MIGRATE", "false")
+    monkeypatch.setenv("OTARI_BOOTSTRAP_API_KEY", "false")
+
+    config = load_config(str(config_file))
+
+    assert config.master_key == "otari-master"
+    assert config.database_url == "sqlite:///./otari.db"
+    assert config.host == "127.0.0.1"
+    assert config.port == 9001
+    assert config.auto_migrate is False
+    assert config.bootstrap_api_key is False
+
+
+def test_load_config_prefers_otari_prefix_over_gateway_aliases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_PORT", "9001")
+    monkeypatch.setenv("GATEWAY_PORT", "7000")
+
+    config = load_config(str(config_file))
+
+    assert config.port == 9001
 
 
 def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

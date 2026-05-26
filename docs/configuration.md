@@ -76,7 +76,7 @@ pricing:
 
 ## Environment variables
 
-Environment variables with the `GATEWAY_` prefix override config file values. For example, `GATEWAY_PORT=9000` overrides `port: 8000` in the YAML.
+Environment variables with the `OTARI_` prefix override config file values. For example, `OTARI_PORT=9000` overrides `port: 8000` in the YAML.
 
 The config file also supports `${ENV_VAR}` interpolation:
 
@@ -88,12 +88,12 @@ master_key: "${MY_SECRET_KEY}"
 
 | Variable | Description |
 |----------|-------------|
-| `GATEWAY_MASTER_KEY` | Master key for management endpoints |
-| `GATEWAY_DATABASE_URL` | Database connection URL |
-| `GATEWAY_HOST` | Server bind host |
-| `GATEWAY_PORT` | Server bind port |
-| `GATEWAY_AUTO_MIGRATE` | Auto-run migrations on startup |
-| `GATEWAY_BOOTSTRAP_API_KEY` | Create first-use API key |
+| `OTARI_MASTER_KEY` | Master key for management endpoints |
+| `OTARI_DATABASE_URL` | Database connection URL |
+| `OTARI_HOST` | Server bind host |
+| `OTARI_PORT` | Server bind port |
+| `OTARI_AUTO_MIGRATE` | Auto-run migrations on startup |
+| `OTARI_BOOTSTRAP_API_KEY` | Create first-use API key |
 
 ### Provider credentials
 
