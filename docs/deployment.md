@@ -81,7 +81,10 @@ You need your gateway token from your otari.ai account.
 Pass them as environment variables. Create a `.env` file:
 
 ```bash
-OTARI_PLATFORM_TOKEN=gw_your_token_here
+OTARI_AI_TOKEN=gw_your_token_here
+
+# legacy alias (still supported):
+# OTARI_PLATFORM_TOKEN=gw_your_token_here
 ```
 
 ### 3. Start the gateway
@@ -167,6 +170,6 @@ Provider API keys can be passed as environment variables instead of putting them
 | `GEMINI_API_KEY` | Google Gemini API key |
 | `GATEWAY_PORT` | Host port for the gateway (default: `8000`) |
 | `GATEWAY_MASTER_KEY` | Master key for management endpoints |
-| `OTARI_PLATFORM_TOKEN` | otari.ai gateway token |
+| `OTARI_AI_TOKEN` | otari.ai gateway token |
 
 See [Configuration](configuration.md) for the full reference.

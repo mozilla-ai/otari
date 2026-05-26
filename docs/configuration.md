@@ -71,7 +71,7 @@ pricing:
 | `bootstrap_api_key` | bool | `true` | Create a first-use API key on startup when none exist |
 | `log_writer_strategy` | string | `"single"` | Usage log writing: `"single"` (inline) or `"batch"` (background) |
 | `budget_strategy` | string | `"for_update"` | Budget validation: `"for_update"`, `"cas"`, or `"disabled"` |
-| `mode` | string | `"standalone"` | Configured mode (`"standalone"` or `"platform"`). Effective behavior is driven by presence of `OTARI_PLATFORM_TOKEN`. |
+| `mode` | string | `"standalone"` | Configured mode (`"standalone"` or `"platform"`). Effective behavior is driven by presence of `OTARI_AI_TOKEN`. |
 | `platform` | dict | `{}` | otari.ai integration settings (`base_url`, timeouts, retries) |
 
 ## Environment variables
@@ -114,14 +114,15 @@ These are only relevant when running connected to [otari.ai](https://otari.ai). 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OTARI_PLATFORM_TOKEN` | -- | Gateway token from otari.ai (enables platform connection) |
-| `ANY_LLM_PLATFORM_TOKEN` | -- | Legacy alias for `OTARI_PLATFORM_TOKEN` |
+| `OTARI_AI_TOKEN` | -- | Gateway token from otari.ai (enables platform connection) |
+| `OTARI_PLATFORM_TOKEN` | -- | Legacy alias for `OTARI_AI_TOKEN` |
+| `ANY_LLM_PLATFORM_TOKEN` | -- | Legacy alias for `OTARI_AI_TOKEN` |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Timeout for provider resolution calls |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Timeout for usage reporting calls |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage reporting failures |
 | `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt timeout waiting for first streamed chunk |
 
-`OTARI_PLATFORM_TOKEN` takes precedence. `ANY_LLM_PLATFORM_TOKEN` is supported for backward compatibility.
+`OTARI_AI_TOKEN` takes precedence. `OTARI_PLATFORM_TOKEN` and `ANY_LLM_PLATFORM_TOKEN` are supported for backward compatibility.
 
 ## Provider configuration
 

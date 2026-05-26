@@ -52,12 +52,15 @@ Open API docs at `http://localhost:8000/docs`.
 
 ## Start in platform mode
 
-Platform mode is enabled automatically when `OTARI_PLATFORM_TOKEN` is set.
+Platform mode is enabled automatically when `OTARI_AI_TOKEN` is set.
 
 1) Export platform env vars:
 
 ```bash
-export OTARI_PLATFORM_TOKEN=gw_xxx
+export OTARI_AI_TOKEN=gw_xxx
+
+# legacy alias (still supported):
+# export OTARI_PLATFORM_TOKEN=gw_xxx
 ```
 
 2) Start the gateway:
@@ -68,8 +71,8 @@ uv run gateway serve --config config.yml
 
 Notes:
 
-- `GATEWAY_MODE` is optional; effective mode is derived from `OTARI_PLATFORM_TOKEN`.
-- If you explicitly set `GATEWAY_MODE=platform`, startup fails unless `OTARI_PLATFORM_TOKEN` is also set.
+- `GATEWAY_MODE` is optional; effective mode is derived from `OTARI_AI_TOKEN`.
+- If you explicitly set `GATEWAY_MODE=platform`, startup fails unless `OTARI_AI_TOKEN` is also set.
 - In platform mode, local `providers` configuration is not used.
 - The gateway/platform wire contract (resolve and usage endpoints, request/response shapes, retry semantics) is documented in [`docs/platform-protocol.md`](docs/platform-protocol.md).
 

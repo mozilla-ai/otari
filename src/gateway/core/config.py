@@ -12,13 +12,19 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 API_KEY_HEADER = "Otari-Key"
 LEGACY_API_KEY_HEADERS = ("AnyLLM-Key", "X-AnyLLM-Key")  # Back-compat aliases; prefer API_KEY_HEADER.
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
+PLATFORM_TOKEN_ENV_VARS = (
+    "OTARI_AI_TOKEN",
+    "OTARI_PLATFORM_TOKEN",
+    "ANY_LLM_PLATFORM_TOKEN",
+)
 
 
 def _get_platform_token_from_env() -> str | None:
-    token = os.getenv("OTARI_PLATFORM_TOKEN", "").strip()
-    if not token:
-        token = os.getenv("ANY_LLM_PLATFORM_TOKEN", "").strip()
-    return token if token else None
+    for env_var in PLATFORM_TOKEN_ENV_VARS:
+        token = os.getenv(env_var, "").strip()
+        if token:
+            return token
+    return None
 
 
 class PricingConfig(BaseModel):
@@ -132,7 +138,10 @@ class GatewayConfig(BaseSettings):
 
         token_present = self.platform_token is not None
         if configured_mode == "platform" and not token_present:
-            msg = "GATEWAY_MODE=platform requires OTARI_PLATFORM_TOKEN to be set."
+            msg = (
+                "GATEWAY_MODE=platform requires OTARI_AI_TOKEN to be set "
+                "(legacy aliases: OTARI_PLATFORM_TOKEN, ANY_LLM_PLATFORM_TOKEN)."
+            )
             raise ValueError(msg)
 
 

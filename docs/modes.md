@@ -18,7 +18,7 @@ All endpoints are available. On first startup, the gateway bootstraps an API key
 
 When connected to [otari.ai](https://otari.ai), the gateway delegates provider routing, authentication, and usage tracking to the platform.
 
-This mode activates automatically when `OTARI_PLATFORM_TOKEN` is set.
+This mode activates automatically when `OTARI_AI_TOKEN` is set.
 
 ### What otari.ai handles
 
@@ -39,7 +39,10 @@ This mode activates automatically when `OTARI_PLATFORM_TOKEN` is set.
 ### Setup
 
 ```bash
-export OTARI_PLATFORM_TOKEN=gw_your_token_here
+export OTARI_AI_TOKEN=gw_your_token_here
+
+# legacy alias (still supported):
+# export OTARI_PLATFORM_TOKEN=gw_your_token_here
 ```
 
 See [Deployment](deployment.md) for the full Docker setup.
