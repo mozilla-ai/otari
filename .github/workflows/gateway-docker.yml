@@ -21,7 +21,6 @@ on:
 env:
   REGISTRY: docker.io
   IMAGE_NAME: mzdotai/otari
-  AWS_REGION: us-east-2
 
 jobs:
   build-and-push-image:
@@ -114,37 +113,3 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: mzdotai/otari
           readme-filepath: ./README.md
-
-  deploy-development:
-    runs-on: ubuntu-latest
-    needs: build-and-push-image
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Download task definition
-        run: |
-          aws ecs describe-task-definition \
-            --task-definition otari-platform-gateway-task-development \
-            --query taskDefinition \
-            > task-definition.json
-
-      - name: Update image in task definition
-        run: |
-          cat task-definition.json \
-            | jq --arg IMAGE "${{ needs.build-and-push-image.outputs.image }}" \
-              '.containerDefinitions[0].image = $IMAGE' \
-            > new-task-definition.json
-
-      - name: Deploy to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-        with:
-          task-definition: new-task-definition.json
-          service: otari-ai-service-development
-          cluster: otari-ai-cluster-development
-          wait-for-service-stability: true
