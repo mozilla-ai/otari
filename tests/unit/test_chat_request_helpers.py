@@ -1,6 +1,6 @@
-"""Unit tests for the tool-extraction helper in `gateway.api.routes.chat`.
+"""Unit tests for the tool-extraction helpers in `gateway.api.routes._tools`.
 
-The helper has to recognise both the gateway-native short form and the
+The helpers have to recognise both the gateway-native short form and the
 provider-native shapes (OpenAI `code_interpreter`, Anthropic versioned
 `code_execution_*`) so that pointing an OpenAI/Anthropic SDK at the gateway's
 `base_url` keeps working unchanged.
@@ -8,7 +8,7 @@ provider-native shapes (OpenAI `code_interpreter`, Anthropic versioned
 
 from __future__ import annotations
 
-from gateway.api.routes.chat import _extract_code_execution_tool, _extract_web_search_tool
+from gateway.api.routes._tools import _extract_code_execution_tool, _extract_web_search_tool
 
 
 def test_extracts_gateway_native_short_form() -> None:
