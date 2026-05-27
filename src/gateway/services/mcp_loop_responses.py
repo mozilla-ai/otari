@@ -238,19 +238,28 @@ async def responses_tool_loop_stream(
 
     Forwards every event downstream and tracks ``function_call`` output items
     by buffering ``response.function_call_arguments.delta`` chunks per
-    ``output_index`` until ``response.output_item.done`` for that item.
+    ``output_index``. ``response.function_call_arguments.done``, if present,
+    overrides the running buffer with the terminal argument string.
 
-    On ``response.completed``: if any buffered function_call items exist AND
-    all owned by the pool, execute them, append the originals plus the
-    ``function_call_output`` items to ``input_data``, drop the terminal
-    ``response.completed`` event, and start the next round. If any foreign
-    function_call is present (or none at all), forward ``response.completed``
-    and exit.
+    Loop continuation is decided on ``response.completed``: if any buffered
+    function_call items exist AND all are owned by the pool, execute them,
+    append the originals plus the ``function_call_output`` items to
+    ``input_data``, drop the terminal ``response.completed`` event, and start
+    the next round. If any foreign function_call is present (or none at all),
+    forward ``response.completed`` and exit.
 
     Mixed batches in streaming mode forward everything as-is (rewriting the
     output_items mid-stream to remove owned ones would be too invasive); the
     client sees what it sees and the loop exits. Same trade-off as the
     Anthropic streaming variant.
+
+    Cumulative usage across iterations: each iteration's
+    ``response.completed`` carries that iteration's usage on ``event.response.usage``.
+    When the loop continues, that event is dropped and its usage would be
+    lost from streaming token reporting. We accumulate the per-iteration
+    ``output_tokens`` and fold the running total into the final forwarded
+    ``response.completed`` so downstream usage logging sees the full
+    tool-loop output count.
     """
     input_items = _coerce_input_to_list(completion_kwargs.get("input_data"))
     user_tools = list(completion_kwargs.get("tools") or [])
@@ -258,6 +267,8 @@ async def responses_tool_loop_stream(
 
     base = {k: v for k, v in completion_kwargs.items() if k not in {"input_data", "tools"}}
     base["stream"] = True
+
+    acc_output_tokens = 0  # see usage-accumulation note in the docstring.
 
     for _ in range(max_iterations):
         kwargs: dict[str, Any] = {**base, "input_data": input_items}
@@ -313,7 +324,7 @@ async def responses_tool_loop_stream(
         # Decide whether to loop or exit.
         if not function_calls:
             if deferred_completed is not None:
-                yield deferred_completed
+                yield _maybe_fold_response_completed_usage(deferred_completed, acc_output_tokens)
             return
 
         owned_specs: list[dict[str, Any]] = []
@@ -328,10 +339,17 @@ async def responses_tool_loop_stream(
         if has_foreign or not owned_specs:
             # Caller dispatches the foreign calls; or there's nothing to do.
             if deferred_completed is not None:
-                yield deferred_completed
+                yield _maybe_fold_response_completed_usage(deferred_completed, acc_output_tokens)
             return
 
-        # All-owned: execute, append to input, continue. Drop the terminal.
+        # All-owned: accumulate this iteration's output_tokens from the
+        # dropped ``response.completed`` event (so the next final-fold sees
+        # the running total), then execute, append to input, and continue.
+        if deferred_completed is not None:
+            iter_response = getattr(deferred_completed, "response", None)
+            iter_usage = getattr(iter_response, "usage", None) if iter_response is not None else None
+            if iter_usage is not None:
+                acc_output_tokens += getattr(iter_usage, "output_tokens", 0) or 0
         for spec in owned_specs:
             input_items.append(
                 {
@@ -355,3 +373,27 @@ async def responses_tool_loop_stream(
             input_items.append({"type": "function_call_output", "call_id": spec["call_id"], "output": text})
 
     raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
+
+
+def _maybe_fold_response_completed_usage(event: Any, acc_output_tokens: int) -> Any:
+    """Return a ``response.completed`` event with cumulative output_tokens folded in.
+
+    Pass-through for any other event type or when ``acc_output_tokens`` is
+    zero. The Responses streaming usage report is read off
+    ``event.response.usage``; we ``model_copy`` the Response with an updated
+    Usage so consumers (``streaming_generator``) see the full tool-loop
+    output count instead of only the final iteration's.
+    """
+    if acc_output_tokens <= 0:
+        return event
+    if getattr(event, "type", None) != "response.completed":
+        return event
+    response_obj = getattr(event, "response", None)
+    usage = getattr(response_obj, "usage", None) if response_obj is not None else None
+    if usage is None or not hasattr(usage, "model_copy") or response_obj is None:
+        return event
+    new_output = (getattr(usage, "output_tokens", 0) or 0) + acc_output_tokens
+    new_total = (getattr(usage, "total_tokens", 0) or 0) + acc_output_tokens
+    new_usage = usage.model_copy(update={"output_tokens": new_output, "total_tokens": new_total})
+    new_response = response_obj.model_copy(update={"usage": new_usage})
+    return event.model_copy(update={"response": new_response})
