@@ -165,7 +165,7 @@ Provider API keys can be passed as environment variables instead of putting them
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `MISTRAL_API_KEY` | Mistral API key |
 | `GEMINI_API_KEY` | Google Gemini API key |
-| `OTARI_PORT` | Host port for the gateway (default: `8000`) |
+| `OTARI_PORT` | Gateway server bind port (default: `8000`) |
 | `OTARI_MASTER_KEY` | Master key for management endpoints |
 | `OTARI_AI_TOKEN` | otari.ai gateway token |
 

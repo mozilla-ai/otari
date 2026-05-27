@@ -76,7 +76,7 @@ pricing:
 
 ## Environment variables
 
-Environment variables with the `OTARI_` prefix override config file values. For example, `OTARI_PORT=9000` overrides `port: 8000` in the YAML.
+The following `OTARI_` variables override config file values for their matching fields. For example, `OTARI_PORT=9000` overrides `port: 8000` in the YAML.
 
 The config file also supports `${ENV_VAR}` interpolation:
 
