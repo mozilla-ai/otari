@@ -251,6 +251,12 @@ async def anthropic_tool_loop_stream(
     base = {k: v for k, v in completion_kwargs.items() if k not in {"messages", "tools"}}
     base["stream"] = True
 
+    # Accumulator for output_tokens from dropped intermediate ``message_delta``
+    # events. The final iteration's forwarded ``message_delta`` is modified to
+    # carry the cumulative total so streaming usage reporting downstream sees
+    # the full tool-loop output, not just the final round's tokens.
+    acc_output_tokens = 0
+
     for _ in range(max_iterations):
         kwargs: dict[str, Any] = {**base, "messages": messages}
         if merged_tools:
@@ -258,8 +264,16 @@ async def anthropic_tool_loop_stream(
 
         stream: AsyncIterator[MessageStreamEvent] = await amessages(**kwargs)  # type: ignore[assignment]
 
-        tool_use_blocks: dict[int, dict[str, Any]] = {}  # index -> {"id", "name", "json_buf"}
-        text_buffers: dict[int, list[str]] = {}  # index -> running text fragments
+        # All blocks (text, tool_use, thinking, redacted_thinking, …) tracked
+        # by their original ``content_block_start.index`` so the assistant
+        # message we feed back into the next round preserves the model's
+        # original ordering and doesn't silently drop non-text / non-tool_use
+        # block types.
+        blocks_by_index: dict[int, dict[str, Any]] = {}
+        # Per-tool_use JSON-arg buffer, keyed by index. Stored separately from
+        # ``blocks_by_index`` so we don't have to strip an internal field
+        # before serializing the assistant message.
+        tool_use_json_bufs: dict[int, str] = {}
         stop_reason: str | None = None
         deferred_terminal: list[MessageStreamEvent] = []
 
@@ -269,24 +283,32 @@ async def anthropic_tool_loop_stream(
             if event_type == "content_block_start":
                 block = event.content_block  # type: ignore[union-attr]
                 idx = event.index  # type: ignore[union-attr]
-                btype = getattr(block, "type", None)
-                if btype == "tool_use":
-                    tool_use_blocks[idx] = {
-                        "id": getattr(block, "id", ""),
-                        "name": getattr(block, "name", ""),
-                        "json_buf": "",
-                    }
-                elif btype == "text":
-                    text_buffers[idx] = [getattr(block, "text", "") or ""]
+                if hasattr(block, "model_dump"):
+                    blocks_by_index[idx] = block.model_dump(exclude_none=True)
+                else:
+                    blocks_by_index[idx] = dict(block) if isinstance(block, dict) else {}
+                if blocks_by_index[idx].get("type") == "tool_use":
+                    tool_use_json_bufs[idx] = ""
 
             elif event_type == "content_block_delta":
                 idx = event.index  # type: ignore[union-attr]
                 delta = event.delta  # type: ignore[union-attr]
                 dtype = getattr(delta, "type", None)
-                if dtype == "input_json_delta" and idx in tool_use_blocks:
-                    tool_use_blocks[idx]["json_buf"] += getattr(delta, "partial_json", "") or ""
-                elif dtype == "text_delta" and idx in text_buffers:
-                    text_buffers[idx].append(getattr(delta, "text", "") or "")
+                block_dict = blocks_by_index.get(idx)
+                if block_dict is None:
+                    pass  # delta for an unknown index — defensive no-op
+                elif dtype == "input_json_delta" and idx in tool_use_json_bufs:
+                    tool_use_json_bufs[idx] += getattr(delta, "partial_json", "") or ""
+                elif dtype == "text_delta":
+                    block_dict["text"] = (block_dict.get("text") or "") + (getattr(delta, "text", "") or "")
+                elif dtype == "thinking_delta":
+                    block_dict["thinking"] = (block_dict.get("thinking") or "") + (
+                        getattr(delta, "thinking", "") or ""
+                    )
+                elif dtype == "signature_delta":
+                    block_dict["signature"] = (block_dict.get("signature") or "") + (
+                        getattr(delta, "signature", "") or ""
+                    )
 
             elif event_type == "message_delta":
                 stop_reason = getattr(event.delta, "stop_reason", None) or stop_reason  # type: ignore[union-attr]
@@ -301,52 +323,56 @@ async def anthropic_tool_loop_stream(
             yield event
 
         # Decide whether to loop or exit.
-        if not tool_use_blocks or stop_reason != "tool_use":
-            for term in deferred_terminal:
-                yield term
-            return
-
-        # Build owned/foreign blocks for execution. We don't have the full
-        # pydantic ToolUseBlock; we only need .id / .name / .input.
         owned_specs: list[dict[str, Any]] = []
         has_foreign = False
-        for idx in sorted(tool_use_blocks):
-            spec = tool_use_blocks[idx]
-            name = spec["name"]
-            if pool.owns_tool(name):
-                owned_specs.append(spec)
+        for idx in sorted(blocks_by_index):
+            block_dict = blocks_by_index[idx]
+            if block_dict.get("type") != "tool_use":
+                continue
+            if pool.owns_tool(block_dict.get("name", "")):
+                owned_specs.append({"index": idx, **block_dict})
             else:
                 has_foreign = True
 
-        if has_foreign or not owned_specs:
-            # Caller dispatches the foreign blocks (or there's nothing to do
-            # internally). Forward terminal events and exit. Mixed (owned +
-            # foreign) is handled the same way as all-foreign in streaming
-            # mode — rewriting deltas mid-stream to remove the owned blocks
-            # would be too invasive; the client sees the full set.
+        # Loop exits when: no tool_use blocks, stop_reason isn't tool_use,
+        # the batch is mixed/foreign, or nothing owned. In all of those cases
+        # the deferred terminal events get forwarded (and the message_delta
+        # is rewritten to carry cumulative output_tokens from any prior
+        # dropped iterations).
+        exiting = not owned_specs or has_foreign or stop_reason != "tool_use"
+        if exiting:
             for term in deferred_terminal:
-                yield term
+                yield _maybe_fold_message_delta_usage(term, acc_output_tokens)
             return
 
-        # All-owned: execute and continue the loop. Drop the deferred terminal
-        # events so the client doesn't see a premature "message ended" signal.
-        assistant_content: list[dict[str, Any]] = []
-        for idx in sorted(text_buffers):
-            assistant_content.append({"type": "text", "text": "".join(text_buffers[idx])})
-        for spec in owned_specs:
-            try:
-                parsed_input = json.loads(spec["json_buf"] or "{}")
-            except json.JSONDecodeError:
-                parsed_input = {}
-            assistant_content.append(
-                {"type": "tool_use", "id": spec["id"], "name": spec["name"], "input": parsed_input}
-            )
+        # All-owned: continue the loop. Accumulate this iteration's
+        # output_tokens (from the dropped terminal) for the next final-fold.
+        for term in deferred_terminal:
+            if getattr(term, "type", None) == "message_delta":
+                usage = getattr(term, "usage", None)
+                if usage is not None:
+                    acc_output_tokens += getattr(usage, "output_tokens", 0) or 0
 
-        # Execute and build tool_result blocks for the next user message.
+        # Assistant message for the next round — preserve original block
+        # ordering. tool_use blocks pick up the parsed input from their
+        # JSON buffer.
+        assistant_content: list[dict[str, Any]] = []
+        for idx in sorted(blocks_by_index):
+            block_dict = blocks_by_index[idx]
+            if block_dict.get("type") == "tool_use":
+                try:
+                    parsed_input = json.loads(tool_use_json_bufs.get(idx, "") or "{}")
+                except json.JSONDecodeError:
+                    parsed_input = {}
+                block_dict = {**block_dict, "input": parsed_input}
+            assistant_content.append(block_dict)
+
+        # Execute owned tool_use blocks and build tool_result blocks for the
+        # next user message.
         tool_results: list[dict[str, Any]] = []
         for spec in owned_specs:
             try:
-                parsed_input = json.loads(spec["json_buf"] or "{}")
+                parsed_input = json.loads(tool_use_json_bufs.get(spec["index"], "") or "{}")
             except json.JSONDecodeError:
                 parsed_input = {}
             try:
@@ -360,3 +386,25 @@ async def anthropic_tool_loop_stream(
         messages.append({"role": "user", "content": tool_results})
 
     raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
+
+
+def _maybe_fold_message_delta_usage(event: Any, acc_output_tokens: int) -> Any:
+    """Return ``event`` with cumulative output_tokens folded in.
+
+    Pass-through for any event type other than ``message_delta``. For a
+    ``message_delta`` carrying a usage block, replaces ``output_tokens`` with
+    ``current + acc_output_tokens`` so the stream consumer sees the full
+    tool-loop output count instead of only the final iteration's. No-op when
+    ``acc_output_tokens`` is zero (single-iteration streams stay byte-exact).
+    """
+    if acc_output_tokens <= 0:
+        return event
+    if getattr(event, "type", None) != "message_delta":
+        return event
+    usage = getattr(event, "usage", None)
+    if usage is None or not hasattr(usage, "model_copy"):
+        return event
+    new_usage = usage.model_copy(
+        update={"output_tokens": (getattr(usage, "output_tokens", 0) or 0) + acc_output_tokens}
+    )
+    return event.model_copy(update={"usage": new_usage})

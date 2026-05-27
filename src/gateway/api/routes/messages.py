@@ -76,7 +76,7 @@ class MessagesRequest(BaseModel):
     # Gateway-internal: identical semantics to ChatCompletionRequest.
     mcp_servers: list[McpServerConfig] | None = None
     tools_header: str | None = None
-    max_tool_iterations: int | None = None
+    max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
 
 
 def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPException:
@@ -535,9 +535,19 @@ async def _open_tool_loop_stream(
     web_search_url: str | None,
     max_tool_iterations: int,
 ) -> AsyncIterator[MessageStreamEvent]:
-    """Open the right backend, eagerly enter it (so connection failures
-    surface as HTTP errors, not as in-band SSE errors after a 200 OK), and
-    return an async iterator that yields all events for the entire tool loop.
+    """Return an async iterator that yields events for the entire tool loop.
+
+    For the sandbox and web_search paths the backend is opened **eagerly**
+    (the ``await ... __aenter__()`` runs before the iterator is returned), so
+    a backend-unreachable error surfaces as an HTTP 502 rather than landing
+    in the SSE channel after the response has already committed to 200 OK.
+
+    The MCP path is different: ``MCPClientPool`` is entered lazily inside the
+    iterator's ``async with`` block. An ``MCPClientPool`` dial failure surfaces
+    once the client starts pulling events. A future improvement would
+    AsyncExitStack-share the pool across attempts and eager-open it for the
+    same UX as the other two backends; for now MCP keeps the simpler
+    enter-inside-generator pattern.
     """
     if mcp_server_configs:
         pool_cfgs = mcp_server_configs
