@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any
 
 from any_llm import acompletion
@@ -222,8 +222,17 @@ async def mcp_tool_loop(
     completion_kwargs: dict[str, Any],
     pool: MCPClientPool,
     max_iterations: int,
+    on_first_response: Callable[[], None] | None = None,
 ) -> ChatCompletion:
-    """Non-streaming variant. Accumulates usage across iterations into the returned completion."""
+    """Non-streaming variant. Accumulates usage across iterations into the returned completion.
+
+    ``on_first_response`` is invoked exactly once, right after the first
+    upstream ``acompletion`` call returns successfully. Callers use it to lock
+    in the chosen provider — once the model has produced *any* assistant
+    message, the conversation state is provider-specific and subsequent
+    failures must not silently swap providers. See the platform-mode attempt
+    loop in :mod:`gateway.api.routes.chat` for the consumer.
+    """
     messages = list(completion_kwargs.get("messages") or [])
     user_tools = list(completion_kwargs.get("tools") or [])
     merged_tools = user_tools + pool.openai_tools
@@ -232,6 +241,7 @@ async def mcp_tool_loop(
 
     acc_prompt = 0
     acc_completion = 0
+    first_response_signaled = False
 
     for _ in range(max_iterations):
         kwargs: dict[str, Any] = {**base, "messages": messages, "stream": False}
@@ -239,6 +249,10 @@ async def mcp_tool_loop(
             kwargs["tools"] = merged_tools
 
         completion: ChatCompletion = await acompletion(**kwargs)  # type: ignore[assignment]
+        if not first_response_signaled:
+            first_response_signaled = True
+            if on_first_response is not None:
+                on_first_response()
         if completion.usage:
             acc_prompt += completion.usage.prompt_tokens or 0
             acc_completion += completion.usage.completion_tokens or 0
