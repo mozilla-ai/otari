@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from gateway.api.routes import chat as chat_module
-from gateway.api.routes.chat import _resolve_platform_mcp_servers
+from gateway.api.routes import _platform as platform_module
+from gateway.api.routes._platform import _resolve_platform_mcp_servers
 from gateway.models.mcp import McpServerConfig
 
 
@@ -48,7 +48,7 @@ async def test_resolve_returns_configs(monkeypatch: pytest.MonkeyPatch) -> None:
             ]
         )
 
-    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
 
     ids = [uuid.UUID("11111111-1111-1111-1111-111111111111")]
     out = await _resolve_platform_mcp_servers(_config(), "tk_user", ids)
@@ -70,7 +70,7 @@ async def test_resolve_empty_servers_returns_empty(monkeypatch: pytest.MonkeyPat
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return _ok_response([])
 
-    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
     out = await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
     assert out == []
 
@@ -80,7 +80,7 @@ async def test_resolve_404_passes_through(monkeypatch: pytest.MonkeyPatch) -> No
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(404, json={"detail": "MCPServer not found"})
 
-    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
 
     from fastapi import HTTPException
 
@@ -95,7 +95,7 @@ async def test_resolve_5xx_maps_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(503, text="busy")
 
-    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
 
     from fastapi import HTTPException
 
@@ -109,7 +109,7 @@ async def test_resolve_network_error_maps_to_502(monkeypatch: pytest.MonkeyPatch
     async def fake_post(**kwargs: Any) -> httpx.Response:
         raise httpx.NetworkError("connection refused")
 
-    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
 
     from fastapi import HTTPException
 
@@ -135,7 +135,7 @@ async def test_resolve_429_passthrough_with_retry_after(monkeypatch: pytest.Monk
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(429, json={"detail": "slow down"}, headers={"Retry-After": "30"})
 
-    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
 
     from fastapi import HTTPException
 
@@ -154,7 +154,7 @@ async def test_resolve_402_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(402, json={"detail": "quota exhausted"})
 
-    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
 
     from fastapi import HTTPException
 
@@ -173,7 +173,7 @@ async def test_resolve_422_collapses_to_502(monkeypatch: pytest.MonkeyPatch) -> 
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(422, json={"detail": "schema mismatch"})
 
-    monkeypatch.setattr(chat_module, "_post_platform", fake_post)
+    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
 
     from fastapi import HTTPException
 

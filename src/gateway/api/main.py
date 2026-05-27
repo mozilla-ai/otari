@@ -25,13 +25,15 @@ from gateway.core.config import GatewayConfig
 def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(chat.router)
     app.include_router(health.router)
+    # /v1/messages and /v1/responses now support platform mode (multi-attempt
+    # fallback + usage reporting), so they're registered in both modes.
+    app.include_router(messages.router)
+    app.include_router(responses.router)
 
     if config.is_platform_mode:
         app.include_router(platform_mode.router)
         return  # Remaining routers (including batches) are standalone-mode only
 
-    app.include_router(messages.router)
-    app.include_router(responses.router)
     app.include_router(embeddings.router)
     app.include_router(images.router)
     app.include_router(audio.router)

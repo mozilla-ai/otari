@@ -1,28 +1,58 @@
 """Platform-mode shared infrastructure.
 
-Holds the resolved-route Pydantic types and the generic ``run_platform_attempts``
+Holds the resolved-route Pydantic types, the generic ``run_platform_attempts``
 runner that the chat / messages / responses endpoints all use for multi-attempt
-fallback on the non-streaming path. The runner is format-agnostic — callers
-pass a per-attempt dispatcher and a usage-extractor and the runner handles
-iteration, error classification, lock-in semantics, and the terminal
-all-failed status mapping uniformly.
+fallback on the non-streaming path, and the platform-side helpers (credential
+resolution, MCP server resolution, error classification, usage reporting).
+The runner is format-agnostic — callers pass a per-attempt dispatcher and a
+usage-extractor and the runner handles iteration, error classification,
+lock-in semantics, and the terminal all-failed status mapping uniformly.
 """
 
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, NamedTuple, TypeVar
 
 import httpx
 from any_llm import LLMProvider
-from fastapi import HTTPException, status
+from any_llm.types.completion import CompletionUsage
+from fastapi import HTTPException, Request, status
 from pydantic import BaseModel
 
+from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.models.mcp import McpServerConfig
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 
 T = TypeVar("T")
+
+# Status codes returned by the platform's usage-report endpoint that the
+# gateway should NOT retry. Auth / not-found / conflict / unprocessable are
+# all permanent rejection signals — retrying would just hammer the platform.
+_USAGE_NON_RETRYABLE_STATUS_CODES = {401, 404, 409, 422}
+
+# Status codes that cause the gateway to move on to the next attempt in a
+# multi-attempt route. 401/403 are included because users configure
+# multi-attempt routing policies on the platform precisely to handle
+# credential outages — when they've opted in, an auth failure on one provider
+# should fall through to the next, not surface to the client. Single-attempt
+# requests still see auth errors directly because there's nothing to fall
+# back to.
+_FALLBACK_RETRYABLE_STATUS_CODES = {401, 403, 408, 429, 500, 502, 503, 504}
+_FALLBACK_NON_RETRYABLE_STATUS_CODES = {400, 422}
+
+# Streaming first-chunk timeouts (platform-mode fallback). Plain LLM streams
+# rarely take long to produce a first token, so a tight cap keeps failed-
+# attempt latency low. Tool-loop streams may reason before emitting tokens
+# or a tool_call (especially with extended thinking), so they get more
+# headroom. Both are operator-tunable via ``config.platform``.
+_DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS = 2000
+_DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP = 30000
+_STREAM_FIRST_CHUNK_TIMEOUT_MS_KEY = "streaming_first_chunk_timeout_ms"
+_STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY = "streaming_first_chunk_timeout_ms_tool_loop"
 
 
 class ResolvedAttempt(BaseModel):
@@ -208,3 +238,330 @@ async def run_platform_attempts(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail=detail,
     ) from last_exc
+
+
+# ---------- platform-side helpers ----------
+
+
+def _extract_platform_user_token(request: Request) -> str:
+    """Pull the user's bearer token off the ``Authorization`` header.
+
+    Used in platform mode to forward the caller's identity to the platform's
+    resolve endpoint. Standalone mode uses ``verify_api_key_or_master_key``
+    instead.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+        )
+    token = auth_header[7:].strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token",
+        )
+    return token
+
+
+def _split_model_selector(model_selector: str) -> tuple[str | None, str]:
+    """Parse ``provider:model`` or ``provider/model`` into ``(provider, model)``.
+
+    Used when calling the platform's resolve endpoint with the model selector
+    from the request. Returns ``(None, model_selector)`` for bare model names.
+    """
+    if ":" in model_selector:
+        provider, model_name = model_selector.split(":", 1)
+        return provider or None, model_name
+    if "/" in model_selector:
+        provider, model_name = model_selector.split("/", 1)
+        return provider or None, model_name
+    return None, model_selector
+
+
+def _platform_url(base_url: str, path: str) -> str:
+    return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _safe_detail_from_platform(response: httpx.Response, fallback: str) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return fallback
+
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    return detail if isinstance(detail, str) else fallback
+
+
+async def _post_platform(
+    url: str,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    timeout_seconds: float,
+) -> httpx.Response:
+    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+        return await client.post(url, headers=headers, json=body)
+
+
+async def _resolve_platform_credentials(
+    config: GatewayConfig,
+    user_token: str,
+    model_selector: str,
+) -> ResolvedRoute:
+    """Call the platform's ``/gateway/provider-keys/resolve`` to get the
+    routing plan (one or more ``ResolvedAttempt`` entries).
+    """
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Platform mode is misconfigured",
+        )
+
+    provider, model_name = _split_model_selector(model_selector)
+    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
+    resolve_url = _platform_url(platform_base_url, "/gateway/provider-keys/resolve")
+    resolve_headers = {
+        "X-Gateway-Token": config.platform_token or "",
+        "X-User-Token": user_token,
+    }
+    resolve_body: dict[str, Any] = {"model": model_name}
+    if provider:
+        resolve_body["provider"] = provider
+
+    try:
+        response = await _post_platform(
+            url=resolve_url,
+            headers=resolve_headers,
+            body=resolve_body,
+            timeout_seconds=timeout_ms / 1000,
+        )
+    except (httpx.TimeoutException, httpx.NetworkError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        ) from None
+
+    if response.status_code == 200:
+        payload = response.json()
+        return _parse_resolve_payload(payload)
+
+    if response.status_code in {401, 402, 403, 404, 429}:
+        detail = _safe_detail_from_platform(response, "Authorization request rejected")
+        headers: dict[str, str] | None = None
+        if response.status_code == 429 and response.headers.get("Retry-After"):
+            headers = {"Retry-After": response.headers["Retry-After"]}
+        raise HTTPException(status_code=response.status_code, detail=detail, headers=headers)
+
+    if response.status_code == 422 or response.status_code >= 500:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Authorization service unavailable",
+    )
+
+
+def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
+    """Build a ResolvedRoute from either the new attempts-list shape or the
+    legacy single-attempt shape.
+
+    The legacy shape lacks ``attempts``/``request_id`` and instead has the
+    primary attempt's fields at the top level (``provider``, ``model``,
+    ``api_key``, ``api_base``, ``managed``, ``correlation_id``). Older otari
+    deployments still respond this way; we map them onto a single-attempt route
+    so the rest of the gateway code never has to know.
+    """
+    attempts_payload = payload.get("attempts")
+    if attempts_payload is not None:
+        attempts = [
+            ResolvedAttempt(
+                attempt_id=str(att["attempt_id"]),
+                position=int(att["position"]),
+                provider=str(att["provider"]),
+                model=str(att["model"]),
+                api_base=att.get("api_base"),
+                api_key=str(att["api_key"]),
+                managed=bool(att.get("managed", False)),
+            )
+            for att in attempts_payload
+        ]
+        return ResolvedRoute(
+            request_id=str(payload["request_id"]),
+            fallback_enabled=bool(payload.get("fallback_enabled", False)),
+            attempts=attempts,
+        )
+
+    correlation_id = str(payload["correlation_id"])
+    return ResolvedRoute(
+        request_id=correlation_id,
+        fallback_enabled=False,
+        attempts=[
+            ResolvedAttempt(
+                attempt_id=correlation_id,
+                position=0,
+                provider=str(payload["provider"]),
+                model=str(payload["model"]),
+                api_base=payload.get("api_base"),
+                api_key=str(payload["api_key"]),
+                managed=bool(payload.get("managed", False)),
+            )
+        ],
+    )
+
+
+def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
+    """Classify an upstream provider error.
+
+    Returns ``(retryable, error_class)``. ``error_class`` is a short string used
+    for logging and reporting back to the platform. Streaming-only failures still
+    pass through this classifier; the caller decides whether to actually retry.
+    """
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+        return True, "timeout"
+    if isinstance(exc, httpx.NetworkError):
+        return True, "conn_err"
+
+    status_code = getattr(exc, "status_code", None)
+    if status_code is None:
+        resp = getattr(exc, "response", None)
+        if resp is not None:
+            status_code = getattr(resp, "status_code", None)
+
+    if isinstance(status_code, int):
+        if status_code in _FALLBACK_NON_RETRYABLE_STATUS_CODES:
+            return False, f"http_{status_code}"
+        if status_code in _FALLBACK_RETRYABLE_STATUS_CODES or 500 <= status_code <= 599:
+            return True, f"http_{status_code}"
+        return False, f"http_{status_code}"
+
+    return False, "unknown"
+
+
+async def _resolve_platform_mcp_servers(
+    config: GatewayConfig,
+    user_token: str,
+    mcp_server_ids: list[uuid.UUID],
+) -> list[McpServerConfig]:
+    """Swap workspace-scoped MCP server ids for inline configs by calling the platform."""
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Platform mode is misconfigured",
+        )
+
+    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
+    resolve_url = _platform_url(platform_base_url, "/gateway/mcp-servers/resolve")
+    headers = {
+        "X-Gateway-Token": config.platform_token or "",
+        "X-User-Token": user_token,
+    }
+    body: dict[str, Any] = {"mcp_server_ids": [str(uid) for uid in mcp_server_ids]}
+
+    try:
+        response = await _post_platform(
+            url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000
+        )
+    except (httpx.TimeoutException, httpx.NetworkError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        ) from None
+
+    if response.status_code == 200:
+        payload = response.json()
+        return [
+            McpServerConfig(
+                name=s["name"],
+                url=s["url"],
+                authorization_token=s.get("authorization_token"),
+                purpose_hint=s.get("purpose_hint"),
+                allowed_tools=s.get("allowed_tools"),
+            )
+            for s in payload.get("servers", [])
+        ]
+
+    # Mirror the status-code semantics of `_resolve_platform_credentials`:
+    # client errors (auth/quota/not-found/rate-limit) are forwarded so the
+    # caller sees the real status (and can honour Retry-After on 429), while
+    # the platform's server-side or unexpected responses collapse to 502.
+    if response.status_code in {401, 402, 403, 404, 429}:
+        detail = _safe_detail_from_platform(response, "MCP server resolution failed")
+        response_headers: dict[str, str] | None = None
+        if response.status_code == 429 and response.headers.get("Retry-After"):
+            response_headers = {"Retry-After": response.headers["Retry-After"]}
+        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
+
+    if response.status_code == 422 or response.status_code >= 500:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Authorization service unavailable",
+    )
+
+
+async def _report_platform_usage(
+    config: GatewayConfig,
+    correlation_id: str,
+    outcome: str,
+    usage: CompletionUsage | None,
+    error_class: str | None = None,
+) -> None:
+    """POST a usage record back to the platform with bounded retries.
+
+    Best-effort — failures are swallowed after ``max_retries`` so they don't
+    impact the user's response path. Non-retryable status codes (auth /
+    not-found / conflict / unprocessable) short-circuit the retry loop.
+    """
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        return
+
+    timeout_ms = int(config.platform.get("usage_timeout_ms", 5000))
+    max_retries = int(config.platform.get("usage_max_retries", 3))
+    usage_url = _platform_url(platform_base_url, "/gateway/usage")
+    headers = {"X-Gateway-Token": config.platform_token or ""}
+
+    payload: dict[str, Any] = {"correlation_id": correlation_id, "status": outcome}
+    if outcome == "success":
+        token_usage = usage or CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+        payload["usage"] = {
+            "prompt_tokens": token_usage.prompt_tokens,
+            "completion_tokens": token_usage.completion_tokens,
+            "total_tokens": token_usage.total_tokens,
+        }
+    elif error_class is not None:
+        payload["error_class"] = error_class
+
+    delay_seconds = 0.25
+    for attempt in range(1, max_retries + 1):
+        should_retry = False
+        try:
+            response = await _post_platform(
+                url=usage_url,
+                headers=headers,
+                body=payload,
+                timeout_seconds=timeout_ms / 1000,
+            )
+            if response.status_code == 204:
+                return
+            if response.status_code in _USAGE_NON_RETRYABLE_STATUS_CODES:
+                return
+            should_retry = response.status_code >= 500
+        except (httpx.TimeoutException, httpx.NetworkError):
+            should_retry = True
+
+        if not should_retry or attempt == max_retries:
+            return
+
+        await asyncio.sleep(delay_seconds)
+        delay_seconds *= 2

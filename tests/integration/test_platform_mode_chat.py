@@ -56,7 +56,7 @@ def test_platform_mode_maps_resolve_unauthorized(
     ) -> httpx.Response:
         return httpx.Response(401, json={"detail": "Invalid user token"})
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
         "/v1/chat/completions",
@@ -121,7 +121,7 @@ def test_platform_mode_sets_correlation_id_and_reports_usage(
             usage=CompletionUsage(prompt_tokens=10, completion_tokens=7, total_tokens=17),
         )
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -194,7 +194,7 @@ def test_platform_mode_accepts_legacy_resolve_shape(
             usage=CompletionUsage(prompt_tokens=4, completion_tokens=2, total_tokens=6),
         )
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -246,7 +246,7 @@ def test_platform_mode_maps_provider_timeout(
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
         raise TimeoutError("provider timeout")
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -271,7 +271,7 @@ def test_platform_mode_propagates_resolve_rate_limit_retry_after(
     ) -> httpx.Response:
         return httpx.Response(429, json={"detail": "Rate limited"}, headers={"Retry-After": "11"})
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
         "/v1/chat/completions",
@@ -337,7 +337,7 @@ def test_platform_mode_usage_retries_only_transient_failures(
             usage=CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2),
         )
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -361,7 +361,7 @@ def test_platform_mode_maps_resolve_validation_error_to_bad_gateway(
     ) -> httpx.Response:
         return httpx.Response(422, json={"detail": "missing headers"})
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
     response = platform_client.post(
         "/v1/chat/completions",
@@ -469,7 +469,7 @@ def test_platform_mode_streaming_falls_through_on_first_attempt_failure(
 
         return _success_stream()
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -550,7 +550,7 @@ def test_platform_mode_streaming_returns_502_when_all_attempts_fail(
     async def fake_acompletion(**kwargs: Any) -> Any:
         raise RuntimeError("simulated upstream failure")
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
 
     response = platform_client.post(
@@ -685,7 +685,7 @@ def test_platform_mode_tool_loop_falls_through_pre_lock_in(
             usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
         )
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -761,7 +761,7 @@ def test_platform_mode_tool_loop_no_fallback_after_lock_in(
         # Round 2 (still on attempt 1 — lock-in is in effect) — upstream dies.
         raise RuntimeError("simulated upstream 5xx on round 2")
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 
@@ -833,7 +833,7 @@ def test_platform_mode_tool_loop_streaming_falls_through_pre_lock_in(
 
         return _stream()
 
-    monkeypatch.setattr("gateway.api.routes.chat._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
     monkeypatch.setattr("gateway.api.routes.chat.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
 

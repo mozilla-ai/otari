@@ -1,21 +1,35 @@
+import asyncio
 import os
-from collections.abc import AsyncIterator
+import time
+import uuid
+from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-from any_llm import AnyLLM, aresponses
+import httpx
+from any_llm import AnyLLM, LLMProvider, aresponses
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.responses import Response as ResponsesResponse
 from any_llm.types.responses import ResponseStreamEvent
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi import Response as FastAPIResponse
 from fastapi.responses import StreamingResponse
 from openai.types.responses import ResponseUsage
 from openresponses_types.types import Usage as OpenResponsesUsage
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._platform import (
+    ResolvedAttempt,
+    ResolvedRoute,
+    _classify_upstream_error,
+    _extract_platform_user_token,
+    _report_platform_usage,
+    _resolve_platform_credentials,
+    _resolve_platform_mcp_servers,
+    run_platform_attempts,
+)
 from gateway.api.routes._tools import (
     _build_web_search_backend,
     _extract_code_execution_tool,
@@ -28,7 +42,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey
 from gateway.models.mcp import McpServerConfig
-from gateway.rate_limit import check_rate_limit
+from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budget_service import validate_user_budget
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
@@ -42,7 +56,12 @@ from gateway.services.mcp_loop_responses import (
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
-from gateway.streaming import RESPONSES_STREAM_FORMAT, streaming_generator
+from gateway.streaming import (
+    RESPONSES_STREAM_FORMAT,
+    StreamingAttemptFailure,
+    iterate_streaming_attempts,
+    streaming_generator,
+)
 
 router = APIRouter(prefix="/v1", tags=["responses"])
 
@@ -54,10 +73,10 @@ _API_KEY_NO_USER = "API key has no associated user"
 class ResponsesRequest(BaseModel):
     """OpenAI Responses API-compatible request.
 
-    Gateway-internal fields (``mcp_servers``, ``tools_header``,
-    ``max_tool_iterations``) opt the request into gateway-managed MCP /
-    sandbox / web_search without changing the upstream wire shape. They're
-    stripped before the request is forwarded.
+    Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
+    ``tools_header``, ``max_tool_iterations``) opt the request into
+    gateway-managed MCP / sandbox / web_search without changing the upstream
+    wire shape. They're stripped before the request is forwarded.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -68,11 +87,11 @@ class ResponsesRequest(BaseModel):
     user: str | None = None
     tools: list[dict[str, Any]] | None = None
 
-    # Gateway-internal — same semantics as ChatCompletionRequest /
-    # MessagesRequest. Stripped from upstream call_kwargs at the boundary.
+    # Gateway-internal: identical semantics to ChatCompletionRequest.
     mcp_servers: list[McpServerConfig] | None = None
+    mcp_server_ids: list[uuid.UUID] | None = None
     tools_header: str | None = None
-    max_tool_iterations: int | None = None
+    max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
 
 
 def _usage_to_completion_usage(
@@ -91,55 +110,108 @@ def _usage_to_completion_usage(
 async def create_response(
     raw_request: Request,
     response: FastAPIResponse,
+    background_tasks: BackgroundTasks,
     request_body: ResponsesRequest,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
 ) -> dict[str, Any] | StreamingResponse:
     """OpenAI-compatible Responses endpoint.
 
-    Supports gateway-managed MCP tool-use loops, sandboxed code execution,
-    and SearXNG web_search on the standalone path. Platform-mode
-    multi-attempt fallback is handled in a follow-up PR.
+    Supports MCP tool-use loops, sandboxed code execution, and SearXNG
+    web_search in both standalone mode and platform mode. Platform-mode
+    requests resolve credentials via the platform service and (for
+    non-tool-loop requests) get multi-attempt fallback across the resolved
+    route. Tool-loop requests collapse to a single attempt — once
+    ``on_first_response`` lock-in plumbing lands across the codebase, a
+    follow-up will enable pre-lock-in fallback for tool-loop requests too.
     """
+    api_key: APIKey | None = None
+    api_key_id: str | None = None
+    user_id: str | None = None
+    rate_limit_info: RateLimitInfo | None = None
+    platform_mode = config.is_platform_mode
+    route: ResolvedRoute | None = None
+    user_token: str | None = None
 
-    api_key, is_master_key = auth_result
-    api_key_id = api_key.id if api_key else None
+    if platform_mode:
+        user_token = _extract_platform_user_token(raw_request)
+        start_time = time.perf_counter()
+        route = await _resolve_platform_credentials(
+            config=config,
+            user_token=user_token,
+            model_selector=request_body.model,
+        )
+        resolve_latency_ms = (time.perf_counter() - start_time) * 1000
+        response.headers["X-Otari-Request-ID"] = route.request_id
+        logger.info(
+            "Platform resolve succeeded request_id=%s attempts=%d fallback_enabled=%s resolve_latency_ms=%.2f",
+            route.request_id,
+            len(route.attempts),
+            route.fallback_enabled,
+            resolve_latency_ms,
+        )
+        # Provider-support guard: even in platform mode, an unsupported provider
+        # would just fail downstream — surface a clearer 400 upfront.
+        if route.attempts:
+            provider = LLMProvider(route.attempts[0].provider)
+            provider_class = AnyLLM.get_provider_class(provider)
+            if not getattr(provider_class, "SUPPORTS_RESPONSES", False):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Provider '{provider.value}' does not support the Responses API",
+                )
+    else:
+        if db is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database session unavailable",
+            )
+        api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
+        api_key_id = api_key.id if api_key else None
+        user_id = resolve_user_id(
+            user_id_from_request=request_body.user,
+            api_key=api_key,
+            is_master_key=is_master_key,
+            master_key_error=HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=_MASTER_KEY_USER_REQUIRED,
+            ),
+            no_api_key_error=HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=_API_KEY_VALIDATION_FAILED,
+            ),
+            no_user_error=HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=_API_KEY_NO_USER,
+            ),
+        )
+        rate_limit_info = check_rate_limit(raw_request, user_id)
+        _ = await validate_user_budget(db, user_id, request_body.model, strategy=config.budget_strategy)
+        if config.budget_strategy == "for_update":
+            await db.rollback()
+        provider, model = AnyLLM.split_model_provider(request_body.model)
+        provider_class = AnyLLM.get_provider_class(provider)
+        if not getattr(provider_class, "SUPPORTS_RESPONSES", False):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Provider '{provider.value}' does not support the Responses API",
+            )
 
-    user_id = resolve_user_id(
-        user_id_from_request=request_body.user,
-        api_key=api_key,
-        is_master_key=is_master_key,
-        master_key_error=HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=_MASTER_KEY_USER_REQUIRED,
-        ),
-        no_api_key_error=HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=_API_KEY_VALIDATION_FAILED,
-        ),
-        no_user_error=HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=_API_KEY_NO_USER,
-        ),
-    )
-
-    rate_limit_info = check_rate_limit(raw_request, user_id)
-
-    _ = await validate_user_budget(db, user_id, request_body.model, strategy=config.budget_strategy)
-    if config.budget_strategy == "for_update":
-        await db.rollback()
-
-    provider, model = AnyLLM.split_model_provider(request_body.model)
-    provider_class = AnyLLM.get_provider_class(provider)
-    if not getattr(provider_class, "SUPPORTS_RESPONSES", False):
+    # mcp_server_ids is platform-only.
+    if request_body.mcp_server_ids and not platform_mode:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Provider '{provider.value}' does not support the Responses API",
+            detail="mcp_server_ids is only available in platform mode",
         )
-
-    provider_kwargs = get_provider_kwargs(config, provider)
+    if platform_mode and request_body.mcp_server_ids:
+        assert user_token is not None
+        resolved_mcp_servers = await _resolve_platform_mcp_servers(
+            config=config,
+            user_token=user_token,
+            mcp_server_ids=request_body.mcp_server_ids,
+        )
+        request_body.mcp_servers = (request_body.mcp_servers or []) + resolved_mcp_servers
 
     # Tool extraction mirrors chat.py / messages.py.
     sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(request_body.tools)
@@ -191,15 +263,15 @@ async def create_response(
         request_body.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
         MAX_TOOL_ITERATIONS_CAP,
     )
+    use_tool_loop = bool(mcp_server_configs) or use_sandbox or use_web_search
 
+    # Strip gateway-internal fields, flatten any caller-supplied function tools
+    # to the Responses shape.
     request_fields = _strip_gateway_fields(
         request_body.model_dump(exclude_none=True),
         tools_extracted=sandbox_tool_entry is not None or web_search_tool_entry is not None,
         remaining_user_tools=remaining_user_tools,
     )
-    # Caller-supplied function tools are still in OpenAI Chat-Completions
-    # nested shape; convert to Responses flat shape so the upstream call
-    # accepts them.
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_responses_tools(request_fields["tools"])
 
@@ -207,17 +279,85 @@ async def create_response(
     stream = bool(request_fields.pop("stream", False))
     request_fields.pop("model", None)
     request_fields.pop("user", None)
-    request_fields["user"] = user_id
+    # Standalone mode forwards the resolved user_id to the upstream provider
+    # for analytics; platform mode handles attribution server-side via the
+    # correlation id.
+    if not platform_mode and user_id:
+        request_fields["user"] = user_id
 
-    call_kwargs: dict[str, Any] = {**provider_kwargs}
-    call_kwargs.update(request_fields)
-    call_kwargs["model"] = model
-    call_kwargs["provider"] = provider
-    call_kwargs["input_data"] = input_payload
+    # base_request_fields is what gets merged with per-attempt creds; it
+    # includes ``provider`` and ``input_data`` so each attempt has the full
+    # call shape.
+    base_request_fields = {**request_fields}
+    if not platform_mode:
+        base_request_fields["provider"] = provider
+    base_request_fields["input_data"] = input_payload
 
-    use_tool_loop = bool(mcp_server_configs) or use_sandbox or use_web_search
-
+    # ------------------------------------------------------------------
+    # Streaming path
+    # ------------------------------------------------------------------
     if stream:
+        if platform_mode and not use_tool_loop:
+            assert route is not None
+            if not route.attempts:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Authorization service returned no resolvable provider",
+                )
+            try:
+                return await _run_streaming_with_fallback_responses(
+                    route=route,
+                    base_request_fields=base_request_fields,
+                    response=response,
+                    config=config,
+                    background_tasks=background_tasks,
+                    rate_limit_info=rate_limit_info,
+                )
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
+                if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+                    raise HTTPException(
+                        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                        detail=(
+                            "LLM provider timeout" if len(route.attempts) <= 1 else "All upstream providers timed out"
+                        ),
+                    ) from exc
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=(
+                        "LLM provider error" if len(route.attempts) <= 1 else "All upstream providers failed"
+                    ),
+                ) from exc
+
+        # Single-attempt streaming (standalone, or platform + tool-loop).
+        if platform_mode:
+            assert route is not None
+            if not route.attempts:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Authorization service returned no resolvable provider",
+                )
+            attempt = route.attempts[0]
+            attempt_provider = LLMProvider(attempt.provider)
+            model = attempt.model
+            provider = attempt_provider
+            call_kwargs: dict[str, Any] = {"api_key": attempt.api_key}
+            if attempt.api_base:
+                call_kwargs["api_base"] = attempt.api_base
+            call_kwargs.update(request_fields)
+            call_kwargs["model"] = model
+            call_kwargs["provider"] = provider
+            call_kwargs["input_data"] = input_payload
+        else:
+            provider_kwargs = get_provider_kwargs(config, provider)
+            call_kwargs = {**provider_kwargs}
+            call_kwargs.update(request_fields)
+            call_kwargs["model"] = model
+            call_kwargs["provider"] = provider
+            call_kwargs["input_data"] = input_payload
+
         return await _stream_responses(
             call_kwargs=call_kwargs,
             tools_header=request_body.tools_header,
@@ -239,6 +379,61 @@ async def create_response(
             max_tool_iterations=max_tool_iterations,
         )
 
+    # ------------------------------------------------------------------
+    # Non-streaming path
+    # ------------------------------------------------------------------
+    if platform_mode:
+        assert route is not None
+        platform_route = route
+        attempts_to_try = platform_route.attempts
+        if not attempts_to_try:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Authorization service returned no resolvable provider",
+            )
+        try:
+            return await _run_platform_non_stream_responses(
+                route=platform_route,
+                attempts=attempts_to_try,
+                base_request_fields=base_request_fields,
+                tools_header=request_body.tools_header,
+                response=response,
+                background_tasks=background_tasks,
+                config=config,
+                rate_limit_info=rate_limit_info,
+                use_tool_loop=use_tool_loop,
+                mcp_server_configs=mcp_server_configs,
+                use_sandbox=use_sandbox,
+                sandbox_tool_entry=sandbox_tool_entry,
+                sandbox_url=sandbox_url,
+                use_web_search=use_web_search,
+                web_search_tool_entry=web_search_tool_entry,
+                web_search_url=web_search_url,
+                max_tool_iterations=max_tool_iterations,
+            )
+        except HTTPException:
+            raise
+        except SandboxNotReachableError as e:
+            logger.error("Sandbox unreachable: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
+            ) from e
+        except WebSearchNotReachableError as e:
+            logger.error("Web search backend unreachable: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
+            ) from e
+
+    # Standalone non-stream path
+    provider_kwargs = get_provider_kwargs(config, provider)
+    call_kwargs = {**provider_kwargs}
+    call_kwargs.update(request_fields)
+    call_kwargs["model"] = model
+    call_kwargs["provider"] = provider
+    call_kwargs["input_data"] = input_payload
+
     try:
         result = await _run_responses_non_stream(
             call_kwargs=call_kwargs,
@@ -254,32 +449,32 @@ async def create_response(
             max_tool_iterations=max_tool_iterations,
         )
         usage_data = _usage_to_completion_usage(getattr(result, "usage", None))
-        await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/responses",
-            user_id=user_id,
-            usage_override=usage_data,
-        )
+        if db is not None:
+            await log_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=model,
+                provider=provider,
+                endpoint="/v1/responses",
+                user_id=user_id,
+                usage_override=usage_data,
+            )
 
     except HTTPException:
         raise
     except MaxToolIterationsExceeded as e:
-        # Gateway-side cap hit, not an upstream failure. 422 lets callers
-        # distinguish a runaway tool loop from a provider outage.
-        await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/responses",
-            user_id=user_id,
-            error=str(e),
-        )
+        if db is not None:
+            await log_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=model,
+                provider=provider,
+                endpoint="/v1/responses",
+                user_id=user_id,
+                error=str(e),
+            )
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
@@ -297,16 +492,17 @@ async def create_response(
             detail="web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
         ) from e
     except Exception as e:
-        await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/responses",
-            user_id=user_id,
-            error=str(e),
-        )
+        if db is not None:
+            await log_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=model,
+                provider=provider,
+                endpoint="/v1/responses",
+                user_id=user_id,
+                error=str(e),
+            )
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -317,6 +513,128 @@ async def create_response(
         for key, value in rate_limit_headers(rate_limit_info).items():
             response.headers[key] = value
 
+    return result.model_dump(exclude_none=True)
+
+
+async def _run_platform_non_stream_responses(
+    *,
+    route: ResolvedRoute,
+    attempts: list[ResolvedAttempt],
+    base_request_fields: dict[str, Any],
+    tools_header: str | None,
+    response: FastAPIResponse,
+    background_tasks: BackgroundTasks,
+    config: GatewayConfig,
+    rate_limit_info: RateLimitInfo | None,
+    use_tool_loop: bool,
+    mcp_server_configs: list[McpServerConfig] | None,
+    use_sandbox: bool,
+    sandbox_tool_entry: dict[str, Any] | None,
+    sandbox_url: str | None,
+    use_web_search: bool,
+    web_search_tool_entry: dict[str, Any] | None,
+    web_search_url: str | None,
+    max_tool_iterations: int,
+) -> dict[str, Any]:
+    """Drive the multi-attempt platform-mode non-streaming Responses path via
+    the shared ``run_platform_attempts`` runner.
+    """
+
+    async def _run_attempt(
+        completion_kwargs: dict[str, Any],
+        on_first_response: Callable[[], None],
+    ) -> ResponsesResponse:
+        # run_platform_attempts hands us ``"model"`` as ``"provider:model"``;
+        # split it back out for the aresponses signature.
+        merged_model = completion_kwargs.pop("model")
+        provider_str, model_str = merged_model.split(":", 1)
+        completion_kwargs["model"] = model_str
+        completion_kwargs["provider"] = LLMProvider(provider_str)
+
+        if not use_tool_loop:
+            return await aresponses(**completion_kwargs)  # type: ignore[return-value]
+        if mcp_server_configs:
+            async with MCPClientPool(mcp_server_configs) as pool:
+                kwargs = inject_purpose_hints_responses(
+                    {**completion_kwargs},
+                    pool.purpose_hints(),
+                    header=tools_header,
+                )
+                return await responses_tool_loop(
+                    completion_kwargs=kwargs,
+                    pool=pool,
+                    max_iterations=max_tool_iterations,
+                    on_first_response=on_first_response,
+                )
+        if use_sandbox:
+            assert sandbox_url is not None
+            sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
+            async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
+                kwargs = inject_purpose_hints_responses(
+                    {**completion_kwargs},
+                    backend.purpose_hints(),
+                    header=tools_header,
+                )
+                return await responses_tool_loop(
+                    completion_kwargs=kwargs,
+                    pool=backend,  # type: ignore[arg-type]
+                    max_iterations=max_tool_iterations,
+                    on_first_response=on_first_response,
+                )
+        assert use_web_search
+        assert web_search_url is not None
+        assert web_search_tool_entry is not None
+        async with _build_web_search_backend(
+            base_url=web_search_url,
+            tool_entry=web_search_tool_entry,
+        ) as web_backend:
+            kwargs = inject_purpose_hints_responses(
+                {**completion_kwargs},
+                web_backend.purpose_hints(),
+                header=tools_header,
+            )
+            return await responses_tool_loop(
+                completion_kwargs=kwargs,
+                pool=web_backend,  # type: ignore[arg-type]
+                max_iterations=max_tool_iterations,
+                on_first_response=on_first_response,
+            )
+
+    def _extract_usage(result: ResponsesResponse) -> CompletionUsage | None:
+        return _usage_to_completion_usage(getattr(result, "usage", None))
+
+    def _report_attempt_outcome(
+        attempt: ResolvedAttempt,
+        outcome: str,
+        usage: Any,
+        error_class: str | None,
+    ) -> None:
+        background_tasks.add_task(
+            _report_platform_usage,
+            config,
+            attempt.attempt_id,
+            outcome,
+            usage,
+            error_class,
+        )
+
+    def _on_attempt_success(attempt: ResolvedAttempt) -> None:
+        response.headers["X-Correlation-ID"] = attempt.attempt_id
+        if rate_limit_info:
+            for key, value in rate_limit_headers(rate_limit_info).items():
+                response.headers[key] = value
+
+    result = await run_platform_attempts(
+        route=route,
+        attempts=attempts,
+        base_request_fields=base_request_fields,
+        run_attempt=_run_attempt,
+        extract_usage=_extract_usage,
+        classify_error=_classify_upstream_error,
+        report_attempt_outcome=_report_attempt_outcome,
+        on_success=_on_attempt_success,
+        max_tool_iterations=max_tool_iterations,
+    )
     return result.model_dump(exclude_none=True)
 
 
@@ -334,11 +652,11 @@ async def _run_responses_non_stream(
     web_search_url: str | None,
     max_tool_iterations: int,
 ) -> ResponsesResponse:
-    """Dispatch the non-streaming Responses call.
+    """Standalone-mode non-streaming dispatch.
 
     Plain ``aresponses`` when no gateway tools are in play. Otherwise the
-    appropriate backend is opened and ``responses_tool_loop`` drives the tool
-    round-trips.
+    appropriate backend is opened and ``responses_tool_loop`` drives the
+    tool round-trips.
     """
     if not use_tool_loop:
         return await aresponses(**call_kwargs)  # type: ignore[return-value]
@@ -394,10 +712,10 @@ async def _stream_responses(
     *,
     call_kwargs: dict[str, Any],
     tools_header: str | None,
-    db: AsyncSession,
+    db: AsyncSession | None,
     log_writer: LogWriter,
     api_key_id: str | None,
-    user_id: str,
+    user_id: str | None,
     provider: Any,
     model: str,
     rate_limit_info: Any,
@@ -411,12 +729,11 @@ async def _stream_responses(
     web_search_url: str | None,
     max_tool_iterations: int,
 ) -> StreamingResponse:
-    """Streaming Responses dispatch.
+    """Streaming dispatch for single-attempt requests.
 
-    Plain ``aresponses(stream=True)`` when no gateway tools are in play.
-    Otherwise the backend is opened eagerly so a backend-unreachable failure
-    surfaces as an HTTP error rather than a 200 + in-band SSE error. Same
-    rationale as the chat.py / messages.py streaming paths.
+    Used for standalone mode and the tool-loop path in platform mode (where
+    [:1] collapses fallback). Multi-attempt platform-mode streaming for
+    non-tool-loop requests uses ``_run_streaming_with_fallback_responses``.
     """
     call_kwargs["stream"] = True
 
@@ -430,6 +747,8 @@ async def _stream_responses(
         return None
 
     async def _on_complete(usage_data: CompletionUsage) -> None:
+        if db is None:
+            return
         await log_usage(
             db=db,
             log_writer=log_writer,
@@ -442,6 +761,8 @@ async def _stream_responses(
         )
 
     async def _on_error(error: str) -> None:
+        if db is None:
+            return
         await log_usage(
             db=db,
             log_writer=log_writer,
@@ -471,9 +792,6 @@ async def _stream_responses(
                 max_tool_iterations=max_tool_iterations,
             )
     except SandboxNotReachableError as exc:
-        # Surfaced here (rather than from the in-band SSE channel) because the
-        # backend is opened eagerly — see ``_open_tool_loop_stream``'s
-        # docstring. Mirrors the non-streaming error mapping.
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -502,6 +820,142 @@ async def _stream_responses(
     )
 
 
+async def _run_streaming_with_fallback_responses(
+    *,
+    route: ResolvedRoute,
+    base_request_fields: dict[str, Any],
+    response: FastAPIResponse,
+    config: GatewayConfig,
+    background_tasks: BackgroundTasks,
+    rate_limit_info: RateLimitInfo | None,
+) -> StreamingResponse:
+    """Multi-attempt streaming for platform-mode non-tool-loop requests.
+
+    Mirrors the chat / messages equivalents: iterates ``route.attempts`` and
+    falls through on any attempt that fails before its first chunk arrives.
+    """
+    first_chunk_timeout_seconds = int(config.platform.get("streaming_first_chunk_timeout_ms", 2000)) / 1000
+
+    async def _build_for_attempt(
+        attempt: ResolvedAttempt,
+    ) -> AsyncIterator[ResponseStreamEvent]:
+        attempt_provider = LLMProvider(attempt.provider)
+        provider_kwargs: dict[str, Any] = {"api_key": attempt.api_key}
+        if attempt.api_base:
+            provider_kwargs["api_base"] = attempt.api_base
+        # base_request_fields carries input_data + provider stripped from the
+        # request; per-attempt we replace provider and model.
+        completion_kwargs = {
+            **provider_kwargs,
+            **{k: v for k, v in base_request_fields.items() if k != "provider"},
+            "model": attempt.model,
+            "provider": attempt_provider,
+            "stream": True,
+        }
+        return await aresponses(**completion_kwargs)  # type: ignore[return-value]
+
+    async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
+        background_tasks.add_task(
+            _report_platform_usage,
+            config,
+            attempt.attempt_id,
+            "error",
+            None,
+            failure.error_class,
+        )
+        logger.warning(
+            "Streaming attempt failed request_id=%s position=%d provider=%s model=%s error=%s",
+            route.request_id,
+            attempt.position,
+            attempt.provider,
+            attempt.model,
+            failure.error_class,
+        )
+
+    chosen, stream = await iterate_streaming_attempts(
+        attempts=route.attempts,
+        build_stream=_build_for_attempt,
+        classify_error=_classify_upstream_error,
+        on_attempt_failed=_on_attempt_failed,
+        first_chunk_timeout_seconds=first_chunk_timeout_seconds,
+    )
+
+    return _build_streaming_response_responses(
+        stream=stream,
+        provider=LLMProvider(chosen.provider),
+        model=chosen.model,
+        correlation_id=chosen.attempt_id,
+        request_id=route.request_id,
+        config=config,
+        rate_limit_info=rate_limit_info,
+    )
+
+
+def _build_streaming_response_responses(
+    *,
+    stream: AsyncIterator[ResponseStreamEvent],
+    provider: LLMProvider,
+    model: str,
+    correlation_id: str,
+    request_id: str,
+    config: GatewayConfig,
+    rate_limit_info: RateLimitInfo | None,
+) -> StreamingResponse:
+    """Wrap an already-opened Responses stream in an SSE response for
+    platform-mode requests. Sets correlation / request-id headers and reports
+    usage to the platform on complete.
+    """
+
+    def _format_chunk(event: ResponseStreamEvent) -> str:
+        return f"event: {event.type}\ndata: {event.model_dump_json(exclude_none=True)}\n\n"
+
+    def _extract_usage(event: ResponseStreamEvent) -> CompletionUsage | None:
+        response_obj = getattr(event, "response", None)
+        if response_obj and getattr(response_obj, "usage", None):
+            return _usage_to_completion_usage(response_obj.usage)
+        return None
+
+    async def _on_complete(usage_data: CompletionUsage) -> None:
+        asyncio.create_task(
+            _report_platform_usage(
+                config=config,
+                correlation_id=correlation_id,
+                outcome="success",
+                usage=usage_data,
+            )
+        )
+
+    async def _on_error(error: str) -> None:
+        asyncio.create_task(
+            _report_platform_usage(
+                config=config,
+                correlation_id=correlation_id,
+                outcome="error",
+                usage=None,
+            )
+        )
+
+    headers: dict[str, str] = {}
+    if rate_limit_info:
+        headers.update(rate_limit_headers(rate_limit_info))
+    headers["X-Correlation-ID"] = correlation_id
+    headers["X-Otari-Request-ID"] = request_id
+
+    return StreamingResponse(
+        streaming_generator(
+            stream=stream,
+            format_chunk=_format_chunk,
+            extract_usage=_extract_usage,
+            fmt=RESPONSES_STREAM_FORMAT,
+            on_complete=_on_complete,
+            on_error=_on_error,
+            label=f"{provider}:{model}",
+        ),
+        media_type="text/event-stream",
+        headers=headers,
+    )
+
+
 async def _open_tool_loop_stream(
     *,
     call_kwargs: dict[str, Any],
@@ -515,8 +969,15 @@ async def _open_tool_loop_stream(
     web_search_url: str | None,
     max_tool_iterations: int,
 ) -> AsyncIterator[ResponseStreamEvent]:
-    """Open the right backend, eagerly enter it, and return an iterator that
-    yields all events for the entire tool loop.
+    """Return an async iterator that yields events for the entire tool loop.
+
+    For the sandbox and web_search paths the backend is opened **eagerly**
+    (the ``await ... __aenter__()`` runs before the iterator is returned), so
+    a backend-unreachable error surfaces as an HTTP 502 rather than landing
+    in the SSE channel after the response has already committed to 200 OK.
+
+    The MCP path is different: ``MCPClientPool`` is entered lazily inside the
+    iterator's ``async with`` block — same trade-off as messages.py.
     """
     if mcp_server_configs:
         pool_cfgs = mcp_server_configs
@@ -541,7 +1002,7 @@ async def _open_tool_loop_stream(
         assert sandbox_url is not None
         sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
         sandbox_backend = SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint)
-        await sandbox_backend.__aenter__()  # eager-open
+        await sandbox_backend.__aenter__()
 
         async def _sandbox_iter() -> AsyncIterator[ResponseStreamEvent]:
             try:
@@ -568,7 +1029,7 @@ async def _open_tool_loop_stream(
         base_url=web_search_url,
         tool_entry=web_search_tool_entry,
     )
-    await web_search_backend.__aenter__()  # eager-open
+    await web_search_backend.__aenter__()
 
     async def _web_search_iter() -> AsyncIterator[ResponseStreamEvent]:
         try:
