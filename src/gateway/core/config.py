@@ -121,6 +121,15 @@ class GatewayConfig(BaseSettings):
         default="for_update",
         description="Budget validation strategy: 'for_update' (default), 'cas' (lock-free), or 'disabled'.",
     )
+    model_discovery: bool = Field(
+        default=True,
+        description="Enable auto-discovery of models from configured providers via GET /v1/models",
+    )
+    model_cache_ttl_seconds: int = Field(
+        default=300,
+        ge=0,
+        description="TTL in seconds for the in-memory model discovery cache (0 disables caching)",
+    )
     mode: str = Field(default="standalone", description="Gateway operating mode: standalone or platform")
     platform: dict[str, Any] = Field(default_factory=dict, description="Platform integration settings")
 

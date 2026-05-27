@@ -1151,6 +1151,16 @@
           "owned_by": {
             "title": "Owned By",
             "type": "string"
+          },
+          "pricing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelPricingInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1159,6 +1169,25 @@
           "owned_by"
         ],
         "title": "ModelObject",
+        "type": "object"
+      },
+      "ModelPricingInfo": {
+        "description": "Pricing information for a model.",
+        "properties": {
+          "input_price_per_million": {
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "output_price_per_million": {
+            "title": "Output Price Per Million",
+            "type": "number"
+          }
+        },
+        "required": [
+          "input_price_per_million",
+          "output_price_per_million"
+        ],
+        "title": "ModelPricingInfo",
         "type": "object"
       },
       "ModerationRequest": {
@@ -3087,8 +3116,28 @@
     },
     "/v1/models": {
       "get": {
-        "description": "List all available models.\n\nReturns models derived from the model_pricing table in an\nOpenAI-compatible format.",
+        "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available. Models that only\nexist in the pricing table are also included for backward compatibility.",
         "operationId": "list_models_v1_models_get",
+        "parameters": [
+          {
+            "description": "Filter models by provider name",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter models by provider name",
+              "title": "Provider"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -3099,6 +3148,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Models",
