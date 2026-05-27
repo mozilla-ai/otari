@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.models.entities import UsageLog, User
+from gateway.models.entities import Project, UsageLog, User
 
 USAGE_PATH = "/v1/usage"
 
@@ -19,12 +20,20 @@ def _ensure_user(db: Session, user_id: str) -> None:
         db.flush()
 
 
+def _ensure_project(db: Session, project_id: str) -> None:
+    if db.query(Project).filter(Project.project_id == project_id).first() is None:
+        db.add(Project(project_id=project_id, name=project_id, is_active=True))
+        db.flush()
+
+
 def _make_log(
     db: Session,
     *,
     user_id: str,
     timestamp: datetime,
     api_key_id: str | None = None,
+    project_id: str | None = None,
+    tags: dict[str, Any] | None = None,
     model: str = "gpt-4",
     provider: str | None = "openai",
     endpoint: str = "/v1/chat/completions",
@@ -37,10 +46,13 @@ def _make_log(
     log_id: str | None = None,
 ) -> UsageLog:
     _ensure_user(db, user_id)
+    if project_id is not None:
+        _ensure_project(db, project_id)
     log = UsageLog(
         id=log_id or str(uuid.uuid4()),
         user_id=user_id,
         api_key_id=api_key_id,
+        project_id=project_id,
         timestamp=timestamp,
         model=model,
         provider=provider,
@@ -51,6 +63,7 @@ def _make_log(
         cost=cost,
         status=status,
         error_message=error_message,
+        tags=tags or {},
     )
     db.add(log)
     return log
@@ -181,6 +194,61 @@ def test_list_usage_filter_by_user_id(
     assert data[0]["user_id"] == "filter-b"
 
 
+def test_list_usage_filter_by_project_id(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    timestamp = datetime(2025, 5, 2, 15, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="project-user-a", project_id="project-a", timestamp=timestamp)
+    _make_log(db_session, user_id="project-user-b", project_id="project-b", timestamp=timestamp)
+    db_session.commit()
+
+    response = client.get(
+        USAGE_PATH,
+        headers=master_key_header,
+        params={"project_id": "project-b"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["project_id"] == "project-b"
+
+
+def test_list_usage_filter_by_tag(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    timestamp = datetime(2025, 5, 3, 15, 0, tzinfo=UTC)
+    _make_log(
+        db_session,
+        user_id="tag-user-a",
+        timestamp=timestamp,
+        tags={"surface": "responses", "tier": "prod"},
+    )
+    _make_log(db_session, user_id="tag-user-b", timestamp=timestamp, tags={"surface": "chat"})
+    _make_log(db_session, user_id="tag-user-c", timestamp=timestamp, tags={})
+    db_session.commit()
+
+    response = client.get(
+        USAGE_PATH,
+        headers=master_key_header,
+        params={"tag_key": "surface", "tag_value": "responses"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["user_id"] == "tag-user-a"
+    assert data[0]["tags"] == {"surface": "responses", "tier": "prod"}
+
+    key_only_response = client.get(USAGE_PATH, headers=master_key_header, params={"tag_key": "surface"})
+    assert key_only_response.status_code == 200
+    assert {entry["user_id"] for entry in key_only_response.json()} == {"tag-user-a", "tag-user-b"}
+
+
 def test_list_usage_pagination(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -216,6 +284,8 @@ def test_list_usage_response_shape(
         user_id="shape-user",
         timestamp=timestamp,
         api_key_id=None,
+        project_id="shape-project",
+        tags={"purpose": "shape"},
         model="gpt-4o",
         provider="openai",
         endpoint="/custom",
@@ -237,6 +307,7 @@ def test_list_usage_response_shape(
         "id": log.id,
         "user_id": "shape-user",
         "api_key_id": None,
+        "project_id": "shape-project",
         "timestamp": timestamp.isoformat(),
         "model": "gpt-4o",
         "provider": "openai",
@@ -247,6 +318,7 @@ def test_list_usage_response_shape(
         "cost": 1.23,
         "status": "error",
         "error_message": "capacity",
+        "tags": {"purpose": "shape"},
     }
 
 

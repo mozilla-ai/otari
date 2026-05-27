@@ -2,7 +2,7 @@ import asyncio
 import os
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from typing import Annotated, Any, NamedTuple
@@ -16,7 +16,7 @@ from any_llm.types.completion import (
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key
@@ -27,7 +27,7 @@ from gateway.metrics import record_cost, record_tokens
 from gateway.models.entities import APIKey, UsageLog
 from gateway.models.mcp import McpServerConfig
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
-from gateway.services.budget_service import validate_user_budget
+from gateway.services.budget_service import validate_project_budget, validate_tag_budgets, validate_user_budget
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -40,6 +40,18 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
+from gateway.services.routing_policy_service import (
+    DEFAULT_ROUTE_TRACE_ENDPOINT,
+    DEFAULT_ROUTING_MODEL,
+    RoutingCandidate,
+    RoutingPlan,
+    RoutingPolicyError,
+    apply_context_policy,
+    apply_guardrail_redactions,
+    normalize_routing_model_selector,
+    record_route_trace,
+    resolve_routing_plan,
+)
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchBackend, WebSearchNotReachableError
 from gateway.streaming import (
@@ -119,6 +131,8 @@ _GATEWAY_INTERNAL_FIELDS = (
     "tools_header",
     "max_tool_iterations",
     "user",
+    "project_id",
+    "tags",
 )
 
 
@@ -274,8 +288,19 @@ def _build_web_search_backend(*, base_url: str, tool_entry: dict[str, Any]) -> W
 class ChatCompletionRequest(BaseModel):
     """OpenAI-compatible chat completion request."""
 
-    model: str
+    _route_trace_endpoint: str = PrivateAttr(default=DEFAULT_ROUTE_TRACE_ENDPOINT)
+
+    model: str = DEFAULT_ROUTING_MODEL
     messages: list[dict[str, Any]] = Field(min_length=1)
+
+    @field_validator("model", mode="before")
+    @classmethod
+    def normalize_model(cls, v: Any) -> str:
+        """Accept Merge-style omitted/null/case-insensitive default_routing sentinels."""
+        normalized = normalize_routing_model_selector(v)
+        if not normalized:
+            raise ValueError("model must not be blank")
+        return normalized
 
     @field_validator("messages")
     @classmethod
@@ -287,6 +312,8 @@ class ChatCompletionRequest(BaseModel):
         return v
 
     user: str | None = None
+    project_id: str | None = Field(default=None, description="Optional gateway project id for routing policy lookup")
+    tags: dict[str, str] | None = Field(default=None, description="Optional trace tags for routing observability")
     temperature: float | None = None
     max_tokens: int | None = None
     max_completion_tokens: int | None = None
@@ -310,6 +337,15 @@ class ChatCompletionRequest(BaseModel):
     )
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
 
+    @property
+    def route_trace_endpoint(self) -> str:
+        """Return the endpoint label used for standalone routing traces."""
+        return self._route_trace_endpoint
+
+    def set_route_trace_endpoint(self, endpoint: str) -> None:
+        """Set the endpoint label used for standalone routing traces."""
+        self._route_trace_endpoint = endpoint
+
 
 async def log_usage(
     db: AsyncSession,
@@ -319,6 +355,8 @@ async def log_usage(
     provider: str | None,
     endpoint: str,
     user_id: str | None = None,
+    project_id: str | None = None,
+    tags: Mapping[str, Any] | None = None,
     response: ChatCompletion | AsyncIterator[ChatCompletionChunk] | None = None,
     usage_override: CompletionUsage | None = None,
     error: str | None = None,
@@ -332,6 +370,8 @@ async def log_usage(
         provider: Provider name
         endpoint: Endpoint path
         user_id: User identifier for tracking
+        project_id: Gateway project identifier for attribution
+        tags: Usage tags for attribution and filtering
         response: Response object (if successful)
         usage_override: Usage data for streaming requests
         error: Error message (if failed)
@@ -341,12 +381,14 @@ async def log_usage(
         id=str(uuid.uuid4()),
         api_key_id=api_key_id,
         user_id=user_id,
+        project_id=project_id,
         timestamp=datetime.now(UTC),
         model=model,
         provider=provider,
         endpoint=endpoint,
         status="success" if error is None else "error",
         error_message=error,
+        tags=dict(tags) if tags is not None else {},
     )
 
     usage_data = usage_override
@@ -713,6 +755,357 @@ async def _report_platform_usage(
         delay_seconds *= 2
 
 
+async def _run_non_streaming_completion(
+    *,
+    completion_kwargs: dict[str, Any],
+    mcp_server_configs: list[McpServerConfig] | None,
+    max_tool_iterations: int,
+    tools_header: str | None,
+    use_sandbox: bool,
+    sandbox_url: str | None,
+    sandbox_tool_entry: dict[str, Any] | None,
+    use_web_search: bool,
+    web_search_url: str | None,
+    web_search_tool_entry: dict[str, Any] | None,
+) -> ChatCompletion:
+    """Run one non-streaming completion attempt with gateway tool backends."""
+    if mcp_server_configs:
+        async with MCPClientPool(mcp_server_configs) as pool:
+            mcp_kwargs = {
+                **completion_kwargs,
+                "messages": inject_purpose_hints(
+                    completion_kwargs["messages"],
+                    pool.purpose_hints(),
+                    header=tools_header,
+                ),
+            }
+            return await mcp_tool_loop(
+                completion_kwargs=mcp_kwargs,
+                pool=pool,
+                max_iterations=max_tool_iterations,
+            )
+    if use_sandbox:
+        assert sandbox_url is not None
+        sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
+        async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
+            sandbox_kwargs = {
+                **completion_kwargs,
+                "messages": inject_purpose_hints(
+                    completion_kwargs["messages"],
+                    backend.purpose_hints(),
+                    header=tools_header,
+                ),
+            }
+            return await mcp_tool_loop(
+                completion_kwargs=sandbox_kwargs,
+                pool=backend,  # type: ignore[arg-type]
+                max_iterations=max_tool_iterations,
+            )
+    if use_web_search:
+        assert web_search_url is not None
+        assert web_search_tool_entry is not None
+        async with _build_web_search_backend(
+            base_url=web_search_url,
+            tool_entry=web_search_tool_entry,
+        ) as web_backend:
+            web_kwargs = {
+                **completion_kwargs,
+                "messages": inject_purpose_hints(
+                    completion_kwargs["messages"],
+                    web_backend.purpose_hints(),
+                    header=tools_header,
+                ),
+            }
+            return await mcp_tool_loop(
+                completion_kwargs=web_kwargs,
+                pool=web_backend,  # type: ignore[arg-type]
+                max_iterations=max_tool_iterations,
+            )
+    return await acompletion(**completion_kwargs)  # type: ignore[return-value]
+
+
+async def _run_standalone_routing_plan(
+    *,
+    plan: RoutingPlan,
+    request: ChatCompletionRequest,
+    response: Response,
+    config: GatewayConfig,
+    db: AsyncSession,
+    log_writer: LogWriter,
+    api_key_id: str | None,
+    user_id: str | None,
+    rate_limit_info: RateLimitInfo | None,
+    mcp_server_configs: list[McpServerConfig] | None,
+    max_tool_iterations: int,
+    sandbox_tool_entry: dict[str, Any] | None,
+    sandbox_url: str | None,
+    use_sandbox: bool,
+    web_search_tool_entry: dict[str, Any] | None,
+    web_search_url: str | None,
+    use_web_search: bool,
+    remaining_user_tools: list[dict[str, Any]] | None,
+    trace_endpoint: str,
+) -> ChatCompletion:
+    """Execute a standalone routing plan with pre-response fallback."""
+    request_fields = _strip_gateway_fields(
+        request.model_dump(exclude_unset=True),
+        tools_extracted=sandbox_tool_entry is not None or web_search_tool_entry is not None,
+        remaining_user_tools=remaining_user_tools,
+    )
+    request_fields, _ = apply_guardrail_redactions(plan.policy.config_ or {}, request_fields)
+    request_fields, _ = apply_context_policy(plan.policy.config_ or {}, request_fields)
+
+    attempts: list[dict[str, Any]] = []
+    last_exc: BaseException | None = None
+
+    for candidate in plan.candidates:
+        provider_kwargs = get_provider_kwargs(config, LLMProvider(candidate.provider))
+        completion_kwargs = {**provider_kwargs, **request_fields, "model": candidate.model}
+        started_at = time.perf_counter()
+        attempt_record: dict[str, Any] = {
+            "position": candidate.position,
+            "provider": candidate.provider,
+            "model": candidate.provider_model,
+            "model_key": candidate.model,
+            "tier": candidate.tier,
+        }
+
+        try:
+            completion = await _run_non_streaming_completion(
+                completion_kwargs=completion_kwargs,
+                mcp_server_configs=mcp_server_configs,
+                max_tool_iterations=max_tool_iterations,
+                tools_header=request.tools_header,
+                use_sandbox=use_sandbox,
+                sandbox_url=sandbox_url,
+                sandbox_tool_entry=sandbox_tool_entry,
+                use_web_search=use_web_search,
+                web_search_url=web_search_url,
+                web_search_tool_entry=web_search_tool_entry,
+            )
+        except HTTPException:
+            raise
+        except SandboxNotReachableError as exc:
+            await _record_routing_attempt_error(
+                db=db,
+                log_writer=log_writer,
+                plan=plan,
+                api_key_id=api_key_id,
+                user_id=user_id,
+                candidate=candidate,
+                attempts=attempts,
+                attempt_record=attempt_record,
+                started_at=started_at,
+                exc=exc,
+                error_class="sandbox_unreachable",
+                final=True,
+                trace_endpoint=trace_endpoint,
+            )
+            logger.error("Sandbox unreachable for routed model %s: %s", candidate.model, exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
+            ) from exc
+        except WebSearchNotReachableError as exc:
+            await _record_routing_attempt_error(
+                db=db,
+                log_writer=log_writer,
+                plan=plan,
+                api_key_id=api_key_id,
+                user_id=user_id,
+                candidate=candidate,
+                attempts=attempts,
+                attempt_record=attempt_record,
+                started_at=started_at,
+                exc=exc,
+                error_class="web_search_unreachable",
+                final=True,
+                trace_endpoint=trace_endpoint,
+            )
+            logger.error("Web search backend unreachable for routed model %s: %s", candidate.model, exc)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
+            ) from exc
+        except MaxToolIterationsExceeded as exc:
+            await _record_routing_attempt_error(
+                db=db,
+                log_writer=log_writer,
+                plan=plan,
+                api_key_id=api_key_id,
+                user_id=user_id,
+                candidate=candidate,
+                attempts=attempts,
+                attempt_record=attempt_record,
+                started_at=started_at,
+                exc=exc,
+                error_class="max_tool_iterations",
+                final=True,
+                trace_endpoint=trace_endpoint,
+            )
+            logger.warning("Tool loop iteration cap hit (routed): cap=%d", max_tool_iterations)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        except BaseException as exc:
+            _retryable, error_class = _classify_upstream_error(exc)
+            last_exc = exc
+            await log_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=candidate.provider_model,
+                provider=candidate.provider,
+                endpoint=trace_endpoint,
+                user_id=user_id,
+                project_id=plan.project_id,
+                tags=plan.tags,
+                error=str(exc),
+            )
+            attempt_record.update(
+                {
+                    "status": "error",
+                    "error_class": error_class,
+                    "error_message": str(exc),
+                    "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                }
+            )
+            attempts.append(attempt_record)
+            logger.warning(
+                "Routed provider call failed policy_id=%s provider=%s model=%s error_class=%s error=%s",
+                plan.policy.policy_id,
+                candidate.provider,
+                candidate.provider_model,
+                error_class,
+                exc,
+            )
+            continue
+
+        attempt_record.update(
+            {
+                "status": "success",
+                "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            }
+        )
+        attempts.append(attempt_record)
+        await log_usage(
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            model=candidate.provider_model,
+            provider=candidate.provider,
+            endpoint=trace_endpoint,
+            user_id=user_id,
+            project_id=plan.project_id,
+            tags=plan.tags,
+            response=completion,
+        )
+        trace_id = await record_route_trace(
+            db,
+            plan=plan,
+            api_key_id=api_key_id,
+            user_id=user_id,
+            status="success",
+            attempts=attempts,
+            error_message=None,
+            selected_candidate=candidate,
+            endpoint=trace_endpoint,
+        )
+        response.headers["X-Route-Trace-ID"] = trace_id
+        response.headers["X-Routing-Policy-ID"] = plan.policy.policy_id
+        response.headers["X-Routed-Model"] = candidate.model
+        response.headers["X-Routing-Strategy"] = plan.strategy
+        response.headers["X-Routing-Tier"] = plan.target_tier
+        response.headers["X-Routing-Fallback-Enabled"] = str(plan.fallback_enabled).lower()
+        response.headers["X-Routing-Policy-Source"] = plan.policy_source
+        if rate_limit_info:
+            for key, value in rate_limit_headers(rate_limit_info).items():
+                response.headers[key] = value
+        return completion
+
+    trace_id = await record_route_trace(
+        db,
+        plan=plan,
+        api_key_id=api_key_id,
+        user_id=user_id,
+        status="error",
+        attempts=attempts,
+        error_message=str(last_exc) if last_exc else "No routed candidates were attempted",
+        selected_candidate=None,
+        endpoint=trace_endpoint,
+    )
+    response.headers["X-Route-Trace-ID"] = trace_id
+    response.headers["X-Routing-Policy-ID"] = plan.policy.policy_id
+    response.headers["X-Routing-Strategy"] = plan.strategy
+    response.headers["X-Routing-Tier"] = plan.target_tier
+    response.headers["X-Routing-Fallback-Enabled"] = str(plan.fallback_enabled).lower()
+    response.headers["X-Routing-Policy-Source"] = plan.policy_source
+
+    if last_exc is not None and isinstance(last_exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="All routed upstream providers timed out",
+        ) from last_exc
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="All routed upstream providers failed",
+    ) from last_exc
+
+
+async def _record_routing_attempt_error(
+    *,
+    db: AsyncSession,
+    log_writer: LogWriter,
+    plan: RoutingPlan,
+    api_key_id: str | None,
+    user_id: str | None,
+    candidate: RoutingCandidate,
+    attempts: list[dict[str, Any]],
+    attempt_record: dict[str, Any],
+    started_at: float,
+    exc: BaseException,
+    error_class: str,
+    final: bool,
+    trace_endpoint: str,
+) -> str | None:
+    """Record usage and trace data for a routed attempt error."""
+    await log_usage(
+        db=db,
+        log_writer=log_writer,
+        api_key_id=api_key_id,
+        model=candidate.provider_model,
+        provider=candidate.provider,
+        endpoint=trace_endpoint,
+        user_id=user_id,
+        project_id=plan.project_id,
+        tags=plan.tags,
+        error=str(exc),
+    )
+    attempt_record.update(
+        {
+            "status": "error",
+            "error_class": error_class,
+            "error_message": str(exc),
+            "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+        }
+    )
+    attempts.append(attempt_record)
+    if not final:
+        return None
+    return await record_route_trace(
+        db,
+        plan=plan,
+        api_key_id=api_key_id,
+        user_id=user_id,
+        status="error",
+        attempts=attempts,
+        error_message=str(exc),
+        selected_candidate=candidate,
+        endpoint=trace_endpoint,
+    )
+
+
 @router.post("/completions", response_model=None)
 async def chat_completions(
     raw_request: Request,
@@ -733,18 +1126,13 @@ async def chat_completions(
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use virtual user created with API key
     """
-    if not request.model.strip():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid request: model is required",
-        )
-
     api_key: APIKey | None = None
     api_key_id: str | None = None
     user_id: str | None = None
     rate_limit_info: RateLimitInfo | None = None
     platform_mode = config.is_platform_mode
     route: ResolvedRoute | None = None
+    routing_plan: RoutingPlan | None = None
     user_token: str | None = None  # set inside the platform_mode branch; referenced again later
 
     if platform_mode:
@@ -793,6 +1181,9 @@ async def chat_completions(
 
         rate_limit_info = check_rate_limit(raw_request, user_id)
         _ = await validate_user_budget(db, user_id, request.model, strategy=config.budget_strategy)
+        if request.project_id is not None:
+            _ = await validate_project_budget(db, request.project_id, request.model, strategy=config.budget_strategy)
+        _ = await validate_tag_budgets(db, request.tags, request.model, strategy=config.budget_strategy)
         if config.budget_strategy == "for_update":
             await db.rollback()
 
@@ -875,6 +1266,23 @@ async def chat_completions(
                 ),
             )
         use_web_search = True
+
+    if not platform_mode and request.model == DEFAULT_ROUTING_MODEL:
+        if request.stream:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Routing policies do not support streaming chat completions yet",
+            )
+        assert db is not None
+        try:
+            routing_plan = await resolve_routing_plan(
+                db,
+                request_body=request.model_dump(exclude_unset=True),
+                project_id=request.project_id,
+                tags=request.tags,
+            )
+        except RoutingPolicyError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
     # ------------------------------------------------------------------
     # Streaming path: iterate `route.attempts` before any bytes are flushed,
@@ -1098,6 +1506,8 @@ async def chat_completions(
                     provider=provider,
                     endpoint="/v1/chat/completions",
                     user_id=user_id,
+                    project_id=request.project_id,
+                    tags=request.tags,
                     error=str(exc),
                 )
             logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
@@ -1123,6 +1533,8 @@ async def chat_completions(
             log_writer=log_writer,
             api_key_id=api_key_id,
             user_id=user_id,
+            project_id=request.project_id,
+            tags=request.tags,
             rate_limit_info=rate_limit_info,
         )
 
@@ -1158,8 +1570,9 @@ async def chat_completions(
                 detail="Authorization service returned no resolvable provider",
             )
     else:
-        provider, model = AnyLLM.split_model_provider(request.model)
-        provider_kwargs = get_provider_kwargs(config, provider)
+        if routing_plan is None:
+            provider, model = AnyLLM.split_model_provider(request.model)
+            provider_kwargs = get_provider_kwargs(config, provider)
         attempts_to_try = []  # standalone path doesn't use the attempts list
 
     class _AttemptFailure(NamedTuple):
@@ -1356,6 +1769,30 @@ async def chat_completions(
             detail=detail,
         ) from last_exc
 
+    if routing_plan is not None:
+        assert db is not None
+        return await _run_standalone_routing_plan(
+            plan=routing_plan,
+            request=request,
+            response=response,
+            config=config,
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            user_id=user_id,
+            rate_limit_info=rate_limit_info,
+            mcp_server_configs=mcp_server_configs,
+            max_tool_iterations=max_tool_iterations,
+            sandbox_tool_entry=sandbox_tool_entry,
+            sandbox_url=sandbox_url,
+            use_sandbox=use_sandbox,
+            web_search_tool_entry=web_search_tool_entry,
+            web_search_url=web_search_url,
+            use_web_search=use_web_search,
+            remaining_user_tools=remaining_user_tools,
+            trace_endpoint=request.route_trace_endpoint,
+        )
+
     # Standalone path (no platform / no fallback). Same MCP / sandbox /
     # web_search semantics as platform mode above: if `mcp_servers` is set,
     # the request goes through the MCP tool-use loop; if `tools` includes a
@@ -1434,6 +1871,8 @@ async def chat_completions(
                 provider=provider,
                 endpoint="/v1/chat/completions",
                 user_id=user_id,
+                project_id=request.project_id,
+                tags=request.tags,
                 response=completion,
             )
     except HTTPException:
@@ -1466,6 +1905,8 @@ async def chat_completions(
                 provider=provider,
                 endpoint="/v1/chat/completions",
                 user_id=user_id,
+                project_id=request.project_id,
+                tags=request.tags,
                 error=str(e),
             )
         raise HTTPException(
@@ -1482,6 +1923,8 @@ async def chat_completions(
                 provider=provider,
                 endpoint="/v1/chat/completions",
                 user_id=user_id,
+                project_id=request.project_id,
+                tags=request.tags,
                 error=str(e),
             )
 
@@ -1516,6 +1959,8 @@ def _build_streaming_response(
     log_writer: LogWriter | None,
     api_key_id: str | None,
     user_id: str | None,
+    project_id: str | None,
+    tags: Mapping[str, Any] | None,
     rate_limit_info: RateLimitInfo | None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response."""
@@ -1553,6 +1998,8 @@ def _build_streaming_response(
             provider=provider,
             endpoint="/v1/chat/completions",
             user_id=user_id,
+            project_id=project_id,
+            tags=tags,
             usage_override=usage_data,
         )
 
@@ -1577,6 +2024,8 @@ def _build_streaming_response(
             provider=provider,
             endpoint="/v1/chat/completions",
             user_id=user_id,
+            project_id=project_id,
+            tags=tags,
             error=error,
         )
 
@@ -1797,5 +2246,7 @@ async def _run_streaming_with_fallback(
         log_writer=None,  # unused when db is None
         api_key_id=None,
         user_id=None,
+        project_id=None,
+        tags=None,
         rate_limit_info=rate_limit_info,
     )

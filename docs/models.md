@@ -67,7 +67,7 @@ Not all providers support all endpoints. Here's what each endpoint type requires
 |----------|-----------|-------------------|
 | `/v1/chat/completions` | Chat completion | Most providers |
 | `/v1/messages` | Anthropic Messages API | Anthropic, Vertex AI Anthropic |
-| `/v1/responses` | OpenAI Responses API | OpenAI |
+| `/v1/responses` | OpenAI Responses API, or standalone `default_routing` translated through chat completions | OpenAI for provider-native calls; any routed chat provider for `default_routing` |
 | `/v1/embeddings` | Text embeddings | OpenAI, Cohere, Voyage, Vertex AI |
 | `/v1/moderations` | Content moderation | OpenAI |
 | `/v1/rerank` | Document reranking | Cohere |
@@ -104,5 +104,21 @@ Query the gateway to see which models are available:
 
 ```bash
 curl http://localhost:8000/v1/models \
+  -H "Authorization: Bearer <your-api-key>"
+```
+
+For a Merge Gateway-style catalog response with canonical `provider/model`
+identifiers and vendor execution metadata:
+
+```bash
+curl "http://localhost:8000/v1/models?format=gateway" \
+  -H "Authorization: Bearer <your-api-key>"
+```
+
+You can filter with `provider`, `vendor`, or fetch one catalog object with
+`model=provider/model-name`. Execution vendors are available at:
+
+```bash
+curl http://localhost:8000/v1/vendors \
   -H "Authorization: Bearer <your-api-key>"
 ```

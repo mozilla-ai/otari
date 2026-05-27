@@ -1,0 +1,25 @@
+# Standalone routing-gateway demo config.
+# Mounted as /app/config.yml by docker-compose.
+
+database_url: "postgresql://gateway:gateway@postgres:5432/gateway"
+host: "0.0.0.0"
+port: 8000
+
+master_key: demo-master-key
+bootstrap_api_key: false
+model_discovery: false
+
+providers:
+  openai: {}
+  anthropic: {}
+
+pricing:
+  openai:gpt-4o-mini:
+    input_price_per_million: 0.15
+    output_price_per_million: 0.60
+  openai:gpt-4o:
+    input_price_per_million: 5.00
+    output_price_per_million: 15.00
+  anthropic:claude-3-5-haiku-latest:
+    input_price_per_million: 0.80
+    output_price_per_million: 4.00

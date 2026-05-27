@@ -60,6 +60,7 @@ select = ["E", "F", "I"]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/generate_openapi.py" = ["E402"]
+"scripts/apply_eval_scores.py" = ["E402"]
 "tests/integration/conftest.py" = ["E402"]
 
 [tool.mypy]
@@ -74,4 +75,3 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["trafilatura.*"]
 ignore_missing_imports = true
-

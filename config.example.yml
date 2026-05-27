@@ -16,6 +16,13 @@ master_key: YOUR_MASTER_KEY_HERE
 # Prometheus metrics endpoint at /metrics. Set to true to enable.
 # enable_metrics: true
 
+# Budget alert webhook retry worker. Set interval to a positive value to retry failed/pending deliveries.
+# budget_alert_webhook_retry_interval_seconds: 60
+# budget_alert_webhook_retry_max_attempts: 5
+# budget_alert_webhook_retry_backoff_seconds: 60
+# budget_alert_webhook_retry_max_backoff_seconds: 3600
+# budget_alert_webhook_retry_batch_size: 50
+
 # Pre-configured provider credentials
 providers:
   vertexai:

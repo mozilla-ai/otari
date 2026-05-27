@@ -11,3 +11,4 @@ It can run standalone (you manage everything) or connected to [otari.ai](https:/
 - [Modes](modes.md) -- Standalone vs connected to otari.ai.
 - [API Reference](api-reference.md) -- All available endpoints.
 - [Models](models.md) -- Supported providers and model format.
+- [Merge Gateway Compatibility](merge-gateway-compatibility.md) -- How the OSS routing control plane maps to Merge Gateway-style concepts.

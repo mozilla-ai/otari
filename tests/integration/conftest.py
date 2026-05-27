@@ -16,6 +16,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 from testcontainers.postgres import PostgresContainer
@@ -52,6 +53,13 @@ def _to_async_url(database_url: str) -> str:
     if database_url.startswith("sqlite:///") and not database_url.startswith("sqlite+aiosqlite"):
         return database_url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
     return database_url
+
+
+def _drop_alembic_version_table(engine: Engine) -> None:
+    cascade = "" if engine.dialect.name == "sqlite" else " CASCADE"
+    with engine.connect() as conn:
+        conn.execute(text(f"DROP TABLE IF EXISTS alembic_version{cascade}"))
+        conn.commit()
 
 
 def build_async_session_override(
@@ -100,9 +108,7 @@ def test_db(postgres_url: str) -> Generator[Session]:
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
+        _drop_alembic_version_table(engine)
 
 
 @pytest_asyncio.fixture
@@ -119,9 +125,7 @@ async def async_db(postgres_url: str) -> AsyncGenerator[AsyncSession, None]:
         await async_engine.dispose()
         engine = create_engine(postgres_url, pool_pre_ping=True)
         Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
+        _drop_alembic_version_table(engine)
         engine.dispose()
 
 
@@ -169,9 +173,7 @@ def client(test_config: GatewayConfig) -> Generator[TestClient]:
             yield test_client
     finally:
         Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
+        _drop_alembic_version_table(engine)
         try:
             asyncio.run(async_engine.dispose())
         except RuntimeError:

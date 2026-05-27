@@ -100,6 +100,47 @@ LOG_WRITER_ROWS = Counter(
     registry=REGISTRY,
 )
 
+BUDGET_ALERTS_CREATED = Counter(
+    "gateway_budget_alerts_created",
+    "Budget alert events created",
+    ["scope_type", "delivery_status"],
+    registry=REGISTRY,
+)
+
+BUDGET_ALERT_WEBHOOK_DELIVERIES = Counter(
+    "gateway_budget_alert_webhook_deliveries",
+    "Budget alert webhook delivery attempts by outcome",
+    ["scope_type", "outcome"],
+    registry=REGISTRY,
+)
+
+BUDGET_ALERT_WEBHOOK_DELIVERY_DURATION_SECONDS = Histogram(
+    "gateway_budget_alert_webhook_delivery_duration_seconds",
+    "Budget alert webhook delivery duration in seconds",
+    ["scope_type", "outcome"],
+    registry=REGISTRY,
+)
+
+BUDGET_ALERT_WEBHOOK_RETRY_RUNS = Counter(
+    "gateway_budget_alert_webhook_retry_runs",
+    "Budget alert webhook retry worker runs by result",
+    ["result"],
+    registry=REGISTRY,
+)
+
+BUDGET_ALERT_WEBHOOK_RETRY_SELECTED = Counter(
+    "gateway_budget_alert_webhook_retry_selected",
+    "Budget alert webhooks selected for retry",
+    registry=REGISTRY,
+)
+
+BUDGET_ALERT_WEBHOOK_DEAD_LETTERS = Counter(
+    "gateway_budget_alert_webhook_dead_letters",
+    "Budget alert webhooks moved to dead-letter status",
+    ["scope_type", "reason"],
+    registry=REGISTRY,
+)
+
 
 _PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 
@@ -172,6 +213,42 @@ def record_budget_exceeded() -> None:
 def record_auth_failure(reason: str) -> None:
     """Record an authentication failure."""
     AUTH_FAILURES.labels(reason=reason).inc()
+
+
+def record_budget_alert_created(scope_type: str, delivery_status: str) -> None:
+    """Record a durable budget alert event."""
+    BUDGET_ALERTS_CREATED.labels(scope_type=scope_type, delivery_status=delivery_status).inc()
+
+
+def record_budget_alert_webhook_delivery(
+    *,
+    scope_type: str,
+    outcome: str,
+    duration_seconds: float,
+) -> None:
+    """Record one attempted budget alert webhook delivery."""
+    labels = BUDGET_ALERT_WEBHOOK_DELIVERIES.labels(scope_type=scope_type, outcome=outcome)
+    labels.inc()
+    BUDGET_ALERT_WEBHOOK_DELIVERY_DURATION_SECONDS.labels(
+        scope_type=scope_type,
+        outcome=outcome,
+    ).observe(duration_seconds)
+
+
+def record_budget_alert_webhook_retry_run(result: str) -> None:
+    """Record a budget alert webhook retry worker pass."""
+    BUDGET_ALERT_WEBHOOK_RETRY_RUNS.labels(result=result).inc()
+
+
+def record_budget_alert_webhook_retry_selected(count: int) -> None:
+    """Record budget alert webhooks selected for retry."""
+    if count > 0:
+        BUDGET_ALERT_WEBHOOK_RETRY_SELECTED.inc(count)
+
+
+def record_budget_alert_webhook_dead_letter(scope_type: str, reason: str) -> None:
+    """Record a budget alert webhook moving to dead-letter status."""
+    BUDGET_ALERT_WEBHOOK_DEAD_LETTERS.labels(scope_type=scope_type, reason=reason).inc()
 
 
 log_writer_queue_depth = LOG_WRITER_QUEUE_DEPTH

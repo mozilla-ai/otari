@@ -1,6 +1,131 @@
 {
   "components": {
     "schemas": {
+      "AppliedRoutingPolicyEvalScoreResponse": {
+        "description": "Candidate score update returned after eval ingestion.",
+        "properties": {
+          "metrics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "previous_quality_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previous Quality Score"
+          },
+          "quality_score": {
+            "title": "Quality Score",
+            "type": "number"
+          },
+          "sample_count": {
+            "title": "Sample Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model",
+          "previous_quality_score",
+          "quality_score",
+          "sample_count",
+          "metrics"
+        ],
+        "title": "AppliedRoutingPolicyEvalScoreResponse",
+        "type": "object"
+      },
+      "ApplyRoutingPolicyEvalScoresRequest": {
+        "description": "Request model for applying eval scores to weighted routing candidates.",
+        "properties": {
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "scores": {
+            "items": {
+              "$ref": "#/components/schemas/RoutingPolicyEvalScoreItem"
+            },
+            "minItems": 1,
+            "title": "Scores",
+            "type": "array"
+          }
+        },
+        "required": [
+          "scores"
+        ],
+        "title": "ApplyRoutingPolicyEvalScoresRequest",
+        "type": "object"
+      },
+      "ApplyRoutingPolicyEvalScoresResponse": {
+        "description": "Response model for eval score ingestion.",
+        "properties": {
+          "applied_count": {
+            "title": "Applied Count",
+            "type": "integer"
+          },
+          "applied_scores": {
+            "items": {
+              "$ref": "#/components/schemas/AppliedRoutingPolicyEvalScoreResponse"
+            },
+            "title": "Applied Scores",
+            "type": "array"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/RoutingPolicyResponse"
+          },
+          "unmatched_models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unmatched Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "policy",
+          "applied_count",
+          "unmatched_models",
+          "applied_scores"
+        ],
+        "title": "ApplyRoutingPolicyEvalScoresResponse",
+        "type": "object"
+      },
+      "ApplyRoutingPolicyRevisionRequest": {
+        "description": "Request model for applying a previous routing policy revision.",
+        "properties": {
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          }
+        },
+        "title": "ApplyRoutingPolicyRevisionRequest",
+        "type": "object"
+      },
       "AudioSpeechRequest": {
         "description": "OpenAI-compatible audio speech (TTS) request.",
         "properties": {
@@ -162,9 +287,199 @@
         "title": "Body_create_transcription_v1_audio_transcriptions_post",
         "type": "object"
       },
+      "BudgetAlertResponse": {
+        "description": "Response model for budget threshold alert events.",
+        "properties": {
+          "budget_id": {
+            "title": "Budget Id",
+            "type": "string"
+          },
+          "budget_period_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Period Start"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "dead_lettered_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dead Lettered At"
+          },
+          "delivered_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delivered At"
+          },
+          "delivery_attempts": {
+            "title": "Delivery Attempts",
+            "type": "integer"
+          },
+          "delivery_status": {
+            "title": "Delivery Status",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "last_delivery_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Delivery Attempt At"
+          },
+          "last_delivery_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Delivery Error"
+          },
+          "last_delivery_status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Delivery Status Code"
+          },
+          "max_budget": {
+            "title": "Max Budget",
+            "type": "number"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "next_delivery_attempt_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Delivery Attempt At"
+          },
+          "scope_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Id"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "spend": {
+            "title": "Spend",
+            "type": "number"
+          },
+          "threshold": {
+            "title": "Threshold",
+            "type": "number"
+          },
+          "webhook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Url"
+          }
+        },
+        "required": [
+          "id",
+          "budget_id",
+          "scope_type",
+          "scope_id",
+          "threshold",
+          "spend",
+          "max_budget",
+          "budget_period_start",
+          "webhook_url",
+          "delivery_status",
+          "delivery_attempts",
+          "last_delivery_status_code",
+          "last_delivery_error",
+          "last_delivery_attempt_at",
+          "next_delivery_attempt_at",
+          "delivered_at",
+          "dead_lettered_at",
+          "created_at",
+          "metadata"
+        ],
+        "title": "BudgetAlertResponse",
+        "type": "object"
+      },
       "BudgetResponse": {
         "description": "Response model for budget information.",
         "properties": {
+          "alert_thresholds": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Alert Thresholds",
+            "type": "array"
+          },
+          "alert_webhook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Webhook Url"
+          },
+          "blocked": {
+            "title": "Blocked",
+            "type": "boolean"
+          },
           "budget_duration_sec": {
             "anyOf": [
               {
@@ -180,9 +495,29 @@
             "title": "Budget Id",
             "type": "string"
           },
+          "budget_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Started At"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "match_tags": {
+            "additionalProperties": true,
+            "title": "Match Tags",
+            "type": "object"
           },
           "max_budget": {
             "anyOf": [
@@ -195,6 +530,25 @@
             ],
             "title": "Max Budget"
           },
+          "next_budget_reset_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Budget Reset At"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "spend": {
+            "title": "Spend",
+            "type": "number"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
@@ -204,6 +558,15 @@
           "budget_id",
           "max_budget",
           "budget_duration_sec",
+          "scope_type",
+          "match_tags",
+          "alert_thresholds",
+          "alert_webhook_url",
+          "spend",
+          "budget_started_at",
+          "next_budget_reset_at",
+          "blocked",
+          "is_active",
           "created_at",
           "updated_at"
         ],
@@ -287,8 +650,21 @@
             "type": "array"
           },
           "model": {
+            "default": "default_routing",
             "title": "Model",
             "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional gateway project id for routing policy lookup",
+            "title": "Project Id"
           },
           "response_format": {
             "anyOf": [
@@ -318,6 +694,21 @@
               }
             ],
             "title": "Stream Options"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional trace tags for routing observability",
+            "title": "Tags"
           },
           "temperature": {
             "anyOf": [
@@ -397,10 +788,39 @@
           }
         },
         "required": [
-          "model",
           "messages"
         ],
         "title": "ChatCompletionRequest",
+        "type": "object"
+      },
+      "CloneRoutingPolicyRequest": {
+        "description": "Request model for cloning a routing policy into a draft.",
+        "properties": {
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "CloneRoutingPolicyRequest",
         "type": "object"
       },
       "CreateBatchRequest": {
@@ -448,6 +868,38 @@
       "CreateBudgetRequest": {
         "description": "Request model for creating a new budget.",
         "properties": {
+          "alert_thresholds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional spend ratios that emit budget alert events when crossed, e.g. [0.5, 0.8, 0.95]",
+            "title": "Alert Thresholds"
+          },
+          "alert_webhook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional HTTP(S) endpoint that receives budget threshold alert webhooks",
+            "title": "Alert Webhook Url"
+          },
+          "blocked": {
+            "default": false,
+            "title": "Blocked",
+            "type": "boolean"
+          },
           "budget_duration_sec": {
             "anyOf": [
               {
@@ -461,6 +913,26 @@
             "description": "Budget duration in seconds (e.g., 86400 for daily, 604800 for weekly)",
             "title": "Budget Duration Sec"
           },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "match_tags": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exact request tags matched by tag-scoped budget groups",
+            "title": "Match Tags"
+          },
           "max_budget": {
             "anyOf": [
               {
@@ -473,6 +945,12 @@
             ],
             "description": "Maximum spending limit",
             "title": "Max Budget"
+          },
+          "scope_type": {
+            "default": "entity",
+            "description": "Budget scope: entity or tag",
+            "title": "Scope Type",
+            "type": "string"
           }
         },
         "title": "CreateBudgetRequest",
@@ -599,6 +1077,131 @@
         "title": "CreateKeyResponse",
         "type": "object"
       },
+      "CreateProjectRequest": {
+        "description": "Request model for creating a project.",
+        "properties": {
+          "blocked": {
+            "default": false,
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Id"
+          },
+          "is_active": {
+            "default": true,
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "routing_policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Routing Policy Id"
+          }
+        },
+        "title": "CreateProjectRequest",
+        "type": "object"
+      },
+      "CreateRoutingPolicyRequest": {
+        "description": "Request model for creating a routing policy.",
+        "properties": {
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "default_strategy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Strategy"
+          },
+          "is_default": {
+            "default": false,
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "default": "active",
+            "title": "Status",
+            "type": "string"
+          },
+          "strategy": {
+            "default": "cost_tier",
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateRoutingPolicyRequest",
+        "type": "object"
+      },
       "CreateUserRequest": {
         "description": "Request model for creating a new user.",
         "properties": {
@@ -711,6 +1314,311 @@
           "input"
         ],
         "title": "EmbeddingRequest",
+        "type": "object"
+      },
+      "GatewayCatalogCapabilities": {
+        "description": "Best-effort capability metadata for a vendor/model pair.",
+        "properties": {
+          "input": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input",
+            "type": "array"
+          },
+          "output": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output",
+            "type": "array"
+          },
+          "streaming": {
+            "default": true,
+            "title": "Streaming",
+            "type": "boolean"
+          },
+          "supports_structured_outputs": {
+            "default": true,
+            "title": "Supports Structured Outputs",
+            "type": "boolean"
+          },
+          "supports_tool_calling": {
+            "default": true,
+            "title": "Supports Tool Calling",
+            "type": "boolean"
+          },
+          "supports_tool_choice": {
+            "default": true,
+            "title": "Supports Tool Choice",
+            "type": "boolean"
+          }
+        },
+        "title": "GatewayCatalogCapabilities",
+        "type": "object"
+      },
+      "GatewayCatalogListResponse": {
+        "description": "Paginated Merge-style model catalog response.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayCatalogModel"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "object": {
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "GatewayCatalogListResponse",
+        "type": "object"
+      },
+      "GatewayCatalogModel": {
+        "description": "Merge Gateway-style canonical model catalog object.",
+        "properties": {
+          "availability_status": {
+            "default": "available",
+            "title": "Availability Status",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "vendors": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/GatewayVendorModelMetadata"
+            },
+            "title": "Vendors",
+            "type": "object"
+          }
+        },
+        "required": [
+          "model",
+          "provider",
+          "display_name",
+          "vendors"
+        ],
+        "title": "GatewayCatalogModel",
+        "type": "object"
+      },
+      "GatewayCatalogPricing": {
+        "description": "Merge-style pricing metadata for a vendor/model pair.",
+        "properties": {
+          "currency": {
+            "default": "USD",
+            "title": "Currency",
+            "type": "string"
+          },
+          "input_per_million": {
+            "title": "Input Per Million",
+            "type": "number"
+          },
+          "output_per_million": {
+            "title": "Output Per Million",
+            "type": "number"
+          }
+        },
+        "required": [
+          "input_per_million",
+          "output_per_million"
+        ],
+        "title": "GatewayCatalogPricing",
+        "type": "object"
+      },
+      "GatewayVendorListResponse": {
+        "description": "Paginated Merge-style vendor catalog response.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/GatewayVendorResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "object": {
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "GatewayVendorListResponse",
+        "type": "object"
+      },
+      "GatewayVendorModelMetadata": {
+        "description": "Execution metadata for a model served by one vendor.",
+        "properties": {
+          "availability_status": {
+            "default": "available",
+            "title": "Availability Status",
+            "type": "string"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/GatewayCatalogCapabilities"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
+          "launch_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Launch Date"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
+          "pricing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GatewayCatalogPricing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "zero_data_retention": {
+            "default": false,
+            "title": "Zero Data Retention",
+            "type": "boolean"
+          }
+        },
+        "title": "GatewayVendorModelMetadata",
+        "type": "object"
+      },
+      "GatewayVendorResponse": {
+        "description": "Merge Gateway-style execution vendor object.",
+        "properties": {
+          "availability_status": {
+            "default": "active",
+            "title": "Availability Status",
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "supports_byok": {
+            "default": true,
+            "title": "Supports Byok",
+            "type": "boolean"
+          },
+          "supports_zdr": {
+            "default": false,
+            "title": "Supports Zdr",
+            "type": "boolean"
+          },
+          "vendor": {
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "vendor",
+          "name",
+          "models"
+        ],
+        "title": "GatewayVendorResponse",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -1361,6 +2269,166 @@
         "title": "PricingResponse",
         "type": "object"
       },
+      "ProjectResponse": {
+        "description": "Response model for project information.",
+        "properties": {
+          "blocked": {
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Id"
+          },
+          "budget_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Started At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "next_budget_reset_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Budget Reset At"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "routing_policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Routing Policy Id"
+          },
+          "spend": {
+            "title": "Spend",
+            "type": "number"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "name",
+          "routing_policy_id",
+          "spend",
+          "budget_id",
+          "budget_started_at",
+          "next_budget_reset_at",
+          "blocked",
+          "is_active",
+          "metadata",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ProjectResponse",
+        "type": "object"
+      },
+      "RejectedRoutingCandidateResponse": {
+        "description": "Candidate rejected by routing constraints during dry-run resolution.",
+        "properties": {
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_health": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Health"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "regions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Regions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "model",
+          "provider",
+          "reason",
+          "estimated_cost"
+        ],
+        "title": "RejectedRoutingCandidateResponse",
+        "type": "object"
+      },
       "RerankRequest": {
         "description": "Rerank request.",
         "properties": {
@@ -1430,6 +2498,417 @@
         "title": "RerankRequest",
         "type": "object"
       },
+      "ResolveRoutingRequest": {
+        "additionalProperties": true,
+        "description": "Request model for previewing one routing decision.",
+        "properties": {
+          "max_completion_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Completion Tokens"
+          },
+          "max_tokens": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Tokens"
+          },
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "minItems": 1,
+            "title": "Messages",
+            "type": "array"
+          },
+          "model": {
+            "default": "default_routing",
+            "title": "Model",
+            "type": "string"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "title": "ResolveRoutingRequest",
+        "type": "object"
+      },
+      "ResolveRoutingResponse": {
+        "description": "Dry-run routing decision response.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ResolvedRoutingCandidateResponse"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context"
+          },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost"
+          },
+          "fallback_enabled": {
+            "title": "Fallback Enabled",
+            "type": "boolean"
+          },
+          "guardrails": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guardrails"
+          },
+          "output_tokens": {
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "policy_name": {
+            "title": "Policy Name",
+            "type": "string"
+          },
+          "policy_rollout": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Rollout"
+          },
+          "policy_source": {
+            "title": "Policy Source",
+            "type": "string"
+          },
+          "policy_status": {
+            "title": "Policy Status",
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "rejected_candidates": {
+            "items": {
+              "$ref": "#/components/schemas/RejectedRoutingCandidateResponse"
+            },
+            "title": "Rejected Candidates",
+            "type": "array"
+          },
+          "requested_model": {
+            "title": "Requested Model",
+            "type": "string"
+          },
+          "selected_model": {
+            "title": "Selected Model",
+            "type": "string"
+          },
+          "selected_provider": {
+            "title": "Selected Provider",
+            "type": "string"
+          },
+          "selected_provider_model": {
+            "title": "Selected Provider Model",
+            "type": "string"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "object"
+          },
+          "target_tier": {
+            "title": "Target Tier",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requested_model",
+          "selected_model",
+          "selected_provider",
+          "selected_provider_model",
+          "project_id",
+          "policy_id",
+          "policy_name",
+          "policy_status",
+          "policy_source",
+          "policy_rollout",
+          "strategy",
+          "target_tier",
+          "prompt_tokens",
+          "output_tokens",
+          "estimated_cost",
+          "fallback_enabled",
+          "reason",
+          "tags",
+          "guardrails",
+          "context",
+          "candidates",
+          "rejected_candidates"
+        ],
+        "title": "ResolveRoutingResponse",
+        "type": "object"
+      },
+      "ResolvedRoutingCandidateResponse": {
+        "description": "Candidate returned from a dry-run routing resolution.",
+        "properties": {
+          "average_latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Latency Ms"
+          },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "latency_sample_count": {
+            "title": "Latency Sample Count",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "provider_health": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Health"
+          },
+          "provider_model": {
+            "title": "Provider Model",
+            "type": "string"
+          },
+          "quality_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Score"
+          },
+          "routing_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Routing Score"
+          },
+          "score_components": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score Components"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier"
+          }
+        },
+        "required": [
+          "model",
+          "provider",
+          "provider_model",
+          "position",
+          "tier",
+          "estimated_cost",
+          "input_price_per_million",
+          "output_price_per_million",
+          "quality_score",
+          "average_latency_ms",
+          "latency_sample_count",
+          "routing_score",
+          "score_components",
+          "provider_health",
+          "metadata"
+        ],
+        "title": "ResolvedRoutingCandidateResponse",
+        "type": "object"
+      },
       "ResponsesRequest": {
         "additionalProperties": true,
         "description": "OpenAI Responses API-compatible request.",
@@ -1437,14 +2916,53 @@
           "input": {
             "title": "Input"
           },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructions"
+          },
           "model": {
+            "default": "default_routing",
             "title": "Model",
             "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional gateway project id for default routing",
+            "title": "Project Id"
           },
           "stream": {
             "default": false,
             "title": "Stream",
             "type": "boolean"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional trace tags for default routing",
+            "title": "Tags"
           },
           "user": {
             "anyOf": [
@@ -1459,10 +2977,623 @@
           }
         },
         "required": [
-          "model",
           "input"
         ],
         "title": "ResponsesRequest",
+        "type": "object"
+      },
+      "RouteTraceResponse": {
+        "description": "Response model for route trace information.",
+        "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Id"
+          },
+          "attempts": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Attempts",
+            "type": "array"
+          },
+          "candidates": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "context": {
+            "additionalProperties": true,
+            "title": "Context",
+            "type": "object"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost"
+          },
+          "estimated_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Output Tokens"
+          },
+          "estimated_prompt_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Prompt Tokens"
+          },
+          "fallback_enabled": {
+            "title": "Fallback Enabled",
+            "type": "boolean"
+          },
+          "guardrails": {
+            "additionalProperties": true,
+            "title": "Guardrails",
+            "type": "object"
+          },
+          "policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Id"
+          },
+          "policy_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Source"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "requested_model": {
+            "title": "Requested Model",
+            "type": "string"
+          },
+          "selected_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Model"
+          },
+          "selected_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Provider"
+          },
+          "selected_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Reason"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy"
+          },
+          "tags": {
+            "additionalProperties": true,
+            "title": "Tags",
+            "type": "object"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "trace_id": {
+            "title": "Trace Id",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "trace_id",
+          "timestamp",
+          "api_key_id",
+          "user_id",
+          "project_id",
+          "policy_id",
+          "requested_model",
+          "endpoint",
+          "selected_model",
+          "selected_provider",
+          "strategy",
+          "status",
+          "error_message",
+          "selected_reason",
+          "estimated_prompt_tokens",
+          "estimated_output_tokens",
+          "estimated_cost",
+          "fallback_enabled",
+          "policy_source",
+          "tags",
+          "guardrails",
+          "context",
+          "candidates",
+          "attempts"
+        ],
+        "title": "RouteTraceResponse",
+        "type": "object"
+      },
+      "RouteTraceSummaryBucket": {
+        "description": "Aggregated route trace metrics for one grouping key.",
+        "properties": {
+          "average_latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Latency Ms"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "error_count": {
+            "title": "Error Count",
+            "type": "integer"
+          },
+          "estimated_cost": {
+            "title": "Estimated Cost",
+            "type": "number"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "success_count": {
+            "title": "Success Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "count",
+          "success_count",
+          "error_count",
+          "estimated_cost",
+          "average_latency_ms"
+        ],
+        "title": "RouteTraceSummaryBucket",
+        "type": "object"
+      },
+      "RouteTraceSummaryResponse": {
+        "description": "Aggregated route trace metrics.",
+        "properties": {
+          "average_latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Latency Ms"
+          },
+          "by_endpoint": {
+            "items": {
+              "$ref": "#/components/schemas/RouteTraceSummaryBucket"
+            },
+            "title": "By Endpoint",
+            "type": "array"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/RouteTraceSummaryBucket"
+            },
+            "title": "By Model",
+            "type": "array"
+          },
+          "by_policy": {
+            "items": {
+              "$ref": "#/components/schemas/RouteTraceSummaryBucket"
+            },
+            "title": "By Policy",
+            "type": "array"
+          },
+          "by_policy_source": {
+            "items": {
+              "$ref": "#/components/schemas/RouteTraceSummaryBucket"
+            },
+            "title": "By Policy Source",
+            "type": "array"
+          },
+          "by_provider": {
+            "items": {
+              "$ref": "#/components/schemas/RouteTraceSummaryBucket"
+            },
+            "title": "By Provider",
+            "type": "array"
+          },
+          "by_strategy": {
+            "items": {
+              "$ref": "#/components/schemas/RouteTraceSummaryBucket"
+            },
+            "title": "By Strategy",
+            "type": "array"
+          },
+          "error_count": {
+            "title": "Error Count",
+            "type": "integer"
+          },
+          "estimated_cost": {
+            "title": "Estimated Cost",
+            "type": "number"
+          },
+          "success_count": {
+            "title": "Success Count",
+            "type": "integer"
+          },
+          "total_count": {
+            "title": "Total Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_count",
+          "success_count",
+          "error_count",
+          "estimated_cost",
+          "average_latency_ms",
+          "by_model",
+          "by_policy",
+          "by_policy_source",
+          "by_endpoint",
+          "by_provider",
+          "by_strategy"
+        ],
+        "title": "RouteTraceSummaryResponse",
+        "type": "object"
+      },
+      "RoutingPolicyEvalScoreItem": {
+        "description": "One uploaded eval or benchmark score for a candidate model.",
+        "properties": {
+          "benchmark_score": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Score"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric"
+          },
+          "model": {
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "quality_score": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Score"
+          },
+          "sample_count": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Count"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "RoutingPolicyEvalScoreItem",
+        "type": "object"
+      },
+      "RoutingPolicyResponse": {
+        "description": "Response model for routing policy information.",
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "default_strategy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Strategy"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "policy_id",
+          "name",
+          "strategy",
+          "config",
+          "default_strategy",
+          "is_default",
+          "revision",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "RoutingPolicyResponse",
+        "type": "object"
+      },
+      "RoutingPolicyRevisionResponse": {
+        "description": "Response model for routing policy revision history.",
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "config": {
+            "additionalProperties": true,
+            "title": "Config",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "default_strategy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Strategy"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "policy_id": {
+            "title": "Policy Id",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "revision_id": {
+            "title": "Revision Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "strategy": {
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision_id",
+          "policy_id",
+          "revision",
+          "action",
+          "name",
+          "strategy",
+          "config",
+          "default_strategy",
+          "is_default",
+          "status",
+          "change_note",
+          "created_at"
+        ],
+        "title": "RoutingPolicyRevisionResponse",
         "type": "object"
       },
       "SetPricingRequest": {
@@ -1510,6 +3641,42 @@
       "UpdateBudgetRequest": {
         "description": "Request model for updating a budget.",
         "properties": {
+          "alert_thresholds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Thresholds"
+          },
+          "alert_webhook_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Webhook Url"
+          },
+          "blocked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked"
+          },
           "budget_duration_sec": {
             "anyOf": [
               {
@@ -1522,6 +3689,31 @@
             ],
             "title": "Budget Duration Sec"
           },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "match_tags": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Tags"
+          },
           "max_budget": {
             "anyOf": [
               {
@@ -1533,6 +3725,29 @@
               }
             ],
             "title": "Max Budget"
+          },
+          "scope_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Type"
+          },
+          "spend": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spend"
           }
         },
         "title": "UpdateBudgetRequest",
@@ -1589,6 +3804,167 @@
           }
         },
         "title": "UpdateKeyRequest",
+        "type": "object"
+      },
+      "UpdateProjectRequest": {
+        "description": "Request model for updating a project.",
+        "properties": {
+          "blocked": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked"
+          },
+          "budget_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Id"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "routing_policy_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Routing Policy Id"
+          }
+        },
+        "title": "UpdateProjectRequest",
+        "type": "object"
+      },
+      "UpdateRoutingPolicyRequest": {
+        "description": "Request model for updating a routing policy.",
+        "properties": {
+          "change_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Note"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "default_strategy": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Strategy"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy"
+          }
+        },
+        "title": "UpdateRoutingPolicyRequest",
         "type": "object"
       },
       "UpdateUserRequest": {
@@ -1702,6 +4078,17 @@
             "title": "Model",
             "type": "string"
           },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
           "prompt_tokens": {
             "anyOf": [
               {
@@ -1727,6 +4114,11 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "tags": {
+            "additionalProperties": true,
+            "title": "Tags",
+            "type": "object"
           },
           "timestamp": {
             "title": "Timestamp",
@@ -1759,6 +4151,7 @@
           "id",
           "user_id",
           "api_key_id",
+          "project_id",
           "timestamp",
           "model",
           "provider",
@@ -1768,7 +4161,8 @@
           "total_tokens",
           "cost",
           "status",
-          "error_message"
+          "error_message",
+          "tags"
         ],
         "title": "UsageEntry",
         "type": "object"
@@ -1832,6 +4226,17 @@
             "title": "Model",
             "type": "string"
           },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
           "prompt_tokens": {
             "anyOf": [
               {
@@ -1857,6 +4262,11 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "tags": {
+            "additionalProperties": true,
+            "title": "Tags",
+            "type": "object"
           },
           "timestamp": {
             "title": "Timestamp",
@@ -1889,6 +4299,7 @@
           "id",
           "user_id",
           "api_key_id",
+          "project_id",
           "timestamp",
           "model",
           "provider",
@@ -1898,9 +4309,159 @@
           "total_tokens",
           "cost",
           "status",
-          "error_message"
+          "error_message",
+          "tags"
         ],
         "title": "UsageLogResponse",
+        "type": "object"
+      },
+      "UsageSummaryBucket": {
+        "description": "Aggregated usage metrics for one grouping key.",
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "error_count": {
+            "title": "Error Count",
+            "type": "integer"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "success_count": {
+            "title": "Success Count",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "count",
+          "success_count",
+          "error_count",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cost"
+        ],
+        "title": "UsageSummaryBucket",
+        "type": "object"
+      },
+      "UsageSummaryResponse": {
+        "description": "Aggregated usage metrics.",
+        "properties": {
+          "by_endpoint": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBucket"
+            },
+            "title": "By Endpoint",
+            "type": "array"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBucket"
+            },
+            "title": "By Model",
+            "type": "array"
+          },
+          "by_project": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBucket"
+            },
+            "title": "By Project",
+            "type": "array"
+          },
+          "by_provider": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBucket"
+            },
+            "title": "By Provider",
+            "type": "array"
+          },
+          "by_status": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBucket"
+            },
+            "title": "By Status",
+            "type": "array"
+          },
+          "by_tag": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBucket"
+            },
+            "title": "By Tag",
+            "type": "array"
+          },
+          "by_user": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSummaryBucket"
+            },
+            "title": "By User",
+            "type": "array"
+          },
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "error_count": {
+            "title": "Error Count",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "success_count": {
+            "title": "Success Count",
+            "type": "integer"
+          },
+          "total_count": {
+            "title": "Total Count",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total_count",
+          "success_count",
+          "error_count",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cost",
+          "by_project",
+          "by_user",
+          "by_model",
+          "by_provider",
+          "by_endpoint",
+          "by_status",
+          "by_tag"
+        ],
+        "title": "UsageSummaryResponse",
         "type": "object"
       },
       "UserResponse": {
@@ -2597,6 +5158,158 @@
         ]
       }
     },
+    "/v1/budgets/alerts": {
+      "get": {
+        "description": "List budget alert events.",
+        "operationId": "list_budget_alerts_v1_budgets_alerts_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "budget_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Budget Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BudgetAlertResponse"
+                  },
+                  "title": "Response List Budget Alerts V1 Budgets Alerts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Budget Alerts",
+        "tags": [
+          "budgets"
+        ]
+      }
+    },
+    "/v1/budgets/alerts/{alert_id}/deliver": {
+      "post": {
+        "description": "Retry webhook delivery for a budget alert event.",
+        "operationId": "deliver_budget_alert_v1_budgets_alerts__alert_id__deliver_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "alert_id",
+            "required": true,
+            "schema": {
+              "title": "Alert Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetAlertResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deliver Budget Alert",
+        "tags": [
+          "budgets"
+        ]
+      }
+    },
     "/v1/budgets/{budget_id}": {
       "delete": {
         "description": "Delete a budget.",
@@ -2720,6 +5433,76 @@
           }
         },
         "summary": "Update Budget",
+        "tags": [
+          "budgets"
+        ]
+      }
+    },
+    "/v1/budgets/{budget_id}/alerts": {
+      "get": {
+        "description": "List alert events for a specific budget.",
+        "operationId": "list_alerts_for_budget_v1_budgets__budget_id__alerts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_id",
+            "required": true,
+            "schema": {
+              "title": "Budget Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BudgetAlertResponse"
+                  },
+                  "title": "Response List Alerts For Budget V1 Budgets  Budget Id  Alerts Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Alerts For Budget",
         "tags": [
           "budgets"
         ]
@@ -3136,6 +5919,86 @@
               "description": "Filter models by provider name",
               "title": "Provider"
             }
+          },
+          {
+            "description": "Filter gateway catalog models by execution vendor",
+            "in": "query",
+            "name": "vendor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter gateway catalog models by execution vendor",
+              "title": "Vendor"
+            }
+          },
+          {
+            "description": "Fetch one gateway catalog model by provider/model id",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Fetch one gateway catalog model by provider/model id",
+              "title": "Model"
+            }
+          },
+          {
+            "description": "Response format: 'openai' (default) or 'gateway'/'merge' catalog shape",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "default": "openai",
+              "description": "Response format: 'openai' (default) or 'gateway'/'merge' catalog shape",
+              "title": "Format",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Gateway catalog pagination cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Gateway catalog pagination cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Gateway catalog page size",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Gateway catalog page size",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -3143,7 +6006,18 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ModelListResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ModelListResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GatewayCatalogListResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GatewayCatalogModel"
+                    }
+                  ],
+                  "title": "Response List Models V1 Models Get"
                 }
               }
             },
@@ -3526,6 +6400,235 @@
         ]
       }
     },
+    "/v1/projects": {
+      "get": {
+        "description": "List projects.",
+        "operationId": "list_projects_v1_projects_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectResponse"
+                  },
+                  "title": "Response List Projects V1 Projects Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Projects",
+        "tags": [
+          "projects"
+        ]
+      },
+      "post": {
+        "description": "Create a project.",
+        "operationId": "create_project_v1_projects_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/v1/projects/{project_id}": {
+      "delete": {
+        "description": "Delete a project.",
+        "operationId": "delete_project_v1_projects__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Project",
+        "tags": [
+          "projects"
+        ]
+      },
+      "get": {
+        "description": "Get a project.",
+        "operationId": "get_project_v1_projects__project_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Project",
+        "tags": [
+          "projects"
+        ]
+      },
+      "patch": {
+        "description": "Update a project.",
+        "operationId": "update_project_v1_projects__project_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/v1/rerank": {
       "post": {
         "description": "Rerank documents by relevance to a query.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
@@ -3606,9 +6709,912 @@
         ]
       }
     },
+    "/v1/route-traces": {
+      "get": {
+        "description": "List route traces with optional filters.",
+        "operationId": "list_route_traces_v1_route_traces_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "policy_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Policy Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endpoint",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Endpoint"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RouteTraceResponse"
+                  },
+                  "title": "Response List Route Traces V1 Route Traces Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Route Traces",
+        "tags": [
+          "route-traces"
+        ]
+      }
+    },
+    "/v1/route-traces/summary": {
+      "get": {
+        "description": "Summarize route traces with optional filters.",
+        "operationId": "summarize_route_traces_v1_route_traces_summary_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "policy_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Policy Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "endpoint",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Endpoint"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 10000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteTraceSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Summarize Route Traces",
+        "tags": [
+          "route-traces"
+        ]
+      }
+    },
+    "/v1/route-traces/{trace_id}": {
+      "get": {
+        "description": "Get a route trace by id.",
+        "operationId": "get_route_trace_v1_route_traces__trace_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trace_id",
+            "required": true,
+            "schema": {
+              "title": "Trace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteTraceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Route Trace",
+        "tags": [
+          "route-traces"
+        ]
+      }
+    },
+    "/v1/routing-policies": {
+      "get": {
+        "description": "List routing policies.",
+        "operationId": "list_routing_policies_v1_routing_policies_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RoutingPolicyResponse"
+                  },
+                  "title": "Response List Routing Policies V1 Routing Policies Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Routing Policies",
+        "tags": [
+          "routing-policies"
+        ]
+      },
+      "post": {
+        "description": "Create a routing policy.",
+        "operationId": "create_routing_policy_v1_routing_policies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoutingPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Routing Policy",
+        "tags": [
+          "routing-policies"
+        ]
+      }
+    },
+    "/v1/routing-policies/{policy_id}": {
+      "delete": {
+        "description": "Delete a routing policy.",
+        "operationId": "delete_routing_policy_v1_routing_policies__policy_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "change_note",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Change Note"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Routing Policy",
+        "tags": [
+          "routing-policies"
+        ]
+      },
+      "get": {
+        "description": "Get a routing policy.",
+        "operationId": "get_routing_policy_v1_routing_policies__policy_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Routing Policy",
+        "tags": [
+          "routing-policies"
+        ]
+      },
+      "patch": {
+        "description": "Update a routing policy.",
+        "operationId": "update_routing_policy_v1_routing_policies__policy_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateRoutingPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Routing Policy",
+        "tags": [
+          "routing-policies"
+        ]
+      }
+    },
+    "/v1/routing-policies/{policy_id}/clone": {
+      "post": {
+        "description": "Clone a routing policy into an inactive draft for safe editing.",
+        "operationId": "clone_routing_policy_v1_routing_policies__policy_id__clone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloneRoutingPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Clone Routing Policy",
+        "tags": [
+          "routing-policies"
+        ]
+      }
+    },
+    "/v1/routing-policies/{policy_id}/eval-scores": {
+      "post": {
+        "description": "Apply uploaded eval or benchmark scores to weighted routing candidates.",
+        "operationId": "apply_routing_policy_eval_scores_v1_routing_policies__policy_id__eval_scores_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyRoutingPolicyEvalScoresRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApplyRoutingPolicyEvalScoresResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Routing Policy Eval Scores",
+        "tags": [
+          "routing-policies"
+        ]
+      }
+    },
+    "/v1/routing-policies/{policy_id}/revisions": {
+      "get": {
+        "description": "List immutable revisions for a routing policy.",
+        "operationId": "list_routing_policy_revisions_v1_routing_policies__policy_id__revisions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RoutingPolicyRevisionResponse"
+                  },
+                  "title": "Response List Routing Policy Revisions V1 Routing Policies  Policy Id  Revisions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Routing Policy Revisions",
+        "tags": [
+          "routing-policies"
+        ]
+      }
+    },
+    "/v1/routing-policies/{policy_id}/revisions/{revision}": {
+      "get": {
+        "description": "Get one immutable routing policy revision.",
+        "operationId": "get_routing_policy_revision_v1_routing_policies__policy_id__revisions__revision__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingPolicyRevisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Routing Policy Revision",
+        "tags": [
+          "routing-policies"
+        ]
+      }
+    },
+    "/v1/routing-policies/{policy_id}/revisions/{revision}/apply": {
+      "post": {
+        "description": "Apply a previous policy revision as a new audited revision.",
+        "operationId": "apply_routing_policy_revision_v1_routing_policies__policy_id__revisions__revision__apply_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "policy_id",
+            "required": true,
+            "schema": {
+              "title": "Policy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "title": "Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplyRoutingPolicyRevisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Apply Routing Policy Revision",
+        "tags": [
+          "routing-policies"
+        ]
+      }
+    },
+    "/v1/routing/resolve": {
+      "post": {
+        "description": "Dry-run a routing policy decision without calling a provider.",
+        "operationId": "resolve_routing_v1_routing_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveRoutingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveRoutingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Routing",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
     "/v1/usage": {
       "get": {
-        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range and user. Paginated via skip/limit.\nTimestamps accept either ISO 8601 strings or Unix epoch seconds (numeric).",
+        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, project, and usage tags.\nPaginated via skip/limit. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
         "operationId": "list_usage_v1_usage_get",
         "parameters": [
           {
@@ -3668,6 +7674,60 @@
             }
           },
           {
+            "description": "Filter to a gateway project",
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a gateway project",
+              "title": "Project Id"
+            }
+          },
+          {
+            "description": "Filter to logs containing this usage tag key",
+            "in": "query",
+            "name": "tag_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to logs containing this usage tag key",
+              "title": "Tag Key"
+            }
+          },
+          {
+            "description": "When tag_key is set, filter to logs whose tag value string matches this value",
+            "in": "query",
+            "name": "tag_value",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When tag_key is set, filter to logs whose tag value string matches this value",
+              "title": "Tag Value"
+            }
+          },
+          {
             "in": "query",
             "name": "skip",
             "required": false,
@@ -3718,6 +7778,162 @@
           }
         },
         "summary": "List Usage",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/usage/summary": {
+      "get": {
+        "description": "Summarize usage logs with optional project and tag filters.",
+        "operationId": "summarize_usage_v1_usage_summary_get",
+        "parameters": [
+          {
+            "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "Filter to a single user",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single user",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Filter to a gateway project",
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a gateway project",
+              "title": "Project Id"
+            }
+          },
+          {
+            "description": "Filter to logs containing this usage tag key",
+            "in": "query",
+            "name": "tag_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to logs containing this usage tag key",
+              "title": "Tag Key"
+            }
+          },
+          {
+            "description": "When tag_key is set, filter to logs whose tag value string matches this value",
+            "in": "query",
+            "name": "tag_value",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When tag_key is set, filter to logs whose tag value string matches this value",
+              "title": "Tag Value"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "maximum": 10000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Summarize Usage",
         "tags": [
           "usage"
         ]
@@ -4019,6 +8235,117 @@
         "summary": "Get User Usage",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/v1/vendors": {
+      "get": {
+        "description": "List Merge-style execution vendors and the models they can serve.",
+        "operationId": "list_vendors_v1_vendors_get",
+        "parameters": [
+          {
+            "description": "Pagination cursor",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Pagination cursor",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Page size",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Page size",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayVendorListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Vendors",
+        "tags": [
+          "models",
+          "vendors"
+        ]
+      }
+    },
+    "/v1/vendors/{vendor_id}": {
+      "get": {
+        "description": "Fetch one Merge-style execution vendor by id.",
+        "operationId": "get_vendor_v1_vendors__vendor_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "vendor_id",
+            "required": true,
+            "schema": {
+              "title": "Vendor Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewayVendorResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Vendor",
+        "tags": [
+          "models",
+          "vendors"
         ]
       }
     }

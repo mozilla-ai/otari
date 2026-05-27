@@ -66,11 +66,16 @@ pricing:
 | `cors_allow_origins` | list | `[]` | Allowed CORS origins (empty = disabled) |
 | `providers` | dict | `{}` | Provider credentials (see below) |
 | `pricing` | dict | `{}` | Model pricing entries |
-| `enable_metrics` | bool | `false` | Enable Prometheus `/metrics` endpoint |
+| `enable_metrics` | bool | `false` | Enable Prometheus `/metrics` endpoint with request, token, cost, budget, alert webhook, retry, and dead-letter metrics |
 | `enable_docs` | bool | `true` | Enable `/docs`, `/redoc`, `/openapi.json` |
 | `bootstrap_api_key` | bool | `true` | Create a first-use API key on startup when none exist |
 | `log_writer_strategy` | string | `"single"` | Usage log writing: `"single"` (inline) or `"batch"` (background) |
 | `budget_strategy` | string | `"for_update"` | Budget validation: `"for_update"`, `"cas"`, or `"disabled"` |
+| `budget_alert_webhook_retry_interval_seconds` | float | `0.0` | Seconds between background retries for failed/pending budget alert webhooks (`0` = disabled) |
+| `budget_alert_webhook_retry_max_attempts` | int | `5` | Maximum delivery attempts for background budget alert webhook retries |
+| `budget_alert_webhook_retry_backoff_seconds` | float | `60.0` | Base seconds for retry backoff after failed budget alert webhook delivery |
+| `budget_alert_webhook_retry_max_backoff_seconds` | float | `3600.0` | Maximum seconds between webhook retry attempts (`0` = no cap) |
+| `budget_alert_webhook_retry_batch_size` | int | `50` | Maximum alert webhooks retried per background worker pass |
 | `mode` | string | `"standalone"` | Configured mode (`"standalone"` or `"platform"`). Effective behavior is driven by presence of `OTARI_AI_TOKEN`. |
 | `platform` | dict | `{}` | otari.ai integration settings (`base_url`, timeouts, retries) |
 

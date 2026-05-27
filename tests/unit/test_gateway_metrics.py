@@ -10,6 +10,11 @@ from gateway.metrics import (
     MetricsMiddleware,
     metrics_endpoint,
     record_auth_failure,
+    record_budget_alert_created,
+    record_budget_alert_webhook_dead_letter,
+    record_budget_alert_webhook_delivery,
+    record_budget_alert_webhook_retry_run,
+    record_budget_alert_webhook_retry_selected,
     record_budget_exceeded,
     record_cost,
     record_rate_limit_hit,
@@ -79,6 +84,53 @@ def test_record_auth_failure_increments_counter() -> None:
     record_auth_failure("unit-test-reason")
 
     assert _sample("gateway_auth_failures_total", labels) - before == 1.0
+
+
+def test_record_budget_alert_created_increments_counter() -> None:
+    labels = {"scope_type": "project", "delivery_status": "pending"}
+    before = _sample("gateway_budget_alerts_created_total", labels)
+
+    record_budget_alert_created("project", "pending")
+
+    assert _sample("gateway_budget_alerts_created_total", labels) - before == 1.0
+
+
+def test_record_budget_alert_webhook_delivery_records_counter_and_duration() -> None:
+    labels = {"scope_type": "project", "outcome": "delivered"}
+    before_total = _sample("gateway_budget_alert_webhook_deliveries_total", labels)
+    before_count = _sample("gateway_budget_alert_webhook_delivery_duration_seconds_count", labels)
+
+    record_budget_alert_webhook_delivery(
+        scope_type="project",
+        outcome="delivered",
+        duration_seconds=0.25,
+    )
+
+    assert _sample("gateway_budget_alert_webhook_deliveries_total", labels) - before_total == 1.0
+    assert _sample("gateway_budget_alert_webhook_delivery_duration_seconds_count", labels) - before_count == 1.0
+    assert _sample("gateway_budget_alert_webhook_delivery_duration_seconds_sum", labels) >= 0.25
+
+
+def test_record_budget_alert_webhook_retry_metrics() -> None:
+    run_labels = {"result": "success"}
+    before_run = _sample("gateway_budget_alert_webhook_retry_runs_total", run_labels)
+    before_selected = _sample("gateway_budget_alert_webhook_retry_selected_total")
+
+    record_budget_alert_webhook_retry_run("success")
+    record_budget_alert_webhook_retry_selected(3)
+    record_budget_alert_webhook_retry_selected(0)
+
+    assert _sample("gateway_budget_alert_webhook_retry_runs_total", run_labels) - before_run == 1.0
+    assert _sample("gateway_budget_alert_webhook_retry_selected_total") - before_selected == 3.0
+
+
+def test_record_budget_alert_webhook_dead_letter_increments_counter() -> None:
+    labels = {"scope_type": "project", "reason": "max_attempts_after_delivery"}
+    before = _sample("gateway_budget_alert_webhook_dead_letters_total", labels)
+
+    record_budget_alert_webhook_dead_letter("project", "max_attempts_after_delivery")
+
+    assert _sample("gateway_budget_alert_webhook_dead_letters_total", labels) - before == 1.0
 
 
 def test_config_enable_metrics_defaults_to_false() -> None:

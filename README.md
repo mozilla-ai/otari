@@ -14,11 +14,31 @@ OpenAI-compatible LLM gateway with API key management, budget enforcement, and u
 
 `gateway` sits between your applications and LLM providers so you can control access, cost, and observability in one place.
 
-- OpenAI-compatible endpoints (`/v1/chat/completions`, `/v1/embeddings`, `/v1/models`)
+- OpenAI-compatible endpoints (`/v1/chat/completions`, `/v1/responses`, `/v1/embeddings`, `/v1/models`)
 - Virtual API key management (`/v1/keys`) for safe client access
 - User and budget controls (`/v1/users`, `/v1/budgets`)
+- Project-scoped routing and budget controls (`/v1/projects`)
+- Tag-scoped team/customer-tier budget groups from request `tags`
+- Budget alert thresholds, durable alert events, optional webhooks, and background delivery retries before hard caps
 - Usage and pricing tracking (`/v1/messages`, `/v1/pricing`)
-- Health and metrics endpoints (`/health`, optional `/metrics`)
+- Database-backed routing policies with `model: "default_routing"`, passive provider health, and weighted custom scoring
+- Eval/benchmark score imports and local generated-eval pipelines for tuning weighted routing candidates
+- Merge-style omitted/null/case-insensitive `default_routing` request handling
+- Immutable routing policy revision history for auditability
+- Draft/active/archived routing policy states plus clone-to-draft rollout flow
+- Audited rollback by applying previous routing policy revisions
+- Merge-style tag-condition routing and deterministic canary rollout with percentage buckets
+- Region-aware model constraints driven by request tags and candidate metadata
+- Policy guardrails for routed request DLP, redaction, credential-leak, and prompt-injection checks, including managed presets and external classifier hooks
+- Policy context trimming and summarization for long routed conversations before provider dispatch
+- Merge-style `default_strategy` policy definitions for fallback, intelligent, and weighted-score routing
+- Responses include the canonical served model and execution vendor
+- Dry-run route resolution (`/v1/routing/resolve`) and endpoint-aware route traces for inspecting policy decisions
+- Project/tag-attributed usage logs and summary rollups for billing and analytics exports
+- Self-hosted operator admin dashboard at `/admin` for policies, traces, usage, budget alerts, and revision rollback
+- Local routing gateway walkthrough in [`demo/routing-gateway`](demo/routing-gateway)
+- Review-ready compatibility map in [`docs/merge-gateway-compatibility.md`](docs/merge-gateway-compatibility.md)
+- Health and metrics endpoints (`/health`, optional `/metrics`) including request, token, cost, budget, alert webhook, retry, and dead-letter counters
 - Built-in tools dispatched server-side — `code_execution` (sandboxed Python REPL) and `web_search`. See [Built-in tools](#built-in-tools).
 
 ## Quickstart
@@ -201,13 +221,21 @@ alongside `GATEWAY_WEB_SEARCH_URL`.
 ## API surface
 
 - `GET /health`
+- `GET /admin`
 - `POST /v1/chat/completions`
+- `POST /v1/responses`
 - `POST /v1/embeddings`
 - `POST /v1/moderations`
 - `GET /v1/models`
+- `GET /v1/vendors`
 - `POST/GET /v1/keys`
 - `POST/GET /v1/users`
 - `POST/GET /v1/budgets`
+- `GET /v1/budgets/alerts`
+- `POST /v1/routing/resolve`
+- `POST/GET /v1/routing-policies`
+- `POST/GET /v1/projects`
+- `GET /v1/route-traces`
 - `GET /v1/messages`
 - `GET /v1/pricing`
 

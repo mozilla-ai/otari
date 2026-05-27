@@ -70,6 +70,7 @@ class UsageLogResponse(BaseModel):
     id: str
     user_id: str | None
     api_key_id: str | None
+    project_id: str | None
     timestamp: str
     model: str
     provider: str | None
@@ -80,13 +81,16 @@ class UsageLogResponse(BaseModel):
     cost: float | None
     status: str
     error_message: str | None
+    tags: dict[str, Any]
 
     @classmethod
     def from_model(cls, log: UsageLog) -> "UsageLogResponse":
+        tags = log.tags if isinstance(log.tags, dict) else {}
         return cls(
             id=log.id,
             user_id=log.user_id,
             api_key_id=log.api_key_id,
+            project_id=log.project_id,
             timestamp=log.timestamp.isoformat(),
             model=log.model,
             provider=log.provider,
@@ -97,6 +101,7 @@ class UsageLogResponse(BaseModel):
             cost=log.cost,
             status=log.status,
             error_message=log.error_message,
+            tags=tags,
         )
 
 
