@@ -341,6 +341,18 @@ async def create_message(
             provider_kwargs = get_provider_kwargs(config, provider)
             call_kwargs = {**provider_kwargs, **request_fields}
 
+        # Platform tool-loop streaming is currently single-attempt; pass the
+        # primary attempt's correlation id + the route's request id so the
+        # response still carries the platform contract (X-Correlation-ID,
+        # X-Otari-Request-ID, usage reported via _report_platform_usage).
+        platform_correlation_id: str | None = None
+        platform_request_id: str | None = None
+        platform_config: GatewayConfig | None = None
+        if platform_mode and route is not None and route.attempts:
+            platform_correlation_id = route.attempts[0].attempt_id
+            platform_request_id = route.request_id
+            platform_config = config
+
         return await _stream_messages(
             call_kwargs=call_kwargs,
             request=request,
@@ -360,6 +372,9 @@ async def create_message(
             web_search_tool_entry=web_search_tool_entry,
             web_search_url=web_search_url,
             max_tool_iterations=max_tool_iterations,
+            platform_correlation_id=platform_correlation_id,
+            platform_request_id=platform_request_id,
+            platform_config=platform_config,
         )
 
     # ------------------------------------------------------------------
@@ -716,14 +731,24 @@ async def _stream_messages(
     web_search_tool_entry: dict[str, Any] | None,
     web_search_url: str | None,
     max_tool_iterations: int,
+    platform_correlation_id: str | None = None,
+    platform_request_id: str | None = None,
+    platform_config: GatewayConfig | None = None,
 ) -> StreamingResponse:
     """Streaming dispatch for single-attempt requests.
 
-    Used for standalone mode and for the tool-loop path in platform mode (where
-    [:1] collapses fallback). Multi-attempt platform-mode streaming for
-    non-tool-loop requests uses ``_run_streaming_with_fallback_messages``.
+    Used for standalone mode and for the tool-loop path in platform mode
+    (where streaming fallback is still single-attempt — multi-attempt
+    streaming for non-tool-loop uses ``_run_streaming_with_fallback_messages``).
+
+    When ``platform_correlation_id`` / ``platform_request_id`` /
+    ``platform_config`` are set (platform mode, single-attempt path), the
+    response includes ``X-Correlation-ID`` / ``X-Otari-Request-ID`` headers
+    and usage is reported to the platform on complete/error. When unset, the
+    response logs usage to the local DB via ``log_usage`` (standalone mode).
     """
     call_kwargs["stream"] = True
+    platform_mode_active = platform_correlation_id is not None and platform_config is not None
 
     def _format_chunk(event: MessageStreamEvent) -> str:
         return f"event: {event.type}\ndata: {event.model_dump_json(exclude_none=True)}\n\n"
@@ -748,6 +773,18 @@ async def _stream_messages(
         return None
 
     async def _on_complete(usage_data: CompletionUsage) -> None:
+        if platform_mode_active:
+            assert platform_config is not None
+            assert platform_correlation_id is not None
+            asyncio.create_task(
+                _report_platform_usage(
+                    config=platform_config,
+                    correlation_id=platform_correlation_id,
+                    outcome="success",
+                    usage=usage_data,
+                )
+            )
+            return
         if db is None:
             return
         await log_usage(
@@ -762,6 +799,18 @@ async def _stream_messages(
         )
 
     async def _on_error(error: str) -> None:
+        if platform_mode_active:
+            assert platform_config is not None
+            assert platform_correlation_id is not None
+            asyncio.create_task(
+                _report_platform_usage(
+                    config=platform_config,
+                    correlation_id=platform_correlation_id,
+                    outcome="error",
+                    usage=None,
+                )
+            )
+            return
         if db is None:
             return
         await log_usage(
@@ -807,7 +856,14 @@ async def _stream_messages(
             status.HTTP_502_BAD_GATEWAY,
         ) from exc
 
-    rl_headers = rate_limit_headers(rate_limit_info) if rate_limit_info else {}
+    headers: dict[str, str] = {}
+    if rate_limit_info:
+        headers.update(rate_limit_headers(rate_limit_info))
+    if platform_correlation_id:
+        headers["X-Correlation-ID"] = platform_correlation_id
+    if platform_request_id:
+        headers["X-Otari-Request-ID"] = platform_request_id
+
     return StreamingResponse(
         streaming_generator(
             stream=msg_stream_typed,
@@ -819,7 +875,7 @@ async def _stream_messages(
             label=f"{provider}:{model}",
         ),
         media_type="text/event-stream",
-        headers=rl_headers,
+        headers=headers,
     )
 
 

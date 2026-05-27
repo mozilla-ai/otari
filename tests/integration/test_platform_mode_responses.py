@@ -449,3 +449,110 @@ def test_platform_mode_tool_loop_no_fallback_after_lock_in(
     # Both calls were to attempt 1 (rounds 1 and 2). Lock-in fired on round 1
     # so the second attempt is never tried.
     assert calls == ["sk-openai-broken", "sk-openai-broken"]
+
+
+# ---------- platform-mode tool-loop streaming contract ----------
+
+
+def test_platform_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Single-attempt tool-loop streaming in platform mode must honor the
+    platform contract: X-Correlation-ID + X-Otari-Request-ID headers + usage
+    report via _report_platform_usage on complete. Regression test for the
+    issue where ``_stream_responses`` was the standalone helper and silently
+    dropped the platform metadata when invoked for platform + tool_loop.
+    """
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json=_resolve_payload([_attempt(0, "stream-att-1", "gpt-4o-mini", "sk-platform")]),
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    from unittest.mock import AsyncMock, patch
+
+    from openai.types.responses import ResponseCompletedEvent
+
+    async def fake_loop_stream(**_kwargs: Any) -> Any:
+        # Emit a single response.completed event with usage so _on_complete
+        # fires.
+        yield ResponseCompletedEvent(
+            type="response.completed",
+            response=_response_object(),
+            sequence_number=0,
+        )
+
+    with (
+        patch("gateway.api.routes.responses.responses_tool_loop_stream", new=fake_loop_stream),
+        patch(
+            "gateway.services.mcp_client.MCPClientPool.__aenter__",
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+        ),
+        patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
+    ):
+        with platform_client.stream(
+            "POST",
+            "/v1/responses",
+            json={
+                "model": "gpt-4o-mini",
+                "input": "hi",
+                "stream": True,
+                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:18080/mcp"}],
+            },
+            headers={"Authorization": "Bearer user_test_token"},
+        ) as response:
+            assert response.status_code == 200, response.read().decode()
+            assert response.headers["X-Correlation-ID"] == "stream-att-1"
+            assert response.headers["X-Otari-Request-ID"] == "req-1"
+            for _ in response.iter_bytes():
+                pass
+
+    success_reports = [r for r in usage_reports if r.get("status") == "success"]
+    assert success_reports, "expected a success usage report for the platform-mode tool-loop stream"
+    assert success_reports[0]["correlation_id"] == "stream-att-1"
+
+
+def test_platform_mode_supports_responses_guard_checks_every_attempt(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression test for the SUPPORTS_RESPONSES guard. Previously only the
+    primary attempt was checked; a fallback to an unsupported provider would
+    crash the runner mid-fallback instead of failing fast.
+    """
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json=_resolve_payload([
+                    _attempt(0, "att-1", "gpt-4o-mini", "sk-openai", provider="openai"),
+                    _attempt(1, "att-2", "claude-3-5-sonnet-20241022", "sk-ant", provider="anthropic"),
+                ]),
+            )
+        return httpx.Response(204)
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    response = platform_client.post(
+        "/v1/responses",
+        json={"model": "gpt-4o-mini", "input": "hi"},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 400, response.text
+    # Anthropic is the unsupported attempt; the guard must surface it
+    # before any upstream call is made.
+    assert "anthropic" in response.json()["detail"]

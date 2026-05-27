@@ -152,9 +152,13 @@ async def create_response(
             resolve_latency_ms,
         )
         # Provider-support guard: even in platform mode, an unsupported provider
-        # would just fail downstream — surface a clearer 400 upfront.
-        if route.attempts:
-            provider = LLMProvider(route.attempts[0].provider)
+        # would just fail downstream — surface a clearer 400 upfront. Validate
+        # *every* resolved attempt so a fallback that lands on an unsupported
+        # provider (e.g. primary OpenAI, fallback Anthropic) fails fast here
+        # instead of crashing mid-fallback when the runner calls ``aresponses``
+        # on a provider that doesn't speak the Responses API.
+        for attempt in route.attempts:
+            provider = LLMProvider(attempt.provider)
             provider_class = AnyLLM.get_provider_class(provider)
             if not getattr(provider_class, "SUPPORTS_RESPONSES", False):
                 raise HTTPException(
@@ -358,6 +362,18 @@ async def create_response(
             call_kwargs["provider"] = provider
             call_kwargs["input_data"] = input_payload
 
+        # Platform tool-loop streaming is currently single-attempt; pass the
+        # primary attempt's correlation id + the route's request id so the
+        # response still carries the platform contract (X-Correlation-ID,
+        # X-Otari-Request-ID, usage reported via _report_platform_usage).
+        platform_correlation_id: str | None = None
+        platform_request_id: str | None = None
+        platform_config: GatewayConfig | None = None
+        if platform_mode and route is not None and route.attempts:
+            platform_correlation_id = route.attempts[0].attempt_id
+            platform_request_id = route.request_id
+            platform_config = config
+
         return await _stream_responses(
             call_kwargs=call_kwargs,
             tools_header=request_body.tools_header,
@@ -377,6 +393,9 @@ async def create_response(
             web_search_tool_entry=web_search_tool_entry,
             web_search_url=web_search_url,
             max_tool_iterations=max_tool_iterations,
+            platform_correlation_id=platform_correlation_id,
+            platform_request_id=platform_request_id,
+            platform_config=platform_config,
         )
 
     # ------------------------------------------------------------------
@@ -728,14 +747,24 @@ async def _stream_responses(
     web_search_tool_entry: dict[str, Any] | None,
     web_search_url: str | None,
     max_tool_iterations: int,
+    platform_correlation_id: str | None = None,
+    platform_request_id: str | None = None,
+    platform_config: GatewayConfig | None = None,
 ) -> StreamingResponse:
     """Streaming dispatch for single-attempt requests.
 
     Used for standalone mode and the tool-loop path in platform mode (where
-    [:1] collapses fallback). Multi-attempt platform-mode streaming for
-    non-tool-loop requests uses ``_run_streaming_with_fallback_responses``.
+    streaming fallback is still single-attempt — multi-attempt streaming for
+    non-tool-loop uses ``_run_streaming_with_fallback_responses``).
+
+    When ``platform_correlation_id`` / ``platform_request_id`` /
+    ``platform_config`` are set (platform mode, single-attempt path), the
+    response includes ``X-Correlation-ID`` / ``X-Otari-Request-ID`` headers
+    and usage is reported to the platform on complete/error. When unset, the
+    response logs usage to the local DB via ``log_usage`` (standalone mode).
     """
     call_kwargs["stream"] = True
+    platform_mode_active = platform_correlation_id is not None and platform_config is not None
 
     def _format_chunk(event: ResponseStreamEvent) -> str:
         return f"event: {event.type}\ndata: {event.model_dump_json(exclude_none=True)}\n\n"
@@ -747,6 +776,18 @@ async def _stream_responses(
         return None
 
     async def _on_complete(usage_data: CompletionUsage) -> None:
+        if platform_mode_active:
+            assert platform_config is not None
+            assert platform_correlation_id is not None
+            asyncio.create_task(
+                _report_platform_usage(
+                    config=platform_config,
+                    correlation_id=platform_correlation_id,
+                    outcome="success",
+                    usage=usage_data,
+                )
+            )
+            return
         if db is None:
             return
         await log_usage(
@@ -761,6 +802,18 @@ async def _stream_responses(
         )
 
     async def _on_error(error: str) -> None:
+        if platform_mode_active:
+            assert platform_config is not None
+            assert platform_correlation_id is not None
+            asyncio.create_task(
+                _report_platform_usage(
+                    config=platform_config,
+                    correlation_id=platform_correlation_id,
+                    outcome="error",
+                    usage=None,
+                )
+            )
+            return
         if db is None:
             return
         await log_usage(
@@ -804,7 +857,14 @@ async def _stream_responses(
             detail="web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
         ) from exc
 
-    rl_headers = rate_limit_headers(rate_limit_info) if rate_limit_info else {}
+    headers: dict[str, str] = {}
+    if rate_limit_info:
+        headers.update(rate_limit_headers(rate_limit_info))
+    if platform_correlation_id:
+        headers["X-Correlation-ID"] = platform_correlation_id
+    if platform_request_id:
+        headers["X-Otari-Request-ID"] = platform_request_id
+
     return StreamingResponse(
         streaming_generator(
             stream=stream_iter,
@@ -816,7 +876,7 @@ async def _stream_responses(
             label=f"{provider}:{model}",
         ),
         media_type="text/event-stream",
-        headers=rl_headers,
+        headers=headers,
     )
 
 
