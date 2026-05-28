@@ -12,16 +12,23 @@ key lives in this service, never in the gateway.
 
 ## Run it via docker-compose
 
-1. Get a key from <https://brave.com/search/api/> and export it:
+1. Get a key from <https://brave.com/search/api/>. Provide it via the
+   environment — either `export BRAVE_API_KEY=...`, or (cleaner) drop it in a
+   gitignored `.env` in the repo root, which `docker compose` auto-loads.
+   You also need to point the gateway at the adapter, so set both:
 
    ```bash
-   export BRAVE_API_KEY=...
+   # ./.env  (gitignored)
+   BRAVE_API_KEY=brv-xxxxxxxx
+   GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
    ```
 
-2. Start the adapter and point the gateway at it:
+   (If you pass an explicit `--env-file PATH`, compose reads that instead of
+   the root `.env`, so put both vars in the file you actually pass.)
+
+2. Start the adapter and the gateway:
 
    ```bash
-   export GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
    docker compose --profile web-search-brave up -d --build brave-adapter gateway
    ```
 
