@@ -189,14 +189,21 @@ that don't forbid automated querying (duckduckgo, mojeek, qwant, wikipedia)
 is extracted via trafilatura in-process so the model sees LLM-ready
 Markdown, not raw SERP snippets.
 
-**For commercial or production use**, swap the SearXNG container for a
-backend that uses a licensed API (Tavily, Brave Search API, Exa, Linkup,
-Serper). `WebSearchBackend` is configured purely by URL
+The free SearXNG engines rate-limit/CAPTCHA automated queries by IP, so they
+can be flaky for sustained use. **For commercial or production use**, swap the
+SearXNG container for a backend that uses a licensed API (Tavily, Brave Search
+API, Exa, Linkup, Serper). `WebSearchBackend` is configured purely by URL
 (`GATEWAY_WEB_SEARCH_URL`), so any HTTP service that exposes a
 SearXNG-compatible `/search?format=json` endpoint is a drop-in replacement
 — including thin adapters in front of commercial APIs. Adapters that
 already extract content can pass it through on the optional
 `extracted_content` result field to bypass the gateway-side extraction.
+
+A ready-to-run **Brave Search** adapter ships in
+`scripts/web-search-brave-adapter/`: set `BRAVE_API_KEY` and
+`GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080`, then
+`docker compose --profile web-search-brave up -d --build brave-adapter gateway`.
+See that folder's README for details and how to adapt it to another provider.
 
 Per-tool overrides (`max_results`, `allowed_domains`, `blocked_domains`,
 `purpose_hint`) live on the tool entry; operator-level env knobs

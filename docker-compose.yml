@@ -155,5 +155,30 @@ services:
       - SEARXNG_SECRET=${SEARXNG_SECRET:-otari-gateway-local-dev-secret}
     restart: unless-stopped
 
+  # Commercial-API web-search backend — a thin adapter that fronts the Brave
+  # Search API with the SearXNG-compatible /search?format=json shape the
+  # gateway expects. Use this instead of the `searxng` profile when the free
+  # metasearch engines rate-limit/CAPTCHA your IP and you want reliable
+  # results. Source + how-to live in scripts/web-search-brave-adapter/.
+  #
+  # Opt-in via the `web-search-brave` profile. To use it, set
+  #   GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
+  #   BRAVE_API_KEY=<your key from https://brave.com/search/api/>
+  # then `docker compose --profile web-search-brave up -d --build brave-adapter gateway`.
+  brave-adapter:
+    profiles: ["web-search-brave"]
+    build:
+      context: ./scripts/web-search-brave-adapter
+      dockerfile: Dockerfile
+    ports:
+      # Localhost-only, like the other internal backends — the gateway reaches
+      # it over the Docker network at `brave-adapter:8080`; this mapping is for
+      # ad-hoc curl/debugging.
+      - "127.0.0.1:8182:8080"
+    environment:
+      # Brave Search API subscription token. Kept here, not in the gateway.
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+    restart: unless-stopped
+
 volumes:
   postgres_data:
