@@ -104,3 +104,62 @@ def inject_purpose_hints_anthropic(
     else:
         call_kwargs["system"] = block
     return call_kwargs
+
+
+def openai_to_responses_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert OpenAI Chat-Completions function tools to OpenAI Responses shape.
+
+    Input (Chat Completions, nested)::
+
+        [{"type": "function", "function": {"name", "description", "parameters"}}]
+
+    Output (Responses, flat)::
+
+        [{"type": "function", "name", "description", "parameters"}]
+
+    Entries already in flat shape (no nested ``function`` dict) pass through
+    unchanged, so a mixed list works.
+    """
+    out: list[dict[str, Any]] = []
+    for tool in tools:
+        if tool.get("type") == "function" and isinstance(tool.get("function"), dict):
+            fn = tool["function"]
+            converted: dict[str, Any] = {"type": "function", "name": fn.get("name", "")}
+            if "description" in fn:
+                converted["description"] = fn["description"]
+            if "parameters" in fn:
+                converted["parameters"] = fn["parameters"]
+            out.append(converted)
+        else:
+            out.append(tool)
+    return out
+
+
+def inject_purpose_hints_responses(
+    call_kwargs: dict[str, Any],
+    hints: list[tuple[str, str]],
+    *,
+    header: str | None = None,
+) -> dict[str, Any]:
+    """Prepend per-tool purpose hints to the Responses API ``instructions`` field.
+
+    Mutates ``call_kwargs`` in place. No-op when ``hints`` is empty.
+    The Responses ``instructions`` field is a plain string (no content-block
+    list form), so the handling is simpler than the Anthropic case.
+    """
+    if not hints:
+        return call_kwargs
+
+    block = _build_hint_block(hints, header)
+    existing = call_kwargs.get("instructions")
+
+    if not existing:
+        call_kwargs["instructions"] = block
+    elif isinstance(existing, str):
+        call_kwargs["instructions"] = f"{block}\n\n{existing}"
+    else:
+        # Defensive: Responses spec types it as `str | None`, but if a future
+        # version of the SDK widens it, fall back to a string replacement
+        # rather than silently dropping the hints.
+        call_kwargs["instructions"] = block
+    return call_kwargs
