@@ -38,16 +38,16 @@ def validate_api_key_format(api_key: str) -> None:
         msg = f"API key must be a string, got {type(api_key).__name__}"
         raise ValueError(msg)
 
-    if not api_key.startswith("gw-"):
-        msg = "API key must start with 'gw-' prefix"
+    if not (api_key.startswith("gw-") or api_key.startswith("gw_")):
+        msg = "API key must start with 'gw-' or 'gw_' prefix"
         raise ValueError(msg)
 
     if len(api_key) < 50:
         msg = f"API key is too short. Expected at least 50 characters, got {len(api_key)}"
         raise ValueError(msg)
 
-    if not re.match(r"^gw-[A-Za-z0-9_-]+$", api_key):
-        msg = "API key contains invalid characters. Must match pattern: gw-[A-Za-z0-9_-]+"
+    if not re.match(r"^gw[-_][A-Za-z0-9_-]+$", api_key):
+        msg = "API key contains invalid characters. Must match pattern: gw[-_][A-Za-z0-9_-]+"
         raise ValueError(msg)
 
 
