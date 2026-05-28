@@ -113,3 +113,27 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: mzdotai/otari
           readme-filepath: ./README.md
+
+  notify-platform:
+    runs-on: ubuntu-latest
+    needs: build-and-push-image
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Generate App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.PLATFORM_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.PLATFORM_DISPATCH_APP_PRIVATE_KEY }}
+          owner: mozilla-ai
+          repositories: any-llm-platform
+
+      - name: Dispatch deploy event to any-llm-platform
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          IMAGE_REF: ${{ needs.build-and-push-image.outputs.image }}
+        run: |
+          IMAGE_TAG="${IMAGE_REF##*:}"
+          jq -nc --arg tag "$IMAGE_TAG" \
+            '{event_type:"otari-image-published",client_payload:{image_tag:$tag}}' \
+            | gh api -X POST /repos/mozilla-ai/any-llm-platform/dispatches --input -
