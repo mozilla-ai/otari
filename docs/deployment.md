@@ -133,7 +133,7 @@ The gateway supports two opt-in services via Docker Compose profiles.
 
 ### Code execution sandbox
 
-A sandboxed Python REPL for `code_execution` tool calls:
+A sandboxed Python REPL for `otari_code_execution` tool calls:
 
 ```bash
 docker compose --profile code-exec up -d
@@ -141,7 +141,7 @@ docker compose --profile code-exec up -d
 
 ### Web search
 
-A SearXNG-based web search backend for `web_search` tool calls:
+A SearXNG-based web search backend for `otari_web_search` tool calls:
 
 ```bash
 docker compose --profile web-search up -d

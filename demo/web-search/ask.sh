@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Send a single chat completion to the OSS gateway with web_search enabled.
+# Send a single chat completion to the OSS gateway with web search enabled.
 # Streams the SSE response and highlights tool calls + results as they land.
 # Use `--no-stream` for backends that don't support streaming
 # (e.g. the llamafile path).
+#
+# The tool-array `type` decides who runs the search:
+#   * otari_web_search   → the gateway's own web_search backend runs it
+#   * web_search / web_search_<date>  → passed through to the provider, which
+#     runs its native server-side search (the gateway just proxies)
 #
 # Env vars:
 #   GATEWAY_URL  — default http://localhost:${OTARI_PORT:-8000}
@@ -10,9 +15,8 @@
 #   GATEWAY_USER — default 'demo'
 #
 # Usage:
-#   ./ask.sh "What's the latest stable release of Python?"
-#   ./ask.sh --model openai:gpt-4o-mini --tool-type web_search "..."
-#   ./ask.sh --model llamafile:Qwen3-... --tool-type web_search_20250305 --no-stream "..."
+#   ./ask.sh "What's the latest stable release of Python?"            # gateway backend
+#   ./ask.sh --model anthropic:... --tool-type web_search_20250305 "..."  # Anthropic native
 
 set -euo pipefail
 
@@ -37,7 +41,7 @@ GATEWAY_KEY=${GATEWAY_KEY:-demo-master-key}
 GATEWAY_USER=${GATEWAY_USER:-demo}
 
 MODEL="anthropic:claude-sonnet-4-6"
-TOOL_TYPE="web_search"
+TOOL_TYPE="otari_web_search"
 stream=1
 
 while [[ $# -gt 0 ]]; do
@@ -89,11 +93,17 @@ print(json.dumps({
 }))
 ' "$MODEL" "$query" "$stream" "$GATEWAY_USER" "$TOOL_TYPE")
 
+if [[ "$TOOL_TYPE" == "otari_web_search" ]]; then
+  runs_in="gateway web_search backend (GATEWAY_WEB_SEARCH_URL set in compose)"
+else
+  runs_in="provider's native search (gateway passes '$TOOL_TYPE' through)"
+fi
+
 echo "──────────────────────────────────────────────────────────"
 echo "Q: $query"
-echo "    model:      $MODEL"
-echo "    tool-type:  $TOOL_TYPE"
-echo "    web_search: enabled in the gateway (GATEWAY_WEB_SEARCH_URL set in compose)"
+echo "    model:     $MODEL"
+echo "    tool-type: $TOOL_TYPE"
+echo "    runs in:   $runs_in"
 echo "──────────────────────────────────────────────────────────"
 echo
 

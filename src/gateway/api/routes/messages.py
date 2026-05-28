@@ -218,8 +218,8 @@ async def create_message(
             raise _anthropic_error(
                 _ERR_INVALID_REQUEST,
                 (
-                    "code_execution tool requested but no sandbox is configured on this gateway. "
-                    "Set GATEWAY_SANDBOX_URL on the gateway, or remove code_execution from `tools`."
+                    "otari_code_execution tool requested but no sandbox is configured on this gateway. "
+                    "Set GATEWAY_SANDBOX_URL on the gateway, or remove otari_code_execution from `tools`."
                 ),
                 status.HTTP_400_BAD_REQUEST,
             )
@@ -227,7 +227,7 @@ async def create_message(
             raise _anthropic_error(
                 _ERR_INVALID_REQUEST,
                 (
-                    "code_execution and mcp_servers cannot be combined in the same request yet; "
+                    "otari_code_execution and mcp_servers cannot be combined in the same request yet; "
                     "pick one. Multi-backend dispatch is a planned refinement."
                 ),
                 status.HTTP_400_BAD_REQUEST,
@@ -242,8 +242,8 @@ async def create_message(
             raise _anthropic_error(
                 _ERR_INVALID_REQUEST,
                 (
-                    "web_search tool requested but no search backend is configured on this gateway. "
-                    "Set GATEWAY_WEB_SEARCH_URL on the gateway, or remove web_search from `tools`."
+                    "otari_web_search tool requested but no search backend is configured on this gateway. "
+                    "Set GATEWAY_WEB_SEARCH_URL on the gateway, or remove otari_web_search from `tools`."
                 ),
                 status.HTTP_400_BAD_REQUEST,
             )
@@ -251,7 +251,7 @@ async def create_message(
             raise _anthropic_error(
                 _ERR_INVALID_REQUEST,
                 (
-                    "web_search cannot be combined with code_execution or mcp_servers in the same "
+                    "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same "
                     "request yet; pick one."
                 ),
                 status.HTTP_400_BAD_REQUEST,

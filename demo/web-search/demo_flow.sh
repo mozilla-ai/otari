@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Walkthrough for web search against the OSS gateway.
 #
-# The gateway accepts two equivalent tool-array shapes for web search:
-#   * {"type": "web_search"}              — gateway short form (matches OpenAI)
-#   * {"type": "web_search_20250305"}     — Anthropic, versioned (and future
-#                                           web_search_20260209 etc., matched
-#                                           by prefix)
+# The tool-array `type` says WHO runs the search:
+#   * {"type": "otari_web_search"}        — the gateway runs it against its own
+#                                           configured search backend (SearXNG
+#                                           by default), fetches + extracts
+#                                           content, feeds results back
+#   * {"type": "web_search"}              — passed through to the provider
+#   * {"type": "web_search_20250305"}     — Anthropic native, passed through
 #
-# Both map to the same WebSearchBackend, so swapping the OpenAI/Anthropic
-# SDK's `base_url` to the gateway keeps existing client code working.
+# Provider-named keywords are passed straight through; the gateway still does
+# routing, observability, and billing. This demo shows both: a gateway-managed
+# flow and a native-passthrough flow.
 #
 # Usage:
 #   ./demo_flow.sh                                  # runs every provider that has credentials
@@ -194,11 +197,14 @@ except Exception as e:
       ;;
   esac
 }
-provider_tool_type() {
+# Native web_search keyword each provider understands server-side. Empty for
+# providers with no native search (open-weight llamafile) — those only work in
+# the gateway-managed scenario.
+provider_native_tool_type() {
   case "$1" in
     anthropic) echo "web_search_20250305" ;;  # Anthropic's native versioned shape
-    openai)    echo "web_search" ;;            # OpenAI's native shape (and gateway-native)
-    llamafile) echo "web_search" ;;            # gateway-native short form
+    openai)    echo "web_search" ;;            # OpenAI's server-managed web_search
+    llamafile) echo "" ;;                      # no native search
   esac
 }
 provider_extra() {
@@ -236,17 +242,17 @@ ${BOLD}what's running${RST} (all via \`docker compose up\` in the gateway repo)
             │   OSS Gateway                    │ ──────▶ │  Postgres   │
             │                                  │  state  └─────────────┘
             │   tool-use loop:                 │
-            │    • detects web_search /        │
-            │      web_search_<ver>            │
-            │    • adds it to model's tools[]  │
-            │    • on tool_call: HTTP to       │
-            │      configured search backend   │
-            │    • fetch+extract content       │
-            │    • feed results back to model  │
-            │    • stream SSE to client        │
+            │    • otari_web_search → gateway   │
+            │      runs it: HTTP to the search  │
+            │      backend, fetch+extract,      │
+            │      feed results back to model   │
+            │    • web_search / web_search_<ver>│
+            │      → passed through to provider │
+            │    • stream SSE to client         │
             └────┬───────────────────────┬─────┘
                  │                       │
        Provider chat API        web-search HTTP API
+       (+ native web search)    (otari_web_search only)
                  │                       │
                  ▼                       ▼
        ┌─────────────────┐    ┌──────────────────────────┐
@@ -277,28 +283,31 @@ EOF
 show_request_shapes() {
   local query="$1"
   cat <<EOF
-${BOLD}two shapes the gateway accepts${RST} — same backend, different SDKs:
+${BOLD}the keyword decides who runs the search${RST} — look at the body, you know:
 
-  ${DIM}# Gateway-native / OpenAI Responses (terse):${RST}
+  ${DIM}# Gateway-managed — the gateway's own search backend runs it:${RST}
   ${CYN}{${RST}
   ${CYN}  "messages": [{ "role": "user", "content": "$query" }],${RST}
-  ${GRN}  "tools": [{ "type": "web_search" }]${RST}
+  ${GRN}  "tools": [{ "type": "otari_web_search" }]${RST}
   ${CYN}}${RST}
 
-  ${DIM}# Anthropic SDK code — versioned tool type:${RST}
+  ${DIM}# Native passthrough — Anthropic runs its own server-side search:${RST}
   ${CYN}{${RST}
   ${CYN}  "messages": [{ "role": "user", "content": "$query" }],${RST}
-  ${GRN}  "tools": [{ "type": "web_search_20250305" }]${RST}
+  ${YEL}  "tools": [{ "type": "web_search_20250305" }]${RST}
   ${CYN}}${RST}
 
-  ${DIM}# Optional per-tool overrides (max_results, allowed_domains, blocked_domains, purpose_hint):${RST}
+  ${DIM}# Gateway-managed, with per-tool overrides (max_results, allowed_domains, …):${RST}
   ${CYN}{${RST}
   ${GRN}  "tools": [{${RST}
-  ${GRN}    "type": "web_search",${RST}
+  ${GRN}    "type": "otari_web_search",${RST}
   ${YEL}    "max_results": 3,${RST}
   ${YEL}    "allowed_domains": ["docs.python.org"]${RST}
   ${GRN}  }]${RST}
   ${CYN}}${RST}
+
+  ${DIM}otari_web_search → gateway backend (overrides apply here).${RST}
+  ${DIM}web_search / web_search_<date> → the provider's own search.${RST}
 EOF
 }
 
@@ -309,7 +318,7 @@ show_what_llm_receives() {
   echo
   printf "${CYN}{${RST}\n"
   printf "${CYN}  \"messages\": [{ \"role\": \"user\", \"content\": \"%s\" }],${RST}\n" "$query"
-  printf "${GRN}  \"tools\": [{ \"type\": \"web_search\" }]${RST}\n"
+  printf "${GRN}  \"tools\": [{ \"type\": \"otari_web_search\" }]${RST}\n"
   printf "${CYN}}${RST}\n"
   echo
   echo "${DIM}  system message the gateway prepends:${RST}"
@@ -332,7 +341,7 @@ print(inject_purpose_hints(
   printf "${CYN}{${RST}\n"
   printf "${CYN}  \"messages\": [{ \"role\": \"user\", \"content\": \"%s\" }],${RST}\n" "$query"
   printf "${GRN}  \"tools\": [{${RST}\n"
-  printf "${GRN}    \"type\": \"web_search\",${RST}\n"
+  printf "${GRN}    \"type\": \"otari_web_search\",${RST}\n"
   printf "${YEL}    \"purpose_hint\": \"Use web_search only for questions about events after January 2026.\"${RST}\n"
   printf "${GRN}  }]${RST}\n"
   printf "${CYN}}${RST}\n"
@@ -391,40 +400,79 @@ pause
 QUERY="What is the current top story on Hacker News right now? Summarize it in one sentence."
 
 present "Under the hood: what the LLM actually receives" \
-        "Two things the gateway adds before forwarding to the model:" \
+        "When the request asks for otari_web_search, the gateway adds:" \
         " (a) a system message naming each tool source and its purpose hint" \
-        " (b) a tools[] entry for web_search" \
-        "The client never sees web_search executed — the gateway runs it."
+        " (b) a tools[] entry for the 'web_search' function the model calls" \
+        "The client sends otari_web_search; the gateway injects the rest and" \
+        "runs the search itself (fetch + extract) on each tool call."
 show_what_llm_receives "$QUERY"
 pause
 
 
 # ───────────────────────────────────────────────────────────────────────
-present "Same gateway, two request shapes" \
-        "The gateway accepts the keyword each SDK already emits, so swapping" \
-        "the SDK's base_url to the gateway keeps existing code working."
+present "Two ways to run web search through the gateway" \
+        "otari_web_search → the gateway's own backend runs it." \
+        "web_search / web_search_<date> → passed through to the provider," \
+        "which runs its native search. The keyword alone tells you which."
 show_request_shapes "$QUERY"
 pause
 
 
 # ───────────────────────────────────────────────────────────────────────
+# Scenario 1: gateway-managed web search (otari_web_search).
 N=${#ENABLED[@]}
-present "Web-search end to end — ${N} provider$( [[ $N -gt 1 ]] && echo s )" \
-        "Same question, same SearXNG instance. Each call uses the SDK keyword" \
-        "native to its provider — proving the gateway recognises both shapes."
+present "1) Gateway-managed web search — ${N} provider$( [[ $N -gt 1 ]] && echo s )" \
+        "Every provider uses the SAME keyword (otari_web_search) and the SAME" \
+        "SearXNG instance — identical results regardless of which model ran." \
+        "Watch the 'searxng saw' lines: the gateway's backend does the work."
 for p in "${ENABLED[@]}"; do
   if ! model=$(provider_model "$p"); then
     echo "${YEL}── $p ── skipped (couldn't resolve a model id)${RST}"
     continue
   fi
-  tool_type=$(provider_tool_type "$p")
   extra=$(provider_extra "$p")
 
   echo
-  echo "${BOLD}${GRN}── $p ── model=$model tool-type=$tool_type${RST}"
+  echo "${BOLD}${GRN}── $p ── model=$model tool-type=otari_web_search${RST}"
   # shellcheck disable=SC2086
-  "$ASK" --model "$model" --tool-type "$tool_type" $extra "$QUERY"
+  "$ASK" --model "$model" --tool-type "otari_web_search" $extra "$QUERY"
 done
+pause
+
+
+# ───────────────────────────────────────────────────────────────────────
+# Scenario 2: native provider web search via the gateway. Only providers with
+# native server-side search participate (llamafile is open-weight, none — it
+# only works in scenario 1).
+NATIVE=()
+for p in "${ENABLED[@]}"; do
+  [[ -n "$(provider_native_tool_type "$p")" ]] && NATIVE+=("$p")
+done
+
+present "2) Native provider web search — via the gateway" \
+        "Same gateway, but the keyword is the provider's own (web_search," \
+        "web_search_<date>). The gateway passes it through untouched instead of" \
+        "running its own search — the 'searxng saw' lines stay quiet." \
+        "Whether the provider then runs a server-side search depends on the" \
+        "provider and endpoint (e.g. Anthropic's web_search expects /v1/messages," \
+        "so on /v1/chat/completions the model may just answer from memory)."
+if [[ ${#NATIVE[@]} -eq 0 ]]; then
+  echo "${YEL}  no providers with native search are enabled (need --openai or --anthropic).${RST}"
+else
+  for p in "${NATIVE[@]}"; do
+    if ! model=$(provider_model "$p"); then
+      echo "${YEL}── $p ── skipped (couldn't resolve a model id)${RST}"
+      continue
+    fi
+    tool_type=$(provider_native_tool_type "$p")
+    extra=$(provider_extra "$p")
+
+    echo
+    echo "${BOLD}${GRN}── $p ── model=$model tool-type=$tool_type (provider runs it)${RST}"
+    # shellcheck disable=SC2086
+    "$ASK" --model "$model" --tool-type "$tool_type" $extra "$QUERY"
+  done
+fi
 pause
 
 
@@ -434,5 +482,5 @@ echo "${BOLD}${GRN}════════════════════�
 echo "${BOLD}${GRN}  fin — questions?${RST}"
 echo "${BOLD}${GRN}═══════════════════════════════════════════════════════════════════════${RST}"
 echo
-echo "${DIM}  Same flow works for any model the gateway can route to —${RST}"
-echo "${DIM}  open-weight or frontier. The gateway just runs the loop.${RST}"
+echo "${DIM}  otari_web_search → one backend, consistent results, any model.${RST}"
+echo "${DIM}  provider-named keyword → the provider's own search, gateway proxies.${RST}"

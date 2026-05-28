@@ -221,7 +221,7 @@ def test_code_execution_dispatches_through_sandbox_backend(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``tools: [{"type": "code_execution_*"}]`` routes through ``SandboxBackend``."""
+    """``tools: [{"type": "otari_code_execution"}]`` routes through ``SandboxBackend``."""
     monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     pool_seen: list[Any] = []
@@ -249,7 +249,7 @@ def test_code_execution_dispatches_through_sandbox_backend(
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "compute"}],
                 "max_tokens": 100,
-                "tools": [{"type": "code_execution_20250825"}],
+                "tools": [{"type": "otari_code_execution"}],
             },
             headers=api_key_header,
         )
@@ -264,7 +264,7 @@ def test_web_search_dispatches_through_web_search_backend(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``tools: [{"type": "web_search_*"}]`` routes through ``WebSearchBackend``."""
+    """``tools: [{"type": "otari_web_search"}]`` routes through ``WebSearchBackend``."""
     monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
 
     pool_seen: list[Any] = []
@@ -291,7 +291,7 @@ def test_web_search_dispatches_through_web_search_backend(
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "search"}],
                 "max_tokens": 100,
-                "tools": [{"type": "web_search_20250305"}],
+                "tools": [{"type": "otari_web_search"}],
             },
             headers=api_key_header,
         )
@@ -299,6 +299,79 @@ def test_web_search_dispatches_through_web_search_backend(
     assert resp.status_code == 200
     assert resp.json()["content"][0]["text"] == "via-web-search-loop"
     assert pool_seen == [fake_backend], "loop didn't receive the WebSearchBackend"
+
+
+# ---------- provider-named keyword passthrough ----------
+
+
+@pytest.mark.parametrize("tool_type", ["code_execution", "code_interpreter", "code_execution_20250825"])
+def test_provider_code_execution_passes_through_to_upstream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tool_type: str,
+) -> None:
+    """Provider-named code-execution keywords are NOT intercepted. They stay in
+    ``tools[]`` and reach ``amessages`` so Anthropic runs the code in its own
+    native sandbox — even with no gateway sandbox configured.
+    """
+    monkeypatch.delenv("GATEWAY_SANDBOX_URL", raising=False)
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response("ok")
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "compute"}],
+                "max_tokens": 100,
+                "tools": [{"type": tool_type}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    forwarded = captured.get("tools")
+    assert forwarded is not None, "provider-named tool was dropped instead of forwarded"
+    assert {t["type"] for t in forwarded} == {tool_type}
+
+
+@pytest.mark.parametrize("tool_type", ["web_search", "web_search_20250305"])
+def test_provider_web_search_passes_through_to_upstream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tool_type: str,
+) -> None:
+    """Provider-named web_search keywords pass through to Anthropic even when
+    no gateway web_search backend is configured."""
+    monkeypatch.delenv("GATEWAY_WEB_SEARCH_URL", raising=False)
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response("ok")
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": tool_type}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    forwarded = captured.get("tools")
+    assert forwarded is not None, "provider-named tool was dropped instead of forwarded"
+    assert {t["type"] for t in forwarded} == {tool_type}
 
 
 # ---------- validation errors (Anthropic-shaped 400) ----------
@@ -324,7 +397,7 @@ def test_code_execution_without_sandbox_env_returns_400_anthropic_body(
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 100,
-            "tools": [{"type": "code_execution_20250825"}],
+            "tools": [{"type": "otari_code_execution"}],
         },
         headers=api_key_header,
     )
@@ -344,7 +417,7 @@ def test_code_execution_combined_with_mcp_servers_returns_400(
             "model": "anthropic:claude-3-5-sonnet-20241022",
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 100,
-            "tools": [{"type": "code_execution_20250825"}],
+            "tools": [{"type": "otari_code_execution"}],
             "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
         },
         headers=api_key_header,
@@ -353,7 +426,7 @@ def test_code_execution_combined_with_mcp_servers_returns_400(
     _assert_anthropic_error(
         resp.json(),
         error_type="invalid_request_error",
-        message_substr="code_execution and mcp_servers cannot be combined",
+        message_substr="otari_code_execution and mcp_servers cannot be combined",
     )
 
 
@@ -371,8 +444,8 @@ def test_web_search_combined_with_sandbox_returns_400(
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 100,
             "tools": [
-                {"type": "code_execution_20250825"},
-                {"type": "web_search_20250305"},
+                {"type": "otari_code_execution"},
+                {"type": "otari_web_search"},
             ],
         },
         headers=api_key_header,
@@ -381,7 +454,7 @@ def test_web_search_combined_with_sandbox_returns_400(
     _assert_anthropic_error(
         resp.json(),
         error_type="invalid_request_error",
-        message_substr="web_search cannot be combined",
+        message_substr="otari_web_search cannot be combined",
     )
 
 
@@ -422,7 +495,7 @@ def test_max_tool_iterations_exceeded_returns_422_anthropic_body(
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "go"}],
                 "max_tokens": 100,
-                "tools": [{"type": "code_execution_20250825"}],
+                "tools": [{"type": "otari_code_execution"}],
                 "max_tool_iterations": 1,
             },
             headers=api_key_header,
@@ -455,7 +528,7 @@ def test_sandbox_unreachable_returns_502_anthropic_body(
                 "model": "anthropic:claude-3-5-sonnet-20241022",
                 "messages": [{"role": "user", "content": "go"}],
                 "max_tokens": 100,
-                "tools": [{"type": "code_execution_20250825"}],
+                "tools": [{"type": "otari_code_execution"}],
             },
             headers=api_key_header,
         )
@@ -600,7 +673,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``stream: true`` with ``code_execution_*`` opens the sandbox backend
+    """``stream: true`` with ``otari_code_execution`` opens the sandbox backend
     and feeds it to ``anthropic_tool_loop_stream``.
     """
     monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
@@ -629,7 +702,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
                 "messages": [{"role": "user", "content": "compute"}],
                 "max_tokens": 100,
                 "stream": True,
-                "tools": [{"type": "code_execution_20250825"}],
+                "tools": [{"type": "otari_code_execution"}],
             },
             headers=api_key_header,
         )
@@ -665,7 +738,7 @@ def test_stream_sandbox_unreachable_returns_502_anthropic_body(
                 "messages": [{"role": "user", "content": "go"}],
                 "max_tokens": 100,
                 "stream": True,
-                "tools": [{"type": "code_execution_20250825"}],
+                "tools": [{"type": "otari_code_execution"}],
             },
             headers=api_key_header,
         )

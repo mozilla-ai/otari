@@ -19,7 +19,7 @@ OpenAI-compatible LLM gateway with API key management, budget enforcement, and u
 - User and budget controls (`/v1/users`, `/v1/budgets`)
 - Usage and pricing tracking (`/v1/messages`, `/v1/pricing`)
 - Health and metrics endpoints (`/health`, optional `/metrics`)
-- Built-in tools dispatched server-side — `code_execution` (sandboxed Python REPL) and `web_search`. See [Built-in tools](#built-in-tools).
+- Built-in tools the gateway runs itself — `otari_code_execution` (sandboxed Python REPL) and `otari_web_search`. See [Built-in tools](#built-in-tools).
 
 ## Quickstart
 
@@ -143,39 +143,45 @@ Gateway will be available at `http://localhost:8000`.
 
 ## Built-in tools
 
-The gateway dispatches a couple of tools server-side so any model — including
+The gateway can run a couple of tools itself so any model — including
 open-weight ones — gets parity with what frontier APIs expose as managed
-tools. Both are opt-in via the request's `tools` array (matching OpenAI's and
-Anthropic's wire shape) and run inside docker-compose profiles so operators
-who don't use them don't pull extra images.
+tools. Both are opt-in via the request's `tools` array and run inside
+docker-compose profiles so operators who don't use them don't pull extra
+images.
 
-### `code_execution` — sandboxed Python REPL
+These use dedicated `otari_*` tool types. The keyword decides who runs the
+code: an `otari_*` type means the gateway runs it; the provider-named keywords
+(`code_interpreter`, `code_execution_<date>`, `web_search`,
+`web_search_<date>`) are passed through to the upstream provider untouched, so
+the provider runs them in its own native sandbox/search. Either way the gateway
+still handles routing, observability, and billing.
+
+### `otari_code_execution` — sandboxed Python REPL
 
 ```json
 {
   "model": "anthropic:claude-sonnet-4-6",
   "messages": [{"role": "user", "content": "Compute 23 factorial."}],
-  "tools": [{"type": "code_execution"}]
+  "tools": [{"type": "otari_code_execution"}]
 }
 ```
 
-`code_interpreter` (OpenAI) and `code_execution_<date>` (Anthropic) are
-accepted as aliases. Bring up with `docker compose --profile code-exec up`.
-See `demo/code-exec/` for a runnable walkthrough.
+Bring up with `docker compose --profile code-exec up`. See `demo/code-exec/`
+for a runnable walkthrough of both the gateway-managed and native-passthrough
+flows.
 
-### `web_search` — current-information search
+### `otari_web_search` — current-information search
 
 ```json
 {
   "model": "anthropic:claude-sonnet-4-6",
   "messages": [{"role": "user", "content": "What's the latest stable Python release?"}],
-  "tools": [{"type": "web_search"}]
+  "tools": [{"type": "otari_web_search"}]
 }
 ```
 
-`web_search_<date>` (Anthropic) is accepted as an alias. Bring up with
-`docker compose --profile web-search up`. See `demo/web-search/` for a
-runnable walkthrough.
+Bring up with `docker compose --profile web-search up`. See `demo/web-search/`
+for a runnable walkthrough.
 
 The bundled backend is a SearXNG metasearch container restricted to engines
 that don't forbid automated querying (duckduckgo, mojeek, qwant, wikipedia)
