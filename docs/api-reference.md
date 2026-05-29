@@ -43,7 +43,7 @@ No authentication required.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions. Supports streaming and tool use (`code_execution`, `web_search`, MCP). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions. Supports streaming and tool use (`otari_code_execution`, `otari_web_search`, MCP). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 
 ## Standalone-only endpoints
 

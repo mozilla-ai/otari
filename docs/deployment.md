@@ -133,7 +133,7 @@ The gateway supports two opt-in services via Docker Compose profiles.
 
 ### Code execution sandbox
 
-A sandboxed Python REPL for `code_execution` tool calls:
+A sandboxed Python REPL for `otari_code_execution` tool calls:
 
 ```bash
 docker compose --profile code-exec up -d
@@ -141,13 +141,28 @@ docker compose --profile code-exec up -d
 
 ### Web search
 
-A SearXNG-based web search backend for `web_search` tool calls:
+A SearXNG-based web search backend for `otari_web_search` tool calls:
 
 ```bash
 docker compose --profile web-search up -d
 ```
 
-Both profiles can be combined:
+SearXNG's free engines (DuckDuckGo, mojeek, qwant, …) rate-limit/CAPTCHA
+automated queries by IP, so they can be unreliable. For dependable results,
+use a licensed search API instead. A ready-to-run **Brave Search** adapter
+ships in `scripts/web-search-brave-adapter/`:
+
+```bash
+export BRAVE_API_KEY=...   # from https://brave.com/search/api/
+export GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
+docker compose --profile web-search-brave up -d --build brave-adapter gateway
+```
+
+`WebSearchBackend` is URL-configured, so any service exposing a
+SearXNG-compatible `/search?format=json` endpoint works — copy the adapter to
+front Tavily, Exa, Serper, etc.
+
+Both code-exec and web-search profiles can be combined:
 
 ```bash
 docker compose --profile code-exec --profile web-search up -d

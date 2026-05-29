@@ -223,7 +223,7 @@ def test_code_execution_dispatches_through_sandbox_backend(
             json={
                 "model": _MODEL,
                 "input": "compute",
-                "tools": [{"type": "code_execution_20250825"}],
+                "tools": [{"type": "otari_code_execution"}],
             },
             headers=api_key_header,
         )
@@ -262,13 +262,76 @@ def test_web_search_dispatches_through_web_search_backend(
             json={
                 "model": _MODEL,
                 "input": "search",
-                "tools": [{"type": "web_search_20250305"}],
+                "tools": [{"type": "otari_web_search"}],
             },
             headers=api_key_header,
         )
 
     assert resp.status_code == 200, resp.text
     assert pool_seen == [fake_backend]
+
+
+# ---------- provider-named keyword passthrough ----------
+
+
+@pytest.mark.parametrize("tool_type", ["code_execution", "code_interpreter", "code_execution_20250825"])
+def test_provider_code_execution_passes_through_to_upstream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tool_type: str,
+) -> None:
+    """Provider-named code-execution keywords are NOT intercepted by the
+    gateway. They stay in ``tools[]`` and reach ``aresponses`` so the provider
+    runs the code server-side — even when no gateway sandbox is configured.
+    """
+    monkeypatch.delenv("GATEWAY_SANDBOX_URL", raising=False)
+    captured: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return _response()
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        resp = client.post(
+            "/v1/responses",
+            json={"model": _MODEL, "input": "compute", "tools": [{"type": tool_type}]},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    forwarded = captured.get("tools")
+    assert forwarded is not None, "provider-named tool was dropped instead of forwarded"
+    assert {t["type"] for t in forwarded} == {tool_type}
+
+
+@pytest.mark.parametrize("tool_type", ["web_search", "web_search_20250305"])
+def test_provider_web_search_passes_through_to_upstream(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tool_type: str,
+) -> None:
+    """Provider-named web_search keywords pass through to the provider even
+    when no gateway web_search backend is configured."""
+    monkeypatch.delenv("GATEWAY_WEB_SEARCH_URL", raising=False)
+    captured: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return _response()
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        resp = client.post(
+            "/v1/responses",
+            json={"model": _MODEL, "input": "search", "tools": [{"type": tool_type}]},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    forwarded = captured.get("tools")
+    assert forwarded is not None, "provider-named tool was dropped instead of forwarded"
+    assert {t["type"] for t in forwarded} == {tool_type}
 
 
 # ---------- validation errors ----------
@@ -285,7 +348,7 @@ def test_code_execution_without_sandbox_env_returns_400(
         json={
             "model": _MODEL,
             "input": "hi",
-            "tools": [{"type": "code_execution_20250825"}],
+            "tools": [{"type": "otari_code_execution"}],
         },
         headers=api_key_header,
     )
@@ -304,13 +367,13 @@ def test_code_execution_combined_with_mcp_servers_returns_400(
         json={
             "model": _MODEL,
             "input": "hi",
-            "tools": [{"type": "code_execution_20250825"}],
+            "tools": [{"type": "otari_code_execution"}],
             "mcp_servers": [{"name": "x", "url": "http://127.0.0.1:9999/mcp"}],
         },
         headers=api_key_header,
     )
     assert resp.status_code == 400
-    assert "code_execution and mcp_servers" in resp.json()["detail"]
+    assert "otari_code_execution and mcp_servers" in resp.json()["detail"]
 
 
 def test_web_search_combined_with_sandbox_returns_400(
@@ -326,14 +389,14 @@ def test_web_search_combined_with_sandbox_returns_400(
             "model": _MODEL,
             "input": "hi",
             "tools": [
-                {"type": "code_execution_20250825"},
-                {"type": "web_search_20250305"},
+                {"type": "otari_code_execution"},
+                {"type": "otari_web_search"},
             ],
         },
         headers=api_key_header,
     )
     assert resp.status_code == 400
-    assert "web_search cannot be combined" in resp.json()["detail"]
+    assert "otari_web_search cannot be combined" in resp.json()["detail"]
 
 
 # ---------- gateway-side runtime errors ----------
@@ -369,7 +432,7 @@ def test_max_tool_iterations_exceeded_returns_422(
             json={
                 "model": _MODEL,
                 "input": "go",
-                "tools": [{"type": "code_execution_20250825"}],
+                "tools": [{"type": "otari_code_execution"}],
                 "max_tool_iterations": 1,
             },
             headers=api_key_header,
@@ -397,7 +460,7 @@ def test_sandbox_unreachable_returns_502(
             json={
                 "model": _MODEL,
                 "input": "go",
-                "tools": [{"type": "code_execution_20250825"}],
+                "tools": [{"type": "otari_code_execution"}],
             },
             headers=api_key_header,
         )
@@ -532,8 +595,8 @@ def test_stream_code_execution_dispatches_through_sandbox(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``stream: true`` with ``code_execution_*`` opens the sandbox backend and
-    feeds it to ``responses_tool_loop_stream``.
+    """``stream: true`` with ``otari_code_execution`` opens the sandbox backend
+    and feeds it to ``responses_tool_loop_stream``.
 
     Note: the streaming path uses the ``sandbox_backend`` instance itself
     (not the value ``__aenter__`` returns) for ``purpose_hints()`` and as
@@ -566,7 +629,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
                 "model": _MODEL,
                 "input": "compute",
                 "stream": True,
-                "tools": [{"type": "code_execution_20250825"}],
+                "tools": [{"type": "otari_code_execution"}],
             },
             headers=api_key_header,
         )
@@ -600,7 +663,7 @@ def test_stream_sandbox_unreachable_returns_502(
                 "model": _MODEL,
                 "input": "go",
                 "stream": True,
-                "tools": [{"type": "code_execution_20250825"}],
+                "tools": [{"type": "otari_code_execution"}],
             },
             headers=api_key_header,
         )

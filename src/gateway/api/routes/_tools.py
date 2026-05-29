@@ -3,55 +3,68 @@
 These helpers are format-agnostic — they only look at the `type` string on
 each tool entry. The same predicates and extractors are used from the
 Chat-Completions, Anthropic Messages, and OpenAI Responses endpoints so
-``code_execution`` / ``web_search`` requests get identical handling regardless
-of wire shape.
+``otari_code_execution`` / ``otari_web_search`` requests get identical
+handling regardless of wire shape.
+
+Only the explicit ``otari_*`` tool types trigger gateway-side execution.
+Every other tool type — the legacy gateway short forms (``code_execution`` /
+``web_search``) and the provider-native keywords (``code_interpreter`` /
+``code_execution_<date>`` / ``web_search_<date>``) — is left untouched in
+``tools[]`` and forwarded to the upstream provider, which runs it server-side.
+The keyword alone says who runs the code — no flag, no env toggle.
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from enum import StrEnum, auto
 from typing import Any
 
 from gateway.log_config import logger
 from gateway.services.web_search_backend import WebSearchBackend
 
 
+class Tool(StrEnum):
+    """Gateway-managed tool types — the only ``type`` values the gateway runs
+    itself (everything else is forwarded to the upstream provider).
+
+    Values are derived as ``otari_<member>`` so every gateway tool carries the
+    ``otari_`` prefix by construction; registering a new gateway-run tool is a
+    one-line addition here.
+    """
+
+    @staticmethod
+    def _generate_next_value_(name: str, start: int, count: int, last_values: list[Any]) -> str:
+        return f"otari_{name.lower()}"
+
+    CODE_EXECUTION = auto()  # -> "otari_code_execution"
+    WEB_SEARCH = auto()  # -> "otari_web_search"
+
+
 def _is_web_search_tool_type(type_value: Any) -> bool:
-    """Recognise the tool-array shapes that map to the web_search backend.
+    """Recognise the explicit gateway-managed web_search tool type.
 
-    Accepts:
-      * ``"web_search"`` — gateway-native short form (matches OpenAI's
-        ``{"type": "web_search"}`` server-managed tool).
-      * ``"web_search_*"`` — Anthropic versioned types (e.g.
-        ``"web_search_20250305"``, future ``"web_search_20260209"``).
-
-    Matching Anthropic by prefix means new versions keep working without a
-    code change; the backend's search semantics are version-agnostic.
+    Matches only ``"otari_web_search"``. Provider-named keywords
+    (``"web_search"``, ``"web_search_<date>"``) are *not* matched — they pass
+    through unchanged to the upstream provider, which runs the search itself.
     """
     if not isinstance(type_value, str):
         return False
-    return type_value == "web_search" or type_value.startswith("web_search_")
+    return type_value == Tool.WEB_SEARCH
 
 
 def _is_code_execution_tool_type(type_value: Any) -> bool:
-    """Recognise the tool-array shapes Anthropic and OpenAI use for code execution.
+    """Recognise the explicit gateway-managed code-execution tool type.
 
-    Accepts:
-      * ``"code_execution"`` — gateway-native short form
-      * ``"code_interpreter"`` — OpenAI Responses/Assistants API
-      * ``"code_execution_*"`` — Anthropic versioned types
-        (e.g. ``"code_execution_20250825"``)
-
-    Matching Anthropic by prefix means new versions (``code_execution_20260101``,
-    etc.) keep working without a code change. Our sandbox is a generic Python
-    REPL, so we don't need to track per-version semantics.
+    Matches only ``"otari_code_execution"``. Provider-named keywords
+    (``"code_execution"``, ``"code_interpreter"``, ``"code_execution_<date>"``)
+    are *not* matched — they pass through unchanged to the upstream provider,
+    which runs the code in its own native sandbox.
     """
     if not isinstance(type_value, str):
         return False
-    return (
-        type_value == "code_execution" or type_value == "code_interpreter" or type_value.startswith("code_execution_")
-    )
+    return type_value == Tool.CODE_EXECUTION
 
 
 # Gateway-internal fields the provider SDKs (any-llm, anthropic, openai, …)
@@ -130,13 +143,11 @@ def _extract_first_matching_tool(
 def _extract_code_execution_tool(
     tools: list[dict[str, Any]] | None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
-    """Pull the first code-execution-style entry out of ``tools``.
+    """Pull the first ``{"type": "otari_code_execution"}`` entry out of ``tools``.
 
-    Detects the gateway-native ``{"type": "code_execution"}`` shape plus the
-    provider-native equivalents from OpenAI (``code_interpreter``) and Anthropic
-    (``code_execution_20250825`` and future versions). All three map to the same
-    sandbox backend so swapping ``base_url`` to the gateway keeps existing
-    SDK code working unchanged.
+    Only the explicit gateway-managed type is extracted (and run in the
+    gateway sandbox). Provider-named code-execution keywords stay in
+    ``tools[]`` and reach the upstream provider unchanged.
     """
     return _extract_first_matching_tool(tools, _is_code_execution_tool_type)
 
@@ -144,11 +155,11 @@ def _extract_code_execution_tool(
 def _extract_web_search_tool(
     tools: list[dict[str, Any]] | None,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
-    """Pull the first web-search-style entry out of ``tools``.
+    """Pull the first ``{"type": "otari_web_search"}`` entry out of ``tools``.
 
-    Accepts both the gateway-native ``{"type": "web_search"}`` shape (matching
-    OpenAI's server-managed tool) and Anthropic's dated variants
-    (``web_search_20250305`` etc.). All map to the same backend.
+    Only the explicit gateway-managed type is extracted (and run against the
+    gateway's web_search backend). Provider-named web_search keywords stay in
+    ``tools[]`` and reach the upstream provider unchanged.
     """
     return _extract_first_matching_tool(tools, _is_web_search_tool_type)
 

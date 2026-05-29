@@ -2,6 +2,10 @@
 # Bring up the OSS gateway demo (gateway + searxng + postgres) with the keys
 # and ports configured in this folder's .env. Loads .env via docker-compose's
 # --env-file so the API keys never need to live in shell history.
+#
+#   ./start.sh                # SearXNG backend (free metasearch, can be flaky)
+#   ./start.sh --brave        # Brave Search API backend (needs BRAVE_API_KEY)
+#   ./start.sh --brave -d     # extra flags pass through to `docker compose up`
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -18,6 +22,26 @@ if grep -qE '^[A-Z_]+=.*REPLACE_ME' "$ENV_FILE"; then
   exit 1
 fi
 
+# --brave swaps the SearXNG metasearch backend for the Brave Search adapter
+# (scripts/web-search-brave-adapter/). Everything else passes through to
+# `docker compose up`.
+PROFILE="web-search"
+PASSTHRU=()
+for arg in "$@"; do
+  case "$arg" in
+    --brave)
+      if ! grep -qE '^BRAVE_API_KEY=.+' "$ENV_FILE"; then
+        echo "--brave needs an uncommented BRAVE_API_KEY in $ENV_FILE (key: https://brave.com/search/api/)." >&2
+        exit 1
+      fi
+      PROFILE="web-search-brave"
+      export GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
+      echo "ℹ --brave: web_search backed by the Brave adapter (GATEWAY_WEB_SEARCH_URL → brave-adapter:8080)"
+      ;;
+    *) PASSTHRU+=("$arg") ;;
+  esac
+done
+
 cd "$GATEWAY_ROOT"
 
 # If we're on a non-main branch, the published `mzdotai/otari:latest` may not
@@ -33,7 +57,7 @@ if [[ -n "$branch" && "$branch" != "main" ]]; then
 EOF
 fi
 
-# --profile web-search opts the searxng container in (gateway's compose
-# leaves it opt-in so operators who don't run web_search aren't forced
-# to pull the image). The demo needs it, so request it here.
-exec docker compose --env-file "$ENV_FILE" --profile web-search up "$@"
+# The chosen profile opts in the right web-search backend container
+# (searxng by default, brave-adapter with --brave). gateway + postgres have
+# no profile, so they always come up.
+exec docker compose --env-file "$ENV_FILE" --profile "$PROFILE" up ${PASSTHRU[@]+"${PASSTHRU[@]}"}

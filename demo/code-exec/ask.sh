@@ -4,15 +4,20 @@
 # they land. Use `--no-stream` for backends that don't support streaming
 # (e.g. the llamafile path).
 #
+# The tool-array `type` decides who runs the code:
+#   * otari_code_execution  → the gateway's own sandbox container runs it
+#   * code_interpreter / code_execution_<date>  → passed through to the
+#     provider, which runs it in its native sandbox (the gateway just proxies)
+#
 # Env vars:
 #   GATEWAY_URL  — default http://localhost:${OTARI_PORT:-8000}
 #   GATEWAY_KEY  — default 'demo-master-key'  (your master key or API key)
 #   GATEWAY_USER — default 'demo'
 #
 # Usage:
-#   ./ask.sh "What is 23 factorial?"
-#   ./ask.sh --model openai:gpt-4o-mini --tool-type code_interpreter "..."
-#   ./ask.sh --model llamafile:Qwen3-... --tool-type code_execution_20250825 --no-stream "..."
+#   ./ask.sh "What is 23 factorial?"                              # gateway sandbox
+#   ./ask.sh --model openai:gpt-4o-mini --tool-type code_interpreter "..."  # OpenAI native
+#   ./ask.sh --model anthropic:... --tool-type code_execution_20250825 "..." # Anthropic native
 
 set -euo pipefail
 
@@ -37,7 +42,7 @@ GATEWAY_KEY=${GATEWAY_KEY:-demo-master-key}
 GATEWAY_USER=${GATEWAY_USER:-demo}
 
 MODEL="anthropic:claude-sonnet-4-6"
-TOOL_TYPE="code_execution"
+TOOL_TYPE="otari_code_execution"
 stream=1
 
 while [[ $# -gt 0 ]]; do
@@ -77,11 +82,17 @@ print(json.dumps({
 }))
 ' "$MODEL" "$query" "$stream" "$GATEWAY_USER" "$TOOL_TYPE")
 
+if [[ "$TOOL_TYPE" == "otari_code_execution" ]]; then
+  runs_in="gateway sandbox (GATEWAY_SANDBOX_URL set in compose)"
+else
+  runs_in="provider's native sandbox (gateway passes '$TOOL_TYPE' through)"
+fi
+
 echo "──────────────────────────────────────────────────────────"
 echo "Q: $query"
 echo "    model:     $MODEL"
 echo "    tool-type: $TOOL_TYPE"
-echo "    sandbox:   enabled in the gateway (GATEWAY_SANDBOX_URL set in compose)"
+echo "    runs in:   $runs_in"
 echo "──────────────────────────────────────────────────────────"
 echo
 

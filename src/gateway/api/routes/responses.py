@@ -226,15 +226,15 @@ async def create_response(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "code_execution tool requested but no sandbox is configured on this gateway. "
-                    "Set GATEWAY_SANDBOX_URL on the gateway, or remove code_execution from `tools`."
+                    "otari_code_execution tool requested but no sandbox is configured on this gateway. "
+                    "Set GATEWAY_SANDBOX_URL on the gateway, or remove otari_code_execution from `tools`."
                 ),
             )
         if request_body.mcp_servers:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "code_execution and mcp_servers cannot be combined in the same request yet; "
+                    "otari_code_execution and mcp_servers cannot be combined in the same request yet; "
                     "pick one. Multi-backend dispatch is a planned refinement."
                 ),
             )
@@ -248,15 +248,15 @@ async def create_response(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "web_search tool requested but no search backend is configured on this gateway. "
-                    "Set GATEWAY_WEB_SEARCH_URL on the gateway, or remove web_search from `tools`."
+                    "otari_web_search tool requested but no search backend is configured on this gateway. "
+                    "Set GATEWAY_WEB_SEARCH_URL on the gateway, or remove otari_web_search from `tools`."
                 ),
             )
         if use_sandbox or request_body.mcp_servers:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "web_search cannot be combined with code_execution or mcp_servers in the same "
+                    "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same "
                     "request yet; pick one."
                 ),
             )
