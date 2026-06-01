@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import PricingConfig
+from gateway.services.pricing_service import pricing_required_but_missing
 
 
 def test_negative_pricing_rejected(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -173,3 +174,19 @@ def test_pricing_config_accepts_zero_prices() -> None:
     config = PricingConfig(input_price_per_million=0.0, output_price_per_million=0.0)
     assert config.input_price_per_million == 0.0
     assert config.output_price_per_million == 0.0
+
+
+def test_pricing_required_but_missing_true_when_unpriced_and_required() -> None:
+    """With require_pricing on, a missing pricing row must reject (F3 budget-bypass fix)."""
+    assert pricing_required_but_missing(None, require_pricing=True) is True
+
+
+def test_pricing_required_but_missing_false_when_not_required() -> None:
+    """With require_pricing off, a missing pricing row is allowed (legacy behavior)."""
+    assert pricing_required_but_missing(None, require_pricing=False) is False
+
+
+def test_pricing_required_but_missing_false_when_priced() -> None:
+    """A model that has pricing is never rejected, regardless of require_pricing."""
+    pricing = object()  # any non-None pricing row
+    assert pricing_required_but_missing(pricing, require_pricing=True) is False  # type: ignore[arg-type]

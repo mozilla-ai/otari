@@ -76,6 +76,8 @@ async def streaming_generator(
     on_complete: Callable[[CompletionUsage], Awaitable[None]],
     on_error: Callable[[str], Awaitable[None]],
     label: str,
+    on_no_usage: Callable[[], Awaitable[None]] | None = None,
+    on_incomplete: Callable[[], Awaitable[None]] | None = None,
 ) -> AsyncIterator[str]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -84,13 +86,22 @@ async def streaming_generator(
         format_chunk: Formats a chunk into an SSE string
         extract_usage: Extracts usage from a chunk, or returns None if no usage present
         fmt: SSE format configuration (done marker, error payload, etc.)
-        on_complete: Called with aggregated usage after successful streaming
+        on_complete: Called with aggregated usage after successful streaming that
+            included usage data
         on_error: Called with error message on failure
         label: Identifier for error log messages (e.g., "openai:gpt-4")
+        on_no_usage: Called when streaming completes successfully but the provider
+            sent no usage data. Lets the caller bill per ``stream_missing_usage_policy``
+            instead of silently skipping the request. When omitted, a no-usage
+            stream is not billed (legacy behavior).
+        on_incomplete: Called when the stream neither completes nor errors normally
+            (e.g. client disconnect mid-stream). Used to release any budget
+            reservation so it does not leak.
 
     """
     usage = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     has_usage = False
+    settled = False
 
     try:
         async for chunk in stream:
@@ -101,17 +112,34 @@ async def streaming_generator(
             yield format_chunk(chunk)
         yield fmt.done_marker
 
-        if has_usage:
-            await on_complete(usage)
+        # Settle on normal completion. Guard the callbacks so a logging failure
+        # can't be mistaken for an incomplete (disconnected) stream.
+        settled = True
+        try:
+            if has_usage:
+                await on_complete(usage)
+            elif on_no_usage is not None:
+                await on_no_usage()
+        except Exception as log_err:
+            logger.error("Failed to log streaming usage for %s: %s", label, log_err)
     except Exception as e:
         yield fmt.error_payload
         if fmt.yield_done_on_error:
             yield fmt.done_marker
+        settled = True
         try:
             await on_error(str(e))
         except Exception as log_err:
             logger.error("Failed to log streaming error usage: %s", log_err)
         logger.error("Streaming error for %s: %s", label, e)
+    finally:
+        if not settled and on_incomplete is not None:
+            # Reached on client disconnect / generator cancellation before the
+            # stream finished — release the reservation so it does not leak.
+            try:
+                await on_incomplete()
+            except Exception as log_err:
+                logger.error("Failed to settle incomplete stream for %s: %s", label, log_err)
 
 
 async def iterate_streaming_attempts(

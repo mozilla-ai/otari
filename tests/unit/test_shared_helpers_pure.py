@@ -23,6 +23,7 @@ def test_resolve_user_id_master_key_with_user() -> None:
         master_key_error=_make_error("master key requires user"),
         no_api_key_error=_make_error("no api key"),
         no_user_error=_make_error("no user"),
+        forbidden_user_error=_make_error("forbidden user", 403),
     )
     assert user_id == "user-1"
 
@@ -36,22 +37,61 @@ def test_resolve_user_id_master_key_without_user() -> None:
             master_key_error=_make_error("master key requires user"),
             no_api_key_error=_make_error("no api key"),
             no_user_error=_make_error("no user"),
+            forbidden_user_error=_make_error("forbidden user", 403),
         )
     assert exc_info.value.detail == "master key requires user"
 
 
-def test_resolve_user_id_api_key_with_request_user() -> None:
+def test_resolve_user_id_rejects_mismatched_request_user() -> None:
+    """A non-master key naming a *different* user is rejected (IDOR fix)."""
+    api_key = MagicMock()
+    api_key.user_id = "key-user"
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_user_id(
+            user_id_from_request="someone-else",
+            api_key=api_key,
+            is_master_key=False,
+            master_key_error=_make_error("master key requires user"),
+            no_api_key_error=_make_error("no api key"),
+            no_user_error=_make_error("no user"),
+            forbidden_user_error=_make_error("forbidden user", 403),
+        )
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "forbidden user"
+
+
+def test_resolve_user_id_lenient_mode_binds_mismatch_to_key_user() -> None:
+    """With reject_mismatch=False, a foreign user is ignored and bound to the key's user."""
     api_key = MagicMock()
     api_key.user_id = "key-user"
     user_id = resolve_user_id(
-        user_id_from_request="explicit-user",
+        user_id_from_request="someone-else",
         api_key=api_key,
         is_master_key=False,
         master_key_error=_make_error("master key requires user"),
         no_api_key_error=_make_error("no api key"),
         no_user_error=_make_error("no user"),
+        forbidden_user_error=_make_error("forbidden user", 403),
+        reject_mismatch=False,
     )
-    assert user_id == "explicit-user"
+    # Bound to the key's own user — never the foreign one — so no cross-user billing.
+    assert user_id == "key-user"
+
+
+def test_resolve_user_id_allows_matching_request_user() -> None:
+    """Echoing the key's own user id is allowed and binds to that user."""
+    api_key = MagicMock()
+    api_key.user_id = "key-user"
+    user_id = resolve_user_id(
+        user_id_from_request="key-user",
+        api_key=api_key,
+        is_master_key=False,
+        master_key_error=_make_error("master key requires user"),
+        no_api_key_error=_make_error("no api key"),
+        no_user_error=_make_error("no user"),
+        forbidden_user_error=_make_error("forbidden user", 403),
+    )
+    assert user_id == "key-user"
 
 
 def test_resolve_user_id_falls_back_to_api_key() -> None:
@@ -64,6 +104,7 @@ def test_resolve_user_id_falls_back_to_api_key() -> None:
         master_key_error=_make_error("master key requires user"),
         no_api_key_error=_make_error("no api key"),
         no_user_error=_make_error("no user"),
+        forbidden_user_error=_make_error("forbidden user", 403),
     )
     assert user_id == "key-user"
 
@@ -77,6 +118,7 @@ def test_resolve_user_id_no_api_key() -> None:
             master_key_error=_make_error("master key requires user"),
             no_api_key_error=_make_error("no api key", 500),
             no_user_error=_make_error("no user"),
+            forbidden_user_error=_make_error("forbidden user", 403),
         )
     assert exc_info.value.detail == "no api key"
     assert exc_info.value.status_code == 500
@@ -93,6 +135,7 @@ def test_resolve_user_id_api_key_without_user() -> None:
             master_key_error=_make_error("master key requires user"),
             no_api_key_error=_make_error("no api key"),
             no_user_error=_make_error("no user", 500),
+            forbidden_user_error=_make_error("forbidden user", 403),
         )
     assert exc_info.value.detail == "no user"
     assert exc_info.value.status_code == 500
@@ -107,6 +150,7 @@ def test_resolve_user_id_empty_string_treated_as_missing() -> None:
             master_key_error=_make_error("master key requires user"),
             no_api_key_error=_make_error("no api key"),
             no_user_error=_make_error("no user"),
+            forbidden_user_error=_make_error("forbidden user", 403),
         )
     assert exc_info.value.detail == "master key requires user"
 

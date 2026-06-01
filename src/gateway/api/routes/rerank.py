@@ -16,9 +16,14 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
 from gateway.rate_limit import check_rate_limit
-from gateway.services.budget_service import validate_user_budget
+from gateway.services.budget_service import (
+    estimate_cost,
+    reconcile_reservation,
+    refund_reservation,
+    reserve_budget,
+)
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import find_model_pricing
+from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
 
 router = APIRouter(prefix="/v1", tags=["rerank"])
 
@@ -70,15 +75,32 @@ async def create_rerank(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="API key has no associated user",
         ),
+        forbidden_user_error=HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="'user' field does not match the authenticated API key's user",
+        ),
+        reject_mismatch=config.reject_user_mismatch,
     )
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    _ = await validate_user_budget(db, user_id, request.model, strategy=config.budget_strategy)
-    if config.budget_strategy == "for_update":
-        await db.rollback()
-
     provider, model = AnyLLM.split_model_provider(request.model)
+
+    pricing = await find_model_pricing(db, provider, model)
+
+    # Rerank bills on total tokens (input only). Estimate from query + documents.
+    prompt_chars = len(request.query) + sum(len(doc) for doc in request.documents)
+    estimate = estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
+    # Reserve first so 404/403 precede the missing-pricing 402; refund on reject.
+    reservation = await reserve_budget(
+        db, user_id, estimate, model=request.model, strategy=config.budget_strategy
+    )
+    if pricing_required_but_missing(pricing, require_pricing=config.require_pricing):
+        await refund_reservation(db, reservation)
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=f"No pricing configured for model '{provider}:{model}'",
+        )
 
     provider_kwargs = get_provider_kwargs(config, provider)
 
@@ -113,21 +135,16 @@ async def create_rerank(
             total_tokens=total_tokens,
         )
 
-        if result.usage:
-            pricing = await find_model_pricing(db, provider, model, as_of=usage_log.timestamp)
-            if pricing and total_tokens:
-                cost = (total_tokens / 1_000_000) * pricing.input_price_per_million
-                usage_log.cost = cost
-            elif not pricing:
-                model_ref = f"{provider}:{model}" if provider else model
-                logger.warning(
-                    "No pricing configured for '%s'. Usage will be tracked without cost.",
-                    model_ref,
-                )
+        cost = 0.0
+        if result.usage and pricing and total_tokens:
+            cost = (total_tokens / 1_000_000) * pricing.input_price_per_million
+            usage_log.cost = cost
 
         await log_writer.put(usage_log)
+        await reconcile_reservation(db, reservation, cost)
 
     except HTTPException:
+        await refund_reservation(db, reservation)
         raise
     except Exception as e:
         error_log = UsageLog(
@@ -142,6 +159,7 @@ async def create_rerank(
             error_message=str(e),
         )
         await log_writer.put(error_log)
+        await refund_reservation(db, reservation)
 
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
         raise HTTPException(

@@ -21,7 +21,6 @@ def test_streaming_creation_error_returns_http_error(
         json={
             "model": "openai:totally-invalid-model-xyz",
             "messages": [{"role": "user", "content": "Hello"}],
-            "user": test_user["user_id"],
             "stream": True,
         },
         headers=api_key_header,

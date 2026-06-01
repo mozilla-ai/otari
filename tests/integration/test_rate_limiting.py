@@ -29,6 +29,7 @@ def _make_rate_limit_client(
         host="127.0.0.1",
         port=8000,
         auto_migrate=False,
+        require_pricing=False,
         rate_limit_rpm=rate_limit_rpm,
     )
     _run_alembic_migrations(postgres_url)

@@ -2,8 +2,10 @@ import asyncio
 import json
 import os
 from typing import Any
+from unittest.mock import patch
 
 import pytest
+from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -265,7 +267,6 @@ async def test_failed_request_logs_error(
         json={
             "model": "gemini:invalid-model",
             "messages": test_messages,
-            "user": test_user["user_id"],
         },
         headers=api_key_header,
     )
@@ -284,5 +285,61 @@ async def test_failed_request_logs_error(
 
         assert log.status == "error"
         assert log.error_message is not None
+    finally:
+        db.close()
+
+
+def test_spend_incremented_via_reconciliation(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    test_messages: list[dict[str, str]],
+) -> None:
+    """End-to-end: a successful billable request reserves then reconciles, so
+    users.spend increases by the actual cost (the reconcile path is the sole
+    spend authority now that the log writer no longer touches spend)."""
+    client.post("/v1/users", json={"user_id": "spend-user"}, headers=master_key_header)
+    client.post(
+        "/v1/pricing",
+        json={"model_key": MODEL_NAME, "input_price_per_million": 2.5, "output_price_per_million": 10.0},
+        headers=master_key_header,
+    )
+
+    mock_response = ChatCompletion(
+        id="chatcmpl-spend",
+        object="chat.completion",
+        created=0,
+        model=MODEL_NAME,
+        choices=[
+            Choice(
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content="hi"),
+                finish_reason="stop",
+            )
+        ],
+        usage=CompletionUsage(prompt_tokens=1_000_000, completion_tokens=500_000, total_tokens=1_500_000),
+    )
+
+    async def _mock_acompletion(**kwargs: Any) -> ChatCompletion:
+        return mock_response
+
+    with patch("gateway.api.routes.chat.acompletion") as mock_acompletion:
+        mock_acompletion.side_effect = _mock_acompletion
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": MODEL_NAME, "messages": test_messages, "user": "spend-user"},
+            headers=master_key_header,
+        )
+    assert response.status_code == 200
+
+    # Expected cost: 1M/1M * 2.5 + 0.5M/1M * 10 = 2.5 + 5.0 = 7.5
+    engine = create_engine(test_config.database_url)
+    session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db = session_local()
+    try:
+        user = db.query(User).filter(User.user_id == "spend-user").first()
+        assert user is not None
+        assert user.spend == pytest.approx(7.5)
+        assert float(user.reserved) == pytest.approx(0.0)  # hold released
     finally:
         db.close()

@@ -6,7 +6,6 @@ import asyncio
 import time
 from typing import Protocol
 
-from sqlalchemy import update
 from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.core.database import create_session
@@ -17,7 +16,7 @@ from gateway.metrics import (
     log_writer_queue_depth,
     log_writer_rows,
 )
-from gateway.models.entities import UsageLog, User
+from gateway.models.entities import UsageLog
 
 
 class LogWriter(Protocol):
@@ -34,13 +33,11 @@ class SingleLogWriter:
     async def put(self, log: UsageLog) -> None:
         async with create_session() as db:
             try:
+                # Spend is owned by the budget reservation reconcile path
+                # (gateway.services.budget_service), not the log writer — the
+                # writer is pure logging. Reconciling here would double-charge
+                # and, under the batch writer, lag the budget gate.
                 db.add(log)
-                if log.cost and log.user_id:
-                    await db.execute(
-                        update(User)
-                        .where(User.user_id == log.user_id, User.deleted_at.is_(None))
-                        .values(spend=User.spend + log.cost)
-                    )
                 await db.commit()
                 log_writer_rows.labels(writer="single", result="written").inc()
             except SQLAlchemyError as e:  # pragma: no cover - defensive logging
@@ -114,14 +111,10 @@ class BatchLogWriter:
         log_writer_batch_size.labels(writer="batch").observe(len(batch))
         try:
             async with create_session() as db:
+                # Spend is reconciled inline via the budget reservation path, not
+                # here — see SingleLogWriter.put. The writer only persists rows.
                 for log in batch:
                     db.add(log)
-                    if log.cost and log.user_id:
-                        await db.execute(
-                            update(User)
-                            .where(User.user_id == log.user_id, User.deleted_at.is_(None))
-                            .values(spend=User.spend + log.cost)
-                        )
                 await db.commit()
                 log_writer_rows.labels(writer="batch", result="written").inc(len(batch))
             log_writer_flush_duration.labels(writer="batch", result="ok").observe(time.monotonic() - start)

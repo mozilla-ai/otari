@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 API_KEY_HEADER = "Otari-Key"
@@ -121,6 +121,40 @@ class GatewayConfig(BaseSettings):
         default="for_update",
         description="Budget validation strategy: 'for_update' (default), 'cas' (lock-free), or 'disabled'.",
     )
+    require_pricing: bool = Field(
+        default=True,
+        description=(
+            "Reject requests for models that have no configured pricing (fail-closed, default). "
+            "When False, unpriced models are served and logged without cost (legacy behavior). "
+            "Audio endpoints are always exempt — they have no token-based pricing."
+        ),
+    )
+    reject_user_mismatch: bool = Field(
+        default=True,
+        description=(
+            "When True (default), a non-master key whose request names a 'user' other than its own "
+            "is rejected with 403. When False, the client-supplied 'user' is still forwarded to the "
+            "provider (OpenAI-style end-user tag) but spend is always bound to the key's own user — "
+            "use this if clients send arbitrary 'user' values for abuse tracking. The master key may "
+            "always bill an arbitrary user regardless of this setting."
+        ),
+    )
+    budget_estimate_default_output_tokens: int = Field(
+        default=1024,
+        ge=0,
+        description=(
+            "Output-token count assumed when reserving budget for a request whose max output is "
+            "unbounded. Used by the pre-debit estimate; reconciled to actual usage on completion."
+        ),
+    )
+    stream_missing_usage_policy: str = Field(
+        default="estimate",
+        description=(
+            "How to bill a streamed response that completes without provider usage data: "
+            "'estimate' (charge the pre-debit estimate, default), 'fail' (charge estimate and mark "
+            "the request errored), or 'allow_free' (release the reservation, legacy behavior)."
+        ),
+    )
     model_discovery: bool = Field(
         default=True,
         description="Enable auto-discovery of models from configured providers via GET /v1/models",
@@ -146,6 +180,16 @@ class GatewayConfig(BaseSettings):
     @property
     def is_platform_mode(self) -> bool:
         return self.effective_mode == "platform"
+
+    @field_validator("stream_missing_usage_policy")
+    @classmethod
+    def _validate_stream_missing_usage_policy(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"estimate", "fail", "allow_free"}
+        if normalized not in allowed:
+            msg = f"stream_missing_usage_policy must be one of {sorted(allowed)}, got '{value}'"
+            raise ValueError(msg)
+        return normalized
 
     def validate_mode_selection(self) -> None:
         configured_mode = self.mode.strip().lower()

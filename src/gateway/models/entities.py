@@ -80,6 +80,11 @@ class User(Base):
     user_id: Mapped[str] = mapped_column(primary_key=True)
     alias: Mapped[str | None] = mapped_column()
     spend: Mapped[float] = mapped_column(default=0.0)
+    # In-flight budget held by requests that have passed the budget gate but
+    # whose actual cost is not yet known. The effective committed amount is
+    # ``spend + reserved``; reservations are reconciled into ``spend`` (actual
+    # cost) on success or released on failure. See gateway.services.budget_service.
+    reserved: Mapped[float] = mapped_column(default=0.0, server_default="0")
     budget_id: Mapped[str | None] = mapped_column(ForeignKey("budgets.budget_id"))
     budget_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_budget_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -104,6 +109,7 @@ class User(Base):
             "user_id": self.user_id,
             "alias": self.alias,
             "spend": self.spend,
+            "reserved": self.reserved,
             "budget_id": self.budget_id,
             "budget_started_at": self.budget_started_at.isoformat() if self.budget_started_at else None,
             "next_budget_reset_at": self.next_budget_reset_at.isoformat() if self.next_budget_reset_at else None,

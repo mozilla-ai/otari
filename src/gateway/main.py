@@ -15,7 +15,10 @@ from gateway.core.database import create_session, init_db
 from gateway.rate_limit import RateLimiter
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
-from gateway.services.pricing_init_service import initialize_pricing_from_config
+from gateway.services.pricing_init_service import (
+    initialize_pricing_from_config,
+    warn_if_require_pricing_without_pricing,
+)
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
@@ -165,6 +168,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             async with create_session() as session:
                 await bootstrap_first_api_key(config, session)
                 await initialize_pricing_from_config(config, session)
+                await warn_if_require_pricing_without_pricing(config, session)
             log_writer = create_log_writer(config.log_writer_strategy)
 
         await log_writer.start()

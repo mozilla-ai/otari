@@ -31,6 +31,7 @@ class UserResponse(BaseModel):
     user_id: str
     alias: str | None
     spend: float
+    reserved: float
     budget_id: str | None
     budget_started_at: str | None
     next_budget_reset_at: str | None
@@ -45,6 +46,9 @@ class UserResponse(BaseModel):
             user_id=user.user_id,
             alias=user.alias,
             spend=float(user.spend),
+            # In-flight budget held by accepted-but-not-yet-settled requests;
+            # the effective committed amount is spend + reserved.
+            reserved=float(user.reserved),
             budget_id=user.budget_id,
             budget_started_at=user.budget_started_at.isoformat() if user.budget_started_at else None,
             next_budget_reset_at=user.next_budget_reset_at.isoformat() if user.next_budget_reset_at else None,

@@ -111,7 +111,7 @@ def test_delete_user_preserves_budget_reset_logs(
         client.post(
             "/v1/chat/completions",
             json={"model": MODEL_NAME, "messages": test_messages, "user": "reset-user"},
-            headers=api_key_header,
+            headers=master_key_header,
         )
 
     reset_logs_before = db_session.query(BudgetResetLog).filter(BudgetResetLog.user_id == "reset-user").all()

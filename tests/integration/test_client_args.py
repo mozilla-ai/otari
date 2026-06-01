@@ -28,6 +28,7 @@ def config_with_client_args(postgres_url: str) -> GatewayConfig:
         host="127.0.0.1",
         port=8000,
         auto_migrate=False,
+        require_pricing=False,
         providers={
             "openai": {
                 "api_key": "test-openai-key",
