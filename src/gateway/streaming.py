@@ -122,6 +122,16 @@ async def streaming_generator(
                 await on_no_usage()
         except Exception as log_err:
             logger.error("Failed to log streaming usage for %s: %s", label, log_err)
+    except asyncio.CancelledError:
+        # Client disconnect / request cancellation mid-stream. CancelledError is a
+        # BaseException (not caught by `except Exception` below), so handle it
+        # explicitly: settle as incomplete and let cancellation propagate — do not
+        # emit an SSE error payload or call on_error.
+        if not settled and on_incomplete is not None:
+            with suppress(Exception):
+                await on_incomplete()
+        settled = True
+        raise
     except Exception as e:
         yield fmt.error_payload
         if fmt.yield_done_on_error:

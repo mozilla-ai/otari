@@ -126,7 +126,7 @@ class GatewayConfig(BaseSettings):
         description=(
             "Reject requests for models that have no configured pricing (fail-closed, default). "
             "When False, unpriced models are served and logged without cost (legacy behavior). "
-            "Audio endpoints are always exempt — they have no token-based pricing."
+            "Audio and moderation endpoints are always exempt — they have no token-based pricing."
         ),
     )
     reject_user_mismatch: bool = Field(

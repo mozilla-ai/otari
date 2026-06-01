@@ -228,7 +228,7 @@ async def create_message(
             await refund_reservation(db, reservation)
             raise _anthropic_error(
                 _ERR_INVALID_REQUEST,
-                f"No pricing configured for model '{gate_provider}:{gate_model}'",
+                f"No pricing configured for model '{request.model}'",
                 status.HTTP_402_PAYMENT_REQUIRED,
             )
 

@@ -232,7 +232,7 @@ async def create_response(
             await refund_reservation(db, reservation)
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=f"No pricing configured for model '{gate_provider}:{gate_model}'",
+                detail=f"No pricing configured for model '{request_body.model}'",
             )
         provider, model = AnyLLM.split_model_provider(request_body.model)
         provider_class = AnyLLM.get_provider_class(provider)

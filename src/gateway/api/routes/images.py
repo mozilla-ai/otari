@@ -92,7 +92,8 @@ async def create_image(
     pricing = await find_model_pricing(db, provider, model)
 
     # Reserve for the requested image count; reconciled to the actual count below.
-    requested_images = request.n or 1
+    # `is None` (not `or`) so an explicit n=0 isn't silently treated as 1.
+    requested_images = request.n if request.n is not None else 1
     estimate = requested_images * pricing.input_price_per_million if pricing else 0.0
     # Reserve first so 404/403 precede the missing-pricing 402; refund on reject.
     reservation = await reserve_budget(
@@ -127,7 +128,7 @@ async def create_image(
     try:
         result: ImagesResponse = await aimage_generation(**image_kwargs)
 
-        n_images = len(result.data) if result.data else (request.n or 1)
+        n_images = len(result.data) if result.data else requested_images
 
         usage_log = UsageLog(
             id=str(uuid.uuid4()),
