@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -78,7 +78,7 @@ async def streaming_generator(
     label: str,
     on_no_usage: Callable[[], Awaitable[None]] | None = None,
     on_incomplete: Callable[[], Awaitable[None]] | None = None,
-) -> AsyncIterator[str]:
+) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
     Args:
