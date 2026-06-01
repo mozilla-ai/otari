@@ -6,9 +6,10 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 
-from gateway.models.entities import Budget, User
+from gateway.models.entities import Budget, ModelPricing, User
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budget_service import (
+    estimate_cost,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
@@ -140,3 +141,45 @@ async def test_refund_releases_hold_without_charging(async_db: Any) -> None:
     assert user is not None
     assert user.spend == pytest.approx(10.0)  # unchanged
     assert user.reserved == pytest.approx(0.0)
+
+
+def test_estimate_cost_clamps_negative_output_tokens() -> None:
+    """A hostile negative max_output_tokens must not produce a negative estimate."""
+    pricing = ModelPricing(model_key="openai:gpt-4o", input_price_per_million=2.5, output_price_per_million=10.0)
+    est = estimate_cost(pricing, prompt_chars=400, max_output_tokens=-1_000_000, default_output_tokens=1024)
+    # Output term clamped to 0 → only the prompt contributes; never negative.
+    assert est >= 0.0
+    assert est == pytest.approx((400 / 4 / 1_000_000) * 2.5)
+
+
+@pytest.mark.asyncio
+async def test_reserve_budget_clamps_negative_estimate(async_db: Any) -> None:
+    """A negative estimate must not reduce users.reserved (budget-gate bypass)."""
+    async_db.add(Budget(budget_id="neg-budget", max_budget=100.0))
+    async_db.add(User(user_id="neg-user", spend=10.0, reserved=4.0, budget_id="neg-budget"))
+    await async_db.commit()
+
+    await reserve_budget(async_db, "neg-user", -50.0)
+
+    async_db.expire_all()
+    user = await get_active_user(async_db, "neg-user")
+    assert user is not None
+    assert user.reserved == pytest.approx(4.0)  # unchanged — negative clamped to 0
+    assert user.spend == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
+async def test_reconcile_clamps_negative_cost(async_db: Any) -> None:
+    """A negative actual_cost must not reduce users.spend."""
+    async_db.add(Budget(budget_id="negc-budget", max_budget=100.0))
+    async_db.add(User(user_id="negc-user", spend=10.0, budget_id="negc-budget"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "negc-user", 5.0)
+    await reconcile_reservation(async_db, handle, -3.0)
+
+    async_db.expire_all()
+    user = await get_active_user(async_db, "negc-user")
+    assert user is not None
+    assert user.spend == pytest.approx(10.0)  # not reduced by the negative cost
+    assert user.reserved == pytest.approx(0.0)  # hold released

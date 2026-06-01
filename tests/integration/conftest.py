@@ -149,7 +149,7 @@ def test_config(postgres_url: str) -> GatewayConfig:
         # The bulk of the suite predates require_pricing and exercises models
         # without configuring pricing. Keep the permissive baseline here; the
         # fail-closed require_pricing=True behavior is covered by dedicated tests
-        # that build their own config (see test_pricing_budget_validation.py).
+        # that build their own config (see test_require_pricing.py).
         require_pricing=False,
     )
 

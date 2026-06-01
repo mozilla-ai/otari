@@ -889,6 +889,7 @@ async def _stream_messages(
             endpoint="/v1/messages",
             user_id=user_id,
             error="stream completed without usage data" if policy == "fail" else None,
+            cost_override=reservation.estimate,
         )
         await reconcile_reservation(db, reservation, reservation.estimate)
 

@@ -216,11 +216,15 @@ async def create_response(
         except (ValueError, AnyLLMError):
             gate_provider, gate_model = None, request_body.model
         gate_pricing = await find_model_pricing(db, gate_provider, gate_model)
+        # max_output_tokens comes from an extra="allow" body, so it may be absent,
+        # non-int, or negative — only trust a non-negative int for the estimate.
+        raw_max_output = getattr(request_body, "max_output_tokens", None)
+        max_output_tokens = raw_max_output if isinstance(raw_max_output, int) and raw_max_output >= 0 else None
         estimate = estimate_cost(
             gate_pricing,
             prompt_chars=len(str(request_body.input))
             + len(str(getattr(request_body, "instructions", "") or "")),
-            max_output_tokens=getattr(request_body, "max_output_tokens", None),
+            max_output_tokens=max_output_tokens,
             default_output_tokens=config.budget_estimate_default_output_tokens,
         )
         # Reserve first so user/blocked/budget rejections (404/403) precede the
@@ -888,6 +892,7 @@ async def _stream_responses(
             endpoint="/v1/responses",
             user_id=user_id,
             error="stream completed without usage data" if policy == "fail" else None,
+            cost_override=reservation.estimate,
         )
         await reconcile_reservation(db, reservation, reservation.estimate)
 

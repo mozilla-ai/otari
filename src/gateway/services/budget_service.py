@@ -243,8 +243,10 @@ def estimate_cost(
         return 0.0
     prompt_tokens = max(prompt_chars, 0) / 4
     # `is None` rather than falsy: max_output_tokens == 0 is an explicit "no
-    # output" bound and must not fall through to the default cap.
+    # output" bound and must not fall through to the default cap. Clamp negatives
+    # so a hostile max_output_tokens can't produce a negative estimate.
     output_tokens = max_output_tokens if max_output_tokens is not None else default_output_tokens
+    output_tokens = max(output_tokens, 0)
     return (prompt_tokens / 1_000_000) * pricing.input_price_per_million + (
         output_tokens / 1_000_000
     ) * pricing.output_price_per_million
@@ -271,6 +273,10 @@ async def reserve_budget(
     The returned handle must be passed to :func:`reconcile_reservation` (success)
     or :func:`refund_reservation` (failure) so the reservation does not leak.
     """
+    # Defense-in-depth: estimates derive from client-controlled fields (max
+    # tokens, image count). A negative estimate would *reduce* users.reserved and
+    # weaken the budget gate, so never let one reach the DB.
+    estimate = max(estimate, 0.0)
     normalized = _normalize_strategy(strategy)
     user = await get_active_user(db, user_id, for_update=False)
 
@@ -372,6 +378,8 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     reservation). Runs inline in the request, not in the (possibly batched) log
     writer, so the next request's reservation sees fresh totals.
     """
+    # Never let a negative cost reduce recorded spend.
+    actual_cost = max(actual_cost, 0.0)
     values: dict[str, object] = {}
     if actual_cost:
         values["spend"] = User.spend + actual_cost

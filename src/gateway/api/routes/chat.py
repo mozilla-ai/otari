@@ -137,6 +137,7 @@ async def log_usage(
     response: ChatCompletion | AsyncIterator[ChatCompletionChunk] | None = None,
     usage_override: CompletionUsage | None = None,
     error: str | None = None,
+    cost_override: float | None = None,
 ) -> float | None:
     """Log API usage to the database and return the computed cost.
 
@@ -197,6 +198,12 @@ async def log_usage(
         else:
             model_ref = f"{provider}:{model}" if provider else model
             logger.warning(f"No pricing configured for '{model_ref}'. Usage will be tracked without cost.")
+
+    # When the caller bills a fixed amount without provider usage (e.g. the
+    # stream-missing-usage estimate policy), record that amount on the log row so
+    # usage_logs.cost stays consistent with the spend that was reconciled.
+    if cost_override is not None:
+        usage_log.cost = cost_override
 
     await log_writer.put(usage_log)
     return usage_log.cost
@@ -304,7 +311,7 @@ async def chat_completions(
         estimate = estimate_cost(
             gate_pricing,
             prompt_chars=len(str(request.messages)),
-            max_output_tokens=request.max_tokens or request.max_completion_tokens,
+            max_output_tokens=request.max_tokens if request.max_tokens is not None else request.max_completion_tokens,
             default_output_tokens=config.budget_estimate_default_output_tokens,
         )
         # Reserve first so user/blocked/budget rejections (404/403) take
@@ -1036,6 +1043,7 @@ def _build_streaming_response(
             endpoint="/v1/chat/completions",
             user_id=user_id,
             error="stream completed without usage data" if policy == "fail" else None,
+            cost_override=reservation.estimate,
         )
         await reconcile_reservation(db, reservation, reservation.estimate)
 
