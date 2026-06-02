@@ -213,6 +213,21 @@
       "ChatCompletionRequest": {
         "description": "OpenAI-compatible chat completion request.",
         "properties": {
+          "guardrails": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/GuardrailConfig"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guardrails"
+          },
           "max_completion_tokens": {
             "anyOf": [
               {
@@ -713,6 +728,59 @@
         "title": "EmbeddingRequest",
         "type": "object"
       },
+      "GuardrailConfig": {
+        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated at parse time with the\nsame SSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``GATEWAY_MCP_ALLOW_LOOPBACK`` /\n``GATEWAY_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``GATEWAY_GUARDRAILS_URL`` instead.",
+        "properties": {
+          "mode": {
+            "default": "block",
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "on": {
+            "items": {
+              "enum": [
+                "input",
+                "output"
+              ],
+              "type": "string"
+            },
+            "title": "On",
+            "type": "array"
+          },
+          "profile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Profile",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "validate_kwargs": {
+            "additionalProperties": true,
+            "title": "Validate Kwargs",
+            "type": "object"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "title": "GuardrailConfig",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -962,6 +1030,21 @@
               }
             ],
             "title": "Cache Control"
+          },
+          "guardrails": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/GuardrailConfig"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guardrails"
           },
           "max_tokens": {
             "title": "Max Tokens",
@@ -1487,6 +1570,21 @@
         "additionalProperties": true,
         "description": "OpenAI Responses API-compatible request.\n\nGateway-internal fields (``mcp_servers``, ``mcp_server_ids``,\n``tools_header``, ``max_tool_iterations``) opt the request into\ngateway-managed MCP / sandbox / web_search without changing the upstream\nwire shape. They're stripped before the request is forwarded.",
         "properties": {
+          "guardrails": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/GuardrailConfig"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guardrails"
+          },
           "input": {
             "title": "Input"
           },
