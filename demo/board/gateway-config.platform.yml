@@ -1,0 +1,13 @@
+# Platform-mode gateway config for Act 4. Mounted as /app/config.yml.
+#
+# Platform mode FORBIDS local provider credentials — the gateway delegates all
+# credential resolution to Otari.ai. So there is NO `providers:` block here
+# (its presence would fail startup with "Local provider credentials are not
+# supported in platform mode"). The OTARI_AI_TOKEN passed via docker-compose
+# activates platform mode and points the gateway at Otari.ai.
+
+host: "0.0.0.0"
+port: 8000
+
+# Master key still guards the gateway's own (non-platform) management endpoints.
+master_key: demo-master-key

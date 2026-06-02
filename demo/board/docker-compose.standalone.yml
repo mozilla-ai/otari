@@ -1,0 +1,14 @@
+# Override for Acts 1-3: force STANDALONE mode even when .env carries an
+# OTARI_AI_TOKEN (which would otherwise flip the gateway into platform mode and
+# trip "Local provider credentials are not supported in platform mode").
+#
+# Used by ./start.sh via `-f docker-compose.yml -f this`. Blanks the platform
+# token/base-url for the gateway container so the providers in
+# gateway-config.yml (llamafile/openai) are honoured.
+services:
+  gateway:
+    environment:
+      - OTARI_AI_TOKEN=
+      - OTARI_PLATFORM_TOKEN=
+      - ANY_LLM_PLATFORM_TOKEN=
+      - PLATFORM_BASE_URL=

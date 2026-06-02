@@ -1,0 +1,28 @@
+# Override for Act 4: connect the gateway to Otari.ai (platform mode).
+#
+# Used by ./start-platform.sh via `-f docker-compose.yml -f this`. The base
+# compose deliberately does NOT carry these env vars (it's shared by all demos),
+# so platform mode is opt-in here. Setting OTARI_AI_TOKEN flips the gateway into
+# platform mode: it delegates auth, credential resolution, budgets, and usage to
+# Otari.ai per-request (managed providers like mzai included).
+#
+# Pair this with GATEWAY_CONFIG_PATH=gateway-config.platform.yml (providerless),
+# which start-platform.sh exports — platform mode forbids local providers.
+services:
+  gateway:
+    # The demo gateway runs in its OWN compose project, so it can't use the
+    # platform's in-network service name (`backend`). When the platform runs
+    # locally, reach its host-published port via host.docker.internal. Docker
+    # Desktop (mac/Windows) provides this automatically; the mapping below makes
+    # it work on Linux too (host-gateway resolves to the docker0 bridge host).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # Gateway→Otari.ai identity (X-Gateway-Token). From .env.
+      - OTARI_AI_TOKEN=${OTARI_AI_TOKEN:-}
+      # Where the gateway reaches the platform's resolve/health API. For a LOCAL
+      # platform (repo-root docker-compose, nginx on host :8100), this must be
+      # host.docker.internal — NOT localhost (that's the container itself) and
+      # NOT `backend` (a different compose network). For the hosted platform,
+      # leave empty to default to https://api.otari.ai/api/v1.
+      - PLATFORM_BASE_URL=${PLATFORM_BASE_URL:-http://host.docker.internal:8100/api/v1}
