@@ -86,7 +86,7 @@ if [[ "$GR_OK" == "1" ]]; then
     curl -sS -X POST "$GR_URL/validate" \
       -H "Content-Type: application/json" \
       -d "$(python3 -c 'import json,sys; print(json.dumps({"profile":sys.argv[1],"input_text":sys.argv[2]}))' "$PROFILE" "$text")" \
-      | python3 -c 'import json,sys; r=json.load(sys.stdin).get("result",{}); print(f"  valid={r.get(\"valid\")}  score={r.get(\"score\")}")' \
+      | python3 -c 'import json,sys; r=json.load(sys.stdin).get("result",{}); print("  valid={} score={}".format(r.get("valid"), r.get("score")))' \
       || true
   done
 fi
