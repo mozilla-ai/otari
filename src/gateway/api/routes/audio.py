@@ -18,7 +18,11 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
 from gateway.rate_limit import check_rate_limit
-from gateway.services.budget_service import validate_user_budget
+from gateway.services.budget_service import (
+    reconcile_reservation,
+    refund_reservation,
+    reserve_budget,
+)
 from gateway.services.log_writer import LogWriter
 
 router = APIRouter(prefix="/v1", tags=["audio"])
@@ -80,13 +84,19 @@ async def create_transcription(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="API key has no associated user",
         ),
+        forbidden_user_error=HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="'user' field does not match the authenticated API key's user",
+        ),
+        reject_mismatch=config.reject_user_mismatch,
     )
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    _ = await validate_user_budget(db, user_id, model, strategy=config.budget_strategy)
-    if config.budget_strategy == "for_update":
-        await db.rollback()
+    # Audio is exempt from require_pricing and has no measurable cost unit yet,
+    # so the reservation estimate is 0 — it still enforces existing per-user
+    # state (user exists, not blocked, not already over budget).
+    reservation = await reserve_budget(db, user_id, 0.0, model=model, strategy=config.budget_strategy)
 
     provider, model_name = AnyLLM.split_model_provider(model)
 
@@ -135,8 +145,10 @@ async def create_transcription(
         # so cost is left unset until a dedicated pricing metric is available.
 
         await log_writer.put(usage_log)
+        await reconcile_reservation(db, reservation, 0.0)
 
     except HTTPException:
+        await refund_reservation(db, reservation)
         raise
     except Exception as e:
         error_log = UsageLog(
@@ -151,6 +163,7 @@ async def create_transcription(
             error_message=str(e),
         )
         await log_writer.put(error_log)
+        await refund_reservation(db, reservation)
 
         logger.error("Provider call failed for %s:%s: %s", provider, model_name, e)
         raise HTTPException(
@@ -229,13 +242,19 @@ async def create_speech(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="API key has no associated user",
         ),
+        forbidden_user_error=HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="'user' field does not match the authenticated API key's user",
+        ),
+        reject_mismatch=config.reject_user_mismatch,
     )
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    _ = await validate_user_budget(db, user_id, request.model, strategy=config.budget_strategy)
-    if config.budget_strategy == "for_update":
-        await db.rollback()
+    # Audio is exempt from require_pricing and has no measurable cost unit yet,
+    # so the reservation estimate is 0 — it still enforces existing per-user
+    # state (user exists, not blocked, not already over budget).
+    reservation = await reserve_budget(db, user_id, 0.0, model=request.model, strategy=config.budget_strategy)
 
     provider, model_name = AnyLLM.split_model_provider(request.model)
 
@@ -276,8 +295,10 @@ async def create_speech(
         # so cost is left unset until a dedicated pricing metric is available.
 
         await log_writer.put(usage_log)
+        await reconcile_reservation(db, reservation, 0.0)
 
     except HTTPException:
+        await refund_reservation(db, reservation)
         raise
     except Exception as e:
         error_log = UsageLog(
@@ -292,6 +313,7 @@ async def create_speech(
             error_message=str(e),
         )
         await log_writer.put(error_log)
+        await refund_reservation(db, reservation)
 
         logger.error("Provider call failed for %s:%s: %s", provider, model_name, e)
         raise HTTPException(

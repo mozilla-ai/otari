@@ -16,7 +16,11 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
 from gateway.rate_limit import check_rate_limit
-from gateway.services.budget_service import validate_user_budget
+from gateway.services.budget_service import (
+    reconcile_reservation,
+    refund_reservation,
+    reserve_budget,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing
 from gateway.types.moderation import ModerationResponse
@@ -74,15 +78,25 @@ async def create_moderation(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="API key has no associated user",
         ),
+        forbidden_user_error=HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="'user' field does not match the authenticated API key's user",
+        ),
+        reject_mismatch=config.reject_user_mismatch,
     )
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    _ = await validate_user_budget(db, user_id, request.model, strategy=config.budget_strategy)
-    if config.budget_strategy == "for_update":
-        await db.rollback()
-
     provider, model = AnyLLM.split_model_provider(request.model)
+
+    # Moderations is exempt from require_pricing: it is free at most providers
+    # and is intentionally treated as $0 when unpriced (see below). Pricing, when
+    # present, is a flat per-request rate stored in input_price_per_million.
+    pricing = await find_model_pricing(db, provider, model)
+    flat_cost = (pricing.input_price_per_million / 1_000_000) if pricing and pricing.input_price_per_million else 0.0
+    reservation = await reserve_budget(
+        db, user_id, flat_cost, model=request.model, strategy=config.budget_strategy
+    )
 
     provider_kwargs = get_provider_kwargs(config, provider)
 
@@ -111,18 +125,15 @@ async def create_moderation(
             total_tokens=None,
         )
 
-        pricing = await find_model_pricing(db, provider, model, as_of=usage_log.timestamp)
-        if pricing and pricing.input_price_per_million:
-            # Flat per-request rate stored as input_price_per_million (moderation has no token usage).
-            usage_log.cost = pricing.input_price_per_million / 1_000_000
-        else:
-            usage_log.cost = 0.0
-            # Intentionally do NOT emit "No pricing configured" warning for
-            # /v1/moderations (free at most providers; keeps logs clean).
+        # Flat per-request rate (moderation has no token usage); intentionally
+        # no "No pricing configured" warning here — free at most providers.
+        usage_log.cost = flat_cost
 
         await log_writer.put(usage_log)
+        await reconcile_reservation(db, reservation, flat_cost)
 
     except HTTPException:
+        await refund_reservation(db, reservation)
         raise
     except NotImplementedError as e:
         error_log = UsageLog(
@@ -137,6 +148,7 @@ async def create_moderation(
             error_message=str(e),
         )
         await log_writer.put(error_log)
+        await refund_reservation(db, reservation)
         if UNSUPPORTED_MODERATION_SUBSTRING in str(e):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -160,6 +172,7 @@ async def create_moderation(
             error_message=str(e),
         )
         await log_writer.put(error_log)
+        await refund_reservation(db, reservation)
 
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
         raise HTTPException(

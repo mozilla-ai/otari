@@ -200,12 +200,14 @@ def test_responses_endpoint_bearer_auth(
 
     headers = {API_KEY_HEADER: f"Bearer {api_key_obj['key']}"}
 
+    body = {k: v for k, v in responses_request_body.items() if k != "user"}
+
     with patch(
         "gateway.api.routes.responses.aresponses",
         new_callable=AsyncMock,
         return_value=_FakeResponse({"id": "resp_token"}),
     ):
-        result = client.post("/v1/responses", json=responses_request_body, headers=headers)
+        result = client.post("/v1/responses", json=body, headers=headers)
 
     assert result.status_code == 200
     assert result.json()["id"] == "resp_token"

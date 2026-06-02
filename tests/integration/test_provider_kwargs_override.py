@@ -30,6 +30,7 @@ def config_with_model_in_provider(postgres_url: str) -> GatewayConfig:
         host="127.0.0.1",
         port=8000,
         auto_migrate=False,
+        require_pricing=False,
         providers={
             "openai": {
                 "api_key": "test-openai-key",
@@ -64,6 +65,7 @@ def test_provider_kwargs_do_not_contain_model() -> None:
     config = GatewayConfig(
         database_url="postgresql://localhost/test",
         master_key="test",
+        require_pricing=False,
         providers={
             "openai": {
                 "api_key": "sk-test-key",

@@ -7,6 +7,7 @@ from typing import Annotated, Any
 
 import httpx
 from any_llm import AnyLLM, LLMProvider, aresponses
+from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.responses import Response as ResponsesResponse
 from any_llm.types.responses import ResponseStreamEvent
@@ -49,7 +50,13 @@ from gateway.models.entities import APIKey
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
-from gateway.services.budget_service import validate_user_budget
+from gateway.services.budget_service import (
+    ReservationHandle,
+    estimate_cost,
+    reconcile_reservation,
+    refund_reservation,
+    reserve_budget,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop_responses import (
@@ -59,6 +66,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
 )
+from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -74,6 +82,7 @@ router = APIRouter(prefix="/v1", tags=["responses"])
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in request body"
 _API_KEY_VALIDATION_FAILED = "API key validation failed"
 _API_KEY_NO_USER = "API key has no associated user"
+_USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
 
 class ResponsesRequest(BaseModel):
@@ -154,6 +163,10 @@ async def create_response(
     platform_mode = config.is_platform_mode
     route: ResolvedRoute | None = None
     user_token: str | None = None
+    # Budget pre-debit for the standalone (local-DB) path only; platform mode
+    # reports usage upstream instead. Settled (reconciled/refunded) at every
+    # completion and error hook below.
+    reservation: ReservationHandle | None = None
 
     if platform_mode:
         user_token = _extract_platform_user_token(raw_request)
@@ -210,11 +223,42 @@ async def create_response(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=_API_KEY_NO_USER,
             ),
+            forbidden_user_error=HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=_USER_FORBIDDEN,
+            ),
+            reject_mismatch=config.reject_user_mismatch,
         )
         rate_limit_info = check_rate_limit(raw_request, user_id)
-        _ = await validate_user_budget(db, user_id, request_body.model, strategy=config.budget_strategy)
-        if config.budget_strategy == "for_update":
-            await db.rollback()
+        # Tolerate an unparseable selector: the budget gate (404/403) and the
+        # downstream call surface those; an unparseable model simply has no pricing.
+        try:
+            gate_provider, gate_model = AnyLLM.split_model_provider(request_body.model)
+        except (ValueError, AnyLLMError):
+            gate_provider, gate_model = None, request_body.model
+        gate_pricing = await find_model_pricing(db, gate_provider, gate_model)
+        # max_output_tokens comes from an extra="allow" body, so it may be absent,
+        # non-int, or negative — only trust a non-negative int for the estimate.
+        raw_max_output = getattr(request_body, "max_output_tokens", None)
+        max_output_tokens = raw_max_output if isinstance(raw_max_output, int) and raw_max_output >= 0 else None
+        estimate = estimate_cost(
+            gate_pricing,
+            prompt_chars=len(str(request_body.input))
+            + len(str(getattr(request_body, "instructions", "") or "")),
+            max_output_tokens=max_output_tokens,
+            default_output_tokens=config.budget_estimate_default_output_tokens,
+        )
+        # Reserve first so user/blocked/budget rejections (404/403) precede the
+        # missing-pricing rejection (402); refund if we then reject for no pricing.
+        reservation = await reserve_budget(
+            db, user_id, estimate, model=request_body.model, strategy=config.budget_strategy
+        )
+        if pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
+            await refund_reservation(db, reservation)
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"No pricing configured for model '{request_body.model}'",
+            )
         provider, model = AnyLLM.split_model_provider(request_body.model)
         provider_class = AnyLLM.get_provider_class(provider)
         if not getattr(provider_class, "SUPPORTS_RESPONSES", False):
@@ -406,6 +450,7 @@ async def create_response(
         return await _stream_responses(
             call_kwargs=call_kwargs,
             tools_header=request_body.tools_header,
+            config=config,
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
@@ -425,6 +470,7 @@ async def create_response(
             platform_correlation_id=platform_correlation_id,
             platform_request_id=platform_request_id,
             platform_config=platform_config,
+            reservation=reservation,
         )
 
     # ------------------------------------------------------------------
@@ -498,7 +544,7 @@ async def create_response(
         )
         usage_data = _usage_to_completion_usage(getattr(result, "usage", None))
         if db is not None:
-            await log_usage(
+            actual_cost = await log_usage(
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
@@ -508,8 +554,12 @@ async def create_response(
                 user_id=user_id,
                 usage_override=usage_data,
             )
+            if reservation is not None:
+                await reconcile_reservation(db, reservation, actual_cost or 0.0)
 
     except HTTPException:
+        if db is not None and reservation is not None:
+            await refund_reservation(db, reservation)
         raise
     except MaxToolIterationsExceeded as e:
         if db is not None:
@@ -523,18 +573,24 @@ async def create_response(
                 user_id=user_id,
                 error=str(e),
             )
+            if reservation is not None:
+                await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
         ) from e
     except SandboxNotReachableError as e:
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, e)
+        if db is not None and reservation is not None:
+            await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
         ) from e
     except WebSearchNotReachableError as e:
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, e)
+        if db is not None and reservation is not None:
+            await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
@@ -551,6 +607,8 @@ async def create_response(
                 user_id=user_id,
                 error=str(e),
             )
+            if reservation is not None:
+                await refund_reservation(db, reservation)
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -760,6 +818,7 @@ async def _stream_responses(
     *,
     call_kwargs: dict[str, Any],
     tools_header: str | None,
+    config: GatewayConfig,
     db: AsyncSession | None,
     log_writer: LogWriter,
     api_key_id: str | None,
@@ -779,6 +838,7 @@ async def _stream_responses(
     platform_correlation_id: str | None = None,
     platform_request_id: str | None = None,
     platform_config: GatewayConfig | None = None,
+    reservation: ReservationHandle | None = None,
 ) -> StreamingResponse:
     """Streaming dispatch for single-attempt requests.
 
@@ -819,7 +879,7 @@ async def _stream_responses(
             return
         if db is None:
             return
-        await log_usage(
+        actual_cost = await log_usage(
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
@@ -829,6 +889,41 @@ async def _stream_responses(
             user_id=user_id,
             usage_override=usage_data,
         )
+        if reservation is not None:
+            await reconcile_reservation(db, reservation, actual_cost or 0.0)
+
+    async def _on_no_usage() -> None:
+        # Stream completed but the provider sent no usage data. Settle the
+        # reservation per stream_missing_usage_policy instead of billing $0.
+        if db is None or log_writer is None or reservation is None:
+            return
+        policy = config.stream_missing_usage_policy
+        if policy == "allow_free":
+            await log_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=model,
+                provider=provider,
+                endpoint="/v1/responses",
+                user_id=user_id,
+            )
+            await refund_reservation(db, reservation)
+            return
+        # 'estimate' and 'fail' both charge the up-front estimate; 'fail' also
+        # records the request as errored.
+        await log_usage(
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            model=model,
+            provider=provider,
+            endpoint="/v1/responses",
+            user_id=user_id,
+            error="stream completed without usage data" if policy == "fail" else None,
+            cost_override=reservation.estimate,
+        )
+        await reconcile_reservation(db, reservation, reservation.estimate)
 
     async def _on_error(error: str) -> None:
         if platform_mode_active:
@@ -855,6 +950,14 @@ async def _stream_responses(
             user_id=user_id,
             error=error,
         )
+        if reservation is not None:
+            await refund_reservation(db, reservation)
+
+    async def _on_incomplete() -> None:
+        # Client disconnected mid-stream — release the reservation.
+        if db is None or reservation is None:
+            return
+        await refund_reservation(db, reservation)
 
     try:
         if not use_tool_loop:
@@ -927,6 +1030,8 @@ async def _stream_responses(
             on_complete=_on_complete,
             on_error=_on_error,
             label=f"{provider}:{model}",
+            on_no_usage=_on_no_usage,
+            on_incomplete=_on_incomplete,
         ),
         media_type="text/event-stream",
         headers=headers,

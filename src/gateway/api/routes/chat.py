@@ -9,6 +9,7 @@ from typing import Annotated, Any
 
 import httpx
 from any_llm import AnyLLM, LLMProvider, acompletion
+from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -49,7 +50,13 @@ from gateway.models.entities import APIKey, UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
-from gateway.services.budget_service import validate_user_budget
+from gateway.services.budget_service import (
+    ReservationHandle,
+    estimate_cost,
+    reconcile_reservation,
+    refund_reservation,
+    reserve_budget,
+)
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -60,7 +67,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
-from gateway.services.pricing_service import find_model_pricing
+from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
 from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -132,8 +139,13 @@ async def log_usage(
     response: ChatCompletion | AsyncIterator[ChatCompletionChunk] | None = None,
     usage_override: CompletionUsage | None = None,
     error: str | None = None,
-) -> None:
-    """Log API usage to database and update user spend.
+    cost_override: float | None = None,
+) -> float | None:
+    """Log API usage to the database and return the computed cost.
+
+    Spend is no longer written here — the budget reservation reconcile path owns
+    ``users.spend``. This returns the cost it computed so the caller can reconcile
+    the reservation with the actual amount.
 
     Args:
         db: Database session
@@ -145,6 +157,9 @@ async def log_usage(
         response: Response object (if successful)
         usage_override: Usage data for streaming requests
         error: Error message (if failed)
+
+    Returns:
+        The computed cost for this request, or None when usage/pricing is absent.
 
     """
     usage_log = UsageLog(
@@ -186,7 +201,14 @@ async def log_usage(
             model_ref = f"{provider}:{model}" if provider else model
             logger.warning(f"No pricing configured for '{model_ref}'. Usage will be tracked without cost.")
 
+    # When the caller bills a fixed amount without provider usage (e.g. the
+    # stream-missing-usage estimate policy), record that amount on the log row so
+    # usage_logs.cost stays consistent with the spend that was reconciled.
+    if cost_override is not None:
+        usage_log.cost = cost_override
+
     await log_writer.put(usage_log)
+    return usage_log.cost
 
 
 
@@ -224,6 +246,10 @@ async def chat_completions(
     platform_mode = config.is_platform_mode
     route: ResolvedRoute | None = None
     user_token: str | None = None  # set inside the platform_mode branch; referenced again later
+    # Budget pre-debit for the standalone (local-DB) path only; platform mode
+    # reports usage upstream instead. Settled (reconciled/refunded) at every
+    # completion and error hook below.
+    reservation: ReservationHandle | None = None
 
     if platform_mode:
         user_token = _extract_platform_user_token(raw_request)
@@ -267,12 +293,41 @@ async def chat_completions(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="API key has no associated user",
             ),
+            forbidden_user_error=HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="'user' field does not match the authenticated API key's user",
+            ),
+            reject_mismatch=config.reject_user_mismatch,
         )
 
         rate_limit_info = check_rate_limit(raw_request, user_id)
-        _ = await validate_user_budget(db, user_id, request.model, strategy=config.budget_strategy)
-        if config.budget_strategy == "for_update":
-            await db.rollback()
+
+        # Tolerate an unparseable / unknown-provider selector here — the budget
+        # check below and the downstream provider call surface those with their
+        # own status codes. A model we can't parse simply has no pricing.
+        try:
+            gate_provider, gate_model = AnyLLM.split_model_provider(request.model)
+        except (ValueError, AnyLLMError):
+            gate_provider, gate_model = None, request.model
+        gate_pricing = await find_model_pricing(db, gate_provider, gate_model)
+        estimate = estimate_cost(
+            gate_pricing,
+            prompt_chars=len(str(request.messages)),
+            max_output_tokens=request.max_tokens if request.max_tokens is not None else request.max_completion_tokens,
+            default_output_tokens=config.budget_estimate_default_output_tokens,
+        )
+        # Reserve first so user/blocked/budget rejections (404/403) take
+        # precedence over the missing-pricing rejection (402); refund if we then
+        # reject for missing pricing.
+        reservation = await reserve_budget(
+            db, user_id, estimate, model=request.model, strategy=config.budget_strategy
+        )
+        if pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
+            await refund_reservation(db, reservation)
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"No pricing configured for model '{request.model}'",
+            )
 
     # Caller-requested input guardrails run before any provider/tool dispatch.
     # `block`-mode flags raise 403 here (provider never called); `monitor`-mode
@@ -567,12 +622,16 @@ async def chat_completions(
             # a "provider outage" that's actually the sandbox container
             # being down. 502 keeps "upstream dependency failed" semantics.
             logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
+            if db is not None and reservation is not None:
+                await refund_reservation(db, reservation)
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
             ) from exc
         except WebSearchNotReachableError as exc:
             logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
+            if db is not None and reservation is not None:
+                await refund_reservation(db, reservation)
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
@@ -589,6 +648,8 @@ async def chat_completions(
                     user_id=user_id,
                     error=str(exc),
                 )
+                if reservation is not None:
+                    await refund_reservation(db, reservation)
             logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
             if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
                 raise HTTPException(
@@ -613,6 +674,7 @@ async def chat_completions(
             api_key_id=api_key_id,
             user_id=user_id,
             rate_limit_info=rate_limit_info,
+            reservation=reservation,
         )
 
     # ------------------------------------------------------------------
@@ -820,7 +882,7 @@ async def chat_completions(
         else:
             completion = await acompletion(**completion_kwargs)  # type: ignore[assignment]
         if db is not None:
-            await log_usage(
+            actual_cost = await log_usage(
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
@@ -830,19 +892,27 @@ async def chat_completions(
                 user_id=user_id,
                 response=completion,
             )
+            if reservation is not None:
+                await reconcile_reservation(db, reservation, actual_cost or 0.0)
     except HTTPException:
+        if db is not None and reservation is not None:
+            await refund_reservation(db, reservation)
         raise
     except SandboxNotReachableError as exc:
         # Sandbox is gateway-side infra, not an LLM provider. Clearer detail
         # so operators don't chase a provider outage that's really the
         # sandbox container being down.
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
+        if db is not None and reservation is not None:
+            await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
         ) from exc
     except WebSearchNotReachableError as exc:
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
+        if db is not None and reservation is not None:
+            await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
@@ -862,6 +932,8 @@ async def chat_completions(
                 user_id=user_id,
                 error=str(e),
             )
+            if reservation is not None:
+                await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
@@ -878,6 +950,8 @@ async def chat_completions(
                 user_id=user_id,
                 error=str(e),
             )
+            if reservation is not None:
+                await refund_reservation(db, reservation)
 
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
         if isinstance(e, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
@@ -911,6 +985,7 @@ def _build_streaming_response(
     api_key_id: str | None,
     user_id: str | None,
     rate_limit_info: RateLimitInfo | None,
+    reservation: ReservationHandle | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response."""
 
@@ -939,7 +1014,7 @@ def _build_streaming_response(
             return
         if db is None or log_writer is None:
             return
-        await log_usage(
+        actual_cost = await log_usage(
             db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
@@ -949,6 +1024,41 @@ def _build_streaming_response(
             user_id=user_id,
             usage_override=usage_data,
         )
+        if reservation is not None:
+            await reconcile_reservation(db, reservation, actual_cost or 0.0)
+
+    async def _on_no_usage() -> None:
+        # Stream completed but the provider sent no usage data. Settle the
+        # reservation per stream_missing_usage_policy instead of billing $0.
+        if db is None or log_writer is None or reservation is None:
+            return
+        policy = config.stream_missing_usage_policy
+        if policy == "allow_free":
+            await log_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=model,
+                provider=provider,
+                endpoint="/v1/chat/completions",
+                user_id=user_id,
+            )
+            await refund_reservation(db, reservation)
+            return
+        # 'estimate' and 'fail' both charge the up-front estimate; 'fail' also
+        # records the request as errored.
+        await log_usage(
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            model=model,
+            provider=provider,
+            endpoint="/v1/chat/completions",
+            user_id=user_id,
+            error="stream completed without usage data" if policy == "fail" else None,
+            cost_override=reservation.estimate,
+        )
+        await reconcile_reservation(db, reservation, reservation.estimate)
 
     async def _on_error(error: str) -> None:
         if platform_mode and correlation_id:
@@ -973,6 +1083,14 @@ def _build_streaming_response(
             user_id=user_id,
             error=error,
         )
+        if reservation is not None:
+            await refund_reservation(db, reservation)
+
+    async def _on_incomplete() -> None:
+        # Client disconnected mid-stream — release the reservation.
+        if db is None or reservation is None:
+            return
+        await refund_reservation(db, reservation)
 
     rl_headers = rate_limit_headers(rate_limit_info) if rate_limit_info else {}
     # StreamingResponse builds its own response object, so headers we want on
@@ -992,6 +1110,8 @@ def _build_streaming_response(
             on_complete=_on_complete,
             on_error=_on_error,
             label=f"{provider}:{model}",
+            on_no_usage=_on_no_usage,
+            on_incomplete=_on_incomplete,
         ),
         media_type="text/event-stream",
         headers=headers,

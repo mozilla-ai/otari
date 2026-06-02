@@ -2084,6 +2084,10 @@
             ],
             "title": "Next Budget Reset At"
           },
+          "reserved": {
+            "title": "Reserved",
+            "type": "number"
+          },
           "spend": {
             "title": "Spend",
             "type": "number"
@@ -2101,6 +2105,7 @@
           "user_id",
           "alias",
           "spend",
+          "reserved",
           "budget_id",
           "budget_started_at",
           "next_budget_reset_at",

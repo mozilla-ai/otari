@@ -71,6 +71,10 @@ pricing:
 | `bootstrap_api_key` | bool | `true` | Create a first-use API key on startup when none exist |
 | `log_writer_strategy` | string | `"single"` | Usage log writing: `"single"` (inline) or `"batch"` (background) |
 | `budget_strategy` | string | `"for_update"` | Budget validation: `"for_update"`, `"cas"`, or `"disabled"` |
+| `require_pricing` | bool | `true` | Reject requests for models with no configured pricing (HTTP 402, fail-closed). When `false`, unpriced models are served and logged without cost. Audio and moderation endpoints are always exempt. |
+| `reject_user_mismatch` | bool | `true` | When `true`, a non-master key whose request names a `user` other than its own is rejected (HTTP 403). When `false`, the client `user` is still forwarded to the provider but spend is always bound to the key's own user. The master key may always bill an arbitrary user. |
+| `stream_missing_usage_policy` | string | `"estimate"` | How to bill a streamed response that completes with no provider usage data: `"estimate"` (charge the up-front estimate), `"fail"` (charge estimate and mark errored), or `"allow_free"` (don't bill). |
+| `budget_estimate_default_output_tokens` | int | `1024` | Output-token count assumed when reserving budget for a request with no declared max output; reconciled to actual usage on completion. |
 | `mode` | string | `"standalone"` | Configured mode (`"standalone"` or `"platform"`). Effective behavior is driven by presence of `OTARI_AI_TOKEN`. |
 | `platform` | dict | `{}` | otari.ai integration settings (`base_url`, timeouts, retries) |
 
@@ -159,3 +163,9 @@ pricing:
 ```
 
 Config pricing sets initial values. Pricing set via the `/v1/pricing` API takes precedence.
+
+> **Fail-closed by default.** With `require_pricing: true` (the default), a request for a model
+> that has no pricing entry is rejected with HTTP 402 rather than served free and unmetered — an
+> unpriced model would otherwise bypass the budget cap. To run genuinely free or self-hosted
+> models, add an explicit `$0` pricing entry, or set `require_pricing: false`. Audio and moderation
+> endpoints are exempt. A startup warning is logged if `require_pricing` is on with no pricing configured.

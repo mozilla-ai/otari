@@ -48,3 +48,17 @@ async def find_model_pricing(
 
     legacy_key = f"{provider}/{model}"
     return await _find_by_model_key(db, legacy_key, lookup_time)
+
+
+def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricing: bool) -> bool:
+    """Return True when the request must be rejected for lacking pricing.
+
+    This is the predicate behind the ``require_pricing`` config: an unpriced
+    model would otherwise be served free and unmetered (the budget cap cannot
+    restrain it). Callers evaluate this *after* reserving budget — so a missing
+    user, a blocked user, or an exhausted budget (404/403) take precedence over
+    the missing-pricing rejection (402) — and refund the reservation before
+    raising. When ``require_pricing`` is False, the legacy behavior is preserved
+    (the request is served and logged without cost).
+    """
+    return pricing is None and require_pricing

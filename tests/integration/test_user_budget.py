@@ -193,7 +193,6 @@ def test_user_with_budget(client: TestClient, master_key_header: dict[str, str])
 def test_blocked_user_cannot_make_requests(
     client: TestClient,
     master_key_header: dict[str, str],
-    api_key_header: dict[str, str],
     test_messages: list[dict[str, str]],
 ) -> None:
     """Test that blocked users cannot make completion requests."""
@@ -203,6 +202,8 @@ def test_blocked_user_cannot_make_requests(
         headers=master_key_header,
     )
 
+    # Bill the named user via the master key — a non-master key may only spend
+    # against its own user (see test_api_key_cannot_bill_other_user).
     response = client.post(
         "/v1/chat/completions",
         json={
@@ -210,7 +211,7 @@ def test_blocked_user_cannot_make_requests(
             "messages": test_messages,
             "user": "test-user-1",
         },
-        headers=api_key_header,
+        headers=master_key_header,
     )
     assert response.status_code == 403
     assert "blocked" in response.json()["detail"].lower()
@@ -235,25 +236,37 @@ def test_user_not_found_with_master_key(
     assert "not found" in response.json()["detail"].lower()
 
 
-def test_api_key_requires_existing_user_if_specified(
+def test_api_key_cannot_bill_other_user(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_header: dict[str, str],
     test_messages: list[dict[str, str]],
 ) -> None:
-    """Test that API key requests require user to exist if user field is specified."""
+    """A non-master key naming a user other than its own is rejected (IDOR fix).
+
+    Previously a user key could set ``user`` to any value and charge spend to
+    that user; the gateway now binds non-master spend to the key's own user.
+    """
+    # Create the would-be victim so this proves the rejection is an ownership
+    # check, not merely a "user not found" path.
+    client.post(
+        "/v1/users",
+        json={"user_id": "victim-user"},
+        headers=master_key_header,
+    )
+
     response = client.post(
         "/v1/chat/completions",
         json={
             "model": "openai:gpt-4o",
             "messages": test_messages,
-            "user": "nonexistent-explicit-user",
+            "user": "victim-user",
         },
         headers=api_key_header,
     )
 
-    assert response.status_code == 404
-    assert "not found" in response.json()["detail"].lower()
+    assert response.status_code == 403
+    assert "does not match" in response.json()["detail"].lower()
 
 
 def test_virtual_key_without_user(
@@ -302,7 +315,6 @@ def test_master_key_requires_user(
 def test_user_exceeded_budget_blocked_on_paid_model(
     client: TestClient,
     master_key_header: dict[str, str],
-    api_key_header: dict[str, str],
     test_messages: list[dict[str, str]],
 ) -> None:
     """Test that users who exceeded budget cannot use paid models."""
@@ -336,7 +348,7 @@ def test_user_exceeded_budget_blocked_on_paid_model(
             "messages": test_messages,
             "user": "test-user-budget",
         },
-        headers=api_key_header,
+        headers=master_key_header,
     )
     assert response.status_code == 403
     assert "budget" in response.json()["detail"].lower()
@@ -345,7 +357,6 @@ def test_user_exceeded_budget_blocked_on_paid_model(
 def test_user_exceeded_budget_allowed_on_free_model(
     client: TestClient,
     master_key_header: dict[str, str],
-    api_key_header: dict[str, str],
     test_messages: list[dict[str, str]],
 ) -> None:
     """Test that users who exceeded budget can still use free models."""
@@ -379,7 +390,7 @@ def test_user_exceeded_budget_allowed_on_free_model(
             "messages": test_messages,
             "user": "test-user-budget",
         },
-        headers=api_key_header,
+        headers=master_key_header,
     )
     assert response.status_code != 403
 
@@ -387,7 +398,6 @@ def test_user_exceeded_budget_allowed_on_free_model(
 def test_user_exceeded_budget_blocked_on_unknown_pricing(
     client: TestClient,
     master_key_header: dict[str, str],
-    api_key_header: dict[str, str],
     test_messages: list[dict[str, str]],
 ) -> None:
     """Test that users who exceeded budget are blocked when model pricing is unknown."""
@@ -411,7 +421,7 @@ def test_user_exceeded_budget_blocked_on_unknown_pricing(
             "messages": test_messages,
             "user": "test-user-budget",
         },
-        headers=api_key_header,
+        headers=master_key_header,
     )
     assert response.status_code == 403
     assert "budget" in response.json()["detail"].lower()

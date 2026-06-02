@@ -16,7 +16,6 @@ def test_provider_error_does_not_leak_details(
         json={
             "model": "openai:nonexistent-model-xyz",
             "messages": [{"role": "user", "content": "Hello"}],
-            "user": test_user["user_id"],
         },
         headers=api_key_header,
     )

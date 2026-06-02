@@ -35,6 +35,7 @@ def _make_metrics_client(
         host="127.0.0.1",
         port=8000,
         auto_migrate=False,
+        require_pricing=False,
         enable_metrics=enable_metrics,
         rate_limit_rpm=rate_limit_rpm,
     )

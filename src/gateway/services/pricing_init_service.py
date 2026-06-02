@@ -1,7 +1,7 @@
 """Pricing initialization from configuration."""
 
 from any_llm import AnyLLM
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +9,25 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing
 from gateway.services.pricing_service import normalize_effective_at
+
+
+async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: AsyncSession) -> None:
+    """Warn at startup when require_pricing is on but no pricing is configured.
+
+    With ``require_pricing=True`` (the default), any model lacking a pricing
+    entry is rejected with HTTP 402 — so a deployment with zero pricing rows
+    would reject every billable request. Surface that loudly rather than letting
+    operators discover it via failed traffic.
+    """
+    if not config.require_pricing:
+        return
+    count = (await db.execute(select(func.count()).select_from(ModelPricing))).scalar_one()
+    if count == 0:
+        logger.warning(
+            "require_pricing is enabled but no model pricing is configured: ALL billable requests "
+            "will be rejected with HTTP 402. Add pricing (config `pricing` section or POST /v1/pricing), "
+            "set require_pricing=false, or add explicit $0 pricing for free/self-hosted models."
+        )
 
 
 async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession) -> None:
