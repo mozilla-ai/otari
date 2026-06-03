@@ -3,16 +3,16 @@
 #
 # Instead of running a model in-process, this points at a separate encoderfile
 # container — a single self-contained binary (Mozilla `encoderfile`) that
-# serves a transformer encoder over HTTP. The `duo_guard` guardrail class wraps
-# it via the EncoderfileProvider; the model (DuoGuard-0.5B) lives in the
+# serves a transformer encoder over HTTP. The `injec_guard` guardrail class
+# wraps it via the EncoderfileProvider; the model (PIGuard) lives in the
 # encoderfile container, so nothing is downloaded here at startup.
 #
 # Requires the `encoderfile` service from docker-compose.yml to be up (the
 # anyguardrails container builds its guardrails eagerly at boot and polls the
 # encoderfile server for readiness). `./start.sh --encoderfile` brings up both.
 #
-# NOTE: the published encoderfile image is built for aarch64-linux — it only
-# runs on ARM64 hosts (Apple Silicon, arm64 Linux).
+# The encoderfile images are published per-arch (amd64 + arm64); start.sh picks
+# the right tag for the host.
 
 threadpool:
   max_workers: 8
@@ -26,9 +26,10 @@ providers:
 guardrails:
   # Same profile NAME as the default config (guardrails-service.yaml), so the
   # caller's request — {"profile": "prompt-injection"} — is identical whether
-  # the model runs in-process (Deepset/HF) or via the encoderfile (DuoGuard).
-  # Only this server-side wiring differs.
+  # the model runs in-process (InjecGuard/HF) or via the encoderfile (PIGuard).
+  # Only this server-side wiring differs. We omit model_id so the InjecGuard
+  # class uses its default id for validation; in external-server mode the actual
+  # model is whatever the encoderfile container serves (PIGuard).
   prompt-injection:
-    guardrail_name: duo_guard
+    guardrail_name: injec_guard
     provider: encoderfile
-    model_id: DuoGuard/DuoGuard-0.5B

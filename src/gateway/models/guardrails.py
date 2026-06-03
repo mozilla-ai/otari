@@ -49,10 +49,11 @@ class GuardrailConfig(BaseModel):
     accepted but not yet enforced (the response-direction check is a planned
     follow-up that needs streaming handling)."""
 
-    mode: Literal["block", "monitor"] = "block"
-    """``block`` → reject the request without calling the provider when the
-    guardrail flags it. ``monitor`` → forward anyway and annotate the response
-    with the verdict (shadow mode)."""
+    mode: Literal["block", "monitor"] = "monitor"
+    """``monitor`` (default) → forward the request anyway and annotate the
+    response with the verdict (shadow mode); good for observing without
+    disrupting workflows on false positives. ``block`` → reject the request
+    with a 403 and never call the provider when the guardrail flags it."""
 
     validate_kwargs: dict[str, Any] = Field(default_factory=dict)
     """Extra kwargs forwarded to the guardrails service ``/validate`` call,

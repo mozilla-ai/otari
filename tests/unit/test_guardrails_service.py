@@ -73,7 +73,9 @@ async def test_list_result_is_unwrapped(monkeypatch: pytest.MonkeyPatch) -> None
         return httpx.Response(200, json={"profile": "prompt-injection", "result": [{"valid": False, "score": 0.9}]})
 
     _patch_transport(monkeypatch, handler)
-    verdict = await run_input_guardrails([GuardrailConfig(profile="prompt-injection")], "x", default_url=_URL)
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=_URL
+    )
     assert verdict.blocked is True
 
 
@@ -100,7 +102,9 @@ async def test_output_only_guardrail_is_skipped(monkeypatch: pytest.MonkeyPatch)
 @pytest.mark.asyncio
 async def test_missing_url_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(GuardrailsNotReachableError):
-        await run_input_guardrails([GuardrailConfig(profile="prompt-injection")], "x", default_url=None)
+        await run_input_guardrails(
+            [GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=None
+        )
 
 
 @pytest.mark.asyncio

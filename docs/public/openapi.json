@@ -732,7 +732,7 @@
         "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated at parse time with the\nsame SSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``GATEWAY_MCP_ALLOW_LOOPBACK`` /\n``GATEWAY_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``GATEWAY_GUARDRAILS_URL`` instead.",
         "properties": {
           "mode": {
-            "default": "block",
+            "default": "monitor",
             "enum": [
               "block",
               "monitor"

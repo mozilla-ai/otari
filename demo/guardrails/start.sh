@@ -3,8 +3,8 @@
 # postgres) using the keys and ports configured in this folder's .env. Loads
 # .env via docker-compose's --env-file so secrets never live in shell history.
 #
-#   ./start.sh                 # default: local Deepset prompt-injection (HF, no extra container)
-#   ./start.sh --encoderfile   # DuoGuard via a separate encoderfile container (per-arch image)
+#   ./start.sh                 # default: PIGuard via the encoderfile container (per-arch image)
+#   ./start.sh --in-process    # InjecGuard in-process via HuggingFace (no encoderfile container)
 #   ./start.sh -d              # detached; extra flags pass through to `compose up`
 
 set -euo pipefail
@@ -22,30 +22,39 @@ if grep -qE '^[A-Z_]+=.*REPLACE_ME' "$ENV_FILE"; then
   exit 1
 fi
 
-# --encoderfile swaps the in-process Deepset profile for DuoGuard served by a
-# separate encoderfile container. Everything else passes through to compose.
-PROFILES=(--profile guardrails)
+# Default backend is the encoderfile container (PIGuard). `--in-process` opts
+# out to the in-process HuggingFace path (InjecGuard, no extra container).
+INPROCESS=0
 PASSTHRU=()
 for arg in "$@"; do
   case "$arg" in
-    --encoderfile)
-      PROFILES+=(--profile guardrails-encoderfile)
-      export GUARDRAILS_CONFIG_PATH="./demo/guardrails/guardrails-encoderfile-service.yaml"
-      # Encoderfile images are published per-arch (arch in the tag name). Pick
-      # the one matching this host. Model + version are overridable via env.
-      case "$(uname -m)" in
-        arm64|aarch64) ef_triple="aarch64-unknown-linux-gnu" ;;
-        x86_64|amd64)  ef_triple="x86_64-unknown-linux-gnu" ;;
-        *) echo "unsupported arch $(uname -m) for the encoderfile image" >&2; exit 1 ;;
-      esac
-      ef_model="${GUARDRAILS_ENCODERFILE_MODEL:-duoguard-0.5b}"
-      ef_tag="${GUARDRAILS_ENCODERFILE_VERSION:-v0.6.2}"
-      export OTARI_ENCODERFILE_IMAGE="docker.io/mzdotai/${ef_model}.${ef_triple}-encoderfile:${ef_tag}"
-      echo "ℹ --encoderfile: ${ef_model} via the encoderfile container (${OTARI_ENCODERFILE_IMAGE})."
-      ;;
+    --in-process) INPROCESS=1 ;;
     *) PASSTHRU+=("$arg") ;;
   esac
 done
+
+# Both backends live in the single `guardrails` profile. Default brings up
+# everything (incl. the encoderfile container); --in-process lists services
+# explicitly to leave the encoderfile container out.
+SERVICES=()
+if [[ "$INPROCESS" == 1 ]]; then
+  export GUARDRAILS_CONFIG_PATH="./demo/guardrails/guardrails-service.yaml"
+  SERVICES=(gateway postgres anyguardrails)
+  echo "ℹ --in-process: InjecGuard via HuggingFace (no encoderfile container)."
+else
+  export GUARDRAILS_CONFIG_PATH="./demo/guardrails/guardrails-encoderfile-service.yaml"
+  # Encoderfile images are published per-arch (arch in the tag name). Pick the
+  # one matching this host. Model + version are overridable via env.
+  case "$(uname -m)" in
+    arm64|aarch64) ef_triple="aarch64-linux-gnu" ;;
+    x86_64|amd64)  ef_triple="x86_64-linux-gnu" ;;
+    *) echo "unsupported arch $(uname -m) for the encoderfile image" >&2; exit 1 ;;
+  esac
+  ef_model="${GUARDRAILS_ENCODERFILE_MODEL:-piguard}"
+  ef_tag="${GUARDRAILS_ENCODERFILE_VERSION:-v0.6.2}"
+  export OTARI_ENCODERFILE_IMAGE="docker.io/mzdotai/${ef_model}.${ef_triple}-encoderfile:${ef_tag}"
+  echo "ℹ encoderfile (default): ${ef_model} via the encoderfile container (${OTARI_ENCODERFILE_IMAGE})."
+fi
 
 cd "$GATEWAY_ROOT"
 
@@ -68,4 +77,5 @@ if [[ -n "$branch" && "$branch" != "main" ]]; then
 EOF
 fi
 
-exec docker compose --env-file "$ENV_FILE" "${PROFILES[@]}" up ${PASSTHRU[@]+"${PASSTHRU[@]}"}
+exec docker compose --env-file "$ENV_FILE" --profile guardrails up \
+  ${SERVICES[@]+"${SERVICES[@]}"} ${PASSTHRU[@]+"${PASSTHRU[@]}"}

@@ -196,11 +196,13 @@ services:
   # tag via $OTARI_ANYGUARDRAILS_IMAGE. (If the pull 401s, the Docker Hub repo
   # may still be private — it must be public for external users.)
   #
-  # Opt-in via the `guardrails` compose profile. When this container is not
-  # running, the gateway returns a clean 502 to any request that tries to use
-  # `guardrails`. The mounted service config (see demo/guardrails/) defaults to
-  # a local Deepset `prompt-injection` profile; `./start.sh --encoderfile`
-  # swaps in the DuoGuard-via-encoderfile config and brings up `encoderfile`.
+  # Opt-in via the `guardrails` compose profile — which also includes the
+  # `encoderfile` container below, so `docker compose --profile guardrails up`
+  # brings up the whole PIGuard-via-encoderfile guardrail with no extra flags.
+  # When this container is not running, the gateway returns a clean 502 to any
+  # request that uses `guardrails`. The mounted service config defaults to the
+  # encoderfile profile; `./start.sh --in-process` swaps in the
+  # InjecGuard/HuggingFace config and skips the encoderfile container.
   anyguardrails:
     profiles: ["guardrails"]
     image: ${OTARI_ANYGUARDRAILS_IMAGE:-docker.io/mzdotai/otari-any-guardrail-container:latest}
@@ -210,10 +212,10 @@ services:
       # ad-hoc curl/debugging (e.g. GET /profiles, POST /validate).
       - "127.0.0.1:8183:8000"
     volumes:
-      # Guardrail config. Defaults to the local Deepset profile; override with
-      # GUARDRAILS_CONFIG_PATH (start.sh --encoderfile points it at the
-      # DuoGuard/encoderfile config). Mount path matches ANY_GUARDRAILS_CONFIG_PATHS.
-      - ${GUARDRAILS_CONFIG_PATH:-./demo/guardrails/guardrails-service.yaml}:/app/config/service.yaml:ro
+      # Guardrail config. Defaults to the encoderfile (PIGuard) profile; override
+      # with GUARDRAILS_CONFIG_PATH (start.sh --in-process points it at the
+      # InjecGuard/HF config). Mount path matches ANY_GUARDRAILS_CONFIG_PATHS.
+      - ${GUARDRAILS_CONFIG_PATH:-./demo/guardrails/guardrails-encoderfile-service.yaml}:/app/config/service.yaml:ro
       # Cache HuggingFace model downloads across restarts (the first /validate
       # for a HF-backed profile pulls the model).
       - anyguardrails_hf_cache:/app/hf_cache
@@ -227,22 +229,24 @@ services:
 
   # Encoderfile backend — a single self-contained binary (Mozilla `encoderfile`,
   # https://github.com/mozilla-ai/encoderfile) that serves a transformer encoder
-  # over HTTP. The anyguardrails container's `duo-guard` profile reaches it via
-  # the EncoderfileProvider at http://encoderfile:8080 (see
+  # over HTTP. The anyguardrails container's `prompt-injection` profile reaches
+  # it via the EncoderfileProvider at http://encoderfile:8080 (see
   # demo/guardrails/guardrails-encoderfile-service.yaml). The published image
-  # bakes in DuoGuard-0.5B.
+  # bakes in the PIGuard prompt-injection model.
   #
-  # Opt-in via the `guardrails-encoderfile` profile (brought up by
-  # `./start.sh --encoderfile`, alongside the `guardrails` profile).
+  # Part of the `guardrails` profile, so `docker compose --profile guardrails up`
+  # brings up the full prompt-injection guardrail (anyguardrails + encoderfile)
+  # with no extra flags. (`./start.sh --in-process` runs only gateway/postgres/
+  # anyguardrails with the HuggingFace config instead.)
   #
   # The encoderfile binary is architecture-specific, so the images are published
-  # per-arch (the arch is in the tag name, e.g. `.aarch64-unknown-linux-gnu` /
-  # `.x86_64-unknown-linux-gnu`) rather than as one multi-arch tag. `start.sh
-  # --encoderfile` picks the right tag for the host via $OTARI_ENCODERFILE_IMAGE;
-  # the default below is the arm64 build for raw `docker compose` on Apple Silicon.
+  # per-arch (the arch is in the tag name, e.g. `.aarch64-linux-gnu` /
+  # `.x86_64-linux-gnu`) rather than as one multi-arch tag. The default below is
+  # the arm64 build; on x86 set OTARI_ENCODERFILE_IMAGE to the `.x86_64-linux-gnu`
+  # tag (the demo's start.sh picks the right one automatically via `uname -m`).
   encoderfile:
-    profiles: ["guardrails-encoderfile"]
-    image: ${OTARI_ENCODERFILE_IMAGE:-docker.io/mzdotai/duoguard-0.5b.aarch64-unknown-linux-gnu-encoderfile:v0.6.2}
+    profiles: ["guardrails"]
+    image: ${OTARI_ENCODERFILE_IMAGE:-docker.io/mzdotai/piguard.aarch64-linux-gnu-encoderfile:v0.6.2}
     ports:
       # Localhost-only debug port; the anyguardrails container reaches it over
       # the Docker network at `encoderfile:8080`.

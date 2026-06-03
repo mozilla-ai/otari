@@ -1,18 +1,17 @@
 # Default guardrail config for the otari-anyguardrails service
 # (mounted at /app/config/service.yaml). New `providers` + `guardrails` schema.
 #
-# This config runs LOCALLY with no extra containers: Deepset is a
+# This config runs LOCALLY with no extra containers: InjecGuard is a
 # transformers-based prompt-injection detector; the first /validate downloads a
-# public HuggingFace model (deepset/deberta-v3-base-injection — no API key, no
-# HF token) and runs it in-process.
+# public HuggingFace model (leolee99/InjecGuard — no API key, no HF token) and
+# runs it in-process.
 #
-# (We use Deepset rather than ProtectAI because ProtectAI's models are now
-# gated on HuggingFace and require a token + access grant. Deepset is a
-# drop-in, ungated prompt-injection detector.)
+# (The encoderfile variant in guardrails-encoderfile-service.yaml serves the
+# sibling PIGuard model; the InjecGuard guardrail class only supports the
+# `leolee99/InjecGuard` model id in-process, so that's the local default.)
 #
 # The profile is named by intent (`prompt-injection`), so the caller's request
-# never changes if the model/provider is swapped underneath — e.g. the
-# encoderfile variant in guardrails-encoderfile-service.yaml.
+# never changes if the model/provider is swapped underneath.
 #
 # `valid: false` in the /validate result means an injection was detected.
 # See https://github.com/mozilla-ai/any-guardrail for the guardrail catalogue.
@@ -22,4 +21,4 @@ threadpool:
 
 guardrails:
   prompt-injection:
-    guardrail_name: deepset   # defaults to the HuggingFace provider (local, in-process)
+    guardrail_name: injec_guard   # defaults to the HuggingFace provider (local, in-process)

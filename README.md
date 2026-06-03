@@ -236,10 +236,10 @@ works identically on all three endpoints — `/v1/chat/completions`,
 Each entry names a `profile` configured on the guardrails service. Optional
 fields:
 
-- `mode` — `block` (default): if the guardrail flags the input, the gateway
-  returns `403` with the verdict and **never calls the provider**. `monitor`:
-  forward to the provider anyway and surface the verdict on the
-  `X-Otari-Guardrails` response header (shadow mode).
+- `mode` — `monitor` (default): forward to the provider and surface the verdict
+  on the `X-Otari-Guardrails` response header (shadow mode — observe without
+  disrupting on false positives). `block`: if the guardrail flags the input, the
+  gateway returns `403` with the verdict and **never calls the provider**.
 - `on` — directions to check. `["input"]` (default) is enforced today;
   `"output"` is accepted but not yet enforced (response-direction checks are a
   planned follow-up).
@@ -252,10 +252,16 @@ The backend is the
 container, which wraps
 [`any-guardrail`](https://github.com/mozilla-ai/any-guardrail) behind a
 `POST /validate` API. Point the gateway at it with `GATEWAY_GUARDRAILS_URL`.
-Bring it up with `docker compose --profile guardrails up`. See
-`demo/guardrails/` for a runnable walkthrough (the bundled config ships a local
-`prompt-injection` profile — Deepset via HuggingFace, no API key). When the
-service isn't running, a request that uses `guardrails` gets a clean `502`.
+
+`docker compose --profile guardrails up` brings up the whole default
+`prompt-injection` guardrail — the gateway plus the anyguardrails service plus a
+Mozilla `encoderfile` container serving PIGuard — and callers use it by adding
+`"guardrails": [{"profile": "prompt-injection"}]` to their request. (On x86 set
+`OTARI_ENCODERFILE_IMAGE` to the `.x86_64-linux-gnu` tag; the demo's `start.sh`
+picks the right per-arch image automatically, and `--in-process` runs InjecGuard
+via HuggingFace with no extra container.) See `demo/guardrails/` for a runnable
+walkthrough. When the service isn't running, a request that uses `guardrails`
+gets a clean `502`.
 
 ## API surface
 
