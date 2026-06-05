@@ -1,17 +1,46 @@
 # AGENTS.md
 
 Guidance for agentic coding tools working in this repository.
-Scope: entire repo (`/Users/tbille/Documents/mozilla.ai/move/gateway`).
+Scope: entire repo.
 
 `CLAUDE.md` is a symlink to this file. Always edit `AGENTS.md` directly; never modify `CLAUDE.md`.
 
 ## Project Snapshot
+- Project: `otari` — an OpenAI-compatible LLM gateway (API key management, budget enforcement, usage tracking). The Python package is still named `gateway`.
 - Language/runtime: Python 3.13+.
 - Package manager + task runner: `uv`.
-- App type: FastAPI gateway service with SQLAlchemy + Alembic.
-- Source root: `src/gateway`.
-- Tests: `tests/integration` and `tests/unit`.
-- Database: SQLite by default, PostgreSQL in integration tests.
+- App type: FastAPI gateway service with async SQLAlchemy + Alembic.
+- Source root: `src/gateway` (the package is imported as `gateway.*`; uvicorn runs with `--app-dir src`).
+- Tests: `tests/unit` and `tests/integration`.
+- Database: SQLite by default (async via `aiosqlite`), PostgreSQL in integration tests (async via `asyncpg`).
+- Provider calls go through the `any-llm` SDK (`any_llm`), not hand-rolled HTTP clients.
+
+## Architecture (Big Picture)
+Read these together before changing request behavior — the flow spans several files.
+
+### Two runtime modes
+- Mode is derived, not configured directly: `GatewayConfig.is_platform_mode` / `effective_mode` (`src/gateway/core/config.py`) return `platform` when a platform token (`OTARI_AI_TOKEN`, plus legacy aliases) is set, else `standalone`. Setting `GATEWAY_MODE=platform` without a token fails at startup.
+- **Standalone**: provider credentials come from the `providers:` block in `config.yml`; users/keys/budgets/usage live in the local DB. All routers are registered.
+- **Platform**: per-request provider credentials are resolved from the platform service; local DB/user/budget management is skipped and usage is reported upstream. `register_routers()` (`src/gateway/api/main.py`) only mounts `chat`, `messages`, `responses`, and `health`; management routers (keys/users/budgets/pricing/usage/etc.) are standalone-only.
+
+### Request lifecycle (chat completions)
+1. App + middleware: `src/gateway/main.py` builds the FastAPI app, adds CORS + a security-headers middleware, and enforces auth on every path except `_PUBLIC_PREFIXES` (`/health`).
+2. Auth: `src/gateway/api/deps.py` extracts the key from `Otari-Key` (canonical `API_KEY_HEADER` in `core/config.py`), the legacy `AnyLLM-Key`/`X-AnyLLM-Key` aliases, or `Authorization: Bearer`; validates the SHA-256 hash against the `api_keys` table, or matches the master key.
+3. Route handler: `src/gateway/api/routes/chat.py` resolves the billed user, runs budget checks (standalone) or resolves platform credentials, applies input guardrails, and extracts gateway-managed tools.
+4. Dispatch: the provider/model is split with `AnyLLM.split_model_provider(...)` and the call is made via `acompletion(...)` from `any_llm`. Platform mode walks multiple resolved attempts with fallback (`src/gateway/api/routes/_platform.py`, streaming in `src/gateway/streaming.py`).
+5. Usage + budget reconciliation: standalone writes a `UsageLog` row via the log writer and reconciles spend; platform reports usage upstream.
+
+### Budget enforcement
+`src/gateway/services/budget_service.py` reserves an estimated cost before the call and reconciles/refunds after. Strategy is selectable (`for_update` row-lock, `cas` compare-and-swap, or `disabled`) via `GATEWAY_BUDGET_STRATEGY`. Per-period resets are driven by `next_budget_reset_at` on the user.
+
+### Built-in tools vs pass-through
+Only `otari_*` tool types are run by the gateway; every other tool type is forwarded to the provider untouched (`src/gateway/api/routes/_tools.py`). `otari_code_execution` → `SandboxBackend` (`services/sandbox_backend.py`), `otari_web_search` → `WebSearchBackend` (`services/web_search_backend.py`). The agentic tool/MCP loop lives in `services/mcp_loop.py`. Request-level guardrails (`services/guardrails.py`) are a caller-opted, input-side check run before the provider; SSRF checks for outbound URLs live in `services/url_safety.py`.
+
+### Data, sessions, migrations
+ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, UsageLog, ModelPricing, BudgetResetLog). The async engine/session factory and `init_db` live in `src/gateway/core/database.py`; routes get a session via the `get_db` dependency, non-request code uses `create_session()`. Alembic migrations are in `alembic/versions/` and run on startup when `auto_migrate` is set.
+
+### Config layering
+`GatewayConfig` (`src/gateway/core/config.py`) loads `config.yml` (with `${VAR}` env interpolation) and layers env vars on top using the `GATEWAY_` prefix, with `OTARI_*` accepted as legacy aliases.
 ## Setup Commands
 - Create venv: `uv venv`
 - Activate venv: `source .venv/bin/activate`
@@ -33,21 +62,25 @@ Scope: entire repo (`/Users/tbille/Documents/mozilla.ai/move/gateway`).
 - Run lint checks with `make lint` (or `uv run ruff check src tests scripts`).
 - Ruff is also enforced in CI via `.github/workflows/gateway-lint.yml`.
 - Primary static checks present in dev dependencies: `ruff`, `mypy`.
-- Run type checks (if adding/maintaining typed modules): `uv run mypy src`
+- mypy is configured `strict` over `src`, `tests`, and `scripts` (`pyproject.toml`).
+- Run type checks with `make typecheck` (or `uv run mypy`).
+- mypy is also enforced in CI via `.github/workflows/gateway-typecheck.yml`.
 - If introducing a formatter/linter, keep changes in a separate PR unless requested.
 ## Test Commands
 - Main local suite (matches Makefile):
   - `make test`
-  - expands to `uv run pytest -v tests/integration tests/unit/test_gateway_*.py`
-- CI-style tests with coverage + parallel:
-  - `uv run pytest tests/integration tests/unit -v --cov --cov-report=xml --cov-append -n auto`
+  - expands to `uv run pytest -v tests/unit tests/integration`
+  - unit only: `make test-unit`; integration only: `make test-integration`
+- CI-style tests with coverage + parallel (unit and integration run separately):
+  - `uv run pytest tests/unit -v --cov --cov-report=xml -n auto`
+  - `uv run pytest tests/integration -v --cov --cov-report=xml --cov-append -n auto`
 ### Running a Single Test (important)
 - Single test file:
   - `uv run pytest tests/unit/test_gateway_cli.py -v`
 - Single test function via node id:
   - `uv run pytest tests/unit/test_gateway_cli.py::test_gateway_config_defaults_to_sqlite -v`
 - Single integration test function:
-  - `uv run pytest tests/integration/test_health.py::test_health_endpoint -v`
+  - `uv run pytest tests/integration/test_health.py::test_health_check -v`
 - Pattern-filtered run:
   - `uv run pytest tests/integration -k "budget and reset" -v`
 ### Test Environment Notes
@@ -109,7 +142,7 @@ Scope: entire repo (`/Users/tbille/Documents/mozilla.ai/move/gateway`).
 ### Error Handling
 - Raise explicit `HTTPException` in API layer with clear `detail` messages.
 - Preserve security posture: do not leak internals in public error responses.
-- Domain-layer errors live in `src/gateway/exceptions/domain.py`.
+- Service-specific exceptions live alongside their service modules in `src/gateway/services/` (e.g. `UnsafeURLError`, `GuardrailsNotReachableError`).
 - Prefer specific exceptions (`ValueError`, `SQLAlchemyError`) over broad `except Exception`.
 ### Logging
 - Use module logger from `gateway.log_config`.
