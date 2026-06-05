@@ -139,6 +139,15 @@ class GatewayConfig(BaseSettings):
             "always bill an arbitrary user regardless of this setting."
         ),
     )
+    sandbox_forward_auth: bool = Field(
+        default=False,
+        description=(
+            "When True, forward the caller's Authorization header to the sandbox backend "
+            "(GATEWAY_SANDBOX_URL) on every request. Default off: a local/trusted sandbox "
+            "container needs no auth. Enable it when the sandbox backend is an authenticated, "
+            "remote endpoint that derives the caller/tenant from the forwarded token."
+        ),
+    )
     budget_estimate_default_output_tokens: int = Field(
         default=1024,
         ge=0,

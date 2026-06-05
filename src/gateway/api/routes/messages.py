@@ -63,7 +63,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop_stream,
 )
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
-from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
+from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError, set_sandbox_forward_auth
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import (
@@ -286,6 +286,8 @@ async def create_message(
                 status.HTTP_400_BAD_REQUEST,
             )
         use_sandbox = True
+        if config.sandbox_forward_auth:
+            set_sandbox_forward_auth(raw_request.headers.get("authorization"))
 
     web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
     web_search_url: str | None = os.environ.get("GATEWAY_WEB_SEARCH_URL") or None

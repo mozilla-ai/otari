@@ -69,7 +69,7 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
 from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
-from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
+from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError, set_sandbox_forward_auth
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import (
     OPENAI_STREAM_FORMAT,
@@ -394,6 +394,10 @@ async def chat_completions(
                 ),
             )
         use_sandbox = True
+        # Forward the caller's auth to the sandbox backend when configured (e.g.
+        # an authenticated remote sandbox that derives the tenant from the token).
+        if config.sandbox_forward_auth:
+            set_sandbox_forward_auth(raw_request.headers.get("authorization"))
 
     # web_search opt-in mirrors the sandbox path; see comment above for the
     # threat-model rationale. GATEWAY_WEB_SEARCH_URL is operator-controlled —
