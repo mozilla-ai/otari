@@ -203,3 +203,61 @@ async def test_purpose_hint_is_emitted() -> None:
     hints = backend.purpose_hints()
     assert len(hints) == 1
     assert hints[0][0] == CODE_EXECUTION_TOOL_NAME
+
+
+@pytest.mark.asyncio
+async def test_forwards_auth_header_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With GATEWAY_SANDBOX_FORWARD_AUTH on, the handler sets the forward header
+    and every sandbox request carries it."""
+    from gateway.services.sandbox_backend import set_sandbox_forward_auth
+
+    set_sandbox_forward_auth("Bearer tok-123")
+    try:
+        transport = _patched_async_client(
+            {
+                ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+                ("POST", "/sessions/s1/exec"): httpx.Response(
+                    200,
+                    json={
+                        "result_block": {
+                            "type": "code_execution_tool_result",
+                            "content": {
+                                "type": "code_execution_result",
+                                "stdout": "4",
+                                "stderr": "",
+                                "return_code": 0,
+                                "content": [],
+                            },
+                        }
+                    },
+                ),
+                ("DELETE", "/sessions/s1"): httpx.Response(204),
+            },
+            monkeypatch,
+        )
+        async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(2+2)"})
+        assert transport.captured  # sanity
+        for r in transport.captured:
+            assert r.headers.get("authorization") == "Bearer tok-123"
+    finally:
+        set_sandbox_forward_auth(None)
+
+
+@pytest.mark.asyncio
+async def test_no_auth_header_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default off: no Authorization header is sent (a trusted local sandbox)."""
+    from gateway.services.sandbox_backend import set_sandbox_forward_auth
+
+    set_sandbox_forward_auth(None)
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+        pass
+    for r in transport.captured:
+        assert "authorization" not in {k.lower() for k in r.headers}
