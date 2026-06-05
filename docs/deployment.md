@@ -139,6 +139,15 @@ A sandboxed Python REPL for `otari_code_execution` tool calls:
 docker compose --profile code-exec up -d
 ```
 
+To point the gateway at your own sandbox backend instead of the bundled
+container, set `GATEWAY_SANDBOX_URL` to a service that speaks the sandbox
+contract (`POST /sessions`, `POST /sessions/{id}/exec`, `DELETE /sessions/{id}`):
+
+| Variable | Description |
+|----------|-------------|
+| `GATEWAY_SANDBOX_URL` | Base URL of the sandbox backend. Unset → the tool is unavailable (502 on use). |
+| `GATEWAY_SANDBOX_FORWARD_AUTH` | `false` by default. When `true`, the gateway forwards the **caller's** `Authorization` header to the sandbox backend on every request. Leave off for a local/trusted sandbox (it needs no auth); turn it on when the backend is an authenticated, remote endpoint that derives the caller/tenant from the forwarded token. |
+
 ### Web search
 
 A SearXNG-based web search backend for `otari_web_search` tool calls:
