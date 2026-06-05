@@ -2,6 +2,9 @@
 
 Guidance for agentic coding tools working in this repository.
 Scope: entire repo (`/Users/tbille/Documents/mozilla.ai/move/gateway`).
+
+`CLAUDE.md` is a symlink to this file. Always edit `AGENTS.md` directly; never modify `CLAUDE.md`.
+
 ## Project Snapshot
 - Language/runtime: Python 3.13+.
 - Package manager + task runner: `uv`.
