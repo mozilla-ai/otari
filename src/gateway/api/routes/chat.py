@@ -69,7 +69,7 @@ from gateway.services.mcp_loop import (
 )
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
 from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
-from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError, set_sandbox_forward_auth
+from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import (
     OPENAI_STREAM_FORMAT,
@@ -375,6 +375,10 @@ async def chat_completions(
     # also bypassed when sandbox is in use.
     sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(request.tools)
     sandbox_url: str | None = os.environ.get("GATEWAY_SANDBOX_URL") or None
+    # Auth to forward to the sandbox backend when configured (e.g. an authenticated
+    # remote sandbox that derives the tenant from the token). Passed explicitly to
+    # each SandboxBackend — never global state, so it can't leak across requests.
+    sandbox_forward_auth = raw_request.headers.get("authorization") if config.sandbox_forward_auth else None
     use_sandbox = False
     if sandbox_tool_entry is not None:
         if sandbox_url is None:
@@ -394,10 +398,6 @@ async def chat_completions(
                 ),
             )
         use_sandbox = True
-        # Forward the caller's auth to the sandbox backend when configured (e.g.
-        # an authenticated remote sandbox that derives the tenant from the token).
-        if config.sandbox_forward_auth:
-            set_sandbox_forward_auth(raw_request.headers.get("authorization"))
 
     # web_search opt-in mirrors the sandbox path; see comment above for the
     # threat-model rationale. GATEWAY_WEB_SEARCH_URL is operator-controlled —
@@ -465,6 +465,7 @@ async def chat_completions(
                     mcp_server_configs=stream_mcp_configs,
                     use_sandbox=use_sandbox,
                     sandbox_url=sandbox_url,
+                    sandbox_forward_auth=sandbox_forward_auth,
                     sandbox_tool_entry=sandbox_tool_entry,
                     use_web_search=use_web_search,
                     web_search_url=web_search_url,
@@ -563,7 +564,9 @@ async def chat_completions(
                 # clients that expected a normal HTTP failure.
                 assert sandbox_url is not None
                 sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
-                sandbox_backend = SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint)
+                sandbox_backend = SandboxBackend(
+                    sandbox_url=sandbox_url, purpose_hint=sandbox_hint, forward_auth=sandbox_forward_auth
+                )
                 await sandbox_backend.__aenter__()  # may raise SandboxNotReachableError
 
                 async def _sandbox_stream() -> AsyncIterator[ChatCompletionChunk]:
@@ -742,7 +745,9 @@ async def chat_completions(
             if use_sandbox:
                 assert sandbox_url is not None
                 sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
-                async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
+                async with SandboxBackend(
+                    sandbox_url=sandbox_url, purpose_hint=sandbox_hint, forward_auth=sandbox_forward_auth
+                ) as backend:
                     sandbox_kwargs = {
                         **completion_kwargs,
                         "messages": inject_purpose_hints(
@@ -849,7 +854,9 @@ async def chat_completions(
         elif use_sandbox:
             assert sandbox_url is not None
             sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
-            async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
+            async with SandboxBackend(
+                sandbox_url=sandbox_url, purpose_hint=sandbox_hint, forward_auth=sandbox_forward_auth
+            ) as backend:
                 sandbox_kwargs = {
                     **completion_kwargs,
                     "messages": inject_purpose_hints(
@@ -1133,6 +1140,7 @@ async def _run_streaming_with_fallback(
     mcp_server_configs: list[McpServerConfig] | None = None,
     use_sandbox: bool = False,
     sandbox_url: str | None = None,
+    sandbox_forward_auth: str | None = None,
     sandbox_tool_entry: dict[str, Any] | None = None,
     use_web_search: bool = False,
     web_search_url: str | None = None,
@@ -1205,7 +1213,7 @@ async def _run_streaming_with_fallback(
             assert sandbox_url is not None
             sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
             pool_for_loop = await backend_stack.enter_async_context(
-                SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint),
+                SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint, forward_auth=sandbox_forward_auth),
             )
         elif use_web_search:
             assert web_search_url is not None

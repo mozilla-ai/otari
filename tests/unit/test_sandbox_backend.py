@@ -207,49 +207,40 @@ async def test_purpose_hint_is_emitted() -> None:
 
 @pytest.mark.asyncio
 async def test_forwards_auth_header_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With GATEWAY_SANDBOX_FORWARD_AUTH on, the handler sets the forward header
-    and every sandbox request carries it."""
-    from gateway.services.sandbox_backend import set_sandbox_forward_auth
-
-    set_sandbox_forward_auth("Bearer tok-123")
-    try:
-        transport = _patched_async_client(
-            {
-                ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
-                ("POST", "/sessions/s1/exec"): httpx.Response(
-                    200,
-                    json={
-                        "result_block": {
-                            "type": "code_execution_tool_result",
-                            "content": {
-                                "type": "code_execution_result",
-                                "stdout": "4",
-                                "stderr": "",
-                                "return_code": 0,
-                                "content": [],
-                            },
-                        }
-                    },
-                ),
-                ("DELETE", "/sessions/s1"): httpx.Response(204),
-            },
-            monkeypatch,
-        )
-        async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
-            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(2+2)"})
-        assert transport.captured  # sanity
-        for r in transport.captured:
-            assert r.headers.get("authorization") == "Bearer tok-123"
-    finally:
-        set_sandbox_forward_auth(None)
+    """With forward_auth set (GATEWAY_SANDBOX_FORWARD_AUTH on), every sandbox
+    request carries the caller's Authorization header."""
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200,
+                json={
+                    "result_block": {
+                        "type": "code_execution_tool_result",
+                        "content": {
+                            "type": "code_execution_result",
+                            "stdout": "4",
+                            "stderr": "",
+                            "return_code": 0,
+                            "content": [],
+                        },
+                    }
+                },
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", forward_auth="Bearer tok-123") as backend:
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(2+2)"})
+    assert transport.captured  # sanity
+    for r in transport.captured:
+        assert r.headers.get("authorization") == "Bearer tok-123"
 
 
 @pytest.mark.asyncio
 async def test_no_auth_header_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """Default off: no Authorization header is sent (a trusted local sandbox)."""
-    from gateway.services.sandbox_backend import set_sandbox_forward_auth
-
-    set_sandbox_forward_auth(None)
     transport = _patched_async_client(
         {
             ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
@@ -261,3 +252,25 @@ async def test_no_auth_header_by_default(monkeypatch: pytest.MonkeyPatch) -> Non
         pass
     for r in transport.captured:
         assert "authorization" not in {k.lower() for k in r.headers}
+
+
+@pytest.mark.asyncio
+async def test_forward_auth_is_not_global_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A backend constructed without forward_auth must never inherit another
+    backend's auth — proves the value is per-instance, not process-global."""
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+    # one request forwards auth...
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", forward_auth="Bearer secret"):
+        pass
+    # ...a subsequent, independent backend must not leak it
+    async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+        pass
+    leaked = [r for r in transport.captured if r.headers.get("authorization") == "Bearer secret"]
+    # only the first backend's 2 calls (POST + DELETE) may carry it
+    assert len(leaked) == 2

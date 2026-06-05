@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import logging
 from contextlib import AsyncExitStack
-from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -42,18 +41,6 @@ if TYPE_CHECKING:
     from types import TracebackType
 
 logger = logging.getLogger(__name__)
-
-# Request-scoped: the Authorization header to forward to the sandbox backend
-# when GATEWAY_SANDBOX_FORWARD_AUTH is on. Set per-request by the route handler;
-# read when a SandboxBackend is created. Default None = send no auth (a local /
-# trusted sandbox container needs none).
-_forward_auth: ContextVar[str | None] = ContextVar("sandbox_forward_auth", default=None)
-
-
-def set_sandbox_forward_auth(authorization: str | None) -> None:
-    """Set the Authorization header to forward to the sandbox for this request."""
-    _forward_auth.set(authorization)
-
 
 CODE_EXECUTION_TOOL_NAME = "code_execution"
 _DEFAULT_TIMEOUT_S = 60.0
@@ -86,6 +73,7 @@ class SandboxBackend:
         sandbox_url: str,
         purpose_hint: str | None = None,
         timeout_s: float = _DEFAULT_TIMEOUT_S,
+        forward_auth: str | None = None,
     ) -> None:
         self._sandbox_url = sandbox_url.rstrip("/")
         self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
@@ -93,9 +81,11 @@ class SandboxBackend:
         self._client: httpx.AsyncClient | None = None
         self._session_id: str | None = None
         self._stack: AsyncExitStack = AsyncExitStack()
-        # Captured at construction (request scope). Forwarded to the sandbox on
-        # every request when GATEWAY_SANDBOX_FORWARD_AUTH is on.
-        self._forward_auth: str | None = _forward_auth.get()
+        # The Authorization header to forward to the sandbox, or None to send no
+        # auth (a local/trusted sandbox needs none). Passed explicitly by the
+        # route handler from the caller's request when GATEWAY_SANDBOX_FORWARD_AUTH
+        # is on — never global state, so it can't leak across requests or tasks.
+        self._forward_auth = forward_auth
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": self._forward_auth} if self._forward_auth else {}

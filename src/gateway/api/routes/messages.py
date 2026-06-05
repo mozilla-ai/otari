@@ -63,7 +63,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop_stream,
 )
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
-from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError, set_sandbox_forward_auth
+from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import (
@@ -265,6 +265,10 @@ async def create_message(
     # mutually exclusive for now (multi-backend dispatch is a follow-up).
     sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(request.tools)
     sandbox_url: str | None = os.environ.get("GATEWAY_SANDBOX_URL") or None
+    # Auth to forward to the sandbox backend when configured (e.g. an authenticated
+    # remote sandbox that derives the tenant from the token). Passed explicitly to
+    # each SandboxBackend — never global state, so it can't leak across requests.
+    sandbox_forward_auth = raw_request.headers.get("authorization") if config.sandbox_forward_auth else None
     use_sandbox = False
     if sandbox_tool_entry is not None:
         if sandbox_url is None:
@@ -286,8 +290,6 @@ async def create_message(
                 status.HTTP_400_BAD_REQUEST,
             )
         use_sandbox = True
-        if config.sandbox_forward_auth:
-            set_sandbox_forward_auth(raw_request.headers.get("authorization"))
 
     web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
     web_search_url: str | None = os.environ.get("GATEWAY_WEB_SEARCH_URL") or None
@@ -423,6 +425,7 @@ async def create_message(
             use_sandbox=use_sandbox,
             sandbox_tool_entry=sandbox_tool_entry,
             sandbox_url=sandbox_url,
+            sandbox_forward_auth=sandbox_forward_auth,
             use_web_search=use_web_search,
             web_search_tool_entry=web_search_tool_entry,
             web_search_url=web_search_url,
@@ -463,6 +466,7 @@ async def create_message(
                 use_sandbox=use_sandbox,
                 sandbox_tool_entry=sandbox_tool_entry,
                 sandbox_url=sandbox_url,
+                sandbox_forward_auth=sandbox_forward_auth,
                 use_web_search=use_web_search,
                 web_search_tool_entry=web_search_tool_entry,
                 web_search_url=web_search_url,
@@ -499,6 +503,7 @@ async def create_message(
             use_sandbox=use_sandbox,
             sandbox_tool_entry=sandbox_tool_entry,
             sandbox_url=sandbox_url,
+            sandbox_forward_auth=sandbox_forward_auth,
             use_web_search=use_web_search,
             web_search_tool_entry=web_search_tool_entry,
             web_search_url=web_search_url,
@@ -606,6 +611,7 @@ async def _run_platform_non_stream_messages(
     use_sandbox: bool,
     sandbox_tool_entry: dict[str, Any] | None,
     sandbox_url: str | None,
+    sandbox_forward_auth: str | None,
     use_web_search: bool,
     web_search_tool_entry: dict[str, Any] | None,
     web_search_url: str | None,
@@ -637,7 +643,9 @@ async def _run_platform_non_stream_messages(
         if use_sandbox:
             assert sandbox_url is not None
             sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
-            async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
+            async with SandboxBackend(
+                sandbox_url=sandbox_url, purpose_hint=sandbox_hint, forward_auth=sandbox_forward_auth
+            ) as backend:
                 kwargs = inject_purpose_hints_anthropic(
                     {**completion_kwargs},
                     backend.purpose_hints(),
@@ -721,6 +729,7 @@ async def _run_messages_non_stream(
     use_sandbox: bool,
     sandbox_tool_entry: dict[str, Any] | None,
     sandbox_url: str | None,
+    sandbox_forward_auth: str | None,
     use_web_search: bool,
     web_search_tool_entry: dict[str, Any] | None,
     web_search_url: str | None,
@@ -751,7 +760,9 @@ async def _run_messages_non_stream(
     if use_sandbox:
         assert sandbox_url is not None
         sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
-        async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
+        async with SandboxBackend(
+            sandbox_url=sandbox_url, purpose_hint=sandbox_hint, forward_auth=sandbox_forward_auth
+        ) as backend:
             kwargs = inject_purpose_hints_anthropic(
                 {**call_kwargs},
                 backend.purpose_hints(),
@@ -798,6 +809,7 @@ async def _stream_messages(
     use_sandbox: bool,
     sandbox_tool_entry: dict[str, Any] | None,
     sandbox_url: str | None,
+    sandbox_forward_auth: str | None,
     use_web_search: bool,
     web_search_tool_entry: dict[str, Any] | None,
     web_search_url: str | None,
@@ -952,6 +964,7 @@ async def _stream_messages(
                 use_sandbox=use_sandbox,
                 sandbox_tool_entry=sandbox_tool_entry,
                 sandbox_url=sandbox_url,
+                sandbox_forward_auth=sandbox_forward_auth,
                 use_web_search=use_web_search,
                 web_search_tool_entry=web_search_tool_entry,
                 web_search_url=web_search_url,
@@ -1177,6 +1190,7 @@ async def _open_tool_loop_stream(
     use_sandbox: bool,
     sandbox_tool_entry: dict[str, Any] | None,
     sandbox_url: str | None,
+    sandbox_forward_auth: str | None,
     use_web_search: bool,
     web_search_tool_entry: dict[str, Any] | None,
     web_search_url: str | None,
@@ -1218,7 +1232,9 @@ async def _open_tool_loop_stream(
     if use_sandbox:
         assert sandbox_url is not None
         sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
-        sandbox_backend = SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint)
+        sandbox_backend = SandboxBackend(
+            sandbox_url=sandbox_url, purpose_hint=sandbox_hint, forward_auth=sandbox_forward_auth
+        )
         await sandbox_backend.__aenter__()  # eager-open
 
         async def _sandbox_iter() -> AsyncIterator[MessageStreamEvent]:
