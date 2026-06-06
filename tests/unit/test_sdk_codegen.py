@@ -78,6 +78,37 @@ def test_filter_prunes_schemas_to_reachable_closure() -> None:
     assert "Orphan" not in schemas
 
 
+def test_postprocess_rust_writes_rustfmt_exemption(tmp_path: Path) -> None:
+    generate.postprocess("rust", tmp_path)
+    cfg = tmp_path / "rustfmt.toml"
+    assert cfg.exists()
+    assert "disable_all_formatting = true" in cfg.read_text()
+
+
+def test_postprocess_typescript_injects_mapvalues_idempotently(tmp_path: Path) -> None:
+    runtime = tmp_path / "runtime.ts"
+    runtime.write_text("export const BASE_PATH = '';\n")
+    generate.postprocess("typescript", tmp_path)
+    once = runtime.read_text()
+    assert "export function mapValues" in once
+    # Running again must not append a second copy.
+    generate.postprocess("typescript", tmp_path)
+    assert runtime.read_text().count("export function mapValues") == 1
+
+
+def test_normalize_python_collapses_to_package(tmp_path: Path) -> None:
+    dest = tmp_path / "python"
+    pkg = dest / "otari" / "_control_plane"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("x = 1\n")
+    (dest / "setup.py").write_text("# project scaffolding\n")
+    generate.normalize("python", dest)
+    # dest is now the package itself: its __init__.py is present, scaffolding gone.
+    assert (dest / "__init__.py").read_text() == "x = 1\n"
+    assert not (dest / "setup.py").exists()
+    assert not (dest / "otari").exists()
+
+
 def test_control_plane_tags_are_typed_management_only() -> None:
     assert generate.CONTROL_PLANE_TAGS == frozenset(
         {"keys", "users", "budgets", "pricing", "usage"}

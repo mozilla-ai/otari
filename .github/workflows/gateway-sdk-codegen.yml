@@ -34,16 +34,16 @@ jobs:
         include:
           - language: python
             sdk_repo: mozilla-ai/otari-sdk-python
-            target_path: src/otari/_generated
+            target_path: src/otari/_control_plane
           - language: typescript
             sdk_repo: mozilla-ai/otari-sdk-ts
-            target_path: src/generated
+            target_path: src/_control_plane
           - language: go
             sdk_repo: mozilla-ai/otari-sdk-go
             target_path: otari/generated
           - language: rust
             sdk_repo: mozilla-ai/otari-sdk-rust
-            target_path: src/generated
+            target_path: control-plane
 
     steps:
       - name: Checkout gateway

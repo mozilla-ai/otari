@@ -43,14 +43,28 @@ Set `OPENAPI_GENERATOR_CLI` if the CLI is not named `openapi-generator-cli` on P
 to `main`, or manually, and opens a PR against each SDK repo with the regenerated
 client dropped into:
 
-| Language   | SDK repo                      | Target path           |
-|------------|-------------------------------|-----------------------|
-| python     | `mozilla-ai/otari-sdk-python` | `src/otari/_generated`|
-| typescript | `mozilla-ai/otari-sdk-ts`     | `src/generated`       |
-| go         | `mozilla-ai/otari-sdk-go`     | `otari/generated`     |
-| rust       | `mozilla-ai/otari-sdk-rust`   | `src/generated`       |
+| Language   | SDK repo                      | Target path                |
+|------------|-------------------------------|----------------------------|
+| python     | `mozilla-ai/otari-sdk-python` | `src/otari/_control_plane` |
+| typescript | `mozilla-ai/otari-sdk-ts`     | `src/_control_plane`       |
+| go         | `mozilla-ai/otari-sdk-go`     | `otari/generated`          |
+| rust       | `mozilla-ai/otari-sdk-rust`   | `control-plane`            |
 
 The matrix in the workflow mirrors `TARGETS` in `generate.py`; keep them in sync.
+Target paths match what each SDK's hand-written wiring imports from.
+
+## Post-processing
+
+Raw generator output needs small fix-ups (applied by `postprocess`/`normalize`
+in `generate.py`, so no per-repo hand-edits to generated code are required):
+
+- **rust** — a `rustfmt.toml` with `disable_all_formatting` is written into the
+  crate, because the SDK's CI runs `cargo fmt --all -- --check`, which reaches
+  the generated crate (and `ignore` needs nightly).
+- **typescript** — the `mapValues` helper the models import is appended to
+  `runtime.ts` (this generator version omits it).
+- **python** — output is collapsed to the `otari/_control_plane` package so the
+  workflow drops `otari._control_plane` directly into the SDK.
 
 **Required secret:** `SDK_CODEGEN_TOKEN`, a fine-grained PAT or GitHub App token
 with `Contents:write` and `Pull-requests:write` on the four SDK repos. The default

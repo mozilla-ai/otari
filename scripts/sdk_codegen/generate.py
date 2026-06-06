@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -59,21 +60,26 @@ class LanguageTarget:
     target_path: str
 
 
-# target_path is where the generated client project is dropped inside the SDK
-# repo by the codegen workflow. Wiring the generated client into each SDK's
-# public surface is a per-repo follow-up.
+# target_path is where the generated client is dropped inside the SDK repo by
+# the codegen workflow (1:1 copy of the normalized per-language output). These
+# match the layout each SDK's hand-written wiring imports from.
 TARGETS: dict[str, LanguageTarget] = {
     "python": LanguageTarget(
         generator="python",
-        additional_properties="packageName=otari_control_plane",
+        # Dotted package so internal imports are ``otari._control_plane.*`` and
+        # the client is importable as a subpackage of the SDK's ``otari`` package.
+        additional_properties="packageName=otari._control_plane",
         sdk_repo="mozilla-ai/otari-sdk-python",
-        target_path="src/otari/_generated",
+        target_path="src/otari/_control_plane",
     ),
     "typescript": LanguageTarget(
         generator="typescript-fetch",
-        additional_properties="npmName=otari-control-plane,supportsES6=true",
+        # No npmName: that makes typescript-fetch emit a full npm project (sources
+        # under src/). Without it the output is flat (runtime.ts, apis/, models/),
+        # which is what the SDK imports from under src/_control_plane.
+        additional_properties="supportsES6=true",
         sdk_repo="mozilla-ai/otari-sdk-ts",
-        target_path="src/generated",
+        target_path="src/_control_plane",
     ),
     "go": LanguageTarget(
         generator="go",
@@ -85,9 +91,23 @@ TARGETS: dict[str, LanguageTarget] = {
         generator="rust",
         additional_properties="packageName=otari-control-plane,library=reqwest",
         sdk_repo="mozilla-ai/otari-sdk-rust",
-        target_path="src/generated",
+        target_path="control-plane",
     ),
 }
+
+# Helper that this generator version's typescript-fetch models import from
+# ``runtime`` but the runtime template omits. Injected post-generation so the
+# generated TypeScript compiles without a hand-edit.
+_TS_MAPVALUES = """
+// Added by sdk_codegen post-processing: the generated models import `mapValues`
+// from runtime, but this generator version omits it.
+export function mapValues(data: any, fn: (item: any) => any) {
+  return Object.keys(data).reduce(
+    (acc, key) => ({ ...acc, [key]: fn(data[key]) }),
+    {} as Record<string, any>,
+  );
+}
+"""
 
 
 def _collect_schema_refs(node: Any, acc: set[str]) -> None:
@@ -153,6 +173,41 @@ def _generator_cli() -> str:
     return os.environ.get("OPENAPI_GENERATOR_CLI", "openapi-generator-cli")
 
 
+def postprocess(language: str, dest: Path) -> None:
+    """Apply language-specific fix-ups so the raw generator output is usable.
+
+    Keeps each SDK repo's CI green without per-repo hand-edits to generated code:
+    - rust: exempt the crate from rustfmt (``cargo fmt --all -- --check`` reaches
+      it; ``disable_all_formatting`` is the only stable-channel option).
+    - typescript: inject the ``mapValues`` helper the models import but this
+      generator version omits.
+    """
+    if language == "rust":
+        (dest / "rustfmt.toml").write_text("disable_all_formatting = true\n")
+    elif language == "typescript":
+        runtime = dest / "runtime.ts"
+        if runtime.exists() and "export function mapValues" not in runtime.read_text():
+            with runtime.open("a") as handle:
+                handle.write(_TS_MAPVALUES)
+
+
+def normalize(language: str, dest: Path) -> None:
+    """Reduce the generator output to exactly what gets copied into the SDK repo.
+
+    The python generator emits a full project (``otari/_control_plane/`` package
+    plus ``setup.py`` etc.); collapse ``dest`` to the package directory so the
+    workflow's ``dest -> target_path`` copy lands ``otari._control_plane``
+    directly. Other languages already emit a flat payload.
+    """
+    if language == "python":
+        package = dest / "otari" / "_control_plane"
+        if package.is_dir():
+            staged = dest.parent / f"{dest.name}__pkg"
+            shutil.move(str(package), str(staged))
+            shutil.rmtree(dest)
+            shutil.move(str(staged), str(dest))
+
+
 def generate_language(language: str, spec_path: Path, out_dir: Path) -> Path:
     """Run OpenAPI Generator for ``language`` and return the output directory."""
     target = TARGETS[language]
@@ -170,6 +225,8 @@ def generate_language(language: str, spec_path: Path, out_dir: Path) -> Path:
         target.additional_properties,
     ]
     subprocess.run(cmd, check=True)
+    postprocess(language, dest)
+    normalize(language, dest)
     return dest
 
 
