@@ -28,9 +28,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -280,19 +282,64 @@ def _generator_cli() -> str:
     return os.environ.get("OPENAPI_GENERATOR_CLI", "openapi-generator-cli")
 
 
+def _patch_rust_cargo_toml(dest: Path) -> None:
+    """Correct the generated Rust ``Cargo.toml`` so the crate builds as the SDK needs.
+
+    The rust generator emits a truncated ``version`` (``0.0.0-de`` from "dev") and a
+    ``reqwest`` dependency pinned to ``^0.13`` with a feature set that does not build
+    against the SDK's pinned ``reqwest 0.12``; it also names the wrong rustls feature
+    (``reqwest/rustls`` rather than ``reqwest/rustls-tls``). The Rust SDK port fixed
+    these by hand; do them here so regenerations are clean. Replacements are tolerant
+    of formatting so they survive generator-version churn.
+    """
+    cargo = dest / "Cargo.toml"
+    if not cargo.exists():
+        return
+    text = cargo.read_text()
+
+    # version under [package]: any "0.0.0-*" placeholder -> 0.1.0.
+    text = re.sub(
+        r'^(version\s*=\s*)"0\.0\.0[^"]*"',
+        r'\1"0.1.0"',
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+    # reqwest dependency: pin to 0.12 and keep only the features the SDK builds with.
+    text = re.sub(
+        r'^reqwest\s*=\s*\{[^}]*\}',
+        'reqwest = { version = "0.12", default-features = false, '
+        'features = ["json", "multipart"] }',
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+
+    # rustls feature must map onto reqwest's rustls-tls (not rustls).
+    text = text.replace('"reqwest/rustls"', '"reqwest/rustls-tls"')
+
+    cargo.write_text(text)
+
+
 def postprocess(language: str, dest: Path) -> None:
     """Apply language-specific fix-ups so the raw generator output is usable.
 
     Keeps each SDK repo's CI green without per-repo hand-edits to generated code:
     - rust: exempt the crate from rustfmt (``cargo fmt --all -- --check`` reaches
-      it; ``disable_all_formatting`` is the only stable-channel option).
+      it; ``disable_all_formatting`` is the only stable-channel option), and patch
+      the emitted ``Cargo.toml`` (placeholder version + a ``reqwest`` pin/feature
+      set that does not build against the SDK's pinned ``reqwest 0.12``).
     - typescript: inject the ``mapValues`` helper the models import but this
       generator version omits.
     - go: drop the generated ``test/`` dir, whose unfilled
-      ``GIT_USER_ID/GIT_REPO_ID`` import placeholders break ``go vet``/``go test``.
+      ``GIT_USER_ID/GIT_REPO_ID`` import placeholders break ``go vet``/``go test``,
+      then ``gofmt -w`` the payload (the generator emits un-gofmt'd Go, which fails
+      the SDK repo's ``gofmt -l`` check).
     """
     if language == "rust":
         (dest / "rustfmt.toml").write_text("disable_all_formatting = true\n")
+        _patch_rust_cargo_toml(dest)
     elif language == "typescript":
         runtime = dest / "runtime.ts"
         if runtime.exists() and "export function mapValues" not in runtime.read_text():
@@ -302,6 +349,15 @@ def postprocess(language: str, dest: Path) -> None:
         test_dir = dest / "test"
         if test_dir.is_dir():
             shutil.rmtree(test_dir)
+        gofmt = shutil.which("gofmt")
+        if gofmt is None:
+            warnings.warn(
+                "gofmt not found on PATH; skipping gofmt of generated Go "
+                "(the SDK repo's gofmt -l check may then fail).",
+                stacklevel=2,
+            )
+        else:
+            subprocess.run([gofmt, "-w", str(dest)], check=True)
 
 
 def normalize(language: str, dest: Path, python_package: str) -> None:
