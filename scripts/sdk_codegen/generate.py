@@ -181,6 +181,8 @@ def postprocess(language: str, dest: Path) -> None:
       it; ``disable_all_formatting`` is the only stable-channel option).
     - typescript: inject the ``mapValues`` helper the models import but this
       generator version omits.
+    - go: drop the generated ``test/`` dir, whose unfilled
+      ``GIT_USER_ID/GIT_REPO_ID`` import placeholders break ``go vet``/``go test``.
     """
     if language == "rust":
         (dest / "rustfmt.toml").write_text("disable_all_formatting = true\n")
@@ -189,6 +191,10 @@ def postprocess(language: str, dest: Path) -> None:
         if runtime.exists() and "export function mapValues" not in runtime.read_text():
             with runtime.open("a") as handle:
                 handle.write(_TS_MAPVALUES)
+    elif language == "go":
+        test_dir = dest / "test"
+        if test_dir.is_dir():
+            shutil.rmtree(test_dir)
 
 
 def normalize(language: str, dest: Path) -> None:

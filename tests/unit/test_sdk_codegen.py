@@ -96,6 +96,14 @@ def test_postprocess_typescript_injects_mapvalues_idempotently(tmp_path: Path) -
     assert runtime.read_text().count("export function mapValues") == 1
 
 
+def test_postprocess_go_drops_broken_generated_tests(tmp_path: Path) -> None:
+    test_dir = tmp_path / "test"
+    test_dir.mkdir()
+    (test_dir / "api_keys_test.go").write_text('import "github.com/GIT_USER_ID/GIT_REPO_ID"\n')
+    generate.postprocess("go", tmp_path)
+    assert not test_dir.exists()
+
+
 def test_normalize_python_collapses_to_package(tmp_path: Path) -> None:
     dest = tmp_path / "python"
     pkg = dest / "otari" / "_control_plane"
