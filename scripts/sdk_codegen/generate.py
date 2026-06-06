@@ -209,13 +209,22 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     Streaming still cannot be generated (OpenAPI Generator emits no SSE); the SDK
     shell hand-writes the stream iterator over the generated client.
     """
-    from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
+    from any_llm.types.completion import (
+        ChatCompletion,
+        ChatCompletionChunk,
+        CreateEmbeddingResponse,
+    )
+    from any_llm.types.messages import MessageResponse
+    from any_llm.types.rerank import RerankResponse
     from openai.types.chat import ChatCompletionMessageParam
     from pydantic import TypeAdapter
 
     schemas: dict[str, Any] = spec.setdefault("components", {}).setdefault("schemas", {})
 
     def absorb(js: dict[str, Any], prefix: str) -> dict[str, Any]:
+        # Pydantic emits nested models under ``$defs``; lift them into the spec's
+        # shared schema map under a unique prefix so distinct models can't collide
+        # on a common nested name (e.g. two responses both referencing Usage).
         for name, body in js.pop("$defs", {}).items():
             schemas[f"{prefix}_{name}"] = body
         return js
@@ -232,11 +241,33 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     )
     schemas["ChatMessageInput"] = msgs.get("items", {})
 
-    chat = spec["paths"]["/v1/chat/completions"]["post"]
-    chat["responses"]["200"] = {
-        "description": "Chat completion",
-        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ChatCompletion"}}},
-    }
+    # otari-owned inference endpoints the gateway leaves ``response_model=None``.
+    # Their real response shapes live in any-llm (which the gateway depends on);
+    # inject them so the generated core returns typed models instead of ``object``.
+    # Audio/images are intentionally left opaque: they return binary/file payloads
+    # that do not map onto a JSON response schema.
+    schemas["MessageResponse"] = absorb(
+        MessageResponse.model_json_schema(ref_template="#/components/schemas/MR_{model}"), "MR"
+    )
+    schemas["RerankResponse"] = absorb(
+        RerankResponse.model_json_schema(ref_template="#/components/schemas/RR_{model}"), "RR"
+    )
+    schemas["CreateEmbeddingResponse"] = absorb(
+        CreateEmbeddingResponse.model_json_schema(ref_template="#/components/schemas/EMB_{model}"), "EMB"
+    )
+
+    def set_json_200(path: str, schema_name: str, description: str) -> None:
+        op = spec["paths"][path]["post"]
+        op["responses"]["200"] = {
+            "description": description,
+            "content": {"application/json": {"schema": {"$ref": f"#/components/schemas/{schema_name}"}}},
+        }
+
+    set_json_200("/v1/chat/completions", "ChatCompletion", "Chat completion")
+    set_json_200("/v1/messages", "MessageResponse", "Anthropic-style message")
+    set_json_200("/v1/rerank", "RerankResponse", "Rerank result")
+    set_json_200("/v1/embeddings", "CreateEmbeddingResponse", "Embeddings")
+
     schemas["ChatCompletionRequest"]["properties"]["messages"] = {
         "type": "array",
         "minItems": 1,

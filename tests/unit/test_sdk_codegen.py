@@ -117,6 +117,49 @@ def test_normalize_python_collapses_to_package(tmp_path: Path) -> None:
     assert not (dest / "otari").exists()
 
 
+def _full_spec_stub() -> dict[str, Any]:
+    return {
+        "openapi": "3.1.0",
+        "info": {"title": "t", "version": "0"},
+        "paths": {
+            "/v1/chat/completions": {"post": {"responses": {}}},
+            "/v1/messages": {"post": {"responses": {}}},
+            "/v1/rerank": {"post": {"responses": {}}},
+            "/v1/embeddings": {"post": {"responses": {}}},
+        },
+        "components": {"schemas": {"ChatCompletionRequest": {"type": "object", "properties": {}}}},
+    }
+
+
+def test_enrich_types_otari_owned_inference_endpoints() -> None:
+    spec = generate.enrich_spec(_full_spec_stub())
+    schemas = spec["components"]["schemas"]
+    for name in (
+        "ChatCompletion",
+        "ChatCompletionChunk",
+        "MessageResponse",
+        "RerankResponse",
+        "CreateEmbeddingResponse",
+        "ChatMessageInput",
+    ):
+        assert name in schemas, f"{name} schema missing after enrich"
+
+    def ref(path: str) -> str:
+        schema = spec["paths"][path]["post"]["responses"]["200"]["content"]["application/json"]["schema"]
+        return str(schema["$ref"])
+
+    assert ref("/v1/chat/completions").endswith("/ChatCompletion")
+    # /messages is Anthropic-shaped and has no OpenAI-SDK equivalent; typing it
+    # from any-llm's MessageResponse is the whole point of generating from the
+    # otari spec rather than wrapping the OpenAI SDK.
+    assert ref("/v1/messages").endswith("/MessageResponse")
+    assert ref("/v1/rerank").endswith("/RerankResponse")
+    assert ref("/v1/embeddings").endswith("/CreateEmbeddingResponse")
+
+    messages_field = schemas["ChatCompletionRequest"]["properties"]["messages"]
+    assert messages_field["items"]["$ref"].endswith("/ChatMessageInput")
+
+
 def test_control_plane_tags_are_typed_management_only() -> None:
     assert generate.CONTROL_PLANE_TAGS == frozenset(
         {"keys", "users", "budgets", "pricing", "usage"}
