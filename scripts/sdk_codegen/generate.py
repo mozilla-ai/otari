@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
-"""Generate language SDK control-plane clients from the otari OpenAPI spec.
+"""Generate language SDK clients from the otari OpenAPI spec via OpenAPI Generator.
 
-This produces typed clients for the gateway's management / control-plane endpoints
-(API keys, users, budgets, pricing, usage) using OpenAPI Generator.
+Two modes:
 
-Intentionally excluded:
-  - inference / proxy (chat, responses, embeddings, messages, moderations,
-    rerank, audio, images, models, health): the published SDKs wrap the official
-    OpenAI SDK, the spec leaves them loosely typed, and OpenAPI Generator cannot
-    generate their streaming (SSE) responses.
-  - batches: responses are untyped in the spec (the route uses
-    ``response_model=None``), so generation would regress them, and every SDK
-    already implements batches with hand-written typed models.
+- ``control-plane`` (default): typed clients for the management endpoints only
+  (keys, users, budgets, pricing, usage). The inference surface stays a
+  hand-written wrapper around the official OpenAI SDK; batches are hand-written
+  (their responses are untyped in the spec).
 
-So only the typed, bespoke management surface is generated; everything else
-stays hand-written.
+- ``full`` (Option C): enriches the spec's inference surface with the real typed
+  completion schemas (from ``any-llm``), then generates a typed core covering
+  *every* endpoint. The SDK hand-writes a thin shell over this core for the
+  three things generation can't do: streaming (SSE), typed error mapping, and
+  ergonomic method names / auth modes.
 
 Usage:
     python scripts/sdk_codegen/generate.py --language python --out-dir dist
-    python scripts/sdk_codegen/generate.py --language all
+    python scripts/sdk_codegen/generate.py --language all --mode full
 
 The OpenAPI Generator CLI must be on PATH (or set OPENAPI_GENERATOR_CLI). It
 requires a JRE. Install with:
@@ -95,6 +93,36 @@ TARGETS: dict[str, LanguageTarget] = {
     ),
 }
 
+# Option C: the FULL client (every endpoint, typed core). The SDK hand-writes a
+# thin shell over this for streaming, error mapping, and ergonomic method names.
+FULL_TARGETS: dict[str, LanguageTarget] = {
+    "python": LanguageTarget(
+        generator="python",
+        additional_properties="packageName=otari._client",
+        sdk_repo="mozilla-ai/otari-sdk-python",
+        target_path="src/otari/_client",
+    ),
+    "typescript": LanguageTarget(
+        generator="typescript-fetch",
+        additional_properties="supportsES6=true",
+        sdk_repo="mozilla-ai/otari-sdk-ts",
+        target_path="src/_client",
+    ),
+    "go": LanguageTarget(
+        generator="go",
+        additional_properties="packageName=client,withGoMod=false",
+        sdk_repo="mozilla-ai/otari-sdk-go",
+        target_path="otari/client",
+    ),
+    "rust": LanguageTarget(
+        generator="rust",
+        additional_properties="packageName=otari-client,library=reqwest",
+        sdk_repo="mozilla-ai/otari-sdk-rust",
+        target_path="client",
+    ),
+}
+
+
 # Helper that this generator version's typescript-fetch models import from
 # ``runtime`` but the runtime template omits. Injected post-generation so the
 # generated TypeScript compiles without a hand-edit.
@@ -169,6 +197,54 @@ def filter_spec(spec: dict[str, Any], tags: frozenset[str]) -> dict[str, Any]:
     return filtered
 
 
+def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    """Type the inference surface so the FULL client generates typed methods.
+
+    The gateway spec leaves chat loosely typed (``messages`` are untyped dicts,
+    the chat ``200`` response has no schema). For Option C (a generated core that
+    covers every endpoint) we inject the real, typed completion schemas from
+    ``any-llm`` (which the gateway already depends on) so the generated chat
+    method returns a typed ``ChatCompletion`` and accepts typed messages.
+
+    Streaming still cannot be generated (OpenAPI Generator emits no SSE); the SDK
+    shell hand-writes the stream iterator over the generated client.
+    """
+    from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
+    from openai.types.chat import ChatCompletionMessageParam
+    from pydantic import TypeAdapter
+
+    schemas: dict[str, Any] = spec.setdefault("components", {}).setdefault("schemas", {})
+
+    def absorb(js: dict[str, Any], prefix: str) -> dict[str, Any]:
+        for name, body in js.pop("$defs", {}).items():
+            schemas[f"{prefix}_{name}"] = body
+        return js
+
+    schemas["ChatCompletion"] = absorb(
+        ChatCompletion.model_json_schema(ref_template="#/components/schemas/CC_{model}"), "CC"
+    )
+    schemas["ChatCompletionChunk"] = absorb(
+        ChatCompletionChunk.model_json_schema(ref_template="#/components/schemas/CCK_{model}"), "CCK"
+    )
+    msgs = absorb(
+        TypeAdapter(list[ChatCompletionMessageParam]).json_schema(ref_template="#/components/schemas/MSG_{model}"),
+        "MSG",
+    )
+    schemas["ChatMessageInput"] = msgs.get("items", {})
+
+    chat = spec["paths"]["/v1/chat/completions"]["post"]
+    chat["responses"]["200"] = {
+        "description": "Chat completion",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ChatCompletion"}}},
+    }
+    schemas["ChatCompletionRequest"]["properties"]["messages"] = {
+        "type": "array",
+        "minItems": 1,
+        "items": {"$ref": "#/components/schemas/ChatMessageInput"},
+    }
+    return spec
+
+
 def _generator_cli() -> str:
     return os.environ.get("OPENAPI_GENERATOR_CLI", "openapi-generator-cli")
 
@@ -197,16 +273,16 @@ def postprocess(language: str, dest: Path) -> None:
             shutil.rmtree(test_dir)
 
 
-def normalize(language: str, dest: Path) -> None:
+def normalize(language: str, dest: Path, python_package: str) -> None:
     """Reduce the generator output to exactly what gets copied into the SDK repo.
 
-    The python generator emits a full project (``otari/_control_plane/`` package
+    The python generator emits a full project (an ``otari/<package>/`` package
     plus ``setup.py`` etc.); collapse ``dest`` to the package directory so the
-    workflow's ``dest -> target_path`` copy lands ``otari._control_plane``
-    directly. Other languages already emit a flat payload.
+    workflow's ``dest -> target_path`` copy lands ``otari.<package>`` directly.
+    Other languages already emit a flat payload.
     """
     if language == "python":
-        package = dest / "otari" / "_control_plane"
+        package = dest / "otari" / python_package
         if package.is_dir():
             staged = dest.parent / f"{dest.name}__pkg"
             shutil.move(str(package), str(staged))
@@ -214,9 +290,8 @@ def normalize(language: str, dest: Path) -> None:
             shutil.move(str(staged), str(dest))
 
 
-def generate_language(language: str, spec_path: Path, out_dir: Path) -> Path:
+def generate_language(language: str, spec_path: Path, out_dir: Path, target: LanguageTarget) -> Path:
     """Run OpenAPI Generator for ``language`` and return the output directory."""
-    target = TARGETS[language]
     dest = out_dir / language
     cmd = [
         _generator_cli(),
@@ -232,38 +307,52 @@ def generate_language(language: str, spec_path: Path, out_dir: Path) -> Path:
     ]
     subprocess.run(cmd, check=True)
     postprocess(language, dest)
-    normalize(language, dest)
+    normalize(language, dest, target.target_path.rsplit("/", 1)[-1])
     return dest
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate control-plane SDK clients.")
+    parser = argparse.ArgumentParser(description="Generate SDK clients from the otari OpenAPI spec.")
     parser.add_argument("--language", choices=[*TARGETS, "all"], default="all")
+    parser.add_argument(
+        "--mode",
+        choices=["control-plane", "full"],
+        default="control-plane",
+        help="control-plane: typed management endpoints only. full: every endpoint "
+        "(typed inference core) with the spec enriched (Option C).",
+    )
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument(
-        "--write-filtered-spec",
+        "--write-spec",
         type=Path,
         default=None,
-        help="Also write the control-plane-only spec to this path (for inspection).",
+        help="Also write the (filtered or enriched) spec to this path, for inspection.",
     )
     args = parser.parse_args()
 
     spec: dict[str, Any] = json.loads(Path(args.spec).read_text())
-    filtered = filter_spec(spec, CONTROL_PLANE_TAGS)
-    languages = list(TARGETS) if args.language == "all" else [str(args.language)]
+    if args.mode == "full":
+        prepared = enrich_spec(spec)
+        targets = FULL_TARGETS
+        spec_name = "otari-full.openapi.json"
+    else:
+        prepared = filter_spec(spec, CONTROL_PLANE_TAGS)
+        targets = TARGETS
+        spec_name = "control-plane.openapi.json"
 
+    languages = list(targets) if args.language == "all" else [str(args.language)]
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    if args.write_filtered_spec is not None:
-        Path(args.write_filtered_spec).write_text(json.dumps(filtered, indent=2))
+    if args.write_spec is not None:
+        Path(args.write_spec).write_text(json.dumps(prepared, indent=2))
 
     with tempfile.TemporaryDirectory() as tmp:
-        filtered_path = Path(tmp) / "control-plane.openapi.json"
-        filtered_path.write_text(json.dumps(filtered, indent=2))
+        spec_path = Path(tmp) / spec_name
+        spec_path.write_text(json.dumps(prepared, indent=2))
         for language in languages:
-            dest = generate_language(language, filtered_path, out_dir)
-            print(f"generated {language} -> {dest}")
+            dest = generate_language(language, spec_path, out_dir, targets[language])
+            print(f"generated {language} ({args.mode}) -> {dest}")
 
     return 0
 

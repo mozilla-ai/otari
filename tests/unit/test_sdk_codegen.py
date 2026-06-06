@@ -110,7 +110,7 @@ def test_normalize_python_collapses_to_package(tmp_path: Path) -> None:
     pkg.mkdir(parents=True)
     (pkg / "__init__.py").write_text("x = 1\n")
     (dest / "setup.py").write_text("# project scaffolding\n")
-    generate.normalize("python", dest)
+    generate.normalize("python", dest, "_control_plane")
     # dest is now the package itself: its __init__.py is present, scaffolding gone.
     assert (dest / "__init__.py").read_text() == "x = 1\n"
     assert not (dest / "setup.py").exists()
