@@ -253,7 +253,7 @@ async def create_message(
             status.HTTP_400_BAD_REQUEST,
         )
     if platform_mode and request.mcp_server_ids:
-        assert user_token is not None
+        assert user_token is not None  # guaranteed by the platform-mode branch above
         resolved_mcp_servers = await _resolve_platform_mcp_servers(
             config=config,
             user_token=user_token,
@@ -335,7 +335,7 @@ async def create_message(
         # Tool-loop streaming collapses to a single attempt (same as chat.py
         # until on_first_response lock-in is wired across all three loops).
         if platform_mode and not use_tool_loop:
-            assert route is not None
+            assert route is not None  # guaranteed by the platform-mode branch above
             if not route.attempts:
                 logger.error("Platform returned empty attempts list request_id=%s", route.request_id)
                 raise _anthropic_error(
@@ -371,7 +371,7 @@ async def create_message(
         # Standalone (or platform + tool-loop): single attempt streaming.
         if platform_mode:
             # Tool-loop platform path: build call_kwargs from the primary attempt.
-            assert route is not None
+            assert route is not None  # guaranteed by the platform-mode branch above
             if not route.attempts:
                 raise _anthropic_error(
                     _ERR_API,
@@ -436,7 +436,7 @@ async def create_message(
     # Non-streaming path
     # ------------------------------------------------------------------
     if platform_mode:
-        assert route is not None
+        assert route is not None  # guaranteed by the platform-mode branch above
         platform_route = route
         attempts_to_try = platform_route.attempts
         if not attempts_to_try:
@@ -633,7 +633,7 @@ async def _run_platform_non_stream_messages(
                     on_first_response=on_first_response,
                 )
         if use_sandbox:
-            assert sandbox_url is not None
+            assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
             sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
             async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
                 kwargs = inject_purpose_hints_anthropic(
@@ -648,8 +648,8 @@ async def _run_platform_non_stream_messages(
                     on_first_response=on_first_response,
                 )
         assert use_web_search
-        assert web_search_url is not None
-        assert web_search_tool_entry is not None
+        assert web_search_url is not None  # guaranteed past the missing-URL 400 above
+        assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
         async with _build_web_search_backend(
             base_url=web_search_url,
             tool_entry=web_search_tool_entry,
@@ -747,7 +747,7 @@ async def _run_messages_non_stream(
             )
 
     if use_sandbox:
-        assert sandbox_url is not None
+        assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
         sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
         async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
             kwargs = inject_purpose_hints_anthropic(
@@ -762,8 +762,8 @@ async def _run_messages_non_stream(
             )
 
     assert use_web_search
-    assert web_search_url is not None
-    assert web_search_tool_entry is not None
+    assert web_search_url is not None  # guaranteed past the missing-URL 400 above
+    assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
     async with _build_web_search_backend(
         base_url=web_search_url,
         tool_entry=web_search_tool_entry,
@@ -845,8 +845,8 @@ async def _stream_messages(
 
     async def _on_complete(usage_data: CompletionUsage) -> None:
         if platform_mode_active:
-            assert platform_config is not None
-            assert platform_correlation_id is not None
+            assert platform_config is not None  # guaranteed by the platform-mode branch above
+            assert platform_correlation_id is not None  # guaranteed by the platform-mode branch above
             asyncio.create_task(
                 _report_platform_usage(
                     config=platform_config,
@@ -906,8 +906,8 @@ async def _stream_messages(
 
     async def _on_error(error: str) -> None:
         if platform_mode_active:
-            assert platform_config is not None
-            assert platform_correlation_id is not None
+            assert platform_config is not None  # guaranteed by the platform-mode branch above
+            assert platform_correlation_id is not None  # guaranteed by the platform-mode branch above
             asyncio.create_task(
                 _report_platform_usage(
                     config=platform_config,
@@ -1214,7 +1214,7 @@ async def _open_tool_loop_stream(
         return _mcp_iter()
 
     if use_sandbox:
-        assert sandbox_url is not None
+        assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
         sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
         sandbox_backend = SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint)
         await sandbox_backend.__aenter__()  # eager-open
@@ -1238,8 +1238,8 @@ async def _open_tool_loop_stream(
         return _sandbox_iter()
 
     assert use_web_search
-    assert web_search_url is not None
-    assert web_search_tool_entry is not None
+    assert web_search_url is not None  # guaranteed past the missing-URL 400 above
+    assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
     web_search_backend = _build_web_search_backend(
         base_url=web_search_url,
         tool_entry=web_search_tool_entry,
