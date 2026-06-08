@@ -96,7 +96,14 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str) -> APIKey:
             detail=f"Invalid API key format: {e}",
         ) from e
 
-    result = await db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
+    try:
+        result = await db.execute(select(APIKey).where(APIKey.key_hash == key_hash))
+    except SQLAlchemyError as e:
+        record_auth_failure("db_error")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication temporarily unavailable, please retry",
+        ) from e
     api_key = result.scalar_one_or_none()
 
     if not api_key:
