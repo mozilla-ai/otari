@@ -1,69 +1,27 @@
 # Deployment
 
+Use this guide after the [Quickstart](quickstart.md). The quickstart gets a standalone gateway running locally and walks through the first authenticated request. This page picks up from there with deployment-specific setup: platform mode, optional services, and environment-based configuration.
+
 The gateway is distributed as a Docker image on [Docker Hub](https://hub.docker.com/r/mzdotai/otari).
 
 ## Prerequisites
 
 - Docker and Docker Compose
 
-## Deploy standalone
+## Standalone deployment notes
 
-In this setup, the gateway manages its own database, API keys, users, budgets, and usage tracking. You provide the LLM provider credentials directly.
+For the local standalone path, start with the [Quickstart](quickstart.md).
 
-### 1. Create a config file
+When turning that setup into a longer-lived deployment:
 
-```bash
-cp config.example.yml config.yml
-```
+- Set `database_url` to a durable Postgres instance.
+- Keep `master_key` for management endpoints, but use generated API keys for application traffic.
+- Add `pricing` entries for every model you want budget enforcement on.
+- Point container health checks at `/health` and `/health/readiness`.
 
-Edit `config.yml` with at least a master key and one provider:
+## Connect to otari.ai
 
-```yaml
-database_url: "postgresql://gateway:gateway@postgres:5432/gateway"
-host: "0.0.0.0"
-port: 8000
-
-master_key: "your-secret-master-key"
-
-providers:
-  openai:
-    api_key: "sk-..."
-```
-
-### 2. Start the services
-
-```bash
-docker compose up -d
-```
-
-This starts two services:
-- **gateway** on port 8000
-- **postgres** on port 5433 (host) / 5432 (container)
-
-### 3. Verify
-
-```bash
-curl http://localhost:8000/health
-```
-
-You should get `{"status": "healthy"}`.
-
-Check readiness as well:
-
-```bash
-curl http://localhost:8000/health/readiness
-```
-
-Then verify an authenticated management call with your master key:
-
-```bash
-curl http://localhost:8000/v1/keys \
-  -H "Otari-Key: Bearer <your-master-key>"
-```
-
-## Deploy with otari.ai
-
-When connected to [otari.ai](https://otari.ai), the gateway delegates provider routing, authentication, and usage tracking to otari.ai. No local database or provider credentials are needed.
+In platform mode, the gateway delegates provider routing, authentication, and usage tracking to [otari.ai](https://otari.ai). No local database or provider credentials are needed.
 
 ### 1. Create a minimal config file
 

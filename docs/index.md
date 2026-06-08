@@ -18,7 +18,7 @@ Start with the [Quickstart](quickstart.md). It gets the gateway running locally 
 ## Browse the docs
 
 - [Quickstart](quickstart.md) — get running and make your first request.
-- [Deployment](deployment.md) — Docker setup, production configuration, connecting to otari.ai.
+- [Deployment](deployment.md) — platform mode, optional services, and deployment-specific configuration.
 - [Modes](modes.md) — standalone vs connected, and what changes between them.
 - [Built-in tools](tools.md) — sandboxed code execution and web search the gateway runs itself.
 - [Guardrails](guardrails.md) — request-level checks like prompt-injection detection.
