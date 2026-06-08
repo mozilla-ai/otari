@@ -25,6 +25,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # Pin the generator so regeneration is reproducible and matches the validated
+  # SDK cores; bump deliberately and review the resulting diff.
+  OPENAPI_GENERATOR_VERSION: '7.22.0'
+
 jobs:
   codegen:
     runs-on: ubuntu-latest
