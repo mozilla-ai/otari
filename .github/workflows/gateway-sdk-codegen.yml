@@ -19,16 +19,18 @@ on:
     paths:
       - 'docs/public/openapi.json'
       - 'scripts/sdk_codegen/**'
+      - 'openapitools.json'
       - '.github/workflows/gateway-sdk-codegen.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-env:
-  # Pin the generator so regeneration is reproducible and matches the validated
-  # SDK cores; bump deliberately and review the resulting diff.
-  OPENAPI_GENERATOR_VERSION: '7.22.0'
+# The OpenAPI Generator version is pinned in openapitools.json
+# (generator-cli.version). That file is the ONLY mechanism the
+# @openapitools/openapi-generator-cli wrapper honors; the OPENAPI_GENERATOR_VERSION
+# env var is ignored by the wrapper and must not be relied on. Bump the generator
+# by editing openapitools.json deliberately and reviewing the resulting diff.
 
 jobs:
   codegen:
