@@ -1,6 +1,8 @@
-<div align="center">
+<p align="center">
+  <img src="assets/otari-logo.svg" width="320" alt="otari logo"/>
+</p>
 
-# 🦭 Otari
+<div align="center">
 
 **An OpenAI-compatible LLM gateway you own and run yourself.**
 
