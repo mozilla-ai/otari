@@ -274,8 +274,8 @@ fields:
 - `validate_kwargs` — extra kwargs forwarded to the service's `/validate` call.
 
 The backend is the
-[otari-anyguardrails](https://github.com/mozilla-ai/otari-anyguardrail-container)
-container, which wraps
+[otari-anyguardrail-container](https://github.com/mozilla-ai/otari-anyguardrail-container),
+which wraps
 [`any-guardrail`](https://github.com/mozilla-ai/any-guardrail) behind a
 `POST /validate` API. Point the gateway at it with `GATEWAY_GUARDRAILS_URL`.
 
@@ -291,9 +291,11 @@ gets a clean `502`.
 
 ## API surface
 
-The gateway exposes three generation surfaces, plus management and health
-endpoints. Generation and health work in both standalone and platform mode; the
-management endpoints (keys, users, budgets, pricing, usage) are standalone-only.
+The gateway exposes three core generation surfaces plus management and health
+endpoints. The three surfaces below and `/health` work in both standalone and
+platform mode; everything else — the management endpoints (keys, users, budgets,
+pricing, usage) and the remaining OpenAI-compatible endpoints — is
+standalone-only.
 
 - `POST /v1/chat/completions` — OpenAI Chat Completions
 - `POST /v1/responses` — OpenAI Responses API
