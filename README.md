@@ -26,7 +26,7 @@ You'll hear a few names. Here's how they fit together:
 
 | Name | What it is | Where |
 | --- | --- | --- |
-| **otari.ai** | The hosted platform — provider routing, auth, and usage handled for you. | [otari.ai](https://otari.ai) |
+| **otari.ai** | The hosted platform, provider routing, auth, and usage handled for you. | [otari.ai](https://otari.ai) |
 | **Otari** | The proxy server otari.ai deploys (this repo). Run it standalone or connected to the platform. | [mozilla-ai/otari](https://github.com/mozilla-ai/otari) |
 | **any-llm** | The Python SDK Otari uses for core LLM routing across 40+ providers. | [mozilla-ai/any-llm](https://github.com/mozilla-ai/any-llm) |
 | **Otari SDKs** | Client SDKs you use to talk to otari.ai or a self-hosted Otari. | [Python](https://github.com/mozilla-ai/otari-sdk-python) · [TypeScript](https://github.com/mozilla-ai/otari-sdk-ts) · [Rust](https://github.com/mozilla-ai/otari-sdk-rust) · [Go](https://github.com/mozilla-ai/otari-sdk-go) |
@@ -39,13 +39,13 @@ You can also use Otari with any OpenAI-compatible client (see [First request](#f
 
 Otari sits between your applications and LLM providers so you can control access, cost, and observability in one place.
 
-- OpenAI-compatible endpoints — Chat Completions (`/v1/chat/completions`), the Responses API (`/v1/responses`), embeddings, models, and more
+- OpenAI-compatible endpoints, Chat Completions (`/v1/chat/completions`), the Responses API (`/v1/responses`), embeddings, models, and more
 - Anthropic-compatible Messages API (`/v1/messages`), so Anthropic-format clients work unchanged
 - Virtual API key management (`/v1/keys`) for safe client access
 - User and budget controls (`/v1/users`, `/v1/budgets`)
 - Usage and pricing tracking (`/v1/usage`, `/v1/pricing`)
 - Health and metrics endpoints (`/health`, optional `/metrics`)
-- Built-in tools the gateway runs itself — `otari_code_execution` (sandboxed Python REPL) and `otari_web_search`. See [Built-in tools](#built-in-tools).
+- Built-in tools the gateway runs itself, `otari_code_execution` (sandboxed Python REPL) and `otari_web_search`. See [Built-in tools](#built-in-tools).
 - Request-level [guardrails](#guardrails) (e.g. prompt-injection detection) the gateway enforces on input before calling the provider.
 
 ## Quickstart
@@ -172,23 +172,23 @@ Gateway will be available at `http://localhost:8000`.
 
 ## Built-in tools
 
-The gateway can run a couple of tools itself so any model — including
-open-weight ones — gets parity with what frontier APIs expose as managed
+The gateway can run a couple of tools itself so any model, including
+open-weight ones, gets parity with what frontier APIs expose as managed
 tools. Both are opt-in via the request's `tools` array and run inside
 docker-compose profiles so operators who don't use them don't pull extra
 images.
 
 These use dedicated `otari_*` tool types. The keyword decides who runs the
-code: an `otari_*` type means the gateway runs it. Every other tool type — the
+code: an `otari_*` type means the gateway runs it. Every other tool type, the
 legacy gateway short forms (`code_execution`, `web_search`) and the
 provider-native keywords (`code_interpreter`, `code_execution_<date>`,
-`web_search_<date>`) — is passed through to the upstream provider untouched, so
+`web_search_<date>`), is passed through to the upstream provider untouched, so
 the provider runs it in its own native sandbox/search. (In particular, the bare
 `code_execution` / `web_search` short forms no longer trigger the gateway
-sandbox — use the `otari_*` types for that.) Either way the gateway still
+sandbox, use the `otari_*` types for that.) Either way the gateway still
 handles routing, observability, and billing.
 
-### `otari_code_execution` — sandboxed Python REPL
+### `otari_code_execution`, sandboxed Python REPL
 
 ```json
 {
@@ -202,7 +202,7 @@ Bring up with `docker compose --profile code-exec up`. See `demo/code-exec/`
 for a runnable walkthrough of both the gateway-managed and native-passthrough
 flows.
 
-### `otari_web_search` — current-information search
+### `otari_web_search`, current-information search
 
 ```json
 {
@@ -216,8 +216,8 @@ Bring up with `docker compose --profile web-search up`. See `demo/web-search/`
 for a runnable walkthrough.
 
 The bundled backend is a SearXNG metasearch container restricted to engines
-that don't forbid automated querying (duckduckgo, mojeek, qwant, wikipedia)
-— see `scripts/searxng/settings.yml`. Top results are fetched and content
+that don't forbid automated querying (duckduckgo, mojeek, qwant, wikipedia);
+see `scripts/searxng/settings.yml`. Top results are fetched and content
 is extracted via trafilatura in-process so the model sees LLM-ready
 Markdown, not raw SERP snippets.
 
@@ -226,8 +226,8 @@ can be flaky for sustained use. **For commercial or production use**, swap the
 SearXNG container for a backend that uses a licensed API (Tavily, Brave Search
 API, Exa, Linkup, Serper). `WebSearchBackend` is configured purely by URL
 (`GATEWAY_WEB_SEARCH_URL`), so any HTTP service that exposes a
-SearXNG-compatible `/search?format=json` endpoint is a drop-in replacement
-— including thin adapters in front of commercial APIs. Adapters that
+SearXNG-compatible `/search?format=json` endpoint is a drop-in replacement,
+including thin adapters in front of commercial APIs. Adapters that
 already extract content can pass it through on the optional
 `extracted_content` result field to bypass the gateway-side extraction.
 
@@ -246,11 +246,11 @@ alongside `GATEWAY_WEB_SEARCH_URL`.
 ## Guardrails
 
 Unlike the built-in tools above, a guardrail is **not** something the model
-chooses to call — it's a request-level check the gateway runs itself, on the
+chooses to call, it's a request-level check the gateway runs itself, on the
 input, before the provider is ever called. The **caller** opts in per request
 via a top-level `guardrails` field (a sibling of `tools` / `mcp_servers`, not a
 tool entry inside `tools`); the model never sees it and can't decline it. It
-works identically on all three endpoints — `/v1/chat/completions`,
+works identically on all three endpoints, `/v1/chat/completions`,
 `/v1/messages`, and `/v1/responses`.
 
 ```json
@@ -264,16 +264,16 @@ works identically on all three endpoints — `/v1/chat/completions`,
 Each entry names a `profile` configured on the guardrails service. Optional
 fields:
 
-- `mode` — `monitor` (default): forward to the provider and surface the verdict
-  on the `X-Otari-Guardrails` response header (shadow mode — observe without
+- `mode`: `monitor` (default): forward to the provider and surface the verdict
+  on the `X-Otari-Guardrails` response header (shadow mode, observe without
   disrupting on false positives). `block`: if the guardrail flags the input, the
   gateway returns `403` with the verdict and **never calls the provider**.
-- `on` — directions to check. `["input"]` (default) is enforced today;
+- `on`: directions to check. `["input"]` (default) is enforced today;
   `"output"` is accepted but not yet enforced (response-direction checks are a
   planned follow-up).
-- `url` — per-request override of the operator-set `GATEWAY_GUARDRAILS_URL`
+- `url`: per-request override of the operator-set `GATEWAY_GUARDRAILS_URL`
   (SSRF-checked at parse time).
-- `validate_kwargs` — extra kwargs forwarded to the service's `/validate` call.
+- `validate_kwargs`: extra kwargs forwarded to the service's `/validate` call.
 
 The backend is the
 [otari-anyguardrail-container](https://github.com/mozilla-ai/otari-anyguardrail-container),
@@ -282,8 +282,8 @@ which wraps
 `POST /validate` API. Point the gateway at it with `GATEWAY_GUARDRAILS_URL`.
 
 `docker compose --profile guardrails up` brings up the whole default
-`prompt-injection` guardrail — the gateway plus the anyguardrails service plus a
-Mozilla `encoderfile` container serving PIGuard — and callers use it by adding
+`prompt-injection` guardrail, the gateway plus the anyguardrails service plus a
+Mozilla `encoderfile` container serving PIGuard, and callers use it by adding
 `"guardrails": [{"profile": "prompt-injection"}]` to their request. (On x86 set
 `OTARI_ENCODERFILE_IMAGE` to the `.x86_64-linux-gnu` tag; the demo's `start.sh`
 picks the right per-arch image automatically, and `--in-process` runs InjecGuard
@@ -295,16 +295,16 @@ gets a clean `502`.
 
 The gateway exposes three core generation surfaces plus management and health
 endpoints. The three surfaces below and `/health` work in both standalone and
-platform mode; everything else — the management endpoints (keys, users, budgets,
-pricing, usage) and the remaining OpenAI-compatible endpoints — is
+platform mode; everything else, the management endpoints (keys, users, budgets,
+pricing, usage) and the remaining OpenAI-compatible endpoints, is
 standalone-only.
 
-- `POST /v1/chat/completions` — OpenAI Chat Completions
-- `POST /v1/responses` — OpenAI Responses API
-- `POST /v1/messages` — Anthropic Messages API
-- `GET/POST /v1/keys`, `/v1/users`, `/v1/budgets`, `/v1/pricing` — management
-- `GET /v1/usage` — usage tracking
-- `GET /health` — health checks (optional Prometheus `/metrics`)
+- `POST /v1/chat/completions`: OpenAI Chat Completions
+- `POST /v1/responses`: OpenAI Responses API
+- `POST /v1/messages`: Anthropic Messages API
+- `GET/POST /v1/keys`, `/v1/users`, `/v1/budgets`, `/v1/pricing`: management
+- `GET /v1/usage`: usage tracking
+- `GET /health`: health checks (optional Prometheus `/metrics`)
 
 Embeddings, moderations, rerank, images, audio, batches, and models round out
 the OpenAI-compatible surface. See the full schema in
@@ -321,11 +321,11 @@ uv run python scripts/generate_openapi.py --check
 
 ## Documentation
 
-- [Deployment](docs/deployment.md) — get the gateway running with Docker.
-- [Configuration](docs/configuration.md) — config file reference and environment variables.
-- [Modes](docs/modes.md) — standalone vs connected to otari.ai.
-- [API Reference](docs/api-reference.md) — all available endpoints.
-- [Models](docs/models.md) — supported providers and model format.
+- [Deployment](docs/deployment.md), get the gateway running with Docker.
+- [Configuration](docs/configuration.md), config file reference and environment variables.
+- [Modes](docs/modes.md), standalone vs connected to otari.ai.
+- [API Reference](docs/api-reference.md), all available endpoints.
+- [Models](docs/models.md), supported providers and model format.
 
 ## License
 
