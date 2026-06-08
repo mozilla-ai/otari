@@ -1,0 +1,202 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit configuration for otari.
+# Reference: https://docs.coderabbit.ai/reference/yaml-template
+# Schema:    https://coderabbit.ai/integrations/schema.v2.json
+#
+# Philosophy: start small. The repo's review guidance lives in AGENTS.md
+# (CLAUDE.md is a symlink to it) and the instruction files under
+# .github/instructions; CodeRabbit reads those via
+# knowledge_base.code_guidelines below, so we do not restate their rules here.
+# Pre-merge gates start at `warning` and only graduate to `error` once real PR
+# traffic shows they catch real problems. Tools that CI already runs (ruff,
+# mypy, pytest) are left to CI to avoid duplicate signal.
+
+language: en-US
+
+tone_instructions: "Review code like a calm, friendly senior engineer. Be clear, constructive, and encouraging. Explain the reasoning behind suggestions, assume good intentions, and occasionally use light, friendly humor when appropriate."
+
+# Beta features can shift under us; stay on stable until we have a reason.
+early_access: false
+enable_free_tier: true
+
+reviews:
+  profile: chill
+
+  # Comment-only reviews; do not auto-request changes from CodeRabbit.
+  request_changes_workflow: false
+
+  high_level_summary: true
+  high_level_summary_instructions: "Provide a concise, high-level summary of what changed (added/removed/moved). Avoid technical jargon in this section; if needed, add a separate technical notes section. Include benefits when clear."
+  high_level_summary_placeholder: "@coderabbitai summary"
+  high_level_summary_in_walkthrough: false
+
+  auto_title_placeholder: "@coderabbitai title"
+  auto_title_instructions: "Generate a short, action-oriented PR title. Start with a verb in the imperative form. Focus only on what changed, not why. Keep it concise and specific"
+
+  review_status: true
+  # Off to stop CodeRabbit from posting a separate per-commit status check.
+  # The walkthrough comment on the PR is enough signal; CI already gates
+  # merges via ruff, mypy, and pytest.
+  commit_status: false
+  # Fails the GitHub commit check when CodeRabbit cannot complete a review
+  # (errors, timeouts, service unavailable). It does NOT fail based on review
+  # findings; those are surfaced as comments.
+  fail_commit_status: false
+
+  collapse_walkthrough: false
+  changed_files_summary: true
+  # Auto mermaid on most diffs adds noise; opt back in once we miss it.
+  sequence_diagrams: false
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+
+  suggested_labels: true
+  labeling_instructions: []
+  auto_apply_labels: false
+
+  # Leave on so reviewer suggestions work as the maintainer team grows.
+  suggested_reviewers: true
+  auto_assign_reviewers: true
+
+  in_progress_fortune: false
+  poem: false
+
+  enable_prompt_for_ai_agents: true
+
+  # Generated and lockfile paths CodeRabbit should not review.
+  # docs/public/openapi.json is generated from the FastAPI app by
+  # scripts/generate_openapi.py (CI checks it with --check); reviewing it just
+  # flags machine output. Lockfiles carry no review value.
+  path_filters:
+    - "!docs/public/openapi.json"
+    - "!**/uv.lock"
+
+  # Intentionally empty. AGENTS.md, CLAUDE.md, and the files under
+  # .github/instructions are loaded as knowledge_base.code_guidelines below;
+  # restating rules here would create two sources of truth that drift. Add
+  # entries only when CodeRabbit needs signal those files cannot express.
+  path_instructions: []
+
+  abort_on_close: true
+  disable_cache: false
+
+  auto_review:
+    enabled: true
+    # On. CodeRabbit does proper housekeeping between incremental reviews
+    # (does not keep previous reviews open) and self-caps at roughly 3
+    # follow-up commits per PR before switching to manual review, so the
+    # noise that originally motivated turning this off is bounded.
+    auto_incremental_review: true
+    ignore_title_keywords:
+      - "Dependencies"
+      - "update dependency"
+      - "wip"
+      - "dependabot"
+    labels: []
+    drafts: false
+    base_branches: ["main"]
+    ignore_usernames: []
+
+  # Optional auto-commits CodeRabbit can offer at the end of a review. Each
+  # one is a "click to accept" suggestion; nothing lands without approval.
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+    simplify:
+      enabled: true
+
+  # Gates that run before merge. Start everything at `warning` so we can
+  # observe real PR traffic before promoting any of these to `error`.
+  pre_merge_checks:
+    docstrings:
+      mode: warning
+      threshold: 80
+    issue_assessment:
+      mode: warning
+    title:
+      mode: warning
+      requirements: |
+        PR titles should start with a Conventional Commit prefix: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`, `perf:`, or `ci:`.
+        Use imperative mood. Keep the title under ~70 chars and let the body carry the detail.
+    description:
+      mode: warning
+
+  tools:
+    # CI already runs ruff (lint) and mypy (strict) on the source, so the
+    # equivalent CodeRabbit tools stay off to avoid duplicate signal in PR
+    # comments. There is no frontend, so biome and eslint stay off too.
+    ruff:
+      enabled: false
+    biome:
+      enabled: false
+    eslint:
+      enabled: false
+    # Things CI does not cover inline and that are cheap to surface on the diff.
+    gitleaks:
+      enabled: true
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    github-checks:
+      enabled: true
+      timeout_ms: 90000
+    # Off by default; opt back in once we know what kind of noise they make.
+    shellcheck:
+      enabled: false
+    languagetool:
+      enabled: false
+    checkov:
+      enabled: false
+    actionlint:
+      enabled: false
+    semgrep:
+      enabled: false
+    dotenvLint:
+      enabled: false
+
+chat:
+  art: true
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
+    # AGENTS.md is the canonical rule set; CLAUDE.md is a symlink to it but we
+    # list both since the symlink may not be resolved by the scanner. The
+    # files under .github/instructions carry scoped review guidance.
+    filePatterns:
+      - "**/AGENTS.md"
+      - "**/CLAUDE.md"
+      - ".github/instructions/*.instructions.md"
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  pull_requests:
+    scope: auto
+  mcp:
+    usage: enabled
+
+code_generation:
+  docstrings:
+    language: en-US
+
+# Issue enrichment intentionally disabled for now. Revisit once we have a
+# clearer sense of CodeRabbit's baseline behavior on real PRs.
+issue_enrichment:
+  auto_enrich:
+    enabled: false
+  planning:
+    enabled: false
+    auto_planning:
+      enabled: false
+      labels: []
