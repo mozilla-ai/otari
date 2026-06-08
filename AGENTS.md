@@ -6,7 +6,7 @@ Scope: entire repo.
 `CLAUDE.md` is a symlink to this file. Always edit `AGENTS.md` directly; never modify `CLAUDE.md`.
 
 ## Project Snapshot
-- Project: `otari` — an OpenAI-compatible LLM gateway (API key management, budget enforcement, usage tracking). The Python package is still named `gateway`.
+- Project: `otari`, an OpenAI-compatible LLM gateway (API key management, budget enforcement, usage tracking). The Python package is still named `gateway`.
 - Language/runtime: Python 3.13+.
 - Package manager + task runner: `uv`.
 - App type: FastAPI gateway service with async SQLAlchemy + Alembic.
@@ -16,7 +16,7 @@ Scope: entire repo.
 - Provider calls go through the `any-llm` SDK (`any_llm`), not hand-rolled HTTP clients.
 
 ## Architecture (Big Picture)
-Read these together before changing request behavior — the flow spans several files.
+Read these together before changing request behavior, the flow spans several files.
 
 ### Two runtime modes
 - Mode is derived, not configured directly: `GatewayConfig.is_platform_mode` / `effective_mode` (`src/gateway/core/config.py`) return `platform` when a platform token (`OTARI_AI_TOKEN`, plus legacy aliases) is set, else `standalone`. Setting `GATEWAY_MODE=platform` without a token fails at startup.
@@ -177,6 +177,13 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - If you touched CLI behavior, run `tests/unit/test_gateway_cli.py`.
 - If you touched auth headers or key handling, run key-management and auth-related tests.
 - If OpenAPI-affecting code changed, run `uv run python scripts/generate_openapi.py --check`.
+
+## Writing style
+
+- Avoid em dashes and double hyphens (`--`) used as separators in prose
+  (README, docs, doc comments, commit messages, PR descriptions). Use commas,
+  semicolons, colons, parentheses, or periods, or rephrase. This does not apply
+  to code (for example CLI flags like `--all`) or en-dash numeric ranges like `3–4`.
 
 ## Notes for Agents
 - Prefer minimal, targeted edits over broad refactors.
