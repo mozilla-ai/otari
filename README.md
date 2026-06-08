@@ -291,36 +291,20 @@ gets a clean `502`.
 
 ## API surface
 
-The gateway exposes three generation surfaces — OpenAI Chat Completions, the
-OpenAI Responses API, and the Anthropic Messages API — alongside the supporting
-OpenAI-compatible endpoints. Generation and health endpoints work in both
-standalone and platform mode; the management endpoints (keys, users, budgets,
-pricing, usage) are standalone-only.
-
-**Generation**
+The gateway exposes three generation surfaces, plus management and health
+endpoints. Generation and health work in both standalone and platform mode; the
+management endpoints (keys, users, budgets, pricing, usage) are standalone-only.
 
 - `POST /v1/chat/completions` — OpenAI Chat Completions
 - `POST /v1/responses` — OpenAI Responses API
 - `POST /v1/messages` — Anthropic Messages API
-- `POST /v1/embeddings`, `POST /v1/moderations`, `POST /v1/rerank`
-- `POST /v1/images/generations`, `POST /v1/audio/speech`, `POST /v1/audio/transcriptions`
-- `GET/POST /v1/batches`
-- `GET /v1/models`
+- `GET/POST /v1/keys`, `/v1/users`, `/v1/budgets`, `/v1/pricing` — management
+- `GET /v1/usage` — usage tracking
+- `GET /health` — health checks (optional Prometheus `/metrics`)
 
-**Management** (standalone mode)
-
-- `GET/POST /v1/keys`
-- `GET/POST /v1/users`
-- `GET/POST /v1/budgets`
-- `GET/POST /v1/pricing`
-- `GET /v1/usage`
-
-**Health**
-
-- `GET /health` (plus `/health/liveness`, `/health/readiness`)
-- `GET /metrics` — optional Prometheus metrics
-
-Full schema: `docs/public/openapi.json`
+Embeddings, moderations, rerank, images, audio, batches, and models round out
+the OpenAI-compatible surface. See the full schema in
+`docs/public/openapi.json`.
 
 ## Useful CLI commands
 
