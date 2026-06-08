@@ -8,7 +8,7 @@ Two modes:
   hand-written wrapper around the official OpenAI SDK; batches are hand-written
   (their responses are untyped in the spec).
 
-- ``full`` (Option C): enriches the spec's inference surface with the real typed
+- ``full``: enriches the spec's inference surface with the real typed
   completion schemas (from ``any-llm``), then generates a typed core covering
   *every* endpoint. The SDK hand-writes a thin shell over this core for the
   three things generation can't do: streaming (SSE), typed error mapping, and
@@ -95,7 +95,7 @@ TARGETS: dict[str, LanguageTarget] = {
     ),
 }
 
-# Option C: the FULL client (every endpoint, typed core). The SDK hand-writes a
+# The FULL client (every endpoint, typed core). The SDK hand-writes a
 # thin shell over this for streaming, error mapping, and ergonomic method names.
 FULL_TARGETS: dict[str, LanguageTarget] = {
     "python": LanguageTarget(
@@ -203,7 +203,7 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     """Type the inference surface so the FULL client generates typed methods.
 
     The gateway spec leaves chat loosely typed (``messages`` are untyped dicts,
-    the chat ``200`` response has no schema). For Option C (a generated core that
+    the chat ``200`` response has no schema). For the full client (a generated core that
     covers every endpoint) we inject the real, typed completion schemas from
     ``any-llm`` (which the gateway already depends on) so the generated chat
     method returns a typed ``ChatCompletion`` and accepts typed messages.
@@ -406,7 +406,7 @@ def main() -> int:
         choices=["control-plane", "full"],
         default="control-plane",
         help="control-plane: typed management endpoints only. full: every endpoint "
-        "(typed inference core) with the spec enriched (Option C).",
+        "(typed inference core) with the spec enriched.",
     )
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
