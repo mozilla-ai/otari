@@ -1,27 +1,45 @@
-# SDK control-plane codegen
+# SDK client codegen
 
-Generates typed **control-plane** clients (API keys, users, budgets, pricing,
-usage) for each language SDK from the gateway's OpenAPI spec, using
-[OpenAPI Generator](https://openapi-generator.tech/).
+Generates a typed **client core** for each language SDK from the gateway's
+OpenAPI spec, using [OpenAPI Generator](https://openapi-generator.tech/).
 
-## What is and isn't generated
+The shipped design: the generator emits a typed core covering *every* endpoint
+(inference *and* control plane), and each SDK wraps that core with a thin,
+hand-written shell. The cross-repo workflow runs the generator in `--mode full`.
 
-`generate.py` filters the spec to operations tagged `keys`, `users`, `budgets`,
-`pricing`, `usage` (plus the transitive closure of the schemas they reference)
-and generates only those. These endpoints have fully typed responses in the spec.
+## Architecture: generated core + hand-written shell
 
-Deliberately **not** generated:
+`generate.py --mode full` produces a typed core for the whole API surface. The
+gateway spec leaves the inference surface loosely typed (chat `messages` are
+untyped dicts, several inference responses use `response_model=None`), so
+`enrich_spec` first injects the real typed completion schemas from `any-llm`
+(which the gateway already depends on) before generation. The result: a chat
+method that accepts typed messages and returns a typed `ChatCompletion`,
+typed `messages` / `rerank` / `embeddings` responses, and the fully typed
+control-plane endpoints (keys, users, budgets, pricing, usage).
 
-- **Inference / proxy** (chat, responses, embeddings, messages, moderations,
-  rerank, audio, images, models, health): the published SDKs wrap the official
-  OpenAI SDK for those endpoints; the spec leaves them loosely typed; and OpenAPI
-  Generator does not emit streaming (SSE) consumption code.
-- **Batches**: the batch routes use `response_model=None`, so their responses are
-  untyped (`{}`) in the spec, and generation would produce untyped `object`
-  results. Every SDK already implements batches with hand-written typed models, so
-  generating them would both regress typing and collide with existing code.
+Each SDK then **hand-writes a thin shell** over this generated core for the
+things OpenAPI Generator cannot emit:
 
-So that surface stays hand-written.
+- **Streaming (SSE)** — the generator emits no server-sent-events consumption
+  code, so the stream iterator is hand-written over the generated client.
+- **Typed error mapping** — turning HTTP error responses into the SDK's typed
+  exception hierarchy.
+- **Ergonomic methods and auth modes** — friendly method names and the SDK's
+  auth ergonomics on top of the raw generated calls.
+
+The shell is **not** regenerated; only the core is. Audio and images are left
+opaque in the core: they return binary/file payloads that do not map onto a
+JSON response schema.
+
+## Endpoint-coverage drift gate
+
+Because the core is generated but the shell is hand-written, a new gateway
+endpoint can land in the spec without a corresponding shell method. Each SDK
+repo runs an endpoint-coverage drift gate against the gateway's published spec
+to catch this: if the generated core gains endpoints the SDK does not yet
+surface, the gate fails, signalling that the SDK needs a regeneration plus shell
+wiring for the new surface.
 
 ## Local usage
 
@@ -29,29 +47,47 @@ Requires a JRE and the OpenAPI Generator CLI:
 
 ```bash
 npm install -g @openapitools/openapi-generator-cli
-uv run python scripts/sdk_codegen/generate.py --language all --out-dir dist
-# one language, plus the filtered spec for inspection:
-uv run python scripts/sdk_codegen/generate.py --language python \
-  --write-filtered-spec dist/control-plane.openapi.json
+# full client core for every language:
+uv run python scripts/sdk_codegen/generate.py --language all --mode full --out-dir dist
+# one language, plus the enriched spec for inspection:
+uv run python scripts/sdk_codegen/generate.py --language python --mode full \
+  --write-spec dist/otari-full.openapi.json
 ```
 
-Set `OPENAPI_GENERATOR_CLI` if the CLI is not named `openapi-generator-cli` on PATH.
+Set `OPENAPI_GENERATOR_CLI` if the CLI is not named `openapi-generator-cli` on
+PATH. The generator version is pinned in `openapitools.json`
+(`generator-cli.version`); that file is the only mechanism the
+`@openapitools/openapi-generator-cli` wrapper honors. Bump it deliberately and
+review the resulting diff.
+
+### Control-plane-only mode
+
+`generate.py` also retains a `--mode control-plane` (the script's default) that
+filters the spec to operations tagged `keys`, `users`, `budgets`, `pricing`,
+`usage` (plus the transitive closure of the schemas they reference) and
+generates only that subset into the `_control_plane` paths. This was the
+original scope; the published SDKs and the codegen workflow now use
+`--mode full`.
 
 ## Automation
 
-`.github/workflows/gateway-sdk-codegen.yml` runs this on release, on spec change
-to `main`, or manually, and opens a PR against each SDK repo with the regenerated
-client dropped into:
+`.github/workflows/gateway-sdk-codegen.yml` runs `generate.py --mode full` on
+release, on spec change to `main`, or manually, and opens a PR against each SDK
+repo with the regenerated client core dropped into:
 
-| Language   | SDK repo                      | Target path                |
-|------------|-------------------------------|----------------------------|
-| python     | `mozilla-ai/otari-sdk-python` | `src/otari/_control_plane` |
-| typescript | `mozilla-ai/otari-sdk-ts`     | `src/_control_plane`       |
-| go         | `mozilla-ai/otari-sdk-go`     | `otari/generated`          |
-| rust       | `mozilla-ai/otari-sdk-rust`   | `control-plane`            |
+| Language   | SDK repo                      | Target path (`--mode full`) |
+|------------|-------------------------------|-----------------------------|
+| python     | `mozilla-ai/otari-sdk-python` | `src/otari/_client`         |
+| typescript | `mozilla-ai/otari-sdk-ts`     | `src/_client`               |
+| go         | `mozilla-ai/otari-sdk-go`     | `otari/client`              |
+| rust       | `mozilla-ai/otari-sdk-rust`   | `client`                    |
 
-The matrix in the workflow mirrors `TARGETS` in `generate.py`; keep them in sync.
-Target paths match what each SDK's hand-written wiring imports from.
+The matrix in the workflow mirrors `FULL_TARGETS` in `generate.py`; keep them in
+sync. Target paths match what each SDK's hand-written shell imports from.
+
+**Required secret:** `SDK_CODEGEN_TOKEN`, a fine-grained PAT or GitHub App token
+with `Contents:write` and `Pull-requests:write` on the four SDK repos. The default
+`GITHUB_TOKEN` cannot push to other repositories.
 
 ## Post-processing
 
@@ -60,18 +96,14 @@ in `generate.py`, so no per-repo hand-edits to generated code are required):
 
 - **rust** — a `rustfmt.toml` with `disable_all_formatting` is written into the
   crate, because the SDK's CI runs `cargo fmt --all -- --check`, which reaches
-  the generated crate (and `ignore` needs nightly).
+  the generated crate (and `ignore` needs nightly). The emitted `Cargo.toml` is
+  also patched (placeholder version, and a `reqwest` pin/feature set that does
+  not build against the SDK's pinned `reqwest 0.12`).
 - **typescript** — the `mapValues` helper the models import is appended to
   `runtime.ts` (this generator version omits it).
-- **python** — output is collapsed to the `otari/_control_plane` package so the
-  workflow drops `otari._control_plane` directly into the SDK.
-
-**Required secret:** `SDK_CODEGEN_TOKEN`, a fine-grained PAT or GitHub App token
-with `Contents:write` and `Pull-requests:write` on the four SDK repos. The default
-`GITHUB_TOKEN` cannot push to other repositories.
-
-## Follow-up (per SDK repo)
-
-This pipeline lands the generated client in the target path. Wiring it into each
-SDK's public surface (re-exporting the control-plane methods from the hand-written
-client) is a per-repo change, tracked separately.
+- **go** — the generated `test/` dir is dropped (its unfilled
+  `GIT_USER_ID`/`GIT_REPO_ID` import placeholders break `go vet`/`go test`) and
+  the payload is run through `gofmt -w` (the generator emits un-gofmt'd Go, which
+  fails the SDK repo's `gofmt -l` check).
+- **python** — output is collapsed to the package directory so the workflow drops
+  `otari._client` directly into the SDK.
