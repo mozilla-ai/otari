@@ -684,7 +684,7 @@ async def _run_platform_non_stream_responses(
                 )
                 return await responses_tool_loop(
                     completion_kwargs=kwargs,
-                    pool=backend,  # type: ignore[arg-type]
+                    pool=backend,
                     max_iterations=max_tool_iterations,
                     on_first_response=on_first_response,
                 )
@@ -702,7 +702,7 @@ async def _run_platform_non_stream_responses(
             )
             return await responses_tool_loop(
                 completion_kwargs=kwargs,
-                pool=web_backend,  # type: ignore[arg-type]
+                pool=web_backend,
                 max_iterations=max_tool_iterations,
                 on_first_response=on_first_response,
             )
@@ -792,7 +792,7 @@ async def _run_responses_non_stream(
             )
             return await responses_tool_loop(
                 completion_kwargs=kwargs,
-                pool=backend,  # type: ignore[arg-type]
+                pool=backend,
                 max_iterations=max_tool_iterations,
             )
 
@@ -810,7 +810,7 @@ async def _run_responses_non_stream(
         )
         return await responses_tool_loop(
             completion_kwargs=kwargs,
-            pool=web_backend,  # type: ignore[arg-type]
+            pool=web_backend,
             max_iterations=max_tool_iterations,
         )
 
@@ -1232,7 +1232,7 @@ async def _open_tool_loop_stream(
                 )
                 async for event in responses_tool_loop_stream(
                     completion_kwargs=kwargs,
-                    pool=sandbox_backend,  # type: ignore[arg-type]
+                    pool=sandbox_backend,
                     max_iterations=max_tool_iterations,
                 ):
                     yield event
@@ -1259,7 +1259,7 @@ async def _open_tool_loop_stream(
             )
             async for event in responses_tool_loop_stream(
                 completion_kwargs=kwargs,
-                pool=web_search_backend,  # type: ignore[arg-type]
+                pool=web_search_backend,
                 max_iterations=max_tool_iterations,
             ):
                 yield event

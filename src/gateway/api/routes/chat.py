@@ -549,7 +549,7 @@ async def chat_completions(
 
                 stream: AsyncIterator[ChatCompletionChunk] = _mcp_stream()
             elif use_sandbox:
-                # SandboxBackend duck-types as MCPClientPool — same tool-loop helper.
+                # SandboxBackend satisfies the ToolBackend protocol — same tool-loop helper.
                 # Eagerly open the backend *before* constructing the
                 # StreamingResponse so that a failure to reach the sandbox
                 # surfaces synchronously as an HTTP error. A lazy `async with`
@@ -574,7 +574,7 @@ async def chat_completions(
                         }
                         async for chunk in mcp_tool_loop_stream(
                             completion_kwargs=kwargs,
-                            pool=sandbox_backend,  # type: ignore[arg-type]
+                            pool=sandbox_backend,
                             max_iterations=max_tool_iterations,
                         ):
                             yield chunk
@@ -604,7 +604,7 @@ async def chat_completions(
                         }
                         async for chunk in mcp_tool_loop_stream(
                             completion_kwargs=kwargs,
-                            pool=web_search_backend,  # type: ignore[arg-type]
+                            pool=web_search_backend,
                             max_iterations=max_tool_iterations,
                         ):
                             yield chunk
@@ -749,7 +749,7 @@ async def chat_completions(
                     }
                     return await mcp_tool_loop(
                         completion_kwargs=sandbox_kwargs,
-                        pool=backend,  # type: ignore[arg-type]
+                        pool=backend,
                         max_iterations=max_tool_iterations,
                         on_first_response=on_first_response,
                     )
@@ -770,7 +770,7 @@ async def chat_completions(
                     }
                     return await mcp_tool_loop(
                         completion_kwargs=web_kwargs,
-                        pool=web_backend,  # type: ignore[arg-type]
+                        pool=web_backend,
                         max_iterations=max_tool_iterations,
                         on_first_response=on_first_response,
                     )
@@ -856,7 +856,7 @@ async def chat_completions(
                 }
                 completion = await mcp_tool_loop(
                     completion_kwargs=sandbox_kwargs,
-                    pool=backend,  # type: ignore[arg-type]
+                    pool=backend,
                     max_iterations=max_tool_iterations,
                 )
         elif use_web_search:
@@ -876,7 +876,7 @@ async def chat_completions(
                 }
                 completion = await mcp_tool_loop(
                     completion_kwargs=web_kwargs,
-                    pool=web_backend,  # type: ignore[arg-type]
+                    pool=web_backend,
                     max_iterations=max_tool_iterations,
                 )
         else:

@@ -30,13 +30,13 @@ from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
     MaxToolIterationsExceeded,
+    ToolBackend,
 )
 from gateway.services.tool_format import openai_to_responses_tools
 
 if TYPE_CHECKING:
     from any_llm.types.responses import Response, ResponseStreamEvent
 
-    from gateway.services.mcp_client import MCPClientPool
 
 __all__ = [
     "DEFAULT_MAX_TOOL_ITERATIONS",
@@ -49,7 +49,7 @@ __all__ = [
 
 def _split_function_calls(
     output: list[Any],
-    pool: MCPClientPool,
+    pool: ToolBackend,
 ) -> tuple[list[Any], bool]:
     """Return (owned_function_call_items, has_foreign).
 
@@ -71,7 +71,7 @@ def _split_function_calls(
 
 
 async def _execute_function_calls(
-    pool: MCPClientPool,
+    pool: ToolBackend,
     items: list[Any],
 ) -> list[dict[str, Any]]:
     """Run each owned function_call and return the Responses function_call_output items.
@@ -127,7 +127,7 @@ def _coerce_input_to_list(input_data: Any) -> list[Any]:
 async def responses_tool_loop(
     *,
     completion_kwargs: dict[str, Any],
-    pool: MCPClientPool,
+    pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
 ) -> Response:
@@ -231,7 +231,7 @@ def _fold_usage(result: Response, input_total: int, output_total: int, total_tot
 async def responses_tool_loop_stream(
     *,
     completion_kwargs: dict[str, Any],
-    pool: MCPClientPool,
+    pool: ToolBackend,
     max_iterations: int,
 ) -> AsyncIterator[ResponseStreamEvent]:
     """Streaming OpenAI Responses tool-use loop.

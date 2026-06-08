@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import AsyncIterator, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from any_llm import acompletion
 
@@ -25,10 +25,26 @@ from gateway.log_config import logger
 if TYPE_CHECKING:
     from any_llm.types.completion import ChatCompletion, ChatCompletionChunk
 
-    from gateway.services.mcp_client import MCPClientPool
-
 MAX_TOOL_ITERATIONS_CAP = 25
 DEFAULT_MAX_TOOL_ITERATIONS = 10
+
+
+class ToolBackend(Protocol):
+    """Subset of the tool-backend surface the loop drives.
+
+    Structurally implemented by ``MCPClientPool``, ``SandboxBackend``, and
+    ``WebSearchBackend`` — each exposes the same three members the loop needs to
+    advertise tools, decide ownership, and execute a call. Widening ``pool`` to
+    this Protocol lets the routes pass any of those backends without casts.
+    """
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]: ...
+
+    def owns_tool(self, name: str) -> bool: ...
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str: ...
+
 
 # Lead-in for the per-source purpose-hint block we prepend to the system message.
 # Generic across MCP servers, the sandbox code-execution tool, and any future
@@ -94,7 +110,7 @@ def _finalize_tool_calls(slots: dict[int, dict[str, Any]]) -> list[dict[str, Any
     return [slots[i] for i in sorted(slots)]
 
 
-def _execute_split(tool_calls: list[dict[str, Any]], pool: MCPClientPool) -> tuple[list[dict[str, Any]], bool]:
+def _execute_split(tool_calls: list[dict[str, Any]], pool: ToolBackend) -> tuple[list[dict[str, Any]], bool]:
     """Return (mcp_owned_calls, has_foreign_calls). Foreign = user-supplied, gateway can't execute."""
     mcp_calls: list[dict[str, Any]] = []
     has_foreign = False
@@ -107,7 +123,7 @@ def _execute_split(tool_calls: list[dict[str, Any]], pool: MCPClientPool) -> tup
     return mcp_calls, has_foreign
 
 
-async def _execute_mcp_calls(pool: MCPClientPool, mcp_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def _execute_mcp_calls(pool: ToolBackend, mcp_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Run each MCP tool call and return the resulting tool-role messages.
 
     Tool failures (network errors, server errors, schema mismatches, MCP-specific
@@ -137,7 +153,7 @@ async def _execute_mcp_calls(pool: MCPClientPool, mcp_calls: list[dict[str, Any]
 async def mcp_tool_loop_stream(
     *,
     completion_kwargs: dict[str, Any],
-    pool: MCPClientPool,
+    pool: ToolBackend,
     max_iterations: int,
 ) -> AsyncIterator[ChatCompletionChunk]:
     """Yield chunks across multiple `acompletion(stream=True)` calls, with MCP execution between rounds.
@@ -220,7 +236,7 @@ async def mcp_tool_loop_stream(
 async def mcp_tool_loop(
     *,
     completion_kwargs: dict[str, Any],
-    pool: MCPClientPool,
+    pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
 ) -> ChatCompletion:
