@@ -37,10 +37,11 @@ You can also use Otari with any OpenAI-compatible client (see [First request](#f
 
 Otari sits between your applications and LLM providers so you can control access, cost, and observability in one place.
 
-- OpenAI-compatible endpoints (`/v1/chat/completions`, `/v1/embeddings`, `/v1/models`)
+- OpenAI-compatible endpoints — Chat Completions (`/v1/chat/completions`), the Responses API (`/v1/responses`), embeddings, models, and more
+- Anthropic-compatible Messages API (`/v1/messages`), so Anthropic-format clients work unchanged
 - Virtual API key management (`/v1/keys`) for safe client access
 - User and budget controls (`/v1/users`, `/v1/budgets`)
-- Usage and pricing tracking (`/v1/messages`, `/v1/pricing`)
+- Usage and pricing tracking (`/v1/usage`, `/v1/pricing`)
 - Health and metrics endpoints (`/health`, optional `/metrics`)
 - Built-in tools the gateway runs itself — `otari_code_execution` (sandboxed Python REPL) and `otari_web_search`. See [Built-in tools](#built-in-tools).
 - Request-level [guardrails](#guardrails) (e.g. prompt-injection detection) the gateway enforces on input before calling the provider.
@@ -290,16 +291,34 @@ gets a clean `502`.
 
 ## API surface
 
-- `GET /health`
-- `POST /v1/chat/completions`
-- `POST /v1/embeddings`
-- `POST /v1/moderations`
+The gateway exposes three generation surfaces — OpenAI Chat Completions, the
+OpenAI Responses API, and the Anthropic Messages API — alongside the supporting
+OpenAI-compatible endpoints. Generation and health endpoints work in both
+standalone and platform mode; the management endpoints (keys, users, budgets,
+pricing, usage) are standalone-only.
+
+**Generation**
+
+- `POST /v1/chat/completions` — OpenAI Chat Completions
+- `POST /v1/responses` — OpenAI Responses API
+- `POST /v1/messages` — Anthropic Messages API
+- `POST /v1/embeddings`, `POST /v1/moderations`, `POST /v1/rerank`
+- `POST /v1/images/generations`, `POST /v1/audio/speech`, `POST /v1/audio/transcriptions`
+- `GET/POST /v1/batches`
 - `GET /v1/models`
-- `POST/GET /v1/keys`
-- `POST/GET /v1/users`
-- `POST/GET /v1/budgets`
-- `GET /v1/messages`
-- `GET /v1/pricing`
+
+**Management** (standalone mode)
+
+- `GET/POST /v1/keys`
+- `GET/POST /v1/users`
+- `GET/POST /v1/budgets`
+- `GET/POST /v1/pricing`
+- `GET /v1/usage`
+
+**Health**
+
+- `GET /health` (plus `/health/liveness`, `/health/readiness`)
+- `GET /metrics` — optional Prometheus metrics
 
 Full schema: `docs/public/openapi.json`
 
