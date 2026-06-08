@@ -1,23 +1,47 @@
-# otari gateway
+<div align="center">
 
-[![Tests](https://github.com/mozilla-ai/gateway/actions/workflows/gateway-tests.yml/badge.svg)](https://github.com/mozilla-ai/gateway/actions/workflows/gateway-tests.yml)
-[![Lint](https://github.com/mozilla-ai/gateway/actions/workflows/gateway-lint.yml/badge.svg)](https://github.com/mozilla-ai/gateway/actions/workflows/gateway-lint.yml)
-[![Typecheck](https://github.com/mozilla-ai/gateway/actions/workflows/gateway-typecheck.yml/badge.svg)](https://github.com/mozilla-ai/gateway/actions/workflows/gateway-typecheck.yml)
-[![Docker](https://github.com/mozilla-ai/gateway/actions/workflows/gateway-docker.yml/badge.svg)](https://github.com/mozilla-ai/gateway/actions/workflows/gateway-docker.yml)
+# 🦭 Otari
+
+**An OpenAI-compatible LLM gateway you own and run yourself.**
+
+Put one endpoint in front of 40+ providers, then manage API keys, enforce budgets, and track usage in one place.
+
+[![Tests](https://github.com/mozilla-ai/otari/actions/workflows/gateway-tests.yml/badge.svg)](https://github.com/mozilla-ai/otari/actions/workflows/gateway-tests.yml)
+[![Lint](https://github.com/mozilla-ai/otari/actions/workflows/gateway-lint.yml/badge.svg)](https://github.com/mozilla-ai/otari/actions/workflows/gateway-lint.yml)
+[![Typecheck](https://github.com/mozilla-ai/otari/actions/workflows/gateway-typecheck.yml/badge.svg)](https://github.com/mozilla-ai/otari/actions/workflows/gateway-typecheck.yml)
+[![Docker](https://github.com/mozilla-ai/otari/actions/workflows/gateway-docker.yml/badge.svg)](https://github.com/mozilla-ai/otari/actions/workflows/gateway-docker.yml)
 ![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)
 
-OpenAI-compatible LLM gateway with API key management, budget enforcement, and usage tracking.
+[📖 Docs](docs/index.md) · [🚀 otari.ai](https://otari.ai) · [📝 Launch blog](https://blog.mozilla.ai/otari-own-your-ai-stack/) · [💬 Discord](https://discord.com/channels/1089876418936180786/1506712100301439129)
 
 </div>
 
-## Why gateway?
+Otari is the proxy server at the heart of [otari.ai](https://otari.ai). Run it yourself to keep full control of your AI stack, or let otari.ai host it for you. Either way you get OpenAI-compatible endpoints, virtual API keys, budget enforcement, and usage tracking in front of any provider.
 
-`gateway` sits between your applications and LLM providers so you can control access, cost, and observability in one place.
+## The Otari ecosystem
 
-- OpenAI-compatible endpoints (`/v1/chat/completions`, `/v1/embeddings`, `/v1/models`)
+You'll hear a few names. Here's how they fit together:
+
+| Name | What it is | Where |
+| --- | --- | --- |
+| **otari.ai** | The hosted platform — provider routing, auth, and usage handled for you. | [otari.ai](https://otari.ai) |
+| **Otari** | The proxy server otari.ai deploys (this repo). Run it standalone or connected to the platform. | [mozilla-ai/otari](https://github.com/mozilla-ai/otari) |
+| **any-llm** | The Python SDK Otari uses for core LLM routing across 40+ providers. | [mozilla-ai/any-llm](https://github.com/mozilla-ai/any-llm) |
+| **Otari SDKs** | Client SDKs you use to talk to otari.ai or a self-hosted Otari. | [Python](https://github.com/mozilla-ai/otari-sdk-python) · [TypeScript](https://github.com/mozilla-ai/otari-sdk-ts) · [Rust](https://github.com/mozilla-ai/otari-sdk-rust) · [Go](https://github.com/mozilla-ai/otari-sdk-go) |
+
+You can also use Otari with any OpenAI-compatible client (see [First request](#first-request-openai-sdk)).
+
+> Browse every Otari repository on GitHub with [this filter](https://github.com/orgs/mozilla-ai/repositories?q=otari).
+
+## Why Otari?
+
+Otari sits between your applications and LLM providers so you can control access, cost, and observability in one place.
+
+- OpenAI-compatible endpoints — Chat Completions (`/v1/chat/completions`), the Responses API (`/v1/responses`), embeddings, models, and more
+- Anthropic-compatible Messages API (`/v1/messages`), so Anthropic-format clients work unchanged
 - Virtual API key management (`/v1/keys`) for safe client access
 - User and budget controls (`/v1/users`, `/v1/budgets`)
-- Usage and pricing tracking (`/v1/messages`, `/v1/pricing`)
+- Usage and pricing tracking (`/v1/usage`, `/v1/pricing`)
 - Health and metrics endpoints (`/health`, optional `/metrics`)
 - Built-in tools the gateway runs itself — `otari_code_execution` (sandboxed Python REPL) and `otari_web_search`. See [Built-in tools](#built-in-tools).
 - Request-level [guardrails](#guardrails) (e.g. prompt-injection detection) the gateway enforces on input before calling the provider.
@@ -53,7 +77,7 @@ Open API docs at `http://localhost:8000/docs`.
 
 ## Start in platform mode
 
-Platform mode is enabled automatically when `OTARI_AI_TOKEN` is set.
+Platform mode connects the gateway to [otari.ai](https://otari.ai). It is enabled automatically when `OTARI_AI_TOKEN` is set.
 
 1) Export platform env vars:
 
@@ -90,11 +114,13 @@ client = OpenAI(
 
 response = client.chat.completions.create(
     model="openai:gpt-4o",
-    messages=[{"role": "user", "content": "Hello from gateway"}],
+    messages=[{"role": "user", "content": "Hello from Otari"}],
 )
 
 print(response.choices[0].message.content)
 ```
+
+Prefer a typed client? Use one of the [Otari SDKs](#the-otari-ecosystem) for [Python](https://github.com/mozilla-ai/otari-sdk-python), [TypeScript](https://github.com/mozilla-ai/otari-sdk-ts), [Rust](https://github.com/mozilla-ai/otari-sdk-rust), or [Go](https://github.com/mozilla-ai/otari-sdk-go).
 
 ## Local development
 
@@ -248,8 +274,8 @@ fields:
 - `validate_kwargs` — extra kwargs forwarded to the service's `/validate` call.
 
 The backend is the
-[otari-anyguardrails](https://github.com/mozilla-ai/otari-anyguardrails-container)
-container, which wraps
+[otari-anyguardrail-container](https://github.com/mozilla-ai/otari-anyguardrail-container),
+which wraps
 [`any-guardrail`](https://github.com/mozilla-ai/any-guardrail) behind a
 `POST /validate` API. Point the gateway at it with `GATEWAY_GUARDRAILS_URL`.
 
@@ -265,18 +291,22 @@ gets a clean `502`.
 
 ## API surface
 
-- `GET /health`
-- `POST /v1/chat/completions`
-- `POST /v1/embeddings`
-- `POST /v1/moderations`
-- `GET /v1/models`
-- `POST/GET /v1/keys`
-- `POST/GET /v1/users`
-- `POST/GET /v1/budgets`
-- `GET /v1/messages`
-- `GET /v1/pricing`
+The gateway exposes three core generation surfaces plus management and health
+endpoints. The three surfaces below and `/health` work in both standalone and
+platform mode; everything else — the management endpoints (keys, users, budgets,
+pricing, usage) and the remaining OpenAI-compatible endpoints — is
+standalone-only.
 
-Full schema: `docs/public/openapi.json`
+- `POST /v1/chat/completions` — OpenAI Chat Completions
+- `POST /v1/responses` — OpenAI Responses API
+- `POST /v1/messages` — Anthropic Messages API
+- `GET/POST /v1/keys`, `/v1/users`, `/v1/budgets`, `/v1/pricing` — management
+- `GET /v1/usage` — usage tracking
+- `GET /health` — health checks (optional Prometheus `/metrics`)
+
+Embeddings, moderations, rerank, images, audio, batches, and models round out
+the OpenAI-compatible surface. See the full schema in
+`docs/public/openapi.json`.
 
 ## Useful CLI commands
 
@@ -286,6 +316,14 @@ uv run gateway migrate --config config.yml
 uv run gateway migrate --config config.yml --revision <rev>
 uv run python scripts/generate_openapi.py --check
 ```
+
+## Documentation
+
+- [Deployment](docs/deployment.md) — get the gateway running with Docker.
+- [Configuration](docs/configuration.md) — config file reference and environment variables.
+- [Modes](docs/modes.md) — standalone vs connected to otari.ai.
+- [API Reference](docs/api-reference.md) — all available endpoints.
+- [Models](docs/models.md) — supported providers and model format.
 
 ## License
 
