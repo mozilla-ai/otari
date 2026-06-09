@@ -132,8 +132,10 @@ jobs:
             const labelName = 'missing-template';
             const cutoffMs = 24 * 60 * 60 * 1000; // 24 hours
 
-            // Find open PRs with the missing-template label
-            const { data: prs } = await github.rest.issues.listForRepo({
+            // Find open PRs with the missing-template label. Paginate so a
+            // backlog of more than one page of labeled PRs is not silently
+            // truncated.
+            const prs = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               state: 'open',
@@ -151,8 +153,11 @@ jobs:
                 continue;
               }
 
-              // Check when the label was added by looking at timeline events
-              const { data: events } = await github.rest.issues.listEventsForTimeline({
+              // Check when the label was added by looking at timeline events.
+              // Paginate: an active PR's timeline can exceed one page, which
+              // could push the `labeled` event past the first 100 and leave a
+              // stale PR open forever.
+              const events = await github.paginate(github.rest.issues.listEventsForTimeline, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: pr.number,
