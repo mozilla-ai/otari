@@ -21,6 +21,10 @@ _engine: AsyncEngine | None = None
 _SessionLocal: async_sessionmaker[AsyncSession] | None = None
 _SYNC_DATABASE_URL: str | None = None
 
+# How long a SQLite connection waits for a held lock before raising
+# "database is locked", in milliseconds.
+_SQLITE_BUSY_TIMEOUT_MS = 5000
+
 
 def _to_async_url(database_url: str) -> tuple[str, dict[str, Any]]:
     """Convert a sync SQLAlchemy URL into its async equivalent."""
@@ -57,13 +61,24 @@ def _run_migrations(database_url: str) -> None:
     command.upgrade(alembic_cfg, "head")
 
 
-def _enable_sqlite_foreign_keys(engine: AsyncEngine) -> None:
+def _configure_sqlite_pragmas(engine: AsyncEngine) -> None:
+    """Apply per-connection SQLite pragmas.
+
+    ``foreign_keys`` enforces referential integrity. ``journal_mode=WAL`` lets
+    readers and the single writer proceed concurrently instead of blocking each
+    other, and ``busy_timeout`` makes a connection wait for a held lock rather
+    than immediately raising "database is locked". Together the latter two
+    remove the lock-contention races that otherwise surface as intermittent HTTP
+    500s (e.g. an auth lookup colliding with a key-creation write).
+    """
     sync_engine = engine.sync_engine
 
     @event.listens_for(sync_engine, "connect")
     def _set_sqlite_pragma(dbapi_connection: Any, _: Any) -> None:  # noqa: ANN001, ANN202
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
         cursor.close()
 
 
@@ -92,7 +107,7 @@ def init_db(config: GatewayConfig) -> None:
     _SYNC_DATABASE_URL = database_url
 
     if is_sqlite:
-        _enable_sqlite_foreign_keys(_engine)
+        _configure_sqlite_pragmas(_engine)
 
     if config.auto_migrate:
         _run_migrations(database_url)

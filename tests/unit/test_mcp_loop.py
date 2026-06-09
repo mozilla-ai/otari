@@ -199,7 +199,7 @@ async def test_loop_returns_immediately_when_model_returns_text(monkeypatch: pyt
     pool = _FakePool(tool_names=["fetch_url"])
     out = await mcp_tool_loop(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
-        pool=pool,  # type: ignore[arg-type]
+        pool=pool,
         max_iterations=5,
     )
     assert out.choices[0].message.content == "hi there"
@@ -225,7 +225,7 @@ async def test_loop_executes_mcp_tool_and_completes(monkeypatch: pytest.MonkeyPa
     pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
     out = await mcp_tool_loop(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "fetch x"}]},
-        pool=pool,  # type: ignore[arg-type]
+        pool=pool,
         max_iterations=5,
     )
 
@@ -254,7 +254,7 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
 
     out = await mcp_tool_loop(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-        pool=_FakePool(tool_names=["fetch_url"]),  # type: ignore[arg-type]
+        pool=_FakePool(tool_names=["fetch_url"]),
         max_iterations=5,
     )
     assert out.usage is not None
@@ -273,7 +273,7 @@ async def test_loop_max_iter_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(MaxToolIterationsExceeded):
         await mcp_tool_loop(
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-            pool=_FakePool(tool_names=["fetch_url"]),  # type: ignore[arg-type]
+            pool=_FakePool(tool_names=["fetch_url"]),
             max_iterations=2,
         )
 
@@ -292,7 +292,7 @@ async def test_loop_foreign_tool_returns_to_caller_without_execution(monkeypatch
             "messages": [{"role": "user", "content": "go"}],
             "tools": [{"type": "function", "function": {"name": "user_tool", "parameters": {}}}],
         },
-        pool=pool,  # type: ignore[arg-type]
+        pool=pool,
         max_iterations=5,
     )
     assert out.choices[0].finish_reason == "tool_calls"
@@ -327,7 +327,7 @@ async def test_loop_handles_duck_typed_tool_calls(monkeypatch: pytest.MonkeyPatc
     pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
     out = await mcp_tool_loop(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "fetch"}]},
-        pool=pool,  # type: ignore[arg-type]
+        pool=pool,
         max_iterations=5,
     )
     assert out.choices[0].finish_reason == "stop"
@@ -357,7 +357,7 @@ async def test_loop_tool_execution_failure_appears_as_tool_message(monkeypatch: 
     pool = FailingPool(tool_names=["fetch_url"])
     out = await mcp_tool_loop(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-        pool=pool,  # type: ignore[arg-type]
+        pool=pool,
         max_iterations=5,
     )
     assert out.choices[0].message.content == "recovered"
@@ -385,7 +385,7 @@ async def test_stream_loop_passes_chunks_through_and_terminates(monkeypatch: pyt
     pieces: list[str | None] = []
     async for c in mcp_tool_loop_stream(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
-        pool=_FakePool(tool_names=[]),  # type: ignore[arg-type]
+        pool=_FakePool(tool_names=[]),
         max_iterations=3,
     ):
         pieces.append(c.choices[0].delta.content if c.choices else None)
@@ -418,7 +418,7 @@ async def test_stream_loop_runs_mcp_tool_and_continues(monkeypatch: pytest.Monke
     finishes: list[str | None] = []
     async for c in mcp_tool_loop_stream(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-        pool=pool,  # type: ignore[arg-type]
+        pool=pool,
         max_iterations=5,
     ):
         if c.choices and c.choices[0].finish_reason:
@@ -454,7 +454,7 @@ async def test_stream_loop_forwards_terminal_when_model_emits_foreign_tool(
     finishes: list[str | None] = []
     async for c in mcp_tool_loop_stream(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-        pool=pool,  # type: ignore[arg-type]
+        pool=pool,
         max_iterations=5,
     ):
         if c.choices and c.choices[0].finish_reason:
@@ -492,7 +492,7 @@ async def test_loop_mixed_tools_executes_mcp_and_returns_only_foreign(
             "messages": [{"role": "user", "content": "go"}],
             "tools": [{"type": "function", "function": {"name": "user_tool", "parameters": {}}}],
         },
-        pool=pool,  # type: ignore[arg-type]
+        pool=pool,
         max_iterations=5,
     )
     # MCP subset was executed internally.
@@ -538,7 +538,7 @@ async def test_loop_on_first_response_fires_once_after_first_call(monkeypatch: p
 
     await mcp_tool_loop(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-        pool=_FakePool(tool_names=["fetch_url"]),  # type: ignore[arg-type]
+        pool=_FakePool(tool_names=["fetch_url"]),
         max_iterations=5,
         on_first_response=_on_first,
     )
@@ -567,7 +567,7 @@ async def test_loop_on_first_response_not_called_when_first_acompletion_raises(
     with pytest.raises(RuntimeError):
         await mcp_tool_loop(
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-            pool=_FakePool(tool_names=["fetch_url"]),  # type: ignore[arg-type]
+            pool=_FakePool(tool_names=["fetch_url"]),
             max_iterations=5,
             on_first_response=_on_first,
         )
@@ -600,7 +600,7 @@ async def test_loop_on_first_response_fires_before_second_round_failure(
     with pytest.raises(RuntimeError):
         await mcp_tool_loop(
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-            pool=_FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"}),  # type: ignore[arg-type]
+            pool=_FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"}),
             max_iterations=5,
             on_first_response=_on_first,
         )
@@ -621,7 +621,7 @@ async def test_loop_omitting_on_first_response_is_backward_compatible(
 
     out = await mcp_tool_loop(
         completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-        pool=_FakePool(tool_names=["fetch_url"]),  # type: ignore[arg-type]
+        pool=_FakePool(tool_names=["fetch_url"]),
         max_iterations=5,
     )
     assert out.choices[0].message.content == "ok"

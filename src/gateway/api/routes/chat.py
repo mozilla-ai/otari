@@ -549,7 +549,7 @@ async def chat_completions(
 
                 stream: AsyncIterator[ChatCompletionChunk] = _mcp_stream()
             elif use_sandbox:
-                # SandboxBackend duck-types as MCPClientPool — same tool-loop helper.
+                # SandboxBackend satisfies the ToolBackend protocol — same tool-loop helper.
                 # Eagerly open the backend *before* constructing the
                 # StreamingResponse so that a failure to reach the sandbox
                 # surfaces synchronously as an HTTP error. A lazy `async with`
@@ -557,7 +557,7 @@ async def chat_completions(
                 # was committed, and SandboxNotReachableError would land in
                 # the SSE channel after a 200 OK header — confusing for
                 # clients that expected a normal HTTP failure.
-                assert sandbox_url is not None
+                assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
                 sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
                 sandbox_backend = SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint)
                 await sandbox_backend.__aenter__()  # may raise SandboxNotReachableError
@@ -574,7 +574,7 @@ async def chat_completions(
                         }
                         async for chunk in mcp_tool_loop_stream(
                             completion_kwargs=kwargs,
-                            pool=sandbox_backend,  # type: ignore[arg-type]
+                            pool=sandbox_backend,
                             max_iterations=max_tool_iterations,
                         ):
                             yield chunk
@@ -584,8 +584,8 @@ async def chat_completions(
                 stream = _sandbox_stream()
             elif use_web_search:
                 # Same eager-open rationale as the sandbox path above.
-                assert web_search_url is not None
-                assert web_search_tool_entry is not None
+                assert web_search_url is not None  # guaranteed past the missing-URL 400 above
+                assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
                 web_search_backend = _build_web_search_backend(
                     base_url=web_search_url,
                     tool_entry=web_search_tool_entry,
@@ -604,7 +604,7 @@ async def chat_completions(
                         }
                         async for chunk in mcp_tool_loop_stream(
                             completion_kwargs=kwargs,
-                            pool=web_search_backend,  # type: ignore[arg-type]
+                            pool=web_search_backend,
                             max_iterations=max_tool_iterations,
                         ):
                             yield chunk
@@ -736,7 +736,7 @@ async def chat_completions(
                         on_first_response=on_first_response,
                     )
             if use_sandbox:
-                assert sandbox_url is not None
+                assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
                 sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
                 async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
                     sandbox_kwargs = {
@@ -749,13 +749,13 @@ async def chat_completions(
                     }
                     return await mcp_tool_loop(
                         completion_kwargs=sandbox_kwargs,
-                        pool=backend,  # type: ignore[arg-type]
+                        pool=backend,
                         max_iterations=max_tool_iterations,
                         on_first_response=on_first_response,
                     )
             if use_web_search:
-                assert web_search_url is not None
-                assert web_search_tool_entry is not None
+                assert web_search_url is not None  # guaranteed past the missing-URL 400 above
+                assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
                 async with _build_web_search_backend(
                     base_url=web_search_url,
                     tool_entry=web_search_tool_entry,
@@ -770,7 +770,7 @@ async def chat_completions(
                     }
                     return await mcp_tool_loop(
                         completion_kwargs=web_kwargs,
-                        pool=web_backend,  # type: ignore[arg-type]
+                        pool=web_backend,
                         max_iterations=max_tool_iterations,
                         on_first_response=on_first_response,
                     )
@@ -843,7 +843,7 @@ async def chat_completions(
                     max_iterations=max_tool_iterations,
                 )
         elif use_sandbox:
-            assert sandbox_url is not None
+            assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
             sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
             async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
                 sandbox_kwargs = {
@@ -856,12 +856,12 @@ async def chat_completions(
                 }
                 completion = await mcp_tool_loop(
                     completion_kwargs=sandbox_kwargs,
-                    pool=backend,  # type: ignore[arg-type]
+                    pool=backend,
                     max_iterations=max_tool_iterations,
                 )
         elif use_web_search:
-            assert web_search_url is not None
-            assert web_search_tool_entry is not None
+            assert web_search_url is not None  # guaranteed past the missing-URL 400 above
+            assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
             async with _build_web_search_backend(
                 base_url=web_search_url,
                 tool_entry=web_search_tool_entry,
@@ -876,7 +876,7 @@ async def chat_completions(
                 }
                 completion = await mcp_tool_loop(
                     completion_kwargs=web_kwargs,
-                    pool=web_backend,  # type: ignore[arg-type]
+                    pool=web_backend,
                     max_iterations=max_tool_iterations,
                 )
         else:
@@ -1198,14 +1198,14 @@ async def _run_streaming_with_fallback(
         if mcp_server_configs:
             pool_for_loop = await backend_stack.enter_async_context(MCPClientPool(mcp_server_configs))
         elif use_sandbox:
-            assert sandbox_url is not None
+            assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
             sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
             pool_for_loop = await backend_stack.enter_async_context(
                 SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint),
             )
         elif use_web_search:
-            assert web_search_url is not None
-            assert web_search_tool_entry is not None
+            assert web_search_url is not None  # guaranteed past the missing-URL 400 above
+            assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
             pool_for_loop = await backend_stack.enter_async_context(
                 _build_web_search_backend(base_url=web_search_url, tool_entry=web_search_tool_entry),
             )

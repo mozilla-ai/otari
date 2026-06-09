@@ -283,7 +283,7 @@ async def create_response(
             detail="mcp_server_ids is only available in platform mode",
         )
     if platform_mode and request_body.mcp_server_ids:
-        assert user_token is not None
+        assert user_token is not None  # guaranteed by the platform-mode branch above
         resolved_mcp_servers = await _resolve_platform_mcp_servers(
             config=config,
             user_token=user_token,
@@ -376,7 +376,7 @@ async def create_response(
     # ------------------------------------------------------------------
     if stream:
         if platform_mode and not use_tool_loop:
-            assert route is not None
+            assert route is not None  # guaranteed by the platform-mode branch above
             if not route.attempts:
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
@@ -411,7 +411,7 @@ async def create_response(
 
         # Single-attempt streaming (standalone, or platform + tool-loop).
         if platform_mode:
-            assert route is not None
+            assert route is not None  # guaranteed by the platform-mode branch above
             if not route.attempts:
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
@@ -478,7 +478,7 @@ async def create_response(
     # Non-streaming path
     # ------------------------------------------------------------------
     if platform_mode:
-        assert route is not None
+        assert route is not None  # guaranteed by the platform-mode branch above
         platform_route = route
         attempts_to_try = platform_route.attempts
         if not attempts_to_try:
@@ -674,7 +674,7 @@ async def _run_platform_non_stream_responses(
                     on_first_response=on_first_response,
                 )
         if use_sandbox:
-            assert sandbox_url is not None
+            assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
             sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
             async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
                 kwargs = inject_purpose_hints_responses(
@@ -684,13 +684,13 @@ async def _run_platform_non_stream_responses(
                 )
                 return await responses_tool_loop(
                     completion_kwargs=kwargs,
-                    pool=backend,  # type: ignore[arg-type]
+                    pool=backend,
                     max_iterations=max_tool_iterations,
                     on_first_response=on_first_response,
                 )
         assert use_web_search
-        assert web_search_url is not None
-        assert web_search_tool_entry is not None
+        assert web_search_url is not None  # guaranteed past the missing-URL 400 above
+        assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
         async with _build_web_search_backend(
             base_url=web_search_url,
             tool_entry=web_search_tool_entry,
@@ -702,7 +702,7 @@ async def _run_platform_non_stream_responses(
             )
             return await responses_tool_loop(
                 completion_kwargs=kwargs,
-                pool=web_backend,  # type: ignore[arg-type]
+                pool=web_backend,
                 max_iterations=max_tool_iterations,
                 on_first_response=on_first_response,
             )
@@ -782,7 +782,7 @@ async def _run_responses_non_stream(
             )
 
     if use_sandbox:
-        assert sandbox_url is not None
+        assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
         sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
         async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
             kwargs = inject_purpose_hints_responses(
@@ -792,13 +792,13 @@ async def _run_responses_non_stream(
             )
             return await responses_tool_loop(
                 completion_kwargs=kwargs,
-                pool=backend,  # type: ignore[arg-type]
+                pool=backend,
                 max_iterations=max_tool_iterations,
             )
 
     assert use_web_search
-    assert web_search_url is not None
-    assert web_search_tool_entry is not None
+    assert web_search_url is not None  # guaranteed past the missing-URL 400 above
+    assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
     async with _build_web_search_backend(
         base_url=web_search_url,
         tool_entry=web_search_tool_entry,
@@ -810,7 +810,7 @@ async def _run_responses_non_stream(
         )
         return await responses_tool_loop(
             completion_kwargs=kwargs,
-            pool=web_backend,  # type: ignore[arg-type]
+            pool=web_backend,
             max_iterations=max_tool_iterations,
         )
 
@@ -867,8 +867,8 @@ async def _stream_responses(
 
     async def _on_complete(usage_data: CompletionUsage) -> None:
         if platform_mode_active:
-            assert platform_config is not None
-            assert platform_correlation_id is not None
+            assert platform_config is not None  # guaranteed by the platform-mode branch above
+            assert platform_correlation_id is not None  # guaranteed by the platform-mode branch above
             asyncio.create_task(
                 _report_platform_usage(
                     config=platform_config,
@@ -928,8 +928,8 @@ async def _stream_responses(
 
     async def _on_error(error: str) -> None:
         if platform_mode_active:
-            assert platform_config is not None
-            assert platform_correlation_id is not None
+            assert platform_config is not None  # guaranteed by the platform-mode branch above
+            assert platform_correlation_id is not None  # guaranteed by the platform-mode branch above
             asyncio.create_task(
                 _report_platform_usage(
                     config=platform_config,
@@ -1218,7 +1218,7 @@ async def _open_tool_loop_stream(
         return _mcp_iter()
 
     if use_sandbox:
-        assert sandbox_url is not None
+        assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
         sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
         sandbox_backend = SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint)
         await sandbox_backend.__aenter__()
@@ -1232,7 +1232,7 @@ async def _open_tool_loop_stream(
                 )
                 async for event in responses_tool_loop_stream(
                     completion_kwargs=kwargs,
-                    pool=sandbox_backend,  # type: ignore[arg-type]
+                    pool=sandbox_backend,
                     max_iterations=max_tool_iterations,
                 ):
                     yield event
@@ -1242,8 +1242,8 @@ async def _open_tool_loop_stream(
         return _sandbox_iter()
 
     assert use_web_search
-    assert web_search_url is not None
-    assert web_search_tool_entry is not None
+    assert web_search_url is not None  # guaranteed past the missing-URL 400 above
+    assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
     web_search_backend = _build_web_search_backend(
         base_url=web_search_url,
         tool_entry=web_search_tool_entry,
@@ -1259,7 +1259,7 @@ async def _open_tool_loop_stream(
             )
             async for event in responses_tool_loop_stream(
                 completion_kwargs=kwargs,
-                pool=web_search_backend,  # type: ignore[arg-type]
+                pool=web_search_backend,
                 max_iterations=max_tool_iterations,
             ):
                 yield event

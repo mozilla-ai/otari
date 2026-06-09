@@ -22,6 +22,7 @@ from gateway.services.mcp_loop import (
     DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
     MaxToolIterationsExceeded,
+    ToolBackend,
 )
 from gateway.services.tool_format import openai_to_anthropic_tools
 
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
         MessageStreamEvent,
     )
 
-    from gateway.services.mcp_client import MCPClientPool
 
 # Re-export so callers in routes/messages.py have a single import surface.
 __all__ = [
@@ -45,7 +45,7 @@ __all__ = [
 
 def _split_tool_uses(
     content: list[Any],
-    pool: MCPClientPool,
+    pool: ToolBackend,
 ) -> tuple[list[Any], bool]:
     """Return (owned_tool_use_blocks, has_foreign).
 
@@ -66,7 +66,7 @@ def _split_tool_uses(
 
 
 async def _execute_tool_uses(
-    pool: MCPClientPool,
+    pool: ToolBackend,
     blocks: list[Any],
 ) -> list[dict[str, Any]]:
     """Run each owned tool_use block and return the Anthropic tool_result blocks.
@@ -111,7 +111,7 @@ def _content_to_dicts(content: list[Any]) -> list[dict[str, Any]]:
 async def anthropic_tool_loop(
     *,
     completion_kwargs: dict[str, Any],
-    pool: MCPClientPool,
+    pool: ToolBackend,
     max_iterations: int,
     on_first_response: Callable[[], None] | None = None,
 ) -> MessageResponse:
@@ -216,7 +216,7 @@ def _fold_usage(result: MessageResponse, input_total: int, output_total: int) ->
 async def anthropic_tool_loop_stream(
     *,
     completion_kwargs: dict[str, Any],
-    pool: MCPClientPool,
+    pool: ToolBackend,
     max_iterations: int,
 ) -> AsyncIterator[MessageStreamEvent]:
     """Streaming Anthropic Messages tool-use loop.
