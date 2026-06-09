@@ -25,5 +25,6 @@ Start with the [Quickstart](quickstart.md). It gets the gateway running locally 
 - [Configuration](configuration.md) — the full config file and environment variable reference.
 - [API reference](api-reference.md) — every endpoint, with auth and availability per mode.
 - [Use with Claude Code](use-with-claude-code.md) — point the Claude Code CLI at the gateway.
+- [Use with opencode](use-with-opencode.md) — point the opencode CLI at the gateway.
 - [Supported models](supported-models.md) — providers, model format, and capabilities.
 - [Platform protocol](platform-protocol.md) — the gateway/platform wire contract, for platform builders.
