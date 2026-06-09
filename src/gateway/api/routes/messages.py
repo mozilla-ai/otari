@@ -1,14 +1,12 @@
 import asyncio
 import math
 import os
-import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
 import httpx
 from any_llm import AnyLLM, LLMProvider, amessages
-from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
     MessageDeltaEvent,
@@ -22,7 +20,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._helpers import apply_input_guardrails, latest_user_text, resolve_user_id
+from gateway.api.routes._helpers import apply_input_guardrails, latest_user_text
+from gateway.api.routes._mode_strategy import (
+    RequestModeStrategy,
+    RequestSettlement,
+    ResolveErrors,
+    ResolveSpec,
+    select_request_mode_strategy,
+)
 from gateway.api.routes._platform import (
     ResolvedAttempt,
     ResolvedRoute,
@@ -30,7 +35,6 @@ from gateway.api.routes._platform import (
     _extract_platform_user_token,
     _report_platform_usage,
     _resolve_platform_credentials,
-    _resolve_platform_mcp_servers,
     run_platform_attempts,
 )
 from gateway.api.routes._tools import (
@@ -43,16 +47,12 @@ from gateway.api.routes._tools import (
 from gateway.api.routes.chat import get_provider_kwargs, log_usage, rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.models.entities import APIKey
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
-from gateway.rate_limit import RateLimitInfo, check_rate_limit
+from gateway.rate_limit import RateLimitInfo
 from gateway.services.budget_service import (
-    ReservationHandle,
-    estimate_cost,
     reconcile_reservation,
     refund_reservation,
-    reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
@@ -63,7 +63,6 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
-from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -173,93 +172,49 @@ async def create_message(
     ``on_first_response`` lock-in plumbing lands across the codebase, a
     follow-up will enable pre-lock-in fallback for tool-loop requests too.
     """
-    api_key: APIKey | None = None
-    api_key_id: str | None = None
-    user_id: str | None = None
-    rate_limit_info: RateLimitInfo | None = None
-    platform_mode = config.is_platform_mode
-    route: ResolvedRoute | None = None
-    user_token: str | None = None
-    # Budget pre-debit for the standalone (local-DB) path only; platform mode
-    # reports usage upstream instead. Settled (reconciled/refunded) at every
-    # completion and error hook below.
-    reservation: ReservationHandle | None = None
-
-    if platform_mode:
-        user_token = _extract_platform_user_token(raw_request)
-        start_time = time.perf_counter()
-        route = await _resolve_platform_credentials(
-            config=config,
-            user_token=user_token,
+    # Mode seam: select the strategy once, then resolve credentials (platform)
+    # or authenticate + reserve budget (standalone). See chat.py for the shared
+    # rationale; the only differences here are the Anthropic error envelope and
+    # the metadata-based user id.
+    user_from_metadata = request.metadata.get("user_id") if request.metadata else None
+    strategy = select_request_mode_strategy(config, db, log_writer)
+    await strategy.resolve(
+        raw_request=raw_request,
+        response=response,
+        spec=ResolveSpec(
             model_selector=request.model,
-        )
-        resolve_latency_ms = (time.perf_counter() - start_time) * 1000
-        response.headers["X-Otari-Request-ID"] = route.request_id
-        logger.info(
-            "Platform resolve succeeded request_id=%s attempts=%d fallback_enabled=%s resolve_latency_ms=%.2f",
-            route.request_id,
-            len(route.attempts),
-            route.fallback_enabled,
-            resolve_latency_ms,
-        )
-    else:
-        if db is None:
-            raise _anthropic_error(_ERR_API, "Database session unavailable", status.HTTP_500_INTERNAL_SERVER_ERROR)
-        api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
-        api_key_id = api_key.id if api_key else None
-        user_from_metadata = request.metadata.get("user_id") if request.metadata else None
-        user_id = resolve_user_id(
             user_id_from_request=str(user_from_metadata) if user_from_metadata else None,
-            api_key=api_key,
-            is_master_key=is_master_key,
-            master_key_error=_anthropic_error(
-                _ERR_INVALID_REQUEST,
-                _MASTER_KEY_USER_REQUIRED,
-                status.HTTP_400_BAD_REQUEST,
-            ),
-            no_api_key_error=_anthropic_error(
-                _ERR_API,
-                _API_KEY_VALIDATION_FAILED,
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-            ),
-            no_user_error=_anthropic_error(
-                _ERR_API,
-                _API_KEY_NO_USER,
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-            ),
-            forbidden_user_error=_anthropic_error(
-                _ERR_PERMISSION,
-                _USER_FORBIDDEN,
-                status.HTTP_403_FORBIDDEN,
-            ),
-            reject_mismatch=config.reject_user_mismatch,
-        )
-        rate_limit_info = check_rate_limit(raw_request, user_id)
-        # Tolerate an unparseable selector: the budget gate (404/403) and the
-        # downstream call surface those; an unparseable model simply has no pricing.
-        try:
-            gate_provider, gate_model = AnyLLM.split_model_provider(request.model)
-        except (ValueError, AnyLLMError):
-            gate_provider, gate_model = None, request.model
-        pricing = await find_model_pricing(db, gate_provider, gate_model)
-        estimate = estimate_cost(
-            pricing,
             prompt_chars=len(str(request.messages)) + len(str(request.system or "")),
             max_output_tokens=request.max_tokens,
-            default_output_tokens=config.budget_estimate_default_output_tokens,
-        )
-        # Reserve first so user/blocked/budget rejections (404/403) precede the
-        # missing-pricing rejection (402); refund if we then reject for no pricing.
-        reservation = await reserve_budget(
-            db, user_id, estimate, model=request.model, strategy=config.budget_strategy
-        )
-        if pricing_required_but_missing(pricing, require_pricing=config.require_pricing):
-            await refund_reservation(db, reservation)
-            raise _anthropic_error(
-                _ERR_INVALID_REQUEST,
-                f"No pricing configured for model '{request.model}'",
-                status.HTTP_402_PAYMENT_REQUIRED,
-            )
+            errors=ResolveErrors(
+                db_unavailable=_anthropic_error(
+                    _ERR_API, "Database session unavailable", status.HTTP_500_INTERNAL_SERVER_ERROR
+                ),
+                master_key_user_required=_anthropic_error(
+                    _ERR_INVALID_REQUEST, _MASTER_KEY_USER_REQUIRED, status.HTTP_400_BAD_REQUEST
+                ),
+                api_key_validation_failed=_anthropic_error(
+                    _ERR_API, _API_KEY_VALIDATION_FAILED, status.HTTP_500_INTERNAL_SERVER_ERROR
+                ),
+                no_user=_anthropic_error(_ERR_API, _API_KEY_NO_USER, status.HTTP_500_INTERNAL_SERVER_ERROR),
+                forbidden_user=_anthropic_error(_ERR_PERMISSION, _USER_FORBIDDEN, status.HTTP_403_FORBIDDEN),
+                no_pricing=_anthropic_error(
+                    _ERR_INVALID_REQUEST,
+                    f"No pricing configured for model '{request.model}'",
+                    status.HTTP_402_PAYMENT_REQUIRED,
+                ),
+            ),
+        ),
+    )
+    platform_mode = strategy.is_platform
+    route = strategy.route
+    rate_limit_info = strategy.rate_limit_info
+    # Used only by the standalone non-streaming tail below (platform returns
+    # earlier via the multi-attempt runner); the streaming path settles through
+    # the strategy's settlement object instead.
+    api_key_id = strategy.api_key_id
+    user_id = strategy.user_id
+    reservation = strategy.reservation
 
     # Caller-requested input guardrails run before any provider/tool dispatch
     # (see chat.py for the rationale). Stripped before forwarding upstream.
@@ -269,21 +224,16 @@ async def create_message(
         response=response,
     )
 
-    # mcp_server_ids is platform-only — standalone has no platform to
-    # resolve them against, so we reject with a 400 rather than silently
-    # ignoring the field.
-    if request.mcp_server_ids and not platform_mode:
-        raise _anthropic_error(
-            _ERR_INVALID_REQUEST,
-            "mcp_server_ids is only available in platform mode",
-            status.HTTP_400_BAD_REQUEST,
-        )
-    if platform_mode and request.mcp_server_ids:
-        assert user_token is not None  # guaranteed by the platform-mode branch above
-        resolved_mcp_servers = await _resolve_platform_mcp_servers(
-            config=config,
-            user_token=user_token,
-            mcp_server_ids=request.mcp_server_ids,
+    # mcp_server_ids is platform-only — the platform strategy resolves them,
+    # the standalone strategy rejects the field with a 400.
+    if request.mcp_server_ids:
+        resolved_mcp_servers = await strategy.resolve_mcp_servers(
+            request.mcp_server_ids,
+            reject_error=_anthropic_error(
+                _ERR_INVALID_REQUEST,
+                "mcp_server_ids is only available in platform mode",
+                status.HTTP_400_BAD_REQUEST,
+            ),
         )
         request.mcp_servers = (request.mcp_servers or []) + resolved_mcp_servers
 
@@ -375,6 +325,7 @@ async def create_message(
                     base_request_fields=request_fields,
                     response=response,
                     config=config,
+                    strategy=strategy,
                     background_tasks=background_tasks,
                     rate_limit_info=rate_limit_info,
                 )
@@ -420,25 +371,26 @@ async def create_message(
             provider_kwargs = get_provider_kwargs(config, provider)
             call_kwargs = {**provider_kwargs, **request_fields}
 
-        # Platform tool-loop streaming is currently single-attempt; pass the
+        # Platform tool-loop streaming is currently single-attempt; carry the
         # primary attempt's correlation id + the route's request id so the
-        # response still carries the platform contract (X-Correlation-ID,
-        # X-Otari-Request-ID, usage reported via _report_platform_usage).
-        platform_correlation_id: str | None = None
-        platform_request_id: str | None = None
-        platform_config: GatewayConfig | None = None
+        # response still presents the platform contract (X-Correlation-ID,
+        # X-Otari-Request-ID, usage reported via the platform settlement).
+        correlation_id: str | None = None
+        request_id: str | None = None
         if platform_mode and route is not None and route.attempts:
-            platform_correlation_id = route.attempts[0].attempt_id
-            platform_request_id = route.request_id
-            platform_config = config
+            correlation_id = route.attempts[0].attempt_id
+            request_id = route.request_id
+
+        settlement = strategy.make_settlement(
+            provider=provider,
+            model=model,
+            endpoint="/v1/messages",
+            correlation_id=correlation_id,
+        )
 
         return await _stream_messages(
             call_kwargs=call_kwargs,
             request=request,
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            user_id=user_id,
             provider=provider,
             model=model,
             rate_limit_info=rate_limit_info,
@@ -451,11 +403,9 @@ async def create_message(
             web_search_tool_entry=web_search_tool_entry,
             web_search_url=web_search_url,
             max_tool_iterations=max_tool_iterations,
-            config=config,
-            platform_correlation_id=platform_correlation_id,
-            platform_request_id=platform_request_id,
-            platform_config=platform_config,
-            reservation=reservation,
+            settlement=settlement,
+            correlation_id=correlation_id,
+            request_id=request_id,
         )
 
     # ------------------------------------------------------------------
@@ -810,10 +760,6 @@ async def _stream_messages(
     *,
     call_kwargs: dict[str, Any],
     request: MessagesRequest,
-    db: AsyncSession | None,
-    log_writer: LogWriter,
-    api_key_id: str | None,
-    user_id: str | None,
     provider: Any,
     model: str,
     rate_limit_info: Any,
@@ -826,11 +772,9 @@ async def _stream_messages(
     web_search_tool_entry: dict[str, Any] | None,
     web_search_url: str | None,
     max_tool_iterations: int,
-    config: GatewayConfig,
-    platform_correlation_id: str | None = None,
-    platform_request_id: str | None = None,
-    platform_config: GatewayConfig | None = None,
-    reservation: ReservationHandle | None = None,
+    settlement: RequestSettlement,
+    correlation_id: str | None = None,
+    request_id: str | None = None,
 ) -> StreamingResponse:
     """Streaming dispatch for single-attempt requests.
 
@@ -838,14 +782,11 @@ async def _stream_messages(
     (where streaming fallback is still single-attempt — multi-attempt
     streaming for non-tool-loop uses ``_run_streaming_with_fallback_messages``).
 
-    When ``platform_correlation_id`` / ``platform_request_id`` /
-    ``platform_config`` are set (platform mode, single-attempt path), the
-    response includes ``X-Correlation-ID`` / ``X-Otari-Request-ID`` headers
-    and usage is reported to the platform on complete/error. When unset, the
-    response logs usage to the local DB via ``log_usage`` (standalone mode).
+    Usage settlement (platform usage report vs local log + reconcile/refund) is
+    delegated to ``settlement``; ``correlation_id`` / ``request_id`` are set as
+    headers when present (platform mode).
     """
     call_kwargs["stream"] = True
-    platform_mode_active = platform_correlation_id is not None and platform_config is not None
 
     def _format_chunk(event: MessageStreamEvent) -> str:
         return f"event: {event.type}\ndata: {event.model_dump_json(exclude_none=True)}\n\n"
@@ -870,99 +811,7 @@ async def _stream_messages(
         return None
 
     async def _on_complete(usage_data: CompletionUsage) -> None:
-        if platform_mode_active:
-            assert platform_config is not None  # guaranteed by the platform-mode branch above
-            assert platform_correlation_id is not None  # guaranteed by the platform-mode branch above
-            asyncio.create_task(
-                _report_platform_usage(
-                    config=platform_config,
-                    correlation_id=platform_correlation_id,
-                    outcome="success",
-                    usage=usage_data,
-                )
-            )
-            return
-        if db is None:
-            return
-        actual_cost = await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/messages",
-            user_id=user_id,
-            usage_override=usage_data,
-        )
-        if reservation is not None:
-            await reconcile_reservation(db, reservation, actual_cost or 0.0)
-
-    async def _on_no_usage() -> None:
-        # Stream completed but the provider sent no usage data. Settle the
-        # reservation per stream_missing_usage_policy instead of billing $0.
-        if db is None or log_writer is None or reservation is None:
-            return
-        policy = config.stream_missing_usage_policy
-        if policy == "allow_free":
-            await log_usage(
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                model=model,
-                provider=provider,
-                endpoint="/v1/messages",
-                user_id=user_id,
-            )
-            await refund_reservation(db, reservation)
-            return
-        # 'estimate' and 'fail' both charge the up-front estimate; 'fail' also
-        # records the request as errored.
-        await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/messages",
-            user_id=user_id,
-            error="stream completed without usage data" if policy == "fail" else None,
-            cost_override=reservation.estimate,
-        )
-        await reconcile_reservation(db, reservation, reservation.estimate)
-
-    async def _on_error(error: str) -> None:
-        if platform_mode_active:
-            assert platform_config is not None  # guaranteed by the platform-mode branch above
-            assert platform_correlation_id is not None  # guaranteed by the platform-mode branch above
-            asyncio.create_task(
-                _report_platform_usage(
-                    config=platform_config,
-                    correlation_id=platform_correlation_id,
-                    outcome="error",
-                    usage=None,
-                )
-            )
-            return
-        if db is None:
-            return
-        await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/messages",
-            user_id=user_id,
-            error=error,
-        )
-        if reservation is not None:
-            await refund_reservation(db, reservation)
-
-    async def _on_incomplete() -> None:
-        # Client disconnected mid-stream — release the reservation.
-        if db is None or reservation is None:
-            return
-        await refund_reservation(db, reservation)
+        await settlement.on_success(usage_data)
 
     try:
         if not use_tool_loop:
@@ -1001,17 +850,7 @@ async def _stream_messages(
         # A provider error raised before the stream starts must surface as an
         # HTTP error (Anthropic envelope) rather than escaping uncaught into a
         # 500. Matches the non-streaming handler.
-        if db is not None:
-            await log_usage(
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                model=model,
-                provider=provider,
-                endpoint="/v1/messages",
-                user_id=user_id,
-                error=str(exc),
-            )
+        await settlement.on_provider_error_precommit(str(exc))
         logger.error("Provider call failed for %s:%s: %s", provider, model, exc)
         raise _anthropic_error(
             _ERR_API,
@@ -1022,10 +861,10 @@ async def _stream_messages(
     headers: dict[str, str] = {}
     if rate_limit_info:
         headers.update(rate_limit_headers(rate_limit_info))
-    if platform_correlation_id:
-        headers["X-Correlation-ID"] = platform_correlation_id
-    if platform_request_id:
-        headers["X-Otari-Request-ID"] = platform_request_id
+    if correlation_id:
+        headers["X-Correlation-ID"] = correlation_id
+    if request_id:
+        headers["X-Otari-Request-ID"] = request_id
 
     return StreamingResponse(
         streaming_generator(
@@ -1034,10 +873,10 @@ async def _stream_messages(
             extract_usage=_extract_usage,
             fmt=ANTHROPIC_STREAM_FORMAT,
             on_complete=_on_complete,
-            on_error=_on_error,
+            on_error=settlement.on_error,
             label=f"{provider}:{model}",
-            on_no_usage=_on_no_usage,
-            on_incomplete=_on_incomplete,
+            on_no_usage=settlement.on_no_usage,
+            on_incomplete=settlement.on_incomplete,
         ),
         media_type="text/event-stream",
         headers=headers,
@@ -1050,6 +889,7 @@ async def _run_streaming_with_fallback_messages(
     base_request_fields: dict[str, Any],
     response: Response,
     config: GatewayConfig,
+    strategy: RequestModeStrategy,
     background_tasks: BackgroundTasks,
     rate_limit_info: RateLimitInfo | None,
 ) -> StreamingResponse:
@@ -1108,9 +948,14 @@ async def _run_streaming_with_fallback_messages(
         stream=stream,
         provider=LLMProvider(chosen.provider),
         model=chosen.model,
+        settlement=strategy.make_settlement(
+            provider=LLMProvider(chosen.provider),
+            model=chosen.model,
+            endpoint="/v1/messages",
+            correlation_id=chosen.attempt_id,
+        ),
         correlation_id=chosen.attempt_id,
         request_id=route.request_id,
-        config=config,
         rate_limit_info=rate_limit_info,
     )
 
@@ -1120,14 +965,14 @@ def _build_streaming_response_messages(
     stream: AsyncIterator[MessageStreamEvent],
     provider: LLMProvider,
     model: str,
+    settlement: RequestSettlement,
     correlation_id: str,
     request_id: str,
-    config: GatewayConfig,
     rate_limit_info: RateLimitInfo | None,
 ) -> StreamingResponse:
     """Wrap an already-opened Anthropic stream in an SSE response for
     platform-mode requests. Sets correlation / request-id headers and reports
-    usage to the platform on complete.
+    usage through ``settlement`` on complete/error.
     """
 
     def _format_chunk(event: MessageStreamEvent) -> str:
@@ -1153,24 +998,7 @@ def _build_streaming_response_messages(
         return None
 
     async def _on_complete(usage_data: CompletionUsage) -> None:
-        asyncio.create_task(
-            _report_platform_usage(
-                config=config,
-                correlation_id=correlation_id,
-                outcome="success",
-                usage=usage_data,
-            )
-        )
-
-    async def _on_error(error: str) -> None:
-        asyncio.create_task(
-            _report_platform_usage(
-                config=config,
-                correlation_id=correlation_id,
-                outcome="error",
-                usage=None,
-            )
-        )
+        await settlement.on_success(usage_data)
 
     headers: dict[str, str] = {}
     if rate_limit_info:
@@ -1185,7 +1013,7 @@ def _build_streaming_response_messages(
             extract_usage=_extract_usage,
             fmt=ANTHROPIC_STREAM_FORMAT,
             on_complete=_on_complete,
-            on_error=_on_error,
+            on_error=settlement.on_error,
             label=f"{provider}:{model}",
         ),
         media_type="text/event-stream",

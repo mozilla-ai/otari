@@ -1,6 +1,5 @@
 import asyncio
 import os
-import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack
@@ -9,7 +8,6 @@ from typing import Annotated, Any
 
 import httpx
 from any_llm import AnyLLM, LLMProvider, acompletion
-from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -20,8 +18,15 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._helpers import apply_input_guardrails, latest_user_text, resolve_user_id
+from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
+from gateway.api.routes._helpers import apply_input_guardrails, latest_user_text
+from gateway.api.routes._mode_strategy import (
+    RequestModeStrategy,
+    RequestSettlement,
+    ResolveErrors,
+    ResolveSpec,
+    select_request_mode_strategy,
+)
 from gateway.api.routes._platform import (
     _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS,
     _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP,
@@ -30,10 +35,7 @@ from gateway.api.routes._platform import (
     ResolvedAttempt,
     ResolvedRoute,
     _classify_upstream_error,
-    _extract_platform_user_token,
     _report_platform_usage,
-    _resolve_platform_credentials,
-    _resolve_platform_mcp_servers,
     run_platform_attempts,
 )
 from gateway.api.routes._tools import (
@@ -46,17 +48,10 @@ from gateway.api.routes._tools import (
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.metrics import record_cost, record_tokens
-from gateway.models.entities import APIKey, UsageLog
+from gateway.models.entities import UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
-from gateway.rate_limit import RateLimitInfo, check_rate_limit
-from gateway.services.budget_service import (
-    ReservationHandle,
-    estimate_cost,
-    reconcile_reservation,
-    refund_reservation,
-    reserve_budget,
-)
+from gateway.rate_limit import RateLimitInfo
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -67,7 +62,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
-from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
+from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -239,95 +234,52 @@ async def chat_completions(
             detail="Invalid request: model is required",
         )
 
-    api_key: APIKey | None = None
-    api_key_id: str | None = None
-    user_id: str | None = None
-    rate_limit_info: RateLimitInfo | None = None
-    platform_mode = config.is_platform_mode
-    route: ResolvedRoute | None = None
-    user_token: str | None = None  # set inside the platform_mode branch; referenced again later
-    # Budget pre-debit for the standalone (local-DB) path only; platform mode
-    # reports usage upstream instead. Settled (reconciled/refunded) at every
-    # completion and error hook below.
-    reservation: ReservationHandle | None = None
-
-    if platform_mode:
-        user_token = _extract_platform_user_token(raw_request)
-        start_time = time.perf_counter()
-        route = await _resolve_platform_credentials(
-            config=config,
-            user_token=user_token,
+    # Mode seam: select the strategy once, then resolve credentials (platform)
+    # or authenticate + reserve budget (standalone). The handler reads the
+    # populated per-request state off the strategy and never branches on mode
+    # again for credential resolution or usage settlement.
+    strategy = select_request_mode_strategy(config, db, log_writer)
+    await strategy.resolve(
+        raw_request=raw_request,
+        response=response,
+        spec=ResolveSpec(
             model_selector=request.model,
-        )
-        resolve_latency_ms = (time.perf_counter() - start_time) * 1000
-        response.headers["X-Otari-Request-ID"] = route.request_id
-        logger.info(
-            "Platform resolve succeeded request_id=%s attempts=%d fallback_enabled=%s resolve_latency_ms=%.2f",
-            route.request_id,
-            len(route.attempts),
-            route.fallback_enabled,
-            resolve_latency_ms,
-        )
-    else:
-        if db is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database session unavailable",
-            )
-
-        api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
-        api_key_id = api_key.id if api_key else None
-        user_id = resolve_user_id(
             user_id_from_request=request.user,
-            api_key=api_key,
-            is_master_key=is_master_key,
-            master_key_error=HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="When using master key, 'user' field is required in request body",
-            ),
-            no_api_key_error=HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="API key validation failed",
-            ),
-            no_user_error=HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="API key has no associated user",
-            ),
-            forbidden_user_error=HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="'user' field does not match the authenticated API key's user",
-            ),
-            reject_mismatch=config.reject_user_mismatch,
-        )
-
-        rate_limit_info = check_rate_limit(raw_request, user_id)
-
-        # Tolerate an unparseable / unknown-provider selector here — the budget
-        # check below and the downstream provider call surface those with their
-        # own status codes. A model we can't parse simply has no pricing.
-        try:
-            gate_provider, gate_model = AnyLLM.split_model_provider(request.model)
-        except (ValueError, AnyLLMError):
-            gate_provider, gate_model = None, request.model
-        gate_pricing = await find_model_pricing(db, gate_provider, gate_model)
-        estimate = estimate_cost(
-            gate_pricing,
             prompt_chars=len(str(request.messages)),
-            max_output_tokens=request.max_tokens if request.max_tokens is not None else request.max_completion_tokens,
-            default_output_tokens=config.budget_estimate_default_output_tokens,
-        )
-        # Reserve first so user/blocked/budget rejections (404/403) take
-        # precedence over the missing-pricing rejection (402); refund if we then
-        # reject for missing pricing.
-        reservation = await reserve_budget(
-            db, user_id, estimate, model=request.model, strategy=config.budget_strategy
-        )
-        if pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
-            await refund_reservation(db, reservation)
-            raise HTTPException(
-                status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=f"No pricing configured for model '{request.model}'",
-            )
+            max_output_tokens=(
+                request.max_tokens if request.max_tokens is not None else request.max_completion_tokens
+            ),
+            errors=ResolveErrors(
+                db_unavailable=HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Database session unavailable",
+                ),
+                master_key_user_required=HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="When using master key, 'user' field is required in request body",
+                ),
+                api_key_validation_failed=HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="API key validation failed",
+                ),
+                no_user=HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="API key has no associated user",
+                ),
+                forbidden_user=HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="'user' field does not match the authenticated API key's user",
+                ),
+                no_pricing=HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail=f"No pricing configured for model '{request.model}'",
+                ),
+            ),
+        ),
+    )
+    platform_mode = strategy.is_platform
+    route = strategy.route
+    rate_limit_info = strategy.rate_limit_info
 
     # Caller-requested input guardrails run before any provider/tool dispatch.
     # `block`-mode flags raise 403 here (provider never called); `monitor`-mode
@@ -341,23 +293,18 @@ async def chat_completions(
     )
 
     # Workspace-scoped MCP server references (platform mode only). Callers
-    # pass `mcp_server_ids: [uuid, ...]` instead of inlining each config; we
-    # resolve them against the platform's `/gateway/mcp-servers/resolve`
-    # endpoint and merge with any inline `mcp_servers` so the downstream
-    # MCP loop sees a single list. In standalone mode there's no platform
-    # to consult, so we reject the field with a 400 rather than silently
-    # ignoring it.
-    if request.mcp_server_ids and not platform_mode:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="mcp_server_ids is only available in platform mode",
-        )
-    if platform_mode and request.mcp_server_ids:
-        assert user_token is not None  # guaranteed by the platform_mode branch above
-        resolved_mcp_servers = await _resolve_platform_mcp_servers(
-            config=config,
-            user_token=user_token,
-            mcp_server_ids=request.mcp_server_ids,
+    # pass `mcp_server_ids: [uuid, ...]` instead of inlining each config; the
+    # platform strategy resolves them against `/gateway/mcp-servers/resolve`
+    # and we merge with any inline `mcp_servers` so the downstream MCP loop
+    # sees a single list. In standalone mode there's no platform to consult,
+    # so the strategy raises a 400 rather than silently ignoring the field.
+    if request.mcp_server_ids:
+        resolved_mcp_servers = await strategy.resolve_mcp_servers(
+            request.mcp_server_ids,
+            reject_error=HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="mcp_server_ids is only available in platform mode",
+            ),
         )
         request.mcp_servers = (request.mcp_servers or []) + resolved_mcp_servers
 
@@ -456,6 +403,7 @@ async def chat_completions(
                     request=request,
                     response=response,
                     config=config,
+                    strategy=strategy,
                     background_tasks=background_tasks,
                     rate_limit_info=rate_limit_info,
                     mcp_server_configs=stream_mcp_configs,
@@ -523,6 +471,13 @@ async def chat_completions(
         completion_kwargs = {**provider_kwargs, **request_fields}
         if completion_kwargs.get("stream_options") is None:
             completion_kwargs["stream_options"] = {"include_usage": True}
+
+        settlement = strategy.make_settlement(
+            provider=provider,
+            model=model,
+            endpoint="/v1/chat/completions",
+            correlation_id=None,
+        )
 
         try:
             if mcp_server_configs:
@@ -622,34 +577,20 @@ async def chat_completions(
             # a "provider outage" that's actually the sandbox container
             # being down. 502 keeps "upstream dependency failed" semantics.
             logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
-            if db is not None and reservation is not None:
-                await refund_reservation(db, reservation)
+            await settlement.on_incomplete()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
             ) from exc
         except WebSearchNotReachableError as exc:
             logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
-            if db is not None and reservation is not None:
-                await refund_reservation(db, reservation)
+            await settlement.on_incomplete()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
             ) from exc
         except Exception as exc:
-            if db is not None:
-                await log_usage(
-                    db=db,
-                    log_writer=log_writer,
-                    api_key_id=api_key_id,
-                    model=model,
-                    provider=provider,
-                    endpoint="/v1/chat/completions",
-                    user_id=user_id,
-                    error=str(exc),
-                )
-                if reservation is not None:
-                    await refund_reservation(db, reservation)
+            await settlement.on_error(str(exc))
             logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
             if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
                 raise HTTPException(
@@ -665,16 +606,10 @@ async def chat_completions(
             stream=stream,
             provider=provider,
             model=model,
-            platform_mode=False,
+            settlement=settlement,
             correlation_id=None,
             request_id=None,
-            config=config,
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            user_id=user_id,
             rate_limit_info=rate_limit_info,
-            reservation=reservation,
         )
 
     # ------------------------------------------------------------------
@@ -826,6 +761,13 @@ async def chat_completions(
     )
     completion_kwargs = {**provider_kwargs, **request_fields}
 
+    settlement = strategy.make_settlement(
+        provider=provider,
+        model=model,
+        endpoint="/v1/chat/completions",
+        correlation_id=None,
+    )
+
     try:
         if mcp_server_configs:
             async with MCPClientPool(mcp_server_configs) as pool:
@@ -881,38 +823,23 @@ async def chat_completions(
                 )
         else:
             completion = await acompletion(**completion_kwargs)  # type: ignore[assignment]
-        if db is not None:
-            actual_cost = await log_usage(
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                model=model,
-                provider=provider,
-                endpoint="/v1/chat/completions",
-                user_id=user_id,
-                response=completion,
-            )
-            if reservation is not None:
-                await reconcile_reservation(db, reservation, actual_cost or 0.0)
+        await settlement.on_success(completion.usage)
     except HTTPException:
-        if db is not None and reservation is not None:
-            await refund_reservation(db, reservation)
+        await settlement.on_incomplete()
         raise
     except SandboxNotReachableError as exc:
         # Sandbox is gateway-side infra, not an LLM provider. Clearer detail
         # so operators don't chase a provider outage that's really the
         # sandbox container being down.
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
-        if db is not None and reservation is not None:
-            await refund_reservation(db, reservation)
+        await settlement.on_incomplete()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
         ) from exc
     except WebSearchNotReachableError as exc:
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
-        if db is not None and reservation is not None:
-            await refund_reservation(db, reservation)
+        await settlement.on_incomplete()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
@@ -921,38 +848,13 @@ async def chat_completions(
         # Gateway-owned cap, not an upstream provider failure. 422 lets
         # callers distinguish a runaway tool loop from a real outage.
         logger.warning("Tool loop iteration cap hit (standalone): cap=%d", max_tool_iterations)
-        if db is not None:
-            await log_usage(
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                model=model,
-                provider=provider,
-                endpoint="/v1/chat/completions",
-                user_id=user_id,
-                error=str(e),
-            )
-            if reservation is not None:
-                await refund_reservation(db, reservation)
+        await settlement.on_error(str(e))
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
         ) from e
     except Exception as e:
-        if db is not None:
-            await log_usage(
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                model=model,
-                provider=provider,
-                endpoint="/v1/chat/completions",
-                user_id=user_id,
-                error=str(e),
-            )
-            if reservation is not None:
-                await refund_reservation(db, reservation)
-
+        await settlement.on_error(str(e))
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
         if isinstance(e, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
             raise HTTPException(
@@ -976,18 +878,17 @@ def _build_streaming_response(
     stream: AsyncIterator[ChatCompletionChunk],
     provider: LLMProvider,
     model: str,
-    platform_mode: bool,
+    settlement: RequestSettlement,
     correlation_id: str | None,
     request_id: str | None,
-    config: GatewayConfig,
-    db: AsyncSession | None,
-    log_writer: LogWriter | None,
-    api_key_id: str | None,
-    user_id: str | None,
     rate_limit_info: RateLimitInfo | None,
-    reservation: ReservationHandle | None = None,
 ) -> StreamingResponse:
-    """Wrap an already-opened upstream stream in an SSE response."""
+    """Wrap an already-opened upstream stream in an SSE response.
+
+    Usage settlement (platform usage report vs local log + reconcile/refund) is
+    delegated to ``settlement``; ``correlation_id`` / ``request_id`` are set as
+    headers when present (platform mode).
+    """
 
     def _format_chunk(chunk: ChatCompletionChunk) -> str:
         return f"data: {chunk.model_dump_json()}\n\n"
@@ -1002,104 +903,16 @@ def _build_streaming_response(
         )
 
     async def _on_complete(usage_data: CompletionUsage) -> None:
-        if platform_mode and correlation_id:
-            asyncio.create_task(
-                _report_platform_usage(
-                    config=config,
-                    correlation_id=correlation_id,
-                    outcome="success",
-                    usage=usage_data,
-                )
-            )
-            return
-        if db is None or log_writer is None:
-            return
-        actual_cost = await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/chat/completions",
-            user_id=user_id,
-            usage_override=usage_data,
-        )
-        if reservation is not None:
-            await reconcile_reservation(db, reservation, actual_cost or 0.0)
-
-    async def _on_no_usage() -> None:
-        # Stream completed but the provider sent no usage data. Settle the
-        # reservation per stream_missing_usage_policy instead of billing $0.
-        if db is None or log_writer is None or reservation is None:
-            return
-        policy = config.stream_missing_usage_policy
-        if policy == "allow_free":
-            await log_usage(
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                model=model,
-                provider=provider,
-                endpoint="/v1/chat/completions",
-                user_id=user_id,
-            )
-            await refund_reservation(db, reservation)
-            return
-        # 'estimate' and 'fail' both charge the up-front estimate; 'fail' also
-        # records the request as errored.
-        await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/chat/completions",
-            user_id=user_id,
-            error="stream completed without usage data" if policy == "fail" else None,
-            cost_override=reservation.estimate,
-        )
-        await reconcile_reservation(db, reservation, reservation.estimate)
-
-    async def _on_error(error: str) -> None:
-        if platform_mode and correlation_id:
-            asyncio.create_task(
-                _report_platform_usage(
-                    config=config,
-                    correlation_id=correlation_id,
-                    outcome="error",
-                    usage=None,
-                )
-            )
-            return
-        if db is None or log_writer is None:
-            return
-        await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/chat/completions",
-            user_id=user_id,
-            error=error,
-        )
-        if reservation is not None:
-            await refund_reservation(db, reservation)
-
-    async def _on_incomplete() -> None:
-        # Client disconnected mid-stream — release the reservation.
-        if db is None or reservation is None:
-            return
-        await refund_reservation(db, reservation)
+        await settlement.on_success(usage_data)
 
     rl_headers = rate_limit_headers(rate_limit_info) if rate_limit_info else {}
     # StreamingResponse builds its own response object, so headers we want on
     # the wire have to be passed in here — assigning to the dependency-injected
     # `Response` object doesn't propagate to streaming responses.
     headers = dict(rl_headers)
-    if platform_mode and correlation_id:
+    if correlation_id:
         headers["X-Correlation-ID"] = correlation_id
-    if platform_mode and request_id:
+    if request_id:
         headers["X-Otari-Request-ID"] = request_id
     return StreamingResponse(
         streaming_generator(
@@ -1108,10 +921,10 @@ def _build_streaming_response(
             extract_usage=_extract_usage,
             fmt=OPENAI_STREAM_FORMAT,
             on_complete=_on_complete,
-            on_error=_on_error,
+            on_error=settlement.on_error,
             label=f"{provider}:{model}",
-            on_no_usage=_on_no_usage,
-            on_incomplete=_on_incomplete,
+            on_no_usage=settlement.on_no_usage,
+            on_incomplete=settlement.on_incomplete,
         ),
         media_type="text/event-stream",
         headers=headers,
@@ -1124,6 +937,7 @@ async def _run_streaming_with_fallback(
     request: ChatCompletionRequest,
     response: Response,
     config: GatewayConfig,
+    strategy: RequestModeStrategy,
     background_tasks: BackgroundTasks,
     rate_limit_info: RateLimitInfo | None,
     mcp_server_configs: list[McpServerConfig] | None = None,
@@ -1303,13 +1117,13 @@ async def _run_streaming_with_fallback(
         stream=stream_to_return,
         provider=LLMProvider(chosen.provider),
         model=chosen.model,
-        platform_mode=True,
+        settlement=strategy.make_settlement(
+            provider=LLMProvider(chosen.provider),
+            model=chosen.model,
+            endpoint="/v1/chat/completions",
+            correlation_id=chosen.attempt_id,
+        ),
         correlation_id=chosen.attempt_id,
         request_id=route.request_id,
-        config=config,
-        db=None,  # platform mode doesn't use the local DB
-        log_writer=None,  # unused when db is None
-        api_key_id=None,
-        user_id=None,
         rate_limit_info=rate_limit_info,
     )
