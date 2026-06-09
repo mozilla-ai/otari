@@ -21,7 +21,7 @@
 - [ ] I have added or updated tests that cover my change (`tests/unit`, `tests/integration`).
 - [ ] I ran the Definition of Done checks locally (`make lint`, `make typecheck`, `make test`).
 - [ ] Documentation was updated where necessary.
-- [ ] If the API contract changed, I regenerated the OpenAPI spec (`uv run python scripts/generate_openapi.py --check`).
+- [ ] If the API contract changed, I regenerated the OpenAPI spec (`uv run python scripts/generate_openapi.py`).
 
 ## AI Usage
 <!-- Check one -->
