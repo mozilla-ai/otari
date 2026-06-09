@@ -601,7 +601,7 @@ async def log_usage(
             record_cost(str(provider or ""), model, cost)
         else:
             model_ref = f"{provider}:{model}" if provider else model
-            logger.warning(f"No pricing configured for '{model_ref}'. Usage will be tracked without cost.")
+            logger.warning("No pricing configured for '%s'. Usage will be tracked without cost.", model_ref)
 
     # When the caller bills a fixed amount without provider usage (e.g. the
     # stream-missing-usage estimate policy), record that amount on the log row

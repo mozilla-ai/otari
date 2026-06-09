@@ -329,8 +329,9 @@ async def create_message(
     # Streaming path
     # ------------------------------------------------------------------
     if request.stream:
-        # Tool-loop streaming collapses to a single attempt (same as chat.py
-        # until on_first_response lock-in is wired across all three loops).
+        # Tool-loop streaming collapses to a single attempt for this format
+        # (chat already runs tool loops through the multi-attempt fallback;
+        # wiring the same here is a planned follow-up).
         if ctx.platform_mode and not tool_ctx.use_tool_loop:
             route = ctx.route
             assert route is not None  # guaranteed by the platform-mode preamble
