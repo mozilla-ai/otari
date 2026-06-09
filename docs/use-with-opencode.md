@@ -46,8 +46,10 @@ your deployment expects:
 
 - **Standalone:** `provider:model`, e.g. `otari/openai:gpt-4o`,
   `otari/anthropic:claude-sonnet-4-6`, `otari/mistral:mistral-large-latest`.
-- **Connected to otari.ai:** the platform selector, e.g.
-  `otari/mzai:openai/gpt-4o` or `otari/mzai:moonshotai/Kimi-K2.6`.
+- **Connected to otari.ai:** `otari/mzai:<catalog-id>` for a managed open-weight
+  model (e.g. `otari/mzai:moonshotai/Kimi-K2.6`), or `otari/provider/model` for
+  one of your own provider keys (e.g. `otari/openai/gpt-4o`). An `mzai:` prefix
+  selects the managed catalog, so adding it to a proprietary model misroutes it.
 
 Any model in the catalog works; the gateway routes the request to the right
 provider and records usage and cost for it the same way as any other client.
