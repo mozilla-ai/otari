@@ -323,7 +323,7 @@ uv run python scripts/generate_openapi.py --check
 - [Configuration](docs/configuration.md) — config file reference and environment variables.
 - [Modes](docs/modes.md) — standalone vs connected to otari.ai.
 - [API Reference](docs/api-reference.md) — all available endpoints.
-- [Models](docs/models.md) — supported providers and model format.
+- [Models](docs/supported-models.md) — supported providers and model format.
 
 ## License
 

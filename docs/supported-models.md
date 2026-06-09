@@ -1,4 +1,4 @@
-# Models
+# Supported Models
 
 The gateway routes requests to LLM providers through [any-llm-sdk](https://pypi.org/project/any-llm-sdk/). This page covers the model format, supported providers, and capabilities.
 
@@ -20,6 +20,12 @@ The `provider` prefix tells the gateway which backend to route to. The `model_na
 The gateway depends on `any-llm-sdk[all]`. Provider support can change as the SDK evolves.
 
 Use this list as a quick reference for common providers supported by the current gateway build.
+
+> **Supported doesn't mean callable by default.** To call a model from this list in [standalone mode](modes.md), it needs a pricing entry. By default (`require_pricing: true`), the gateway rejects any billable request for a model it can't price, returning HTTP 402. This is what keeps unpriced models from bypassing your budget cap.
+>
+> Two ways to make a model callable:
+> - Add a pricing entry for it (see [Configuration](configuration.md#pricing))
+> - Or set `require_pricing: false` to allow unpriced models
 
 | Provider | Config key | Example model | Notes |
 |----------|-----------|---------------|-------|
@@ -76,6 +82,8 @@ Not all providers support all endpoints. Here's what each endpoint type requires
 | `/v1/audio/speech` | Text-to-speech | OpenAI |
 | `/v1/batches` | Batch processing | OpenAI, Anthropic |
 
+The example providers are illustrative, not exhaustive. Support often varies by the specific model within a provider, not just the provider itself, so treat this as a starting point and check the model you intend to use.
+ 
 In deployments connected to otari.ai, the final model/provider choices are resolved by otari.ai routing policy, not by local `providers` configuration.
 
 ## Configuring a provider
