@@ -62,9 +62,12 @@ models, Moonshot, and so on — not just Anthropic's Opus/Sonnet/Haiku.
 
 Set the model strings to whatever your deployment expects:
 
-- **Connected to otari.ai (platform mode):** use the platform's model selector,
-  e.g. `mzai:openai/gpt-4o` or `mzai:moonshotai/Kimi-K2.6`. The platform resolves
-  the selector to a configured route.
+- **Connected to otari.ai (platform mode):** use `mzai:<catalog-id>` for a
+  managed open-weight model (e.g. `mzai:moonshotai/Kimi-K2.6`), or
+  `provider/model` for one of your own provider keys (e.g. `openai/gpt-4o`,
+  `anthropic/claude-sonnet-4-6`). An `mzai:` prefix selects the managed catalog,
+  so adding it to a proprietary model routes it there instead of your key and it
+  will not resolve.
 - **Standalone:** use `provider:model`, e.g. `openai:gpt-4o`,
   `mistral:mistral-large-latest`, or `anthropic:claude-sonnet-4-6`.
 
@@ -73,14 +76,15 @@ agent loop (`ANTHROPIC_MODEL`, or the `ANTHROPIC_DEFAULT_*_MODEL` tier the
 `opus`/`sonnet`/`haiku` aliases resolve to) and a small/fast model for background
 work like title generation (`ANTHROPIC_DEFAULT_HAIKU_MODEL`). Set both so neither
 tier falls back to a model your gateway does not serve. For example, to run the
-whole CLI on a single non-Anthropic model:
+CLI entirely on managed open-weight models (a capable main model and a smaller
+background model):
 
 ```bash
 export ANTHROPIC_BASE_URL="https://api.otari.ai"
 export ANTHROPIC_AUTH_TOKEN="tk_your_otari_token"
-export ANTHROPIC_DEFAULT_OPUS_MODEL="mzai:openai/gpt-4o"
-export ANTHROPIC_DEFAULT_SONNET_MODEL="mzai:openai/gpt-4o"
-export ANTHROPIC_DEFAULT_HAIKU_MODEL="mzai:openai/gpt-4o-mini"
+export ANTHROPIC_DEFAULT_OPUS_MODEL="mzai:moonshotai/Kimi-K2.6"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="mzai:moonshotai/Kimi-K2.6"
+export ANTHROPIC_DEFAULT_HAIKU_MODEL="mzai:Qwen/Qwen3-32B"
 claude
 ```
 
