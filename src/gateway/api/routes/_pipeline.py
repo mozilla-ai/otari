@@ -464,39 +464,47 @@ async def prepare_gateway_tools(
     of Anthropic / OpenAI tool entries; their backend URLs are operator
     controlled (no per-request URL override, which would be an SSRF surface).
     The three backends are mutually exclusive for now.
+
+    Any rejection raised here (guardrail block, unresolvable MCP ids,
+    misconfigured or conflicting tool opt-ins) releases the budget
+    reservation taken by :func:`resolve_request_context` before propagating.
     """
-    await apply_input_guardrails(guardrails, guardrail_text, response=response)
+    try:
+        await apply_input_guardrails(guardrails, guardrail_text, response=response)
 
-    if mcp_server_ids and not ctx.platform_mode:
-        raise adapter.error(400, MCP_SERVER_IDS_PLATFORM_ONLY_DETAIL, ErrorKind.INVALID_REQUEST)
-    if ctx.platform_mode and mcp_server_ids:
-        assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
-        resolved_mcp_servers = await _resolve_platform_mcp_servers(
-            config=ctx.config,
-            user_token=ctx.user_token,
-            mcp_server_ids=mcp_server_ids,
-        )
-        mcp_servers = (mcp_servers or []) + resolved_mcp_servers
+        if mcp_server_ids and not ctx.platform_mode:
+            raise adapter.error(400, MCP_SERVER_IDS_PLATFORM_ONLY_DETAIL, ErrorKind.INVALID_REQUEST)
+        if ctx.platform_mode and mcp_server_ids:
+            assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+            resolved_mcp_servers = await _resolve_platform_mcp_servers(
+                config=ctx.config,
+                user_token=ctx.user_token,
+                mcp_server_ids=mcp_server_ids,
+            )
+            mcp_servers = (mcp_servers or []) + resolved_mcp_servers
 
-    sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
-    sandbox_url: str | None = os.environ.get("GATEWAY_SANDBOX_URL") or None
-    use_sandbox = False
-    if sandbox_tool_entry is not None:
-        if sandbox_url is None:
-            raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
-        if mcp_servers:
-            raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-        use_sandbox = True
+        sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
+        sandbox_url: str | None = os.environ.get("GATEWAY_SANDBOX_URL") or None
+        use_sandbox = False
+        if sandbox_tool_entry is not None:
+            if sandbox_url is None:
+                raise adapter.error(400, SANDBOX_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
+            if mcp_servers:
+                raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+            use_sandbox = True
 
-    web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
-    web_search_url: str | None = os.environ.get("GATEWAY_WEB_SEARCH_URL") or None
-    use_web_search = False
-    if web_search_tool_entry is not None:
-        if web_search_url is None:
-            raise adapter.error(400, WEB_SEARCH_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
-        if use_sandbox or mcp_servers:
-            raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
-        use_web_search = True
+        web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
+        web_search_url: str | None = os.environ.get("GATEWAY_WEB_SEARCH_URL") or None
+        use_web_search = False
+        if web_search_tool_entry is not None:
+            if web_search_url is None:
+                raise adapter.error(400, WEB_SEARCH_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
+            if use_sandbox or mcp_servers:
+                raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+            use_web_search = True
+    except HTTPException:
+        await release_reservation(ctx)
+        raise
 
     return ToolContext(
         mcp_server_configs=mcp_servers,
@@ -605,7 +613,15 @@ async def log_usage(
     return usage_log.cost
 
 
-async def _refund_reservation_if_any(ctx: RequestContext) -> None:
+async def release_reservation(ctx: RequestContext) -> None:
+    """Refund the request's budget reservation, if one was taken.
+
+    No-op in platform mode and for requests that reserved nothing. Use this
+    before raising on any path that rejects the request after
+    :func:`resolve_request_context` pre-debited the estimate; otherwise the
+    held amount shrinks the user's budget until the next reset (or forever,
+    for budgets without a reset period).
+    """
     if ctx.db is not None and ctx.reservation is not None:
         await refund_reservation(ctx.db, ctx.reservation)
 
@@ -956,7 +972,7 @@ async def run_single_attempt_stream(
     try:
         stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
     except HTTPException:
-        await _refund_reservation_if_any(ctx)
+        await release_reservation(ctx)
         raise
     except SandboxNotReachableError as exc:
         # The sandbox is part of the gateway's own infra, not the LLM
@@ -964,11 +980,11 @@ async def run_single_attempt_stream(
         # outage" that is actually the sandbox container being down. 502
         # keeps "upstream dependency failed" semantics.
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
-        await _refund_reservation_if_any(ctx)
+        await release_reservation(ctx)
         raise adapter.error(502, SANDBOX_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     except WebSearchNotReachableError as exc:
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
-        await _refund_reservation_if_any(ctx)
+        await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     except Exception as exc:
         await _log_failure_and_refund(ctx, adapter, provider, model, str(exc))
@@ -1234,7 +1250,7 @@ async def run_standalone_non_stream(
                 await reconcile_reservation(ctx.db, ctx.reservation, actual_cost or 0.0)
         return result
     except HTTPException:
-        await _refund_reservation_if_any(ctx)
+        await release_reservation(ctx)
         raise
     except MaxToolIterationsExceeded as e:
         # Gateway-owned cap, not an upstream provider failure. 422 lets
@@ -1247,11 +1263,11 @@ async def run_standalone_non_stream(
         # so operators don't chase a provider outage that's really the
         # sandbox container being down.
         logger.error("Sandbox unreachable for %s:%s: %s", provider, model, e)
-        await _refund_reservation_if_any(ctx)
+        await release_reservation(ctx)
         raise adapter.error(502, SANDBOX_UNREACHABLE_DETAIL, ErrorKind.API) from e
     except WebSearchNotReachableError as e:
         logger.error("Web search backend unreachable for %s:%s: %s", provider, model, e)
-        await _refund_reservation_if_any(ctx)
+        await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from e
     except Exception as e:
         await _log_failure_and_refund(ctx, adapter, provider, model, str(e))

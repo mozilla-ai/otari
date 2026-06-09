@@ -28,6 +28,7 @@ from gateway.api.routes._pipeline import (
     RequestContext,
     ToolContext,
     build_streaming_response,
+    prepare_gateway_tools,
     run_single_attempt_stream,
     stream_first_chunk_timeout_seconds,
 )
@@ -301,6 +302,77 @@ async def test_client_disconnect_refunds(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert settlement.refunded == 1
     assert settlement.reconciled == []
+
+
+# ---------------------------------------------------------------------------
+# Rejections after the budget pre-debit release the reservation
+# ---------------------------------------------------------------------------
+
+
+async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> ToolContext:
+    from fastapi import Response
+
+    kwargs: dict[str, Any] = {
+        "adapter": chat._ADAPTER,
+        "ctx": ctx,
+        "response": Response(),
+        "guardrails": None,
+        "guardrail_text": "",
+        "tools": None,
+        "mcp_servers": None,
+        "mcp_server_ids": None,
+        "max_tool_iterations": None,
+        "tools_header": None,
+    }
+    kwargs.update(overrides)
+    return await prepare_gateway_tools(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_tool_misconfiguration_400_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.delenv("GATEWAY_SANDBOX_URL", raising=False)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_code_execution"}])
+
+    assert exc_info.value.status_code == 400
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_mcp_server_ids_in_standalone_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(
+            ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")]
+        )
+
+    assert exc_info.value.status_code == 400
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_guardrail_block_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def blocking_guardrails(*args: Any, **kwargs: Any) -> None:
+        raise HTTPException(status_code=403, detail="blocked")
+
+    monkeypatch.setattr(pipeline, "apply_input_guardrails", blocking_guardrails)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx)
+
+    assert exc_info.value.status_code == 403
+    assert settlement.refunded == 1
 
 
 # ---------------------------------------------------------------------------

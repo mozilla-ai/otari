@@ -29,6 +29,7 @@ from gateway.api.routes._pipeline import (
     ErrorKind,
     prepare_gateway_tools,
     rate_limit_headers,
+    release_reservation,
     resolve_request_context,
     run_platform_non_stream,
     run_single_attempt_stream,
@@ -290,7 +291,13 @@ async def create_response(
             _ensure_provider_supports_responses(LLMProvider(attempt.provider))
     else:
         provider, model = AnyLLM.split_model_provider(request_body.model)
-        _ensure_provider_supports_responses(provider)
+        try:
+            _ensure_provider_supports_responses(provider)
+        except HTTPException:
+            # The preamble already pre-debited the estimate; release it before
+            # rejecting so the held amount does not shrink the budget.
+            await release_reservation(ctx)
+            raise
 
     tool_ctx = await prepare_gateway_tools(
         adapter=_ADAPTER,
