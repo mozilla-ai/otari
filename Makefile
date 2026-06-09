@@ -1,4 +1,4 @@
-.PHONY: help dev test test-unit test-integration lint typecheck
+.PHONY: help dev test test-unit test-integration lint typecheck openapi-check
 
 help:
 	@printf "Available targets:\n"
@@ -8,6 +8,7 @@ help:
 	@printf "  test-integration Run integration tests\n"
 	@printf "  lint Run Ruff lint checks\n"
 	@printf "  typecheck Run mypy type checks\n"
+	@printf "  openapi-check Verify the OpenAPI spec is up to date\n"
 
 dev:
 	@set -a; \
@@ -29,3 +30,6 @@ lint:
 
 typecheck:
 	uv run mypy
+
+openapi-check:
+	uv run python scripts/generate_openapi.py --check

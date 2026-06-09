@@ -96,7 +96,7 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - Generate OpenAPI JSON:
   - `uv run python scripts/generate_openapi.py`
 - Check OpenAPI is up to date (CI behavior):
-  - `uv run python scripts/generate_openapi.py --check`
+  - `make openapi-check` (or `uv run python scripts/generate_openapi.py --check`)
 - Default output path:
   - `docs/public/openapi.json`
 ## Repository Conventions
@@ -176,7 +176,7 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - If you touched config loading, run config/env tests in `tests/integration`.
 - If you touched CLI behavior, run `tests/unit/test_gateway_cli.py`.
 - If you touched auth headers or key handling, run key-management and auth-related tests.
-- If OpenAPI-affecting code changed, run `uv run python scripts/generate_openapi.py --check`.
+- If OpenAPI-affecting code changed, run `make openapi-check` (or `uv run python scripts/generate_openapi.py --check`).
 
 ## Writing style
 
