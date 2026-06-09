@@ -352,7 +352,7 @@ def test_platform_mode_tool_loop_falls_through_pre_lock_in(
         return _response_object()
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
-    monkeypatch.setattr("gateway.api.routes.responses.MCPClientPool", _FakeMcpPool)
+    monkeypatch.setattr("gateway.api.routes._pipeline.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.services.mcp_loop_responses.aresponses", fake_loop_aresponses)
 
     response = platform_client.post(
@@ -432,7 +432,7 @@ def test_platform_mode_tool_loop_no_fallback_after_lock_in(
         raise RuntimeError("simulated upstream 5xx on round 2")
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
-    monkeypatch.setattr("gateway.api.routes.responses.MCPClientPool", _FakeMcpPool)
+    monkeypatch.setattr("gateway.api.routes._pipeline.MCPClientPool", _FakeMcpPool)
     monkeypatch.setattr("gateway.services.mcp_loop_responses.aresponses", fake_loop_aresponses)
 
     response = platform_client.post(
