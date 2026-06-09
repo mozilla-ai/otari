@@ -10,6 +10,8 @@ For full request/response schemas, see the [OpenAPI spec](public/openapi.json) o
 |---|---|---|
 | Health (`/health*`) | Yes | Yes |
 | Chat completions (`/v1/chat/completions`) | Yes | Yes |
+| Messages (`/v1/messages`, `/v1/messages/count_tokens`) | Yes | Yes |
+| Responses (`/v1/responses`) | Yes | Yes |
 | All other `/v1/*` endpoints in this doc | Yes | No |
 
 ## Authentication
@@ -45,19 +47,22 @@ No authentication required.
 |--------|------|-------------|------|
 | `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions. Supports streaming and tool use (`otari_code_execution`, `otari_web_search`, MCP). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 
-## Standalone-only endpoints
-
 ### Messages
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/messages` | Anthropic Messages API-compatible endpoint. Supports streaming and extended thinking. | API key or master key |
+| `POST` | `/v1/messages` | Anthropic Messages API-compatible endpoint. Supports streaming, tool use, and extended thinking. Routes to any provider in the catalog (non-Anthropic models are translated to/from the Messages format automatically). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+| `POST` | `/v1/messages/count_tokens` | Anthropic-compatible input-token count for a Messages request. Returns `{"input_tokens": N}`. Counts locally (no provider call, no budget debit); the count is an approximation. Used by clients such as Claude Code for context-window management. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+
+See [Use with Claude Code](use-with-claude-code.md) for a full client setup.
 
 ### Responses
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/responses` | OpenAI Responses API-compatible endpoint. Supports streaming. | API key or master key |
+| `POST` | `/v1/responses` | OpenAI Responses API-compatible endpoint. Supports streaming. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+
+## Standalone-only endpoints
 
 ### Embeddings
 

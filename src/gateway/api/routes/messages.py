@@ -109,6 +109,23 @@ class MessagesRequest(BaseModel):
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
 
 
+class CountTokensRequest(BaseModel):
+    """Anthropic ``/v1/messages/count_tokens`` request.
+
+    A subset of :class:`MessagesRequest`: the same input fields, minus
+    ``max_tokens`` and the streaming/sampling controls, since the endpoint only
+    counts input tokens. Clients such as Claude Code call this on every turn to
+    keep their prompt within the model's context window.
+    """
+
+    model: str
+    messages: list[dict[str, Any]] = Field(min_length=1)
+    system: str | list[dict[str, Any]] | None = None
+    tools: list[dict[str, Any]] | None = None
+    tool_choice: dict[str, Any] | None = None
+    thinking: dict[str, Any] | None = None
+
+
 def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPException:
     """Create an HTTPException with Anthropic-style error body."""
     return HTTPException(
@@ -1263,3 +1280,45 @@ async def _open_tool_loop_stream(
             await web_search_backend.__aexit__(None, None, None)
 
     return _web_search_iter()
+
+
+# The gateway has no tokenizer (see budget_service.estimate_cost), so input
+# tokens are approximated as ``chars / 4`` — the same heuristic used for budget
+# pre-debit. count_tokens callers (e.g. Claude Code) use the result only to
+# gauge headroom against the context window, so an approximate count is fine.
+_CHARS_PER_TOKEN = 4
+
+
+def _estimate_input_tokens(request: CountTokensRequest) -> int:
+    """Approximate the prompt's input-token count from its serialized length."""
+    chars = len(str(request.messages))
+    if request.system:
+        chars += len(str(request.system))
+    if request.tools:
+        chars += len(str(request.tools))
+    return max(1, round(chars / _CHARS_PER_TOKEN))
+
+
+@router.post("/messages/count_tokens", response_model=None)
+async def count_message_tokens(
+    raw_request: Request,
+    request: CountTokensRequest,
+    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> dict[str, int]:
+    """Anthropic ``/v1/messages/count_tokens``-compatible endpoint.
+
+    Returns ``{"input_tokens": N}`` without contacting an upstream provider:
+    counting is local, so there is no budget reservation, pricing, or usage
+    logging. Authentication mirrors :func:`create_message` — platform mode
+    requires the caller's bearer token; standalone mode validates the API key —
+    so the endpoint is not an open token-counting oracle.
+    """
+    if config.is_platform_mode:
+        _extract_platform_user_token(raw_request)
+    else:
+        if db is None:
+            raise _anthropic_error(_ERR_API, "Database session unavailable", status.HTTP_500_INTERNAL_SERVER_ERROR)
+        await verify_api_key_or_master_key(raw_request, db, config)
+
+    return {"input_tokens": _estimate_input_tokens(request)}

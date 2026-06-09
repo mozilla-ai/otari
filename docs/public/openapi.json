@@ -418,6 +418,87 @@
         "title": "ChatCompletionRequest",
         "type": "object"
       },
+      "CountTokensRequest": {
+        "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the same input fields, minus\n``max_tokens`` and the streaming/sampling controls, since the endpoint only\ncounts input tokens. Clients such as Claude Code call this on every turn to\nkeep their prompt within the model's context window.",
+        "properties": {
+          "messages": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "minItems": 1,
+            "title": "Messages",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System"
+          },
+          "thinking": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thinking"
+          },
+          "tool_choice": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Choice"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
+          }
+        },
+        "required": [
+          "model",
+          "messages"
+        ],
+        "title": "CountTokensRequest",
+        "type": "object"
+      },
       "CreateBatchRequest": {
         "properties": {
           "completion_window": {
@@ -3333,6 +3414,46 @@
           }
         },
         "summary": "Create Message",
+        "tags": [
+          "messages"
+        ]
+      }
+    },
+    "/v1/messages/count_tokens": {
+      "post": {
+        "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message` \u2014 platform mode\nrequires the caller's bearer token; standalone mode validates the API key \u2014\nso the endpoint is not an open token-counting oracle.",
+        "operationId": "count_message_tokens_v1_messages_count_tokens_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CountTokensRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Count Message Tokens",
         "tags": [
           "messages"
         ]

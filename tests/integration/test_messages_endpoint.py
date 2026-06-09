@@ -226,3 +226,149 @@ def test_messages_endpoint_bearer_auth(
         )
 
     assert response.status_code == 200
+
+
+def _claude_code_request_body() -> dict[str, Any]:
+    """A request shaped the way Claude Code sends it: a structured ``system``
+    block with cache_control, tool definitions, and ``metadata.user_id``.
+    """
+    return {
+        "model": "anthropic:claude-3-5-sonnet",
+        "max_tokens": 1024,
+        "system": [
+            {
+                "type": "text",
+                "text": "You are Claude Code, Anthropic's official CLI.",
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+        "messages": [{"role": "user", "content": "List the files here."}],
+        "tools": [
+            {
+                "name": "Bash",
+                "description": "Run a shell command",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"],
+                },
+            }
+        ],
+        "metadata": {"user_id": "test-user"},
+    }
+
+
+def test_messages_endpoint_claude_code_shape(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    """A realistic Claude Code request (system blocks + tools) completes."""
+    mock_response = _make_message_response()
+
+    with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=mock_response):
+        response = client.post(
+            "/v1/messages",
+            json=_claude_code_request_body(),
+            headers=master_key_header,
+        )
+
+    assert response.status_code == 200
+    assert response.json()["type"] == "message"
+
+
+def test_count_tokens_basic(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """count_tokens returns a positive integer input-token estimate."""
+    response = client.post(
+        "/v1/messages/count_tokens",
+        json={
+            "model": "anthropic:claude-3-5-sonnet",
+            "messages": [{"role": "user", "content": "Hello, world!"}],
+        },
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data["input_tokens"], int)
+    assert data["input_tokens"] > 0
+
+
+def test_count_tokens_requires_auth(client: TestClient) -> None:
+    """count_tokens rejects unauthenticated callers."""
+    response = client.post(
+        "/v1/messages/count_tokens",
+        json={
+            "model": "anthropic:claude-3-5-sonnet",
+            "messages": [{"role": "user", "content": "Hello"}],
+        },
+    )
+    assert response.status_code == 401
+
+
+def test_count_tokens_validation_error(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Missing required fields produce a 422 before any counting."""
+    response = client.post(
+        "/v1/messages/count_tokens",
+        json={"model": "anthropic:claude-3-5-sonnet"},
+        headers=master_key_header,
+    )
+    assert response.status_code == 422
+
+
+def test_count_tokens_scales_with_input(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A longer prompt yields a strictly larger token estimate."""
+    short = client.post(
+        "/v1/messages/count_tokens",
+        json={
+            "model": "anthropic:claude-3-5-sonnet",
+            "messages": [{"role": "user", "content": "Hi"}],
+        },
+        headers=master_key_header,
+    ).json()["input_tokens"]
+
+    long = client.post(
+        "/v1/messages/count_tokens",
+        json={
+            "model": "anthropic:claude-3-5-sonnet",
+            "messages": [{"role": "user", "content": "Hello " * 200}],
+        },
+        headers=master_key_header,
+    ).json()["input_tokens"]
+
+    with_extras = client.post(
+        "/v1/messages/count_tokens",
+        json=_claude_code_request_body(),
+        headers=master_key_header,
+    ).json()["input_tokens"]
+
+    assert long > short
+    assert with_extras > 0
+
+
+def test_count_tokens_bearer_auth(
+    client: TestClient,
+    api_key_obj: dict[str, Any],
+) -> None:
+    """count_tokens authenticates via a standard Bearer token, as Claude Code
+    sends when ANTHROPIC_AUTH_TOKEN is set.
+    """
+    response = client.post(
+        "/v1/messages/count_tokens",
+        json={
+            "model": "anthropic:claude-3-5-sonnet",
+            "messages": [{"role": "user", "content": "Hello"}],
+        },
+        headers={API_KEY_HEADER: f"Bearer {api_key_obj['key']}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["input_tokens"] > 0
