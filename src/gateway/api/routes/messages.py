@@ -1000,7 +1000,9 @@ async def _stream_messages(
     except Exception as exc:
         # A provider error raised before the stream starts must surface as an
         # HTTP error (Anthropic envelope) rather than escaping uncaught into a
-        # 500. Matches the non-streaming handler.
+        # 500. Log the error and refund the reservation, matching the
+        # non-streaming handler and the chat streaming path (without the refund
+        # the pre-debit hold leaks and is never released).
         if db is not None:
             await log_usage(
                 db=db,
@@ -1012,6 +1014,8 @@ async def _stream_messages(
                 user_id=user_id,
                 error=str(exc),
             )
+            if reservation is not None:
+                await refund_reservation(db, reservation)
         logger.error("Provider call failed for %s:%s: %s", provider, model, exc)
         raise _anthropic_error(
             _ERR_API,

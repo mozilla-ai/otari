@@ -994,9 +994,9 @@ async def _stream_responses(
     except Exception as exc:
         # A provider error raised before the stream starts (e.g. auth failure,
         # 5xx, connection error) must surface as a 502 HTTP error rather than
-        # escaping uncaught into a 500. Matches the non-streaming handler and
-        # the pre-existing behavior before streaming was factored into this
-        # helper.
+        # escaping uncaught into a 500. Log the error and refund the reservation,
+        # matching the non-streaming handler and the chat streaming path (without
+        # the refund the pre-debit hold leaks and is never released).
         if db is not None:
             await log_usage(
                 db=db,
@@ -1008,6 +1008,8 @@ async def _stream_responses(
                 user_id=user_id,
                 error=str(exc),
             )
+            if reservation is not None:
+                await refund_reservation(db, reservation)
         logger.error("Provider call failed for %s:%s: %s", provider, model, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
