@@ -75,4 +75,4 @@ jobs:
       run: uv sync --frozen
 
     - name: Verify OpenAPI spec is up to date
-      run: uv run python scripts/generate_openapi.py --check
+      run: make openapi-check

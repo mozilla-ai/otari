@@ -37,4 +37,4 @@ jobs:
       run: uv sync --dev --frozen
 
     - name: Run mypy type check
-      run: uv run mypy
+      run: make typecheck
