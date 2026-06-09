@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth import generate_api_key, hash_key
 from gateway.core.config import GatewayConfig
-from gateway.log_config import logger
+from gateway.log_config import log_secret
 from gateway.models.entities import APIKey, User
 
 
@@ -45,7 +45,7 @@ async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession) -> No
         await db.rollback()
         raise
 
-    logger.warning(
-        "No API keys found. Created bootstrap key for first run. Save this key now: %s",
+    log_secret(
+        "No API keys found. Created bootstrap key for first run. Save this key now:",
         api_key,
     )
