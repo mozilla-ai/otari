@@ -849,8 +849,9 @@ async def _stream_messages(
     except Exception as exc:
         # A provider error raised before the stream starts must surface as an
         # HTTP error (Anthropic envelope) rather than escaping uncaught into a
-        # 500. Matches the non-streaming handler.
-        await settlement.on_provider_error_precommit(str(exc))
+        # 500. on_error logs the error and refunds the reservation, matching the
+        # non-streaming handler and the chat streaming path.
+        await settlement.on_error(str(exc))
         logger.error("Provider call failed for %s:%s: %s", provider, model, exc)
         raise _anthropic_error(
             _ERR_API,

@@ -142,7 +142,6 @@ async def test_platform_settlement_no_usage_and_incomplete_are_noops(monkeypatch
 
     await settlement.on_no_usage()
     await settlement.on_incomplete()
-    await settlement.on_provider_error_precommit("boom")
     await _drain_tasks()
 
     assert calls == []
@@ -224,19 +223,6 @@ async def test_standalone_incomplete_refunds_without_logging(monkeypatch: pytest
 
     assert recorded["log"] == []
     assert recorded["refund"] == [reservation]
-
-
-@pytest.mark.asyncio
-async def test_standalone_precommit_logs_without_refund(monkeypatch: pytest.MonkeyPatch) -> None:
-    recorded = _patch_budget(monkeypatch)
-    reservation = _reservation()
-    settlement = _standalone_settlement(GatewayConfig(), reservation)
-
-    await settlement.on_provider_error_precommit("boom")
-
-    assert recorded["log"][0]["error"] == "boom"
-    assert recorded["refund"] == []
-    assert recorded["reconcile"] == []
 
 
 @pytest.mark.asyncio

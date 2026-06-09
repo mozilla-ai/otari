@@ -81,18 +81,9 @@ class RequestSettlement(ABC):
     @abstractmethod
     async def on_error(self, error: str) -> None:
         """A failed call that should be recorded as an error (and, standalone,
-        release the reservation)."""
-
-    @abstractmethod
-    async def on_provider_error_precommit(self, error: str) -> None:
-        """A provider error raised before any stream bytes committed.
-
-        Standalone records the error without settling the reservation, matching
-        the long-standing messages/responses pre-commit behavior (the
-        non-streaming and chat paths refund here; messages/responses do not).
-        Platform reports nothing — this path predates platform usage reporting
-        and there is no local reservation to release.
-        """
+        release the reservation). Used for both pre-commit provider failures
+        (surfaced as an HTTP error) and mid-stream failures (surfaced in the
+        SSE channel)."""
 
     @abstractmethod
     async def on_no_usage(self) -> None:
@@ -133,9 +124,6 @@ class PlatformSettlement(RequestSettlement):
                 usage=None,
             )
         )
-
-    async def on_provider_error_precommit(self, error: str) -> None:
-        return
 
     async def on_no_usage(self) -> None:
         return
@@ -208,24 +196,6 @@ class StandaloneSettlement(RequestSettlement):
         )
         if self._reservation is not None:
             await refund_reservation(self._db, self._reservation)
-
-    async def on_provider_error_precommit(self, error: str) -> None:
-        from gateway.api.routes.chat import log_usage
-
-        # Log the error but leave the reservation untouched, matching the
-        # existing messages/responses pre-commit streaming behavior.
-        if self._db is None:
-            return
-        await log_usage(
-            db=self._db,
-            log_writer=self._log_writer,
-            api_key_id=self._api_key_id,
-            model=self._model,
-            provider=self._provider,
-            endpoint=self._endpoint,
-            user_id=self._user_id,
-            error=error,
-        )
 
     async def on_no_usage(self) -> None:
         from gateway.api.routes.chat import log_usage

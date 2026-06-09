@@ -844,10 +844,10 @@ async def _stream_responses(
     except Exception as exc:
         # A provider error raised before the stream starts (e.g. auth failure,
         # 5xx, connection error) must surface as a 502 HTTP error rather than
-        # escaping uncaught into a 500. Matches the non-streaming handler and
-        # the pre-existing behavior before streaming was factored into this
-        # helper.
-        await settlement.on_provider_error_precommit(str(exc))
+        # escaping uncaught into a 500. on_error logs the error and refunds the
+        # reservation, matching the non-streaming handler and the chat streaming
+        # path.
+        await settlement.on_error(str(exc))
         logger.error("Provider call failed for %s:%s: %s", provider, model, exc)
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
