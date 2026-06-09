@@ -47,6 +47,8 @@ No authentication required.
 |--------|------|-------------|------|
 | `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions. Supports streaming and tool use (`otari_code_execution`, `otari_web_search`, MCP). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 
+See [Use with opencode](use-with-opencode.md) for a full client setup.
+
 ### Messages
 
 | Method | Path | Description | Auth |
