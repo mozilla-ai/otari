@@ -1,4 +1,5 @@
 import asyncio
+import math
 import os
 import time
 import uuid
@@ -112,10 +113,10 @@ class MessagesRequest(BaseModel):
 class CountTokensRequest(BaseModel):
     """Anthropic ``/v1/messages/count_tokens`` request.
 
-    A subset of :class:`MessagesRequest`: the same input fields, minus
-    ``max_tokens`` and the streaming/sampling controls, since the endpoint only
-    counts input tokens. Clients such as Claude Code call this on every turn to
-    keep their prompt within the model's context window.
+    A subset of :class:`MessagesRequest`: the input fields that affect the token
+    count, minus ``max_tokens`` and the streaming/sampling controls, since the
+    endpoint only counts input tokens. Clients such as Claude Code call this on
+    every turn to keep their prompt within the model's context window.
     """
 
     model: str
@@ -124,6 +125,14 @@ class CountTokensRequest(BaseModel):
     tools: list[dict[str, Any]] | None = None
     tool_choice: dict[str, Any] | None = None
     thinking: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+    cache_control: dict[str, Any] | None = None
+
+
+class CountTokensResponse(BaseModel):
+    """Anthropic ``/v1/messages/count_tokens`` response."""
+
+    input_tokens: int
 
 
 def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPException:
@@ -1286,6 +1295,8 @@ async def _open_tool_loop_stream(
 # tokens are approximated as ``chars / 4`` — the same heuristic used for budget
 # pre-debit. count_tokens callers (e.g. Claude Code) use the result only to
 # gauge headroom against the context window, so an approximate count is fine.
+# Round up: an over-count keeps callers safely inside the context window, while
+# an under-count could let a prompt slip over the limit.
 _CHARS_PER_TOKEN = 4
 
 
@@ -1296,29 +1307,37 @@ def _estimate_input_tokens(request: CountTokensRequest) -> int:
         chars += len(str(request.system))
     if request.tools:
         chars += len(str(request.tools))
-    return max(1, round(chars / _CHARS_PER_TOKEN))
+    return max(1, math.ceil(chars / _CHARS_PER_TOKEN))
 
 
-@router.post("/messages/count_tokens", response_model=None)
+@router.post("/messages/count_tokens")
 async def count_message_tokens(
     raw_request: Request,
     request: CountTokensRequest,
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-) -> dict[str, int]:
+) -> CountTokensResponse:
     """Anthropic ``/v1/messages/count_tokens``-compatible endpoint.
 
     Returns ``{"input_tokens": N}`` without contacting an upstream provider:
     counting is local, so there is no budget reservation, pricing, or usage
     logging. Authentication mirrors :func:`create_message` — platform mode
-    requires the caller's bearer token; standalone mode validates the API key —
-    so the endpoint is not an open token-counting oracle.
+    resolves the caller's token against the platform, standalone mode validates
+    the API key — so the endpoint is not an open token-counting oracle.
     """
     if config.is_platform_mode:
-        _extract_platform_user_token(raw_request)
+        # Resolve against the platform purely to authenticate the caller (same
+        # as create_message); the routing plan is discarded since counting is
+        # local. Without this, any non-empty bearer string would be accepted.
+        user_token = _extract_platform_user_token(raw_request)
+        await _resolve_platform_credentials(
+            config=config,
+            user_token=user_token,
+            model_selector=request.model,
+        )
     else:
         if db is None:
             raise _anthropic_error(_ERR_API, "Database session unavailable", status.HTTP_500_INTERNAL_SERVER_ERROR)
         await verify_api_key_or_master_key(raw_request, db, config)
 
-    return {"input_tokens": _estimate_input_tokens(request)}
+    return CountTokensResponse(input_tokens=_estimate_input_tokens(request))

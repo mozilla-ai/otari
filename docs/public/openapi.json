@@ -419,8 +419,20 @@
         "type": "object"
       },
       "CountTokensRequest": {
-        "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the same input fields, minus\n``max_tokens`` and the streaming/sampling controls, since the endpoint only\ncounts input tokens. Clients such as Claude Code call this on every turn to\nkeep their prompt within the model's context window.",
+        "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the input fields that affect the token\ncount, minus ``max_tokens`` and the streaming/sampling controls, since the\nendpoint only counts input tokens. Clients such as Claude Code call this on\nevery turn to keep their prompt within the model's context window.",
         "properties": {
+          "cache_control": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Control"
+          },
           "messages": {
             "items": {
               "additionalProperties": true,
@@ -429,6 +441,18 @@
             "minItems": 1,
             "title": "Messages",
             "type": "array"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
           },
           "model": {
             "title": "Model",
@@ -497,6 +521,20 @@
           "messages"
         ],
         "title": "CountTokensRequest",
+        "type": "object"
+      },
+      "CountTokensResponse": {
+        "description": "Anthropic ``/v1/messages/count_tokens`` response.",
+        "properties": {
+          "input_tokens": {
+            "title": "Input Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "input_tokens"
+        ],
+        "title": "CountTokensResponse",
         "type": "object"
       },
       "CreateBatchRequest": {
@@ -3421,7 +3459,7 @@
     },
     "/v1/messages/count_tokens": {
       "post": {
-        "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message` \u2014 platform mode\nrequires the caller's bearer token; standalone mode validates the API key \u2014\nso the endpoint is not an open token-counting oracle.",
+        "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message` \u2014 platform mode\nresolves the caller's token against the platform, standalone mode validates\nthe API key \u2014 so the endpoint is not an open token-counting oracle.",
         "operationId": "count_message_tokens_v1_messages_count_tokens_post",
         "requestBody": {
           "content": {
@@ -3437,7 +3475,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/CountTokensResponse"
+                }
               }
             },
             "description": "Successful Response"

@@ -694,3 +694,88 @@ def test_platform_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage
     success_reports = [r for r in usage_reports if r.get("status") == "success"]
     assert success_reports, "expected a success usage report for the platform-mode tool-loop stream"
     assert success_reports[0]["correlation_id"] == "stream-att-1"
+
+
+def test_platform_mode_count_tokens_requires_authorization_header(
+    platform_client: TestClient,
+) -> None:
+    response = platform_client.post(
+        "/v1/messages/count_tokens",
+        json={
+            "model": "anthropic:claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing authentication token"}
+
+
+def test_platform_mode_count_tokens_validates_token(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A present-but-invalid bearer token is rejected: platform mode resolves
+    the token rather than just checking the header exists.
+    """
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        return httpx.Response(401, json={"detail": "Invalid user token"})
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    response = platform_client.post(
+        "/v1/messages/count_tokens",
+        json={
+            "model": "anthropic:claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": "Bearer not_a_real_token"},
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid user token"}
+
+
+def test_platform_mode_count_tokens_succeeds_without_provider_call(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A valid token resolves, and the count is returned without any upstream
+    provider call (counting is local).
+    """
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        assert url.endswith("/gateway/provider-keys/resolve")
+        return httpx.Response(
+            200,
+            json=_resolve_payload([_attempt(0, "att-1", "claude-3-5-sonnet-20241022", "sk-platform-key")]),
+        )
+
+    async def fail_amessages(**kwargs: Any) -> MessageResponse:
+        raise AssertionError("count_tokens must not call the provider")
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.messages.amessages", fail_amessages)
+
+    response = platform_client.post(
+        "/v1/messages/count_tokens",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["input_tokens"] > 0

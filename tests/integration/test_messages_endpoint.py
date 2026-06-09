@@ -359,8 +359,8 @@ def test_count_tokens_bearer_auth(
     client: TestClient,
     api_key_obj: dict[str, Any],
 ) -> None:
-    """count_tokens authenticates via a standard Bearer token, as Claude Code
-    sends when ANTHROPIC_AUTH_TOKEN is set.
+    """count_tokens authenticates via the standard ``Authorization: Bearer``
+    header, which is what Claude Code sends when ANTHROPIC_AUTH_TOKEN is set.
     """
     response = client.post(
         "/v1/messages/count_tokens",
@@ -368,7 +368,7 @@ def test_count_tokens_bearer_auth(
             "model": "anthropic:claude-3-5-sonnet",
             "messages": [{"role": "user", "content": "Hello"}],
         },
-        headers={API_KEY_HEADER: f"Bearer {api_key_obj['key']}"},
+        headers={"Authorization": f"Bearer {api_key_obj['key']}"},
     )
     assert response.status_code == 200
     assert response.json()["input_tokens"] > 0
