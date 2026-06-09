@@ -108,5 +108,5 @@ Your request went to the gateway, not directly to OpenAI. The gateway authentica
 - [Built-in tools](tools.md) — let any model use a sandboxed code REPL or web search the gateway runs itself.
 - [Guardrails](guardrails.md) — request-level checks like prompt-injection detection, enforced before the provider is called.
 - [Configuration](configuration.md) is the full reference for budgets, rate limits, pricing, and provider options.
-- [Models](models.md) lists every supported provider and the model format.
+- [Models](supported-models.md) lists every supported provider and the model format.
 - [API reference](api-reference.md) documents every endpoint.
