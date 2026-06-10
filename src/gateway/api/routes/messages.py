@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import latest_user_text
+from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
     ALL_PROVIDERS_FAILED_DETAIL,
     ALL_PROVIDERS_TIMED_OUT_DETAIL,
@@ -287,6 +288,23 @@ async def create_message(
     follow-up will enable pre-lock-in fallback for tool-loop requests too.
     """
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
+
+    async def _normalize(user_id: str, provider: LLMProvider | None, model: str) -> int:
+        # Resolve uploaded file/image blocks into the Anthropic wire payload
+        # before the cost estimate. Standalone only; no-op when the files
+        # feature is off or the request has no attachments.
+        request.messages, _ = await normalize_request_messages(
+            request.messages,
+            fmt="anthropic",
+            config=config,
+            provider=provider,
+            model=model,
+            db=db,
+            raw_request=raw_request,
+            user_id=user_id,
+        )
+        return len(str(request.messages)) + len(str(request.system or ""))
+
     ctx = await resolve_request_context(
         adapter=_ADAPTER,
         raw_request=raw_request,
@@ -300,6 +318,7 @@ async def create_message(
         estimate_max_output_tokens=request.max_tokens,
         master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
         user_forbidden_detail=_USER_FORBIDDEN,
+        normalize_messages=_normalize,
     )
 
     tool_ctx = await prepare_gateway_tools(

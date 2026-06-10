@@ -6,6 +6,7 @@ from gateway.api.routes import (
     budgets,
     chat,
     embeddings,
+    files,
     health,
     images,
     keys,
@@ -37,6 +38,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(embeddings.router)
     app.include_router(images.router)
     app.include_router(audio.router)
+    app.include_router(files.router)
     app.include_router(rerank.router)
     app.include_router(batches.router)
     app.include_router(moderations.router)

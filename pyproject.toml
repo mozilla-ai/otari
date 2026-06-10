@@ -14,7 +14,10 @@ dependencies = [
     "asyncpg>=0.29.0",
     "click>=8.1.0",
     "fastapi>=0.115.0",
+    "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",
     "mcp>=1.0.0",
+    "pillow>=10.0.0",
+    "pypdfium2>=4.30.0",
     "prometheus-client>=0.20.0",
     "psycopg2-binary>=2.9.9",
     "pydantic-settings>=2.0.0",
@@ -24,6 +27,14 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "trafilatura>=2.0.0",
     "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+# Optional OCR backend for image/scanned-PDF text extraction. Heavy (onnxruntime),
+# so it's opt-in; the gateway degrades to vision-describe / drop when absent.
+ocr = [
+    "rapidocr-onnxruntime>=1.3.0",
+    "numpy>=1.26.0",
 ]
 
 [dependency-groups]
@@ -79,5 +90,12 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["trafilatura.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Optional/untyped extraction deps imported at the root (e.g. `import pypdfium2`,
+# `from markitdown import ...`). Bare root names are required — a `foo.*` pattern
+# alone does not match the top-level `foo` module these are imported as.
+module = ["markitdown", "pypdfium2", "rapidocr_onnxruntime", "numpy", "PIL"]
 ignore_missing_imports = true
 

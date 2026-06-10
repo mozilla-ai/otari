@@ -13,6 +13,7 @@ from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayC
 from gateway.core.database import get_db
 from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
+from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
 
 _config: GatewayConfig | None = None
@@ -246,12 +247,19 @@ def get_log_writer(request: Request) -> LogWriter:
     return writer
 
 
+def get_file_store(request: Request) -> FileStore:
+    """Return the configured blob store for uploaded files (standalone mode)."""
+    store: FileStore = request.app.state.file_store
+    return store
+
+
 __all__ = [
     "get_config",
     "get_db",
     "reset_config",
     "set_config",
     "get_db_if_needed",
+    "get_file_store",
     "get_log_writer",
     "verify_api_key",
     "verify_api_key_or_master_key",

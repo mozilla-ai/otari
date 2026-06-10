@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
 from gateway.api.routes._helpers import latest_user_text, text_from_content
+from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
     ALL_PROVIDERS_FAILED_DETAIL,
     ALL_PROVIDERS_TIMED_OUT_DETAIL,
@@ -262,6 +263,22 @@ async def create_response(
     raw_max_output = getattr(request_body, "max_output_tokens", None)
     max_output_tokens = raw_max_output if isinstance(raw_max_output, int) and raw_max_output >= 0 else None
 
+    async def _normalize(user_id: str, provider: LLMProvider | None, model: str) -> int:
+        # Resolve uploaded file/image blocks into the Responses input payload
+        # before the cost estimate. Standalone only; no-op when the files
+        # feature is off or the request has no attachments.
+        request_body.input, _ = await normalize_request_messages(
+            request_body.input,
+            fmt="responses",
+            config=config,
+            provider=provider,
+            model=model,
+            db=db,
+            raw_request=raw_request,
+            user_id=user_id,
+        )
+        return len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
+
     ctx = await resolve_request_context(
         adapter=_ADAPTER,
         raw_request=raw_request,
@@ -276,6 +293,7 @@ async def create_response(
         estimate_max_output_tokens=max_output_tokens,
         master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
         user_forbidden_detail=_USER_FORBIDDEN,
+        normalize_messages=_normalize,
     )
 
     # Provider-support guard: an unsupported provider would just fail

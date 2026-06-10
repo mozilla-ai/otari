@@ -16,6 +16,34 @@ master_key: YOUR_MASTER_KEY_HERE
 # Prometheus metrics endpoint at /metrics. Set to true to enable.
 # enable_metrics: true
 
+# --- File uploads & document understanding ---------------------------------
+# The /v1/files endpoints accept uploads; the gateway then resolves file/image
+# content blocks in chat requests. For models that natively understand
+# documents/images the blocks pass through unchanged; for text-only local
+# models the gateway extracts the file to text (and captions images) so the
+# model can still "read" the attachment.
+# files_enabled: true
+# files_backend: "local"            # blob backend for raw bytes ('local' only today)
+# files_local_dir: "./otari-files"  # where the local backend stores bytes
+# files_max_bytes: 536870912        # 512 MB upload cap
+# files_retention_hours: 168        # auto-expire files after N hours (omit = keep)
+# file_understanding_enabled: true  # master switch for content normalization
+
+# How images are handled for text-only models: 'describe' (caption via a vision
+# model, falling back to a logged drop), 'ocr' (extract text only), or 'off'.
+# vision_strategy: "describe"
+# vision_describe_model: "ollama:qwen2-vl"   # may be local (free) or frontier
+
+# Per-model capability overrides. any-llm's provider-level flags over-report for
+# text-only models served behind OpenAI-compatible servers (vLLM, llama.cpp,
+# Ollama), so declare the truth here to enable native passthrough where it works.
+# Keys accept either separator: "provider:model" (matching pricing) or
+# "provider/model"; a bare "model" key also matches.
+# model_capabilities:
+#   "ollama:qwen2-vl":
+#     supports_image: true
+#     supports_pdf: false
+
 # Pre-configured provider credentials
 providers:
   vertexai:
