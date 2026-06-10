@@ -246,3 +246,133 @@ def test_control_plane_tags_are_typed_management_only() -> None:
     # untyped in the spec (so generation would regress them).
     for excluded in ("chat", "responses", "embeddings", "batches"):
         assert excluded not in generate.CONTROL_PLANE_TAGS
+
+
+def _fake_rust_crate(dest: Path) -> None:
+    """Build a minimal stand-in for the rust generator's crate output."""
+    src = dest / "src"
+    (src / "apis").mkdir(parents=True)
+    (src / "models").mkdir(parents=True)
+    (src / "lib.rs").write_text(
+        "#![allow(unused_imports)]\n"
+        "#![allow(clippy::too_many_arguments)]\n"
+        "\n"
+        "extern crate serde;\n"
+        "extern crate reqwest;\n"
+        "\n"
+        "pub mod apis;\n"
+        "pub mod models;\n"
+    )
+    (src / "apis" / "mod.rs").write_text("pub mod configuration;\n")
+    (src / "apis" / "configuration.rs").write_text("pub struct Configuration {}\n")
+    (src / "models" / "mod.rs").write_text("pub mod thing;\n")
+    (src / "models" / "thing.rs").write_text("pub struct Thing {}\n")
+    (dest / "Cargo.toml").write_text('[package]\nname = "otari-client"\n')
+    (dest / "README.md").write_text("# generated\n")
+    (dest / ".travis.yml").write_text("language: rust\n")
+    (dest / "rustfmt.toml").write_text("disable_all_formatting = true\n")
+    docs = dest / "docs"
+    docs.mkdir()
+    (docs / "Thing.md").write_text("# Thing\n")
+    meta = dest / ".openapi-generator"
+    meta.mkdir()
+    (meta / "VERSION").write_text("7.0.0\n")
+
+
+def test_rust_inline_module_reduces_crate_to_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Format is exercised separately; stub it so this test is deterministic and
+    # does not depend on rustfmt being installed.
+    monkeypatch.setattr(generate, "_rustfmt_tree", lambda _dest: None)
+    dest = tmp_path / "rust"
+    dest.mkdir()
+    _fake_rust_crate(dest)
+
+    generate._rust_inline_module(dest)
+
+    # lib.rs -> mod.rs: SDK lint header replaces the crate-root attributes /
+    # extern crate lines, module declarations preserved.
+    mod = dest / "mod.rs"
+    assert mod.exists()
+    text = mod.read_text()
+    assert "pub mod apis;" in text
+    assert "pub mod models;" in text
+    assert "#![allow(clippy::pedantic)]" in text
+    assert "extern crate" not in text
+    assert "clippy::too_many_arguments" not in text
+
+    # src/ hoisted up to the module root; nested module files preserved.
+    assert (dest / "apis" / "configuration.rs").exists()
+    assert (dest / "models" / "thing.rs").exists()
+    assert not (dest / "src").exists()
+
+    # crate scaffolding dropped.
+    for gone in ("Cargo.toml", "README.md", ".travis.yml", "rustfmt.toml", "lib.rs"):
+        assert not (dest / gone).exists()
+    assert not (dest / "docs").exists()
+    assert not (dest / ".openapi-generator").exists()
+
+
+def test_rust_inline_module_without_lib_rs_falls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A partial payload with no lib.rs must still yield a usable mod.rs.
+    monkeypatch.setattr(generate, "_rustfmt_tree", lambda _dest: None)
+    dest = tmp_path / "rust"
+    (dest / "src" / "apis").mkdir(parents=True)
+    (dest / "src" / "models").mkdir(parents=True)
+
+    generate._rust_inline_module(dest)
+
+    text = (dest / "mod.rs").read_text()
+    assert "pub mod apis;" in text
+    assert "pub mod models;" in text
+
+
+def test_rust_inline_module_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Re-running into the same out-dir (a fresh generator payload dropped beside
+    # the previous inlined output) must overwrite, not nest (no apis/apis/).
+    monkeypatch.setattr(generate, "_rustfmt_tree", lambda _dest: None)
+    dest = tmp_path / "rust"
+    dest.mkdir()
+    _fake_rust_crate(dest)
+    generate._rust_inline_module(dest)
+
+    # Second generator run drops a fresh crate payload beside the inlined output.
+    _fake_rust_crate(dest)
+    generate._rust_inline_module(dest)
+
+    assert (dest / "apis" / "configuration.rs").exists()
+    assert not (dest / "apis" / "apis").exists()
+    assert not (dest / "models" / "models").exists()
+    assert not (dest / "src").exists()
+
+
+def test_rust_inline_module_skips_rustfmt_gracefully(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # When rustfmt is absent, the transform still runs and only formatting is
+    # skipped (with a warning), mirroring the go/gofmt path.
+    monkeypatch.setattr(generate.shutil, "which", lambda _name: None)
+    dest = tmp_path / "rust"
+    dest.mkdir()
+    _fake_rust_crate(dest)
+
+    with pytest.warns(UserWarning, match="rustfmt"):
+        generate._rust_inline_module(dest)
+
+    assert (dest / "mod.rs").exists()
+    assert (dest / "apis" / "configuration.rs").exists()
+    assert not (dest / "src").exists()
+
+
+def test_full_rust_target_is_inlined_module() -> None:
+    # The full rust target must drop into src/_client as an inlined module, so a
+    # regeneration does not recreate the separate `client/` crate that made the
+    # SDK unpublishable.
+    rust = generate.FULL_TARGETS["rust"]
+    assert rust.target_path == "src/_client"
+    assert rust.inline_module is True

@@ -58,6 +58,11 @@ class LanguageTarget:
     additional_properties: str
     sdk_repo: str
     target_path: str
+    # When true, the generated output is reduced from a standalone crate to a
+    # single module tree (lib.rs -> mod.rs, crate scaffolding dropped) so the SDK
+    # publishes as one crate with no path dependency. Rust full mode only; see
+    # _rust_inline_module.
+    inline_module: bool = False
 
 
 # target_path is where the generated client is dropped inside the SDK repo by
@@ -120,9 +125,32 @@ FULL_TARGETS: dict[str, LanguageTarget] = {
         generator="rust",
         additional_properties="packageName=otari-client,library=reqwest",
         sdk_repo="mozilla-ai/otari-sdk-rust",
-        target_path="client",
+        # Inlined as a private module of the SDK crate (not a separate crate), so
+        # the crate publishes to crates.io as a single unit with no path
+        # dependency. The SDK's src/lib.rs declares `mod _client` and re-exports
+        # `apis` / `models` at the crate root for the generated code's
+        # `crate::models` / `crate::apis` paths.
+        target_path="src/_client",
+        inline_module=True,
     ),
 }
+
+
+# Header prepended to the inlined Rust core's mod.rs (replacing the generator's
+# own crate-root attributes). Exempts the generated code from the SDK crate's
+# strict lints, the way it had its own relaxed lints as a separate crate.
+_RUST_MODULE_HEADER = """\
+//! OpenAPI-generated typed core. This module is produced by the otari codegen
+//! pipeline (scripts/sdk_codegen) and is not hand-edited; the lint allowances
+//! below exempt it from the SDK crate's strict lints, which it escaped when it
+//! lived in its own crate. Do not add hand-written code here.
+#![allow(unused_imports)]
+#![allow(dead_code)]
+#![allow(clippy::all)]
+#![allow(clippy::pedantic)]
+#![allow(clippy::nursery)]
+
+"""
 
 
 # Helper that this generator version's typescript-fetch models import from
@@ -377,6 +405,85 @@ def normalize(language: str, dest: Path, python_package: str) -> None:
             shutil.move(str(staged), str(dest))
 
 
+def _rustfmt_tree(dest: Path) -> None:
+    """Format the inlined Rust module in place with rustfmt.
+
+    The inlined core becomes part of the SDK crate, so it is reached by the SDK
+    repo's ``cargo fmt --all -- --check``; the old separate crate was exempted
+    via ``rustfmt.toml``. rustfmt recurses into child ``mod`` declarations by
+    default, so formatting the module root (``mod.rs``) formats the whole tree.
+    Missing rustfmt warns and skips rather than failing, mirroring the go path.
+    """
+    rustfmt = shutil.which("rustfmt")
+    if rustfmt is None:
+        warnings.warn(
+            "rustfmt not found on PATH; skipping format of the generated Rust "
+            "core (the SDK repo's `cargo fmt --all -- --check` may then fail).",
+            stacklevel=2,
+        )
+        return
+    root = dest / "mod.rs"
+    if root.exists():
+        subprocess.run([rustfmt, "--edition", "2021", str(root)], check=True)
+
+
+def _rust_inline_module(dest: Path) -> None:
+    """Reduce the generated Rust crate at ``dest`` to a single module tree.
+
+    The crate split (`otari` shell + generated `otari-client` core wired as a
+    path dependency) made the SDK unpublishable: ``cargo publish`` rejects a path
+    dependency with no version. Inlining the core as a private module of the SDK
+    crate fixes that (see mozilla-ai/otari-sdk-rust#37). This rewrites the
+    generator's crate output so it drops cleanly into the SDK's ``src/_client``:
+
+    - ``src/lib.rs`` -> ``mod.rs`` with the crate-root attributes replaced by the
+      SDK lint-exemption header (the module declarations are preserved);
+    - the rest of ``src/`` (``apis/``, ``models/``) is hoisted to ``dest``;
+    - crate scaffolding (``Cargo.toml``, docs, generator metadata, etc.) is
+      dropped, since the core's dependencies live in the SDK crate's Cargo.toml;
+    - every ``.rs`` file is formatted (the old separate crate was rustfmt-exempt).
+    """
+    src = dest / "src"
+    lib = src / "lib.rs"
+    if lib.exists():
+        lines = lib.read_text().splitlines()
+        start = next(
+            (i for i, line in enumerate(lines) if line.startswith(("pub mod ", "mod "))),
+            len(lines),
+        )
+        body = "\n".join(lines[start:]).strip()
+        lib.unlink()
+    else:
+        body = "pub mod apis;\npub mod models;"
+
+    for child in sorted(src.iterdir()):
+        # Clear any same-named entry first so re-running into a non-empty
+        # out-dir overwrites rather than nesting (e.g. apis/ into apis/apis/).
+        target = dest / child.name
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+        shutil.move(str(child), str(target))
+    src.rmdir()
+    (dest / "mod.rs").write_text(_RUST_MODULE_HEADER + body + "\n")
+
+    for name in (
+        "Cargo.toml",
+        "README.md",
+        ".travis.yml",
+        "git_push.sh",
+        ".gitignore",
+        "rustfmt.toml",
+        ".openapi-generator-ignore",
+    ):
+        (dest / name).unlink(missing_ok=True)
+    for directory in ("docs", ".openapi-generator"):
+        shutil.rmtree(dest / directory, ignore_errors=True)
+
+    _rustfmt_tree(dest)
+
+
 def generate_language(language: str, spec_path: Path, out_dir: Path, target: LanguageTarget) -> Path:
     """Run OpenAPI Generator for ``language`` and return the output directory."""
     dest = out_dir / language
@@ -393,8 +500,11 @@ def generate_language(language: str, spec_path: Path, out_dir: Path, target: Lan
         target.additional_properties,
     ]
     subprocess.run(cmd, check=True)
-    postprocess(language, dest)
-    normalize(language, dest, target.target_path.rsplit("/", 1)[-1])
+    if target.inline_module:
+        _rust_inline_module(dest)
+    else:
+        postprocess(language, dest)
+        normalize(language, dest, target.target_path.rsplit("/", 1)[-1])
     return dest
 
 
