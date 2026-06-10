@@ -1,14 +1,11 @@
 import asyncio
 import math
-import os
-import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
 import httpx
 from any_llm import AnyLLM, LLMProvider, amessages
-from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
     MessageDeltaEvent,
@@ -22,57 +19,48 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._helpers import apply_input_guardrails, latest_user_text, resolve_user_id
+from gateway.api.routes._helpers import latest_user_text
+from gateway.api.routes._pipeline import (
+    ALL_PROVIDERS_FAILED_DETAIL,
+    ALL_PROVIDERS_TIMED_OUT_DETAIL,
+    DB_UNAVAILABLE_DETAIL,
+    NO_RESOLVABLE_PROVIDER_DETAIL,
+    PROVIDER_ERROR_DETAIL,
+    PROVIDER_TIMEOUT_DETAIL,
+    SANDBOX_UNREACHABLE_DETAIL,
+    WEB_SEARCH_UNREACHABLE_DETAIL,
+    ErrorKind,
+    default_attempt_kwargs,
+    prepare_gateway_tools,
+    rate_limit_headers,
+    resolve_request_context,
+    run_platform_non_stream,
+    run_single_attempt_stream,
+    run_standalone_non_stream,
+    run_streaming_with_fallback,
+)
 from gateway.api.routes._platform import (
     ResolvedAttempt,
-    ResolvedRoute,
-    _classify_upstream_error,
     _extract_platform_user_token,
-    _report_platform_usage,
     _resolve_platform_credentials,
-    _resolve_platform_mcp_servers,
-    run_platform_attempts,
 )
-from gateway.api.routes._tools import (
-    _build_web_search_backend,
-    _extract_code_execution_tool,
-    _extract_web_search_tool,
-    _resolve_sandbox_purpose_hint,
-    _strip_gateway_fields,
-)
-from gateway.api.routes.chat import get_provider_kwargs, log_usage, rate_limit_headers
+from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.models.entities import APIKey
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
-from gateway.rate_limit import RateLimitInfo, check_rate_limit
-from gateway.services.budget_service import (
-    ReservationHandle,
-    estimate_cost,
-    reconcile_reservation,
-    refund_reservation,
-    reserve_budget,
-)
 from gateway.services.log_writer import LogWriter
-from gateway.services.mcp_client import MCPClientPool
+from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
-    DEFAULT_MAX_TOOL_ITERATIONS,
     MAX_TOOL_ITERATIONS_CAP,
-    MaxToolIterationsExceeded,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
-from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
-from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
+from gateway.services.provider_kwargs import get_provider_kwargs
+from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
-from gateway.streaming import (
-    ANTHROPIC_STREAM_FORMAT,
-    StreamingAttemptFailure,
-    iterate_streaming_attempts,
-    streaming_generator,
-)
+from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 
 router = APIRouter(prefix="/v1", tags=["messages"])
 
@@ -147,10 +135,135 @@ _ERR_INVALID_REQUEST = "invalid_request_error"
 _ERR_API = "api_error"
 _ERR_PERMISSION = "permission_error"
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'metadata.user_id' is required in request body"
-_API_KEY_VALIDATION_FAILED = "API key validation failed"
-_API_KEY_NO_USER = "API key has no associated user"
 _USER_FORBIDDEN = "'metadata.user_id' does not match the authenticated API key's user"
 _PROVIDER_ERROR = "The request could not be completed by the provider"
+
+_ERROR_KIND_TO_ANTHROPIC_TYPE = {
+    ErrorKind.INVALID_REQUEST: _ERR_INVALID_REQUEST,
+    ErrorKind.API: _ERR_API,
+    ErrorKind.PERMISSION: _ERR_PERMISSION,
+}
+
+
+def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
+    if isinstance(event, MessageDeltaEvent):
+        input_tokens = event.usage.input_tokens or 0
+        output_tokens = event.usage.output_tokens or 0
+        return CompletionUsage(
+            prompt_tokens=input_tokens,
+            completion_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+        )
+    if isinstance(event, MessageStartEvent):
+        input_tokens = event.message.usage.input_tokens or 0
+        if input_tokens:
+            return CompletionUsage(
+                prompt_tokens=input_tokens,
+                completion_tokens=0,
+                total_tokens=input_tokens,
+            )
+    return None
+
+
+class _MessagesAdapter:
+    """Anthropic Messages edges of the shared pipeline.
+
+    Provider-call and tool-loop functions are resolved as module globals at
+    call time so tests can monkeypatch ``gateway.api.routes.messages.amessages``
+    and friends.
+    """
+
+    name = "messages"
+    endpoint = "/v1/messages"
+    stream_format: StreamFormat = ANTHROPIC_STREAM_FORMAT
+    # A successful non-streaming call without provider usage data skips the
+    # usage-log row (only the reservation is settled), matching the wire
+    # behavior this endpoint has always had.
+    log_success_without_usage = False
+
+    def error(self, status_code: int, message: str, kind: ErrorKind = ErrorKind.API) -> HTTPException:
+        return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code)
+
+    def provider_error(self, exc: BaseException) -> HTTPException:
+        return _anthropic_error(_ERR_API, _PROVIDER_ERROR, status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def format_chunk(self, chunk: MessageStreamEvent) -> str:
+        return f"event: {chunk.type}\ndata: {chunk.model_dump_json(exclude_none=True)}\n\n"
+
+    def extract_stream_usage(self, chunk: MessageStreamEvent) -> CompletionUsage | None:
+        return _messages_stream_usage(chunk)
+
+    def extract_usage(self, result: MessageResponse) -> CompletionUsage | None:
+        if not result.usage:
+            return None
+        return CompletionUsage(
+            prompt_tokens=result.usage.input_tokens,
+            completion_tokens=result.usage.output_tokens,
+            total_tokens=result.usage.input_tokens + result.usage.output_tokens,
+        )
+
+    async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
+        return await amessages(**kwargs)  # type: ignore[return-value]
+
+    async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
+        return await amessages(**kwargs)  # type: ignore[return-value]
+
+    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        kwargs["stream"] = True
+        return kwargs
+
+    async def run_tool_loop(
+        self,
+        kwargs: dict[str, Any],
+        pool: ToolBackend,
+        max_iterations: int,
+        on_first_response: Callable[[], None] | None = None,
+    ) -> MessageResponse:
+        # Standalone dispatch has no lock-in callback; only pass the kwarg on
+        # the platform-attempt path so test fakes can mirror each call shape.
+        extra: dict[str, Any] = {}
+        if on_first_response is not None:
+            extra["on_first_response"] = on_first_response
+        return await anthropic_tool_loop(
+            completion_kwargs=kwargs,
+            pool=pool,
+            max_iterations=max_iterations,
+            **extra,
+        )
+
+    def open_tool_loop_stream(
+        self,
+        kwargs: dict[str, Any],
+        pool: ToolBackend,
+        max_iterations: int,
+    ) -> AsyncIterator[MessageStreamEvent]:
+        return anthropic_tool_loop_stream(
+            completion_kwargs=kwargs,
+            pool=pool,
+            max_iterations=max_iterations,
+        )
+
+    def inject_hints(
+        self,
+        kwargs: dict[str, Any],
+        hints: list[tuple[str, str]],
+        *,
+        header: str | None,
+    ) -> dict[str, Any]:
+        return inject_purpose_hints_anthropic({**kwargs}, hints, header=header)
+
+    def attempt_kwargs(
+        self,
+        attempt: ResolvedAttempt,
+        base_request_fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        return default_attempt_kwargs(attempt, base_request_fields)
+
+    def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        return kwargs
+
+
+_ADAPTER = _MessagesAdapter()
 
 
 @router.post("/messages", response_model=None)
@@ -173,183 +286,41 @@ async def create_message(
     ``on_first_response`` lock-in plumbing lands across the codebase, a
     follow-up will enable pre-lock-in fallback for tool-loop requests too.
     """
-    api_key: APIKey | None = None
-    api_key_id: str | None = None
-    user_id: str | None = None
-    rate_limit_info: RateLimitInfo | None = None
-    platform_mode = config.is_platform_mode
-    route: ResolvedRoute | None = None
-    user_token: str | None = None
-    # Budget pre-debit for the standalone (local-DB) path only; platform mode
-    # reports usage upstream instead. Settled (reconciled/refunded) at every
-    # completion and error hook below.
-    reservation: ReservationHandle | None = None
-
-    if platform_mode:
-        user_token = _extract_platform_user_token(raw_request)
-        start_time = time.perf_counter()
-        route = await _resolve_platform_credentials(
-            config=config,
-            user_token=user_token,
-            model_selector=request.model,
-        )
-        resolve_latency_ms = (time.perf_counter() - start_time) * 1000
-        response.headers["X-Otari-Request-ID"] = route.request_id
-        logger.info(
-            "Platform resolve succeeded request_id=%s attempts=%d fallback_enabled=%s resolve_latency_ms=%.2f",
-            route.request_id,
-            len(route.attempts),
-            route.fallback_enabled,
-            resolve_latency_ms,
-        )
-    else:
-        if db is None:
-            raise _anthropic_error(_ERR_API, "Database session unavailable", status.HTTP_500_INTERNAL_SERVER_ERROR)
-        api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
-        api_key_id = api_key.id if api_key else None
-        user_from_metadata = request.metadata.get("user_id") if request.metadata else None
-        user_id = resolve_user_id(
-            user_id_from_request=str(user_from_metadata) if user_from_metadata else None,
-            api_key=api_key,
-            is_master_key=is_master_key,
-            master_key_error=_anthropic_error(
-                _ERR_INVALID_REQUEST,
-                _MASTER_KEY_USER_REQUIRED,
-                status.HTTP_400_BAD_REQUEST,
-            ),
-            no_api_key_error=_anthropic_error(
-                _ERR_API,
-                _API_KEY_VALIDATION_FAILED,
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-            ),
-            no_user_error=_anthropic_error(
-                _ERR_API,
-                _API_KEY_NO_USER,
-                status.HTTP_500_INTERNAL_SERVER_ERROR,
-            ),
-            forbidden_user_error=_anthropic_error(
-                _ERR_PERMISSION,
-                _USER_FORBIDDEN,
-                status.HTTP_403_FORBIDDEN,
-            ),
-            reject_mismatch=config.reject_user_mismatch,
-        )
-        rate_limit_info = check_rate_limit(raw_request, user_id)
-        # Tolerate an unparseable selector: the budget gate (404/403) and the
-        # downstream call surface those; an unparseable model simply has no pricing.
-        try:
-            gate_provider, gate_model = AnyLLM.split_model_provider(request.model)
-        except (ValueError, AnyLLMError):
-            gate_provider, gate_model = None, request.model
-        pricing = await find_model_pricing(db, gate_provider, gate_model)
-        estimate = estimate_cost(
-            pricing,
-            prompt_chars=len(str(request.messages)) + len(str(request.system or "")),
-            max_output_tokens=request.max_tokens,
-            default_output_tokens=config.budget_estimate_default_output_tokens,
-        )
-        # Reserve first so user/blocked/budget rejections (404/403) precede the
-        # missing-pricing rejection (402); refund if we then reject for no pricing.
-        reservation = await reserve_budget(
-            db, user_id, estimate, model=request.model, strategy=config.budget_strategy
-        )
-        if pricing_required_but_missing(pricing, require_pricing=config.require_pricing):
-            await refund_reservation(db, reservation)
-            raise _anthropic_error(
-                _ERR_INVALID_REQUEST,
-                f"No pricing configured for model '{request.model}'",
-                status.HTTP_402_PAYMENT_REQUIRED,
-            )
-
-    # Caller-requested input guardrails run before any provider/tool dispatch
-    # (see chat.py for the rationale). Stripped before forwarding upstream.
-    await apply_input_guardrails(
-        request.guardrails,
-        latest_user_text(request.messages),
+    user_from_metadata = request.metadata.get("user_id") if request.metadata else None
+    ctx = await resolve_request_context(
+        adapter=_ADAPTER,
+        raw_request=raw_request,
         response=response,
+        db=db,
+        config=config,
+        log_writer=log_writer,
+        model=request.model,
+        user_id_from_request=str(user_from_metadata) if user_from_metadata else None,
+        estimate_prompt_chars=len(str(request.messages)) + len(str(request.system or "")),
+        estimate_max_output_tokens=request.max_tokens,
+        master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
+        user_forbidden_detail=_USER_FORBIDDEN,
     )
 
-    # mcp_server_ids is platform-only — standalone has no platform to
-    # resolve them against, so we reject with a 400 rather than silently
-    # ignoring the field.
-    if request.mcp_server_ids and not platform_mode:
-        raise _anthropic_error(
-            _ERR_INVALID_REQUEST,
-            "mcp_server_ids is only available in platform mode",
-            status.HTTP_400_BAD_REQUEST,
-        )
-    if platform_mode and request.mcp_server_ids:
-        assert user_token is not None  # guaranteed by the platform-mode branch above
-        resolved_mcp_servers = await _resolve_platform_mcp_servers(
-            config=config,
-            user_token=user_token,
-            mcp_server_ids=request.mcp_server_ids,
-        )
-        request.mcp_servers = (request.mcp_servers or []) + resolved_mcp_servers
-
-    # Tool extraction mirrors chat.py: sandbox / web_search / mcp_servers are
-    # mutually exclusive for now (multi-backend dispatch is a follow-up).
-    sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(request.tools)
-    sandbox_url: str | None = os.environ.get("GATEWAY_SANDBOX_URL") or None
-    use_sandbox = False
-    if sandbox_tool_entry is not None:
-        if sandbox_url is None:
-            raise _anthropic_error(
-                _ERR_INVALID_REQUEST,
-                (
-                    "otari_code_execution tool requested but no sandbox is configured on this gateway. "
-                    "Set GATEWAY_SANDBOX_URL on the gateway, or remove otari_code_execution from `tools`."
-                ),
-                status.HTTP_400_BAD_REQUEST,
-            )
-        if request.mcp_servers:
-            raise _anthropic_error(
-                _ERR_INVALID_REQUEST,
-                (
-                    "otari_code_execution and mcp_servers cannot be combined in the same request yet; "
-                    "pick one. Multi-backend dispatch is a planned refinement."
-                ),
-                status.HTTP_400_BAD_REQUEST,
-            )
-        use_sandbox = True
-
-    web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
-    web_search_url: str | None = os.environ.get("GATEWAY_WEB_SEARCH_URL") or None
-    use_web_search = False
-    if web_search_tool_entry is not None:
-        if web_search_url is None:
-            raise _anthropic_error(
-                _ERR_INVALID_REQUEST,
-                (
-                    "otari_web_search tool requested but no search backend is configured on this gateway. "
-                    "Set GATEWAY_WEB_SEARCH_URL on the gateway, or remove otari_web_search from `tools`."
-                ),
-                status.HTTP_400_BAD_REQUEST,
-            )
-        if use_sandbox or request.mcp_servers:
-            raise _anthropic_error(
-                _ERR_INVALID_REQUEST,
-                (
-                    "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same "
-                    "request yet; pick one."
-                ),
-                status.HTTP_400_BAD_REQUEST,
-            )
-        use_web_search = True
-
-    mcp_server_configs = request.mcp_servers
-    max_tool_iterations = min(
-        request.max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
-        MAX_TOOL_ITERATIONS_CAP,
+    tool_ctx = await prepare_gateway_tools(
+        adapter=_ADAPTER,
+        ctx=ctx,
+        response=response,
+        guardrails=request.guardrails,
+        guardrail_text=latest_user_text(request.messages),
+        tools=request.tools,
+        mcp_servers=request.mcp_servers,
+        mcp_server_ids=request.mcp_server_ids,
+        max_tool_iterations=request.max_tool_iterations,
+        tools_header=request.tools_header,
     )
-    use_tool_loop = bool(mcp_server_configs) or use_sandbox or use_web_search
 
     # Strip gateway-internal fields, convert any caller-supplied OpenAI-shaped
     # tools to Anthropic shape so a mixed list works.
     request_fields = _strip_gateway_fields(
         request.model_dump(exclude_unset=True),
-        tools_extracted=sandbox_tool_entry is not None or web_search_tool_entry is not None,
-        remaining_user_tools=remaining_user_tools,
+        tools_extracted=tool_ctx.tools_extracted,
+        remaining_user_tools=tool_ctx.remaining_user_tools,
     )
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
@@ -358,139 +329,98 @@ async def create_message(
     # Streaming path
     # ------------------------------------------------------------------
     if request.stream:
-        # Tool-loop streaming collapses to a single attempt (same as chat.py
-        # until on_first_response lock-in is wired across all three loops).
-        if platform_mode and not use_tool_loop:
-            assert route is not None  # guaranteed by the platform-mode branch above
+        # Tool-loop streaming collapses to a single attempt for this format
+        # (chat already runs tool loops through the multi-attempt fallback;
+        # wiring the same here is a planned follow-up).
+        if ctx.platform_mode and not tool_ctx.use_tool_loop:
+            route = ctx.route
+            assert route is not None  # guaranteed by the platform-mode preamble
             if not route.attempts:
                 logger.error("Platform returned empty attempts list request_id=%s", route.request_id)
                 raise _anthropic_error(
                     _ERR_API,
-                    "Authorization service returned no resolvable provider",
+                    NO_RESOLVABLE_PROVIDER_DETAIL,
                     status.HTTP_502_BAD_GATEWAY,
                 )
             try:
-                return await _run_streaming_with_fallback_messages(
+                return await run_streaming_with_fallback(
+                    adapter=_ADAPTER,
                     route=route,
                     base_request_fields=request_fields,
-                    response=response,
                     config=config,
                     background_tasks=background_tasks,
-                    rate_limit_info=rate_limit_info,
+                    rate_limit_info=ctx.rate_limit_info,
+                    tool_ctx=tool_ctx,
                 )
             except HTTPException:
                 raise
             except Exception as exc:
                 logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
+                is_single_attempt = len(route.attempts) <= 1
                 if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
                     raise _anthropic_error(
                         _ERR_API,
-                        "LLM provider timeout" if len(route.attempts) <= 1 else "All upstream providers timed out",
+                        PROVIDER_TIMEOUT_DETAIL if is_single_attempt else ALL_PROVIDERS_TIMED_OUT_DETAIL,
                         status.HTTP_504_GATEWAY_TIMEOUT,
                     ) from exc
                 raise _anthropic_error(
                     _ERR_API,
-                    "LLM provider error" if len(route.attempts) <= 1 else "All upstream providers failed",
+                    PROVIDER_ERROR_DETAIL if is_single_attempt else ALL_PROVIDERS_FAILED_DETAIL,
                     status.HTTP_502_BAD_GATEWAY,
                 ) from exc
 
         # Standalone (or platform + tool-loop): single attempt streaming.
-        if platform_mode:
-            # Tool-loop platform path: build call_kwargs from the primary attempt.
-            assert route is not None  # guaranteed by the platform-mode branch above
+        platform_correlation_id: str | None = None
+        platform_request_id: str | None = None
+        if ctx.platform_mode:
+            # Tool-loop platform path: build call_kwargs from the primary
+            # attempt and keep the platform contract (X-Correlation-ID,
+            # X-Otari-Request-ID, usage reported via _report_platform_usage).
+            route = ctx.route
+            assert route is not None  # guaranteed by the platform-mode preamble
             if not route.attempts:
                 raise _anthropic_error(
                     _ERR_API,
-                    "Authorization service returned no resolvable provider",
+                    NO_RESOLVABLE_PROVIDER_DETAIL,
                     status.HTTP_502_BAD_GATEWAY,
                 )
             attempt = route.attempts[0]
             provider = LLMProvider(attempt.provider)
             model = attempt.model
-            attempt_kwargs: dict[str, Any] = {"api_key": attempt.api_key}
-            if attempt.api_base:
-                attempt_kwargs["api_base"] = attempt.api_base
-            call_kwargs: dict[str, Any] = {
-                **attempt_kwargs,
-                **request_fields,
-                "model": f"{provider.value}:{model}",
-            }
+            call_kwargs = default_attempt_kwargs(attempt, request_fields)
+            platform_correlation_id = attempt.attempt_id
+            platform_request_id = route.request_id
         else:
             provider, model = AnyLLM.split_model_provider(request.model)
-            provider_kwargs = get_provider_kwargs(config, provider)
-            call_kwargs = {**provider_kwargs, **request_fields}
+            call_kwargs = {**get_provider_kwargs(config, provider), **request_fields}
 
-        # Platform tool-loop streaming is currently single-attempt; pass the
-        # primary attempt's correlation id + the route's request id so the
-        # response still carries the platform contract (X-Correlation-ID,
-        # X-Otari-Request-ID, usage reported via _report_platform_usage).
-        platform_correlation_id: str | None = None
-        platform_request_id: str | None = None
-        platform_config: GatewayConfig | None = None
-        if platform_mode and route is not None and route.attempts:
-            platform_correlation_id = route.attempts[0].attempt_id
-            platform_request_id = route.request_id
-            platform_config = config
-
-        return await _stream_messages(
+        return await run_single_attempt_stream(
+            adapter=_ADAPTER,
+            ctx=ctx,
+            tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
-            request=request,
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            user_id=user_id,
             provider=provider,
             model=model,
-            rate_limit_info=rate_limit_info,
-            use_tool_loop=use_tool_loop,
-            mcp_server_configs=mcp_server_configs,
-            use_sandbox=use_sandbox,
-            sandbox_tool_entry=sandbox_tool_entry,
-            sandbox_url=sandbox_url,
-            use_web_search=use_web_search,
-            web_search_tool_entry=web_search_tool_entry,
-            web_search_url=web_search_url,
-            max_tool_iterations=max_tool_iterations,
-            config=config,
             platform_correlation_id=platform_correlation_id,
             platform_request_id=platform_request_id,
-            platform_config=platform_config,
-            reservation=reservation,
         )
 
     # ------------------------------------------------------------------
     # Non-streaming path
     # ------------------------------------------------------------------
-    if platform_mode:
-        assert route is not None  # guaranteed by the platform-mode branch above
-        platform_route = route
-        attempts_to_try = platform_route.attempts
-        if not attempts_to_try:
-            logger.error("Platform returned empty attempts list request_id=%s", platform_route.request_id)
-            raise _anthropic_error(
-                _ERR_API,
-                "Authorization service returned no resolvable provider",
-                status.HTTP_502_BAD_GATEWAY,
-            )
+    if ctx.platform_mode:
+        route = ctx.route
+        assert route is not None  # guaranteed by the platform-mode preamble
         try:
-            return await _run_platform_non_stream_messages(
-                route=platform_route,
-                attempts=attempts_to_try,
+            result = await run_platform_non_stream(
+                adapter=_ADAPTER,
+                route=route,
                 base_request_fields=request_fields,
-                tools_header=request.tools_header,
+                tool_ctx=tool_ctx,
                 response=response,
                 background_tasks=background_tasks,
                 config=config,
-                rate_limit_info=rate_limit_info,
-                use_tool_loop=use_tool_loop,
-                mcp_server_configs=mcp_server_configs,
-                use_sandbox=use_sandbox,
-                sandbox_tool_entry=sandbox_tool_entry,
-                sandbox_url=sandbox_url,
-                use_web_search=use_web_search,
-                web_search_tool_entry=web_search_tool_entry,
-                web_search_url=web_search_url,
-                max_tool_iterations=max_tool_iterations,
+                rate_limit_info=ctx.rate_limit_info,
             )
         except HTTPException:
             raise
@@ -498,801 +428,35 @@ async def create_message(
             logger.error("Sandbox unreachable: %s", e)
             raise _anthropic_error(
                 _ERR_API,
-                "code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
+                SANDBOX_UNREACHABLE_DETAIL,
                 status.HTTP_502_BAD_GATEWAY,
             ) from e
         except WebSearchNotReachableError as e:
             logger.error("Web search backend unreachable: %s", e)
             raise _anthropic_error(
                 _ERR_API,
-                "web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
+                WEB_SEARCH_UNREACHABLE_DETAIL,
                 status.HTTP_502_BAD_GATEWAY,
             ) from e
+        return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
     provider, model = AnyLLM.split_model_provider(request.model)
-    provider_kwargs = get_provider_kwargs(config, provider)
-    call_kwargs = {**provider_kwargs, **request_fields}
+    call_kwargs = {**get_provider_kwargs(config, provider), **request_fields}
+    result = await run_standalone_non_stream(
+        adapter=_ADAPTER,
+        ctx=ctx,
+        tool_ctx=tool_ctx,
+        call_kwargs=call_kwargs,
+        provider=provider,
+        model=model,
+    )
 
-    try:
-        result = await _run_messages_non_stream(
-            call_kwargs=call_kwargs,
-            tools_header=request.tools_header,
-            use_tool_loop=use_tool_loop,
-            mcp_server_configs=mcp_server_configs,
-            use_sandbox=use_sandbox,
-            sandbox_tool_entry=sandbox_tool_entry,
-            sandbox_url=sandbox_url,
-            use_web_search=use_web_search,
-            web_search_tool_entry=web_search_tool_entry,
-            web_search_url=web_search_url,
-            max_tool_iterations=max_tool_iterations,
-        )
-
-        if db is not None:
-            actual_cost: float | None = None
-            if result.usage:
-                usage_data = CompletionUsage(
-                    prompt_tokens=result.usage.input_tokens,
-                    completion_tokens=result.usage.output_tokens,
-                    total_tokens=result.usage.input_tokens + result.usage.output_tokens,
-                )
-                actual_cost = await log_usage(
-                    db=db,
-                    log_writer=log_writer,
-                    api_key_id=api_key_id,
-                    model=model,
-                    provider=provider,
-                    endpoint="/v1/messages",
-                    user_id=user_id,
-                    usage_override=usage_data,
-                )
-            if reservation is not None:
-                await reconcile_reservation(db, reservation, actual_cost or 0.0)
-
-    except HTTPException:
-        if db is not None and reservation is not None:
-            await refund_reservation(db, reservation)
-        raise
-    except MaxToolIterationsExceeded as e:
-        if db is not None:
-            await log_usage(
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                model=model,
-                provider=provider,
-                endpoint="/v1/messages",
-                user_id=user_id,
-                error=str(e),
-            )
-            if reservation is not None:
-                await refund_reservation(db, reservation)
-        raise _anthropic_error(_ERR_INVALID_REQUEST, str(e), status.HTTP_422_UNPROCESSABLE_ENTITY) from e
-    except SandboxNotReachableError as e:
-        logger.error("Sandbox unreachable for %s:%s: %s", provider, model, e)
-        if db is not None and reservation is not None:
-            await refund_reservation(db, reservation)
-        raise _anthropic_error(
-            _ERR_API,
-            "code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
-            status.HTTP_502_BAD_GATEWAY,
-        ) from e
-    except WebSearchNotReachableError as e:
-        logger.error("Web search backend unreachable for %s:%s: %s", provider, model, e)
-        if db is not None and reservation is not None:
-            await refund_reservation(db, reservation)
-        raise _anthropic_error(
-            _ERR_API,
-            "web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
-            status.HTTP_502_BAD_GATEWAY,
-        ) from e
-    except Exception as e:
-        if db is not None:
-            await log_usage(
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                model=model,
-                provider=provider,
-                endpoint="/v1/messages",
-                user_id=user_id,
-                error=str(e),
-            )
-            if reservation is not None:
-                await refund_reservation(db, reservation)
-        logger.error("Provider call failed for %s:%s: %s", provider, model, e)
-        raise _anthropic_error(
-            _ERR_API,
-            _PROVIDER_ERROR,
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-        ) from e
-
-    if rate_limit_info:
-        for key, value in rate_limit_headers(rate_limit_info).items():
+    if ctx.rate_limit_info:
+        for key, value in rate_limit_headers(ctx.rate_limit_info).items():
             response.headers[key] = value
 
     return result.model_dump(exclude_none=True)
-
-
-async def _run_platform_non_stream_messages(
-    *,
-    route: ResolvedRoute,
-    attempts: list[ResolvedAttempt],
-    base_request_fields: dict[str, Any],
-    tools_header: str | None,
-    response: Response,
-    background_tasks: BackgroundTasks,
-    config: GatewayConfig,
-    rate_limit_info: RateLimitInfo | None,
-    use_tool_loop: bool,
-    mcp_server_configs: list[McpServerConfig] | None,
-    use_sandbox: bool,
-    sandbox_tool_entry: dict[str, Any] | None,
-    sandbox_url: str | None,
-    use_web_search: bool,
-    web_search_tool_entry: dict[str, Any] | None,
-    web_search_url: str | None,
-    max_tool_iterations: int,
-) -> dict[str, Any]:
-    """Drive the multi-attempt platform-mode non-streaming path via the
-    shared ``run_platform_attempts`` runner.
-    """
-
-    async def _run_attempt(
-        completion_kwargs: dict[str, Any],
-        on_first_response: Callable[[], None],
-    ) -> MessageResponse:
-        if not use_tool_loop:
-            return await amessages(**completion_kwargs)  # type: ignore[return-value]
-        if mcp_server_configs:
-            async with MCPClientPool(mcp_server_configs) as pool:
-                kwargs = inject_purpose_hints_anthropic(
-                    {**completion_kwargs},
-                    pool.purpose_hints(),
-                    header=tools_header,
-                )
-                return await anthropic_tool_loop(
-                    completion_kwargs=kwargs,
-                    pool=pool,
-                    max_iterations=max_tool_iterations,
-                    on_first_response=on_first_response,
-                )
-        if use_sandbox:
-            assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
-            sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
-            async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
-                kwargs = inject_purpose_hints_anthropic(
-                    {**completion_kwargs},
-                    backend.purpose_hints(),
-                    header=tools_header,
-                )
-                return await anthropic_tool_loop(
-                    completion_kwargs=kwargs,
-                    pool=backend,
-                    max_iterations=max_tool_iterations,
-                    on_first_response=on_first_response,
-                )
-        assert use_web_search
-        assert web_search_url is not None  # guaranteed past the missing-URL 400 above
-        assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
-        async with _build_web_search_backend(
-            base_url=web_search_url,
-            tool_entry=web_search_tool_entry,
-        ) as web_backend:
-            kwargs = inject_purpose_hints_anthropic(
-                {**completion_kwargs},
-                web_backend.purpose_hints(),
-                header=tools_header,
-            )
-            return await anthropic_tool_loop(
-                completion_kwargs=kwargs,
-                pool=web_backend,
-                max_iterations=max_tool_iterations,
-                on_first_response=on_first_response,
-            )
-
-    def _extract_usage(result: MessageResponse) -> CompletionUsage | None:
-        if not result.usage:
-            return None
-        return CompletionUsage(
-            prompt_tokens=result.usage.input_tokens,
-            completion_tokens=result.usage.output_tokens,
-            total_tokens=result.usage.input_tokens + result.usage.output_tokens,
-        )
-
-    def _report_attempt_outcome(
-        attempt: ResolvedAttempt,
-        outcome: str,
-        usage: Any,
-        error_class: str | None,
-    ) -> None:
-        background_tasks.add_task(
-            _report_platform_usage,
-            config,
-            attempt.attempt_id,
-            outcome,
-            usage,
-            error_class,
-        )
-
-    def _on_attempt_success(attempt: ResolvedAttempt) -> None:
-        response.headers["X-Correlation-ID"] = attempt.attempt_id
-        if rate_limit_info:
-            for key, value in rate_limit_headers(rate_limit_info).items():
-                response.headers[key] = value
-
-    result = await run_platform_attempts(
-        route=route,
-        attempts=attempts,
-        base_request_fields=base_request_fields,
-        run_attempt=_run_attempt,
-        extract_usage=_extract_usage,
-        classify_error=_classify_upstream_error,
-        report_attempt_outcome=_report_attempt_outcome,
-        on_success=_on_attempt_success,
-        max_tool_iterations=max_tool_iterations,
-    )
-    return result.model_dump(exclude_none=True)
-
-
-async def _run_messages_non_stream(
-    *,
-    call_kwargs: dict[str, Any],
-    tools_header: str | None,
-    use_tool_loop: bool,
-    mcp_server_configs: list[McpServerConfig] | None,
-    use_sandbox: bool,
-    sandbox_tool_entry: dict[str, Any] | None,
-    sandbox_url: str | None,
-    use_web_search: bool,
-    web_search_tool_entry: dict[str, Any] | None,
-    web_search_url: str | None,
-    max_tool_iterations: int,
-) -> MessageResponse:
-    """Standalone-mode non-streaming dispatch.
-
-    Plain ``amessages`` when no gateway tools are in play. Otherwise the
-    appropriate backend is opened (MCP pool, sandbox, or web_search) and
-    ``anthropic_tool_loop`` drives the tool round-trips.
-    """
-    if not use_tool_loop:
-        return await amessages(**call_kwargs)  # type: ignore[return-value]
-
-    if mcp_server_configs:
-        async with MCPClientPool(mcp_server_configs) as pool:
-            kwargs = inject_purpose_hints_anthropic(
-                {**call_kwargs},
-                pool.purpose_hints(),
-                header=tools_header,
-            )
-            return await anthropic_tool_loop(
-                completion_kwargs=kwargs,
-                pool=pool,
-                max_iterations=max_tool_iterations,
-            )
-
-    if use_sandbox:
-        assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
-        sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
-        async with SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint) as backend:
-            kwargs = inject_purpose_hints_anthropic(
-                {**call_kwargs},
-                backend.purpose_hints(),
-                header=tools_header,
-            )
-            return await anthropic_tool_loop(
-                completion_kwargs=kwargs,
-                pool=backend,
-                max_iterations=max_tool_iterations,
-            )
-
-    assert use_web_search
-    assert web_search_url is not None  # guaranteed past the missing-URL 400 above
-    assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
-    async with _build_web_search_backend(
-        base_url=web_search_url,
-        tool_entry=web_search_tool_entry,
-    ) as web_backend:
-        kwargs = inject_purpose_hints_anthropic(
-            {**call_kwargs},
-            web_backend.purpose_hints(),
-            header=tools_header,
-        )
-        return await anthropic_tool_loop(
-            completion_kwargs=kwargs,
-            pool=web_backend,
-            max_iterations=max_tool_iterations,
-        )
-
-
-async def _stream_messages(
-    *,
-    call_kwargs: dict[str, Any],
-    request: MessagesRequest,
-    db: AsyncSession | None,
-    log_writer: LogWriter,
-    api_key_id: str | None,
-    user_id: str | None,
-    provider: Any,
-    model: str,
-    rate_limit_info: Any,
-    use_tool_loop: bool,
-    mcp_server_configs: list[McpServerConfig] | None,
-    use_sandbox: bool,
-    sandbox_tool_entry: dict[str, Any] | None,
-    sandbox_url: str | None,
-    use_web_search: bool,
-    web_search_tool_entry: dict[str, Any] | None,
-    web_search_url: str | None,
-    max_tool_iterations: int,
-    config: GatewayConfig,
-    platform_correlation_id: str | None = None,
-    platform_request_id: str | None = None,
-    platform_config: GatewayConfig | None = None,
-    reservation: ReservationHandle | None = None,
-) -> StreamingResponse:
-    """Streaming dispatch for single-attempt requests.
-
-    Used for standalone mode and for the tool-loop path in platform mode
-    (where streaming fallback is still single-attempt — multi-attempt
-    streaming for non-tool-loop uses ``_run_streaming_with_fallback_messages``).
-
-    When ``platform_correlation_id`` / ``platform_request_id`` /
-    ``platform_config`` are set (platform mode, single-attempt path), the
-    response includes ``X-Correlation-ID`` / ``X-Otari-Request-ID`` headers
-    and usage is reported to the platform on complete/error. When unset, the
-    response logs usage to the local DB via ``log_usage`` (standalone mode).
-    """
-    call_kwargs["stream"] = True
-    platform_mode_active = platform_correlation_id is not None and platform_config is not None
-
-    def _format_chunk(event: MessageStreamEvent) -> str:
-        return f"event: {event.type}\ndata: {event.model_dump_json(exclude_none=True)}\n\n"
-
-    def _extract_usage(event: MessageStreamEvent) -> CompletionUsage | None:
-        if isinstance(event, MessageDeltaEvent):
-            input_tokens = event.usage.input_tokens or 0
-            output_tokens = event.usage.output_tokens or 0
-            return CompletionUsage(
-                prompt_tokens=input_tokens,
-                completion_tokens=output_tokens,
-                total_tokens=input_tokens + output_tokens,
-            )
-        if isinstance(event, MessageStartEvent):
-            input_tokens = event.message.usage.input_tokens or 0
-            if input_tokens:
-                return CompletionUsage(
-                    prompt_tokens=input_tokens,
-                    completion_tokens=0,
-                    total_tokens=input_tokens,
-                )
-        return None
-
-    async def _on_complete(usage_data: CompletionUsage) -> None:
-        if platform_mode_active:
-            assert platform_config is not None  # guaranteed by the platform-mode branch above
-            assert platform_correlation_id is not None  # guaranteed by the platform-mode branch above
-            asyncio.create_task(
-                _report_platform_usage(
-                    config=platform_config,
-                    correlation_id=platform_correlation_id,
-                    outcome="success",
-                    usage=usage_data,
-                )
-            )
-            return
-        if db is None:
-            return
-        actual_cost = await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/messages",
-            user_id=user_id,
-            usage_override=usage_data,
-        )
-        if reservation is not None:
-            await reconcile_reservation(db, reservation, actual_cost or 0.0)
-
-    async def _on_no_usage() -> None:
-        # Stream completed but the provider sent no usage data. Settle the
-        # reservation per stream_missing_usage_policy instead of billing $0.
-        if db is None or log_writer is None or reservation is None:
-            return
-        policy = config.stream_missing_usage_policy
-        if policy == "allow_free":
-            await log_usage(
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                model=model,
-                provider=provider,
-                endpoint="/v1/messages",
-                user_id=user_id,
-            )
-            await refund_reservation(db, reservation)
-            return
-        # 'estimate' and 'fail' both charge the up-front estimate; 'fail' also
-        # records the request as errored.
-        await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/messages",
-            user_id=user_id,
-            error="stream completed without usage data" if policy == "fail" else None,
-            cost_override=reservation.estimate,
-        )
-        await reconcile_reservation(db, reservation, reservation.estimate)
-
-    async def _on_error(error: str) -> None:
-        if platform_mode_active:
-            assert platform_config is not None  # guaranteed by the platform-mode branch above
-            assert platform_correlation_id is not None  # guaranteed by the platform-mode branch above
-            asyncio.create_task(
-                _report_platform_usage(
-                    config=platform_config,
-                    correlation_id=platform_correlation_id,
-                    outcome="error",
-                    usage=None,
-                )
-            )
-            return
-        if db is None:
-            return
-        await log_usage(
-            db=db,
-            log_writer=log_writer,
-            api_key_id=api_key_id,
-            model=model,
-            provider=provider,
-            endpoint="/v1/messages",
-            user_id=user_id,
-            error=error,
-        )
-        if reservation is not None:
-            await refund_reservation(db, reservation)
-
-    async def _on_incomplete() -> None:
-        # Client disconnected mid-stream — release the reservation.
-        if db is None or reservation is None:
-            return
-        await refund_reservation(db, reservation)
-
-    try:
-        if not use_tool_loop:
-            msg_stream = await amessages(**call_kwargs)
-            msg_stream_typed: AsyncIterator[MessageStreamEvent] = msg_stream  # type: ignore[assignment]
-        else:
-            msg_stream_typed = await _open_tool_loop_stream(
-                call_kwargs=call_kwargs,
-                tools_header=request.tools_header,
-                mcp_server_configs=mcp_server_configs,
-                use_sandbox=use_sandbox,
-                sandbox_tool_entry=sandbox_tool_entry,
-                sandbox_url=sandbox_url,
-                use_web_search=use_web_search,
-                web_search_tool_entry=web_search_tool_entry,
-                web_search_url=web_search_url,
-                max_tool_iterations=max_tool_iterations,
-            )
-    except SandboxNotReachableError as exc:
-        logger.error("Sandbox unreachable for %s:%s: %s", provider, model, exc)
-        raise _anthropic_error(
-            _ERR_API,
-            "code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL",
-            status.HTTP_502_BAD_GATEWAY,
-        ) from exc
-    except WebSearchNotReachableError as exc:
-        logger.error("Web search backend unreachable for %s:%s: %s", provider, model, exc)
-        raise _anthropic_error(
-            _ERR_API,
-            "web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL",
-            status.HTTP_502_BAD_GATEWAY,
-        ) from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        # A provider error raised before the stream starts must surface as an
-        # HTTP error (Anthropic envelope) rather than escaping uncaught into a
-        # 500. Log the error and refund the reservation, matching the
-        # non-streaming handler and the chat streaming path (without the refund
-        # the pre-debit hold leaks and is never released).
-        if db is not None:
-            await log_usage(
-                db=db,
-                log_writer=log_writer,
-                api_key_id=api_key_id,
-                model=model,
-                provider=provider,
-                endpoint="/v1/messages",
-                user_id=user_id,
-                error=str(exc),
-            )
-            if reservation is not None:
-                await refund_reservation(db, reservation)
-        logger.error("Provider call failed for %s:%s: %s", provider, model, exc)
-        raise _anthropic_error(
-            _ERR_API,
-            _PROVIDER_ERROR,
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-        ) from exc
-
-    headers: dict[str, str] = {}
-    if rate_limit_info:
-        headers.update(rate_limit_headers(rate_limit_info))
-    if platform_correlation_id:
-        headers["X-Correlation-ID"] = platform_correlation_id
-    if platform_request_id:
-        headers["X-Otari-Request-ID"] = platform_request_id
-
-    return StreamingResponse(
-        streaming_generator(
-            stream=msg_stream_typed,
-            format_chunk=_format_chunk,
-            extract_usage=_extract_usage,
-            fmt=ANTHROPIC_STREAM_FORMAT,
-            on_complete=_on_complete,
-            on_error=_on_error,
-            label=f"{provider}:{model}",
-            on_no_usage=_on_no_usage,
-            on_incomplete=_on_incomplete,
-        ),
-        media_type="text/event-stream",
-        headers=headers,
-    )
-
-
-async def _run_streaming_with_fallback_messages(
-    *,
-    route: ResolvedRoute,
-    base_request_fields: dict[str, Any],
-    response: Response,
-    config: GatewayConfig,
-    background_tasks: BackgroundTasks,
-    rate_limit_info: RateLimitInfo | None,
-) -> StreamingResponse:
-    """Multi-attempt streaming for platform-mode non-tool-loop requests.
-
-    Mirrors chat.py's ``_run_streaming_with_fallback``: iterates
-    ``route.attempts`` and falls through on any attempt that fails before its
-    first chunk arrives. Once an attempt yields its first chunk, the request
-    locks in and any further errors land in the SSE channel as today.
-    """
-    base_request_fields = dict(base_request_fields)  # we mutate stream_options
-    first_chunk_timeout_seconds = int(config.platform.get("streaming_first_chunk_timeout_ms", 2000)) / 1000
-
-    async def _build_for_attempt(
-        attempt: ResolvedAttempt,
-    ) -> AsyncIterator[MessageStreamEvent]:
-        attempt_provider = LLMProvider(attempt.provider)
-        provider_kwargs: dict[str, Any] = {"api_key": attempt.api_key}
-        if attempt.api_base:
-            provider_kwargs["api_base"] = attempt.api_base
-        completion_kwargs = {
-            **provider_kwargs,
-            **base_request_fields,
-            "model": f"{attempt_provider.value}:{attempt.model}",
-            "stream": True,
-        }
-        return await amessages(**completion_kwargs)  # type: ignore[return-value]
-
-    async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
-        background_tasks.add_task(
-            _report_platform_usage,
-            config,
-            attempt.attempt_id,
-            "error",
-            None,
-            failure.error_class,
-        )
-        logger.warning(
-            "Streaming attempt failed request_id=%s position=%d provider=%s model=%s error=%s",
-            route.request_id,
-            attempt.position,
-            attempt.provider,
-            attempt.model,
-            failure.error_class,
-        )
-
-    chosen, stream = await iterate_streaming_attempts(
-        attempts=route.attempts,
-        build_stream=_build_for_attempt,
-        classify_error=_classify_upstream_error,
-        on_attempt_failed=_on_attempt_failed,
-        first_chunk_timeout_seconds=first_chunk_timeout_seconds,
-    )
-
-    return _build_streaming_response_messages(
-        stream=stream,
-        provider=LLMProvider(chosen.provider),
-        model=chosen.model,
-        correlation_id=chosen.attempt_id,
-        request_id=route.request_id,
-        config=config,
-        rate_limit_info=rate_limit_info,
-    )
-
-
-def _build_streaming_response_messages(
-    *,
-    stream: AsyncIterator[MessageStreamEvent],
-    provider: LLMProvider,
-    model: str,
-    correlation_id: str,
-    request_id: str,
-    config: GatewayConfig,
-    rate_limit_info: RateLimitInfo | None,
-) -> StreamingResponse:
-    """Wrap an already-opened Anthropic stream in an SSE response for
-    platform-mode requests. Sets correlation / request-id headers and reports
-    usage to the platform on complete.
-    """
-
-    def _format_chunk(event: MessageStreamEvent) -> str:
-        return f"event: {event.type}\ndata: {event.model_dump_json(exclude_none=True)}\n\n"
-
-    def _extract_usage(event: MessageStreamEvent) -> CompletionUsage | None:
-        if isinstance(event, MessageDeltaEvent):
-            input_tokens = event.usage.input_tokens or 0
-            output_tokens = event.usage.output_tokens or 0
-            return CompletionUsage(
-                prompt_tokens=input_tokens,
-                completion_tokens=output_tokens,
-                total_tokens=input_tokens + output_tokens,
-            )
-        if isinstance(event, MessageStartEvent):
-            input_tokens = event.message.usage.input_tokens or 0
-            if input_tokens:
-                return CompletionUsage(
-                    prompt_tokens=input_tokens,
-                    completion_tokens=0,
-                    total_tokens=input_tokens,
-                )
-        return None
-
-    async def _on_complete(usage_data: CompletionUsage) -> None:
-        asyncio.create_task(
-            _report_platform_usage(
-                config=config,
-                correlation_id=correlation_id,
-                outcome="success",
-                usage=usage_data,
-            )
-        )
-
-    async def _on_error(error: str) -> None:
-        asyncio.create_task(
-            _report_platform_usage(
-                config=config,
-                correlation_id=correlation_id,
-                outcome="error",
-                usage=None,
-            )
-        )
-
-    headers: dict[str, str] = {}
-    if rate_limit_info:
-        headers.update(rate_limit_headers(rate_limit_info))
-    headers["X-Correlation-ID"] = correlation_id
-    headers["X-Otari-Request-ID"] = request_id
-
-    return StreamingResponse(
-        streaming_generator(
-            stream=stream,
-            format_chunk=_format_chunk,
-            extract_usage=_extract_usage,
-            fmt=ANTHROPIC_STREAM_FORMAT,
-            on_complete=_on_complete,
-            on_error=_on_error,
-            label=f"{provider}:{model}",
-        ),
-        media_type="text/event-stream",
-        headers=headers,
-    )
-
-
-async def _open_tool_loop_stream(
-    *,
-    call_kwargs: dict[str, Any],
-    tools_header: str | None,
-    mcp_server_configs: list[McpServerConfig] | None,
-    use_sandbox: bool,
-    sandbox_tool_entry: dict[str, Any] | None,
-    sandbox_url: str | None,
-    use_web_search: bool,
-    web_search_tool_entry: dict[str, Any] | None,
-    web_search_url: str | None,
-    max_tool_iterations: int,
-) -> AsyncIterator[MessageStreamEvent]:
-    """Return an async iterator that yields events for the entire tool loop.
-
-    For the sandbox and web_search paths the backend is opened **eagerly**
-    (the ``await ... __aenter__()`` runs before the iterator is returned), so
-    a backend-unreachable error surfaces as an HTTP 502 rather than landing
-    in the SSE channel after the response has already committed to 200 OK.
-
-    The MCP path is different: ``MCPClientPool`` is entered lazily inside the
-    iterator's ``async with`` block. An ``MCPClientPool`` dial failure surfaces
-    once the client starts pulling events. A future improvement would
-    AsyncExitStack-share the pool across attempts and eager-open it for the
-    same UX as the other two backends; for now MCP keeps the simpler
-    enter-inside-generator pattern.
-    """
-    if mcp_server_configs:
-        pool_cfgs = mcp_server_configs
-
-        async def _mcp_iter() -> AsyncIterator[MessageStreamEvent]:
-            async with MCPClientPool(pool_cfgs) as pool:
-                kwargs = inject_purpose_hints_anthropic(
-                    {**call_kwargs},
-                    pool.purpose_hints(),
-                    header=tools_header,
-                )
-                async for event in anthropic_tool_loop_stream(
-                    completion_kwargs=kwargs,
-                    pool=pool,
-                    max_iterations=max_tool_iterations,
-                ):
-                    yield event
-
-        return _mcp_iter()
-
-    if use_sandbox:
-        assert sandbox_url is not None  # guaranteed past the missing-URL 400 above
-        sandbox_hint = _resolve_sandbox_purpose_hint(sandbox_tool_entry)
-        sandbox_backend = SandboxBackend(sandbox_url=sandbox_url, purpose_hint=sandbox_hint)
-        await sandbox_backend.__aenter__()  # eager-open
-
-        async def _sandbox_iter() -> AsyncIterator[MessageStreamEvent]:
-            try:
-                kwargs = inject_purpose_hints_anthropic(
-                    {**call_kwargs},
-                    sandbox_backend.purpose_hints(),
-                    header=tools_header,
-                )
-                async for event in anthropic_tool_loop_stream(
-                    completion_kwargs=kwargs,
-                    pool=sandbox_backend,
-                    max_iterations=max_tool_iterations,
-                ):
-                    yield event
-            finally:
-                await sandbox_backend.__aexit__(None, None, None)
-
-        return _sandbox_iter()
-
-    assert use_web_search
-    assert web_search_url is not None  # guaranteed past the missing-URL 400 above
-    assert web_search_tool_entry is not None  # guaranteed by the web_search opt-in above
-    web_search_backend = _build_web_search_backend(
-        base_url=web_search_url,
-        tool_entry=web_search_tool_entry,
-    )
-    await web_search_backend.__aenter__()  # eager-open
-
-    async def _web_search_iter() -> AsyncIterator[MessageStreamEvent]:
-        try:
-            kwargs = inject_purpose_hints_anthropic(
-                {**call_kwargs},
-                web_search_backend.purpose_hints(),
-                header=tools_header,
-            )
-            async for event in anthropic_tool_loop_stream(
-                completion_kwargs=kwargs,
-                pool=web_search_backend,
-                max_iterations=max_tool_iterations,
-            ):
-                yield event
-        finally:
-            await web_search_backend.__aexit__(None, None, None)
-
-    return _web_search_iter()
 
 
 # The gateway has no tokenizer (see budget_service.estimate_cost), so input
@@ -1341,7 +505,7 @@ async def count_message_tokens(
         )
     else:
         if db is None:
-            raise _anthropic_error(_ERR_API, "Database session unavailable", status.HTTP_500_INTERNAL_SERVER_ERROR)
+            raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
         await verify_api_key_or_master_key(raw_request, db, config)
 
     return CountTokensResponse(input_tokens=_estimate_input_tokens(request))

@@ -165,7 +165,7 @@ def test_budget_actually_resets_when_duration_passes(
     with patch("gateway.services.budget_service.datetime") as mock_datetime_budget:
         mock_datetime_budget.now.return_value = initial_time
 
-        with patch("gateway.api.routes.chat.datetime") as mock_datetime_chat:
+        with patch("gateway.api.routes._pipeline.datetime") as mock_datetime_chat:
             mock_datetime_chat.now.return_value = initial_time
 
             response = client.post(
@@ -190,7 +190,7 @@ def test_budget_actually_resets_when_duration_passes(
     with patch("gateway.services.budget_service.datetime") as mock_datetime_budget:
         mock_datetime_budget.now.return_value = time_after_reset
 
-        with patch("gateway.api.routes.chat.datetime") as mock_datetime_chat:
+        with patch("gateway.api.routes._pipeline.datetime") as mock_datetime_chat:
             mock_datetime_chat.now.return_value = time_after_reset
 
             response = client.post(
