@@ -84,7 +84,7 @@ def test_delete_user_preserves_budget_reset_logs(
     time_after_reset = initial_time + timedelta(seconds=61)
     with (
         patch("gateway.services.budget_service.datetime") as mock_dt_budget,
-        patch("gateway.api.routes.chat.datetime") as mock_dt_chat,
+        patch("gateway.api.routes._pipeline.datetime") as mock_dt_chat,
         patch("gateway.api.routes.chat.acompletion") as mock_acompletion,
     ):
         mock_dt_budget.now.return_value = time_after_reset

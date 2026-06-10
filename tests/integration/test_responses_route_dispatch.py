@@ -211,7 +211,7 @@ def test_code_execution_dispatches_through_sandbox_backend(
     with (
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
         patch(
-            "gateway.api.routes.responses.SandboxBackend",
+            "gateway.api.routes._pipeline.SandboxBackend",
             return_value=AsyncMock(
                 __aenter__=AsyncMock(return_value=fake_backend),
                 __aexit__=AsyncMock(return_value=None),
@@ -255,7 +255,7 @@ def test_web_search_dispatches_through_web_search_backend(
 
     with (
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
-        patch("gateway.api.routes.responses._build_web_search_backend", return_value=fake_builder_result),
+        patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
     ):
         resp = client.post(
             "/v1/responses",
@@ -420,7 +420,7 @@ def test_max_tool_iterations_exceeded_returns_422(
     with (
         patch("gateway.api.routes.responses.responses_tool_loop", new=fake_loop),
         patch(
-            "gateway.api.routes.responses.SandboxBackend",
+            "gateway.api.routes._pipeline.SandboxBackend",
             return_value=AsyncMock(
                 __aenter__=AsyncMock(return_value=fake_backend),
                 __aexit__=AsyncMock(return_value=None),
@@ -452,7 +452,7 @@ def test_sandbox_unreachable_returns_502(
     from gateway.services.sandbox_backend import SandboxNotReachableError
 
     with patch(
-        "gateway.api.routes.responses.SandboxBackend",
+        "gateway.api.routes._pipeline.SandboxBackend",
         return_value=AsyncMock(__aenter__=AsyncMock(side_effect=SandboxNotReachableError("boom"))),
     ):
         resp = client.post(
@@ -621,7 +621,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
 
     with (
         patch("gateway.api.routes.responses.responses_tool_loop_stream", new=fake_loop_stream),
-        patch("gateway.api.routes.responses.SandboxBackend", return_value=fake_backend),
+        patch("gateway.api.routes._pipeline.SandboxBackend", return_value=fake_backend),
     ):
         resp = client.post(
             "/v1/responses",
@@ -654,7 +654,7 @@ def test_stream_sandbox_unreachable_returns_502(
     from gateway.services.sandbox_backend import SandboxNotReachableError
 
     with patch(
-        "gateway.api.routes.responses.SandboxBackend",
+        "gateway.api.routes._pipeline.SandboxBackend",
         return_value=AsyncMock(__aenter__=AsyncMock(side_effect=SandboxNotReachableError("boom"))),
     ):
         resp = client.post(
