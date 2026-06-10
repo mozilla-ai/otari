@@ -26,7 +26,8 @@ master_key: YOUR_MASTER_KEY_HERE
 # files_backend: "local"            # blob backend for raw bytes ('local' only today)
 # files_local_dir: "./otari-files"  # where the local backend stores bytes
 # files_max_bytes: 536870912        # 512 MB upload cap
-# files_retention_hours: 168        # auto-expire files after N hours (omit = keep)
+# files_retention_hours: 168        # stop serving files after N hours; 404 thereafter (omit = keep).
+                                    # Bytes are not auto-reclaimed yet; periodic cleanup is an operator task.
 # file_understanding_enabled: true  # master switch for content normalization
 
 # How images are handled for text-only models: 'describe' (caption via a vision

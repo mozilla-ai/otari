@@ -14,13 +14,16 @@ from __future__ import annotations
 
 import base64
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
+from gateway.models.entities import FileObject
 from gateway.services.file_extractors import ExtractionResult
 from gateway.services.file_store import LocalDirFileStore
 
@@ -288,3 +291,86 @@ def test_native_model_passes_file_through(
     sent = json.dumps(captured["messages"])
     # file_id was resolved to an inline data: URL the provider understands.
     assert "data:application/pdf;base64," in sent
+
+
+def test_expired_file_returns_404(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+    db_session: Session,
+) -> None:
+    """A file past its retention window is no longer served (404)."""
+    up = client.post(
+        "/v1/files",
+        headers=api_key_header,
+        files={"file": ("a.txt", b"hi", "text/plain")},
+    )
+    file_id = up.json()["id"]
+
+    # Backdate the stored expiry into the past, simulating retention elapsing.
+    record = db_session.get(FileObject, file_id)
+    assert record is not None
+    record.expires_at = datetime.now(UTC) - timedelta(hours=1)
+    db_session.commit()
+
+    assert client.get(f"/v1/files/{file_id}", headers=api_key_header).status_code == 404
+    assert client.get(f"/v1/files/{file_id}/content", headers=api_key_header).status_code == 404
+
+
+def test_vision_describe_side_call_is_billed(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+    test_config: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A describe side-call for a text-only model is metered and billed.
+
+    Captioning an image for a text-only target model issues a side-call to the
+    configured vision model. Its cost must land on the user's spend even though
+    the target model itself has no pricing.
+    """
+    from any_llm.types.completion import CompletionUsage
+
+    monkeypatch.setattr(test_config, "vision_strategy", "describe")
+    monkeypatch.setattr(test_config, "vision_describe_model", "openai:gpt-4o-mini")
+
+    # Pricing for the vision model → the side-call has a non-zero cost.
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "input_price_per_million": 2.5,
+            "output_price_per_million": 10.0,
+        },
+        headers=master_key_header,
+    )
+    client.post("/v1/users", json={"user_id": "vision-user"}, headers=master_key_header)
+
+    async def fake_describe(config: Any, data_url: str) -> tuple[str | None, CompletionUsage | None]:
+        return "a chart of revenue", CompletionUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
+
+    monkeypatch.setattr("gateway.services.content_normalizer.describe_image", fake_describe)
+
+    captured: dict[str, Any] = {}
+
+    async def mock_acompletion(**kwargs: Any) -> Any:
+        captured.update(kwargs)
+        return _make_completion()
+
+    image = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii")
+    body = {
+        "model": "ollama:llama3",  # text-only local → image is described, not forwarded
+        "user": "vision-user",
+        "messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": image}}]}],
+    }
+
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post("/v1/chat/completions", headers=master_key_header, json=body)
+
+    assert resp.status_code == 200, resp.text
+    # The caption reached the provider in place of the image block...
+    assert "a chart of revenue" in json.dumps(captured["messages"])
+    # ...and the describe side-call's cost (1000/1e6*2.5 + 500/1e6*10) was billed.
+    user = client.get("/v1/users/vision-user", headers=master_key_header).json()
+    assert user["spend"] == pytest.approx(0.0075)

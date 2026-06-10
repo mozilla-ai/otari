@@ -22,6 +22,7 @@ import binascii
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from any_llm.types.completion import CompletionUsage
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -47,11 +48,26 @@ class NormalizationStats:
     images_described: int = 0
     dropped: int = 0
     chars_added: int = 0
+    # Token usage of any vision describe side-calls made while extracting images
+    # for a text-only model. Accumulated across every describe call (including
+    # per-page calls for a scanned PDF) so the caller can meter and bill them.
+    vision_prompt_tokens: int = 0
+    vision_completion_tokens: int = 0
     details: list[str] = field(default_factory=list)
 
     @property
     def touched(self) -> bool:
         return bool(self.files_extracted or self.images_described or self.dropped)
+
+    def vision_usage(self) -> CompletionUsage | None:
+        """The summed describe-call usage, or ``None`` if no describe call ran."""
+        if not (self.vision_prompt_tokens or self.vision_completion_tokens):
+            return None
+        return CompletionUsage(
+            prompt_tokens=self.vision_prompt_tokens,
+            completion_tokens=self.vision_completion_tokens,
+            total_tokens=self.vision_prompt_tokens + self.vision_completion_tokens,
+        )
 
     def to_metadata(self) -> dict[str, Any]:
         return {
@@ -243,7 +259,10 @@ async def _render_image(src: _Source, config: GatewayConfig, stats: Normalizatio
     assert src.data is not None
     strategy = config.vision_strategy
     if strategy == "describe":
-        described = await describe_image(config, _to_data_url(src.data, src.mime))
+        described, usage = await describe_image(config, _to_data_url(src.data, src.mime))
+        if usage is not None:
+            stats.vision_prompt_tokens += usage.prompt_tokens or 0
+            stats.vision_completion_tokens += usage.completion_tokens or 0
         if described:
             return f"[Attached image description]\n{described}"
         # Fall through to OCR as a cheaper recovery, then give up.

@@ -10,6 +10,7 @@ import base64
 from typing import Any, cast
 
 import pytest
+from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import FileObject
@@ -58,8 +59,10 @@ async def test_native_image_passthrough() -> None:
 
 @pytest.mark.asyncio
 async def test_text_only_image_described(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fake_describe(config: GatewayConfig, data_url: str) -> str:
-        return "a red circle"
+    async def fake_describe(
+        config: GatewayConfig, data_url: str
+    ) -> tuple[str | None, CompletionUsage | None]:
+        return "a red circle", CompletionUsage(prompt_tokens=11, completion_tokens=7, total_tokens=18)
 
     monkeypatch.setattr(cn, "describe_image", fake_describe)
     cfg = GatewayConfig(vision_strategy="describe")
@@ -70,6 +73,11 @@ async def test_text_only_image_described(monkeypatch: pytest.MonkeyPatch) -> Non
     assert block["type"] == "text"
     assert "a red circle" in block["text"]
     assert stats.images_described == 1
+    # The describe side-call's usage is surfaced so the pipeline can bill it.
+    usage = stats.vision_usage()
+    assert usage is not None
+    assert usage.prompt_tokens == 11
+    assert usage.completion_tokens == 7
 
 
 @pytest.mark.asyncio

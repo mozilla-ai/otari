@@ -206,7 +206,11 @@ class GatewayConfig(BaseSettings):
     files_retention_hours: int | None = Field(
         default=None,
         ge=1,
-        description="Delete stored files older than this many hours (None keeps them indefinitely).",
+        description=(
+            "Stop serving files older than this many hours: expired files become inaccessible "
+            "(404) and can no longer be referenced. Their stored bytes are not yet reclaimed "
+            "automatically, so periodic cleanup is an operator task. None keeps files indefinitely."
+        ),
     )
     file_understanding_enabled: bool = Field(
         default=True,

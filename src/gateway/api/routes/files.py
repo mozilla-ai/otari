@@ -265,6 +265,13 @@ async def delete_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete file",
         ) from exc
-    await file_store.delete(storage_ref)
+
+    # The soft-delete already committed, so the file is gone from the user's
+    # view. Removing the blob is best-effort cleanup: a backend failure must not
+    # turn a successful delete into a 500 (it would only leave an orphaned blob).
+    try:
+        await file_store.delete(storage_ref)
+    except OSError as exc:
+        logger.warning("Soft-deleted file %s but failed to remove its blob %s: %s", file_id, storage_ref, exc)
 
     return {"id": file_id, "object": "file", "deleted": True}

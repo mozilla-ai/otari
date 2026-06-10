@@ -248,12 +248,14 @@ async def chat_completions(
             detail="Invalid request: model is required",
         )
 
-    async def _normalize(user_id: str, provider: LLMProvider | None, model: str) -> int:
+    async def _normalize(
+        user_id: str, provider: LLMProvider | None, model: str
+    ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
         # the cost estimate. Standalone only; no-op when the files feature is
         # off or the request has no attachments.
-        request.messages, _ = await normalize_request_messages(
+        request.messages, stats = await normalize_request_messages(
             request.messages,
             fmt="openai",
             config=config,
@@ -263,7 +265,7 @@ async def chat_completions(
             raw_request=raw_request,
             user_id=user_id,
         )
-        return len(str(request.messages))
+        return len(str(request.messages)), stats.vision_usage()
 
     ctx = await resolve_request_context(
         adapter=_ADAPTER,
