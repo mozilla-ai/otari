@@ -263,11 +263,13 @@ async def create_response(
     raw_max_output = getattr(request_body, "max_output_tokens", None)
     max_output_tokens = raw_max_output if isinstance(raw_max_output, int) and raw_max_output >= 0 else None
 
-    async def _normalize(user_id: str, provider: LLMProvider | None, model: str) -> int:
+    async def _normalize(
+        user_id: str, provider: LLMProvider | None, model: str
+    ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
-        request_body.input, _ = await normalize_request_messages(
+        request_body.input, stats = await normalize_request_messages(
             request_body.input,
             fmt="responses",
             config=config,
@@ -277,7 +279,8 @@ async def create_response(
             raw_request=raw_request,
             user_id=user_id,
         )
-        return len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
+        chars = len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
+        return chars, stats.vision_usage()
 
     ctx = await resolve_request_context(
         adapter=_ADAPTER,

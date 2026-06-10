@@ -291,6 +291,52 @@ class RequestContext:
         self.reservation = reservation
 
 
+async def _bill_vision_side_call(
+    *,
+    db: AsyncSession,
+    log_writer: LogWriter,
+    config: GatewayConfig,
+    api_key_id: str | None,
+    user_id: str,
+    endpoint: str,
+    usage: CompletionUsage,
+) -> None:
+    """Meter and bill a vision describe side-call made during normalization.
+
+    The describe model already ran (to caption an image for a text-only target
+    model), so its cost is recorded as its own usage-log row for the configured
+    vision model and committed directly to ``users.spend``. It is intentionally
+    not gated or refundable: the cost is already incurred, so a budget reject
+    here would lose it, and refunding the main request must not erase it.
+    No-op when no vision model is configured or its selector can't be parsed.
+    """
+    model_selector = config.vision_describe_model
+    if not model_selector:
+        return
+    try:
+        provider, model = AnyLLM.split_model_provider(model_selector)
+    except (ValueError, AnyLLMError):
+        logger.warning("vision billing: cannot parse vision_describe_model %r", model_selector)
+        return
+    cost = await log_usage(
+        db=db,
+        log_writer=log_writer,
+        api_key_id=api_key_id,
+        model=model,
+        provider=provider.value if provider else None,
+        endpoint=endpoint,
+        user_id=user_id,
+        usage_override=usage,
+    )
+    # Commit the spend directly via an unreserved handle (no held estimate to
+    # release): this just adds the actual cost to users.spend.
+    await reconcile_reservation(
+        db,
+        ReservationHandle(user_id=user_id, estimate=0.0, reserved=False, strategy=config.budget_strategy),
+        cost or 0.0,
+    )
+
+
 async def resolve_request_context(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -305,7 +351,8 @@ async def resolve_request_context(
     estimate_max_output_tokens: int | None,
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
-    normalize_messages: Callable[[str, LLMProvider | None, str], Awaitable[int]] | None = None,
+    normalize_messages: Callable[[str, LLMProvider | None, str], Awaitable[tuple[int, CompletionUsage | None]]]
+    | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -324,7 +371,10 @@ async def resolve_request_context(
     user-scoped) and after the provider/model split (capability detection needs
     it), and returns the post-normalization prompt-char count so the reservation
     reflects any text extracted from attachments. It is never called in platform
-    mode, where the files feature is unavailable.
+    mode, where the files feature is unavailable. It returns
+    ``(prompt_chars, vision_usage)``; any vision describe side-call it made is
+    metered and billed here as committed spend (the call already happened, so it
+    is not gated or refundable).
     """
     platform_mode = config.is_platform_mode
     route: ResolvedRoute | None = None
@@ -405,7 +455,7 @@ async def resolve_request_context(
         # provider-call settlement does not cover.
         if normalize_messages is not None:
             try:
-                post_chars = await normalize_messages(user_id, gate_provider, gate_model)
+                post_chars, vision_usage = await normalize_messages(user_id, gate_provider, gate_model)
                 post_estimate = estimate_cost(
                     gate_pricing,
                     prompt_chars=post_chars,
@@ -419,6 +469,16 @@ async def resolve_request_context(
                     model=model,
                     strategy=config.budget_strategy,
                 )
+                if vision_usage is not None:
+                    await _bill_vision_side_call(
+                        db=db,
+                        log_writer=log_writer,
+                        config=config,
+                        api_key_id=api_key_id,
+                        user_id=user_id,
+                        endpoint=adapter.endpoint,
+                        usage=vision_usage,
+                    )
             except HTTPException:
                 await refund_reservation(db, reservation)
                 raise
