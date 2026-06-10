@@ -74,6 +74,12 @@ jobs:
       - name: Install OpenAPI Generator CLI
         run: npm install -g @openapitools/openapi-generator-cli
 
+      - name: Install rustfmt (rust core is inlined and formatted in place)
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
       - name: Generate ${{ matrix.language }} client (full typed core)
         run: uv run python scripts/sdk_codegen/generate.py --language ${{ matrix.language }} --mode full --out-dir dist
 
