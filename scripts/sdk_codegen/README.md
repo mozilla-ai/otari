@@ -94,7 +94,7 @@ with `Contents:write` and `Pull-requests:write` on the four SDK repos. The defau
 Raw generator output needs small fix-ups (applied by `postprocess`/`normalize`
 in `generate.py`, so no per-repo hand-edits to generated code are required):
 
-- **rust** — the generator emits a standalone crate, but the SDK inlines it as a
+- **rust**: the generator emits a standalone crate, but the SDK inlines it as a
   private `src/_client` module so the crate publishes to crates.io as a single
   unit (a path dependency on a separate `otari-client` crate is unpublishable;
   see mozilla-ai/otari-sdk-rust#37). `_rust_inline_module` reduces the crate to a

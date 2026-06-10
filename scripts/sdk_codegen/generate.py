@@ -457,7 +457,14 @@ def _rust_inline_module(dest: Path) -> None:
         body = "pub mod apis;\npub mod models;"
 
     for child in sorted(src.iterdir()):
-        shutil.move(str(child), str(dest / child.name))
+        # Clear any same-named entry first so re-running into a non-empty
+        # out-dir overwrites rather than nesting (e.g. apis/ into apis/apis/).
+        target = dest / child.name
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+        shutil.move(str(child), str(target))
     src.rmdir()
     (dest / "mod.rs").write_text(_RUST_MODULE_HEADER + body + "\n")
 

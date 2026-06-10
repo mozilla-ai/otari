@@ -330,6 +330,27 @@ def test_rust_inline_module_without_lib_rs_falls_back(
     assert "pub mod models;" in text
 
 
+def test_rust_inline_module_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Re-running into the same out-dir (a fresh generator payload dropped beside
+    # the previous inlined output) must overwrite, not nest (no apis/apis/).
+    monkeypatch.setattr(generate, "_rustfmt_tree", lambda _dest: None)
+    dest = tmp_path / "rust"
+    dest.mkdir()
+    _fake_rust_crate(dest)
+    generate._rust_inline_module(dest)
+
+    # Second generator run drops a fresh crate payload beside the inlined output.
+    _fake_rust_crate(dest)
+    generate._rust_inline_module(dest)
+
+    assert (dest / "apis" / "configuration.rs").exists()
+    assert not (dest / "apis" / "apis").exists()
+    assert not (dest / "models" / "models").exists()
+    assert not (dest / "src").exists()
+
+
 def test_rust_inline_module_skips_rustfmt_gracefully(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
