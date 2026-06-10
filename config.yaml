@@ -1,3 +1,0 @@
-mode: platform
-platform:
-  base_url: http://localhost:8100/api/v1
