@@ -51,7 +51,7 @@ jobs:
             target_path: otari/client
           - language: rust
             sdk_repo: mozilla-ai/otari-sdk-rust
-            target_path: client
+            target_path: src/_client
 
     steps:
       - name: Checkout gateway
