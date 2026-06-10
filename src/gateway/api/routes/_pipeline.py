@@ -32,7 +32,7 @@ import asyncio
 import os
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
@@ -82,6 +82,7 @@ from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budget_service import (
     ReservationHandle,
     estimate_cost,
+    increase_reservation,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
@@ -304,6 +305,7 @@ async def resolve_request_context(
     estimate_max_output_tokens: int | None,
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
+    normalize_messages: Callable[[str, LLMProvider | None, str], Awaitable[int]] | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -315,6 +317,14 @@ async def resolve_request_context(
     before the missing-pricing gate so user/blocked/budget rejections
     (404/403) take precedence over the 402; it is refunded if the request is
     then rejected for missing pricing.
+
+    ``normalize_messages`` (standalone only) is an optional hook the file
+    feature uses to resolve uploaded attachments into the wire payload before
+    the cost estimate. It runs after the billed user is known (file access is
+    user-scoped) and after the provider/model split (capability detection needs
+    it), and returns the post-normalization prompt-char count so the reservation
+    reflects any text extracted from attachments. It is never called in platform
+    mode, where the files feature is unavailable.
     """
     platform_mode = config.is_platform_mode
     route: ResolvedRoute | None = None
@@ -365,6 +375,7 @@ async def resolve_request_context(
             gate_provider, gate_model = AnyLLM.split_model_provider(model)
         except (ValueError, AnyLLMError):
             gate_provider, gate_model = None, model
+
         gate_pricing = await find_model_pricing(db, gate_provider, gate_model)
         estimate = estimate_cost(
             gate_pricing,
@@ -383,6 +394,42 @@ async def resolve_request_context(
                 f"No pricing configured for model '{model}'",
                 ErrorKind.INVALID_REQUEST,
             )
+
+        # Resolve uploaded attachments only once the request is authorized
+        # (user exists, not blocked, within budget, pricing OK). Done after the
+        # budget gate so a blocked/over-budget user can't trigger extraction or
+        # vision side-calls. Attachments may expand the prompt (extracted
+        # document text, image captions), so top up the reservation to the
+        # post-normalization size; the top-up rejects if it no longer fits.
+        # Refund on any failure in this setup phase, which the downstream
+        # provider-call settlement does not cover.
+        if normalize_messages is not None:
+            try:
+                post_chars = await normalize_messages(user_id, gate_provider, gate_model)
+                post_estimate = estimate_cost(
+                    gate_pricing,
+                    prompt_chars=post_chars,
+                    max_output_tokens=estimate_max_output_tokens,
+                    default_output_tokens=config.budget_estimate_default_output_tokens,
+                )
+                await increase_reservation(
+                    db,
+                    reservation,
+                    post_estimate - estimate,
+                    model=model,
+                    strategy=config.budget_strategy,
+                )
+            except HTTPException:
+                await refund_reservation(db, reservation)
+                raise
+            except Exception as exc:
+                await refund_reservation(db, reservation)
+                logger.error("Request setup failed after reservation: %s", exc)
+                raise adapter.error(
+                    500,
+                    "Failed to process request attachments",
+                    ErrorKind.API,
+                ) from exc
 
     return RequestContext(
         config=config,

@@ -407,3 +407,33 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
         .execution_options(synchronize_session=False)
     )
     await db.commit()
+
+
+async def increase_reservation(
+    db: AsyncSession,
+    handle: ReservationHandle,
+    additional_estimate: float,
+    *,
+    model: str | None = None,
+    strategy: str = "for_update",
+) -> None:
+    """Grow an existing reservation atomically when the request size increases.
+
+    Used when the billable size grows after the initial reservation — e.g. the
+    content normalizer expands an attachment into extracted prompt text. The
+    delta is reserved with the same atomic conditional UPDATE as
+    :func:`reserve_budget` (so the budget gate stays effective on the true
+    size), then folded into ``handle`` so the existing reconcile/refund path
+    releases the full held amount.
+
+    Like :func:`reserve_budget`, this raises on budget rejection and does *not*
+    clean up the prior hold — the caller owns refunding ``handle`` on failure
+    (the request routes wrap the whole post-reservation setup in a
+    refund-on-error block). No-op when ``additional_estimate`` is not positive.
+    """
+    if additional_estimate <= 0:
+        return
+    delta = await reserve_budget(db, handle.user_id, additional_estimate, model=model, strategy=strategy)
+    if delta.reserved:
+        handle.estimate += delta.estimate
+        handle.reserved = True

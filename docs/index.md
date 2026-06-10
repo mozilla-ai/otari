@@ -21,6 +21,7 @@ Start with the [Quickstart](quickstart.md). It gets the gateway running locally 
 - [Deployment](deployment.md) — platform mode, optional services, and deployment-specific configuration.
 - [Modes](modes.md) — standalone vs connected, and what changes between them.
 - [Built-in tools](tools.md) — sandboxed code execution and web search the gateway runs itself.
+- [Files](files.md) — file uploads and document understanding for local models.
 - [Guardrails](guardrails.md) — request-level checks like prompt-injection detection.
 - [Configuration](configuration.md) — the full config file and environment variable reference.
 - [API reference](api-reference.md) — every endpoint, with auth and availability per mode.
