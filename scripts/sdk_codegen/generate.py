@@ -41,6 +41,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SPEC = REPO_ROOT / "docs" / "public" / "openapi.json"
 DEFAULT_OUT_DIR = REPO_ROOT / "dist" / "sdk-codegen"
 
+# Placeholder stamped into the spec's ``info.version`` until a real gateway
+# release supplies one (see gateway.version.__version__). Mirrors that default so
+# a marker is always written even outside a release build.
+DEFAULT_SPEC_VERSION = "0.0.0-dev"
+
 # Operations carrying one of these tags form the control plane we generate: the
 # management endpoints whose responses are fully typed in the spec. See the
 # module docstring for what is excluded and why (notably batches, whose
@@ -58,6 +63,11 @@ class LanguageTarget:
     additional_properties: str
     sdk_repo: str
     target_path: str
+    # When true, the generated output is reduced from a standalone crate to a
+    # single module tree (lib.rs -> mod.rs, crate scaffolding dropped) so the SDK
+    # publishes as one crate with no path dependency. Rust full mode only; see
+    # _rust_inline_module.
+    inline_module: bool = False
 
 
 # target_path is where the generated client is dropped inside the SDK repo by
@@ -120,9 +130,32 @@ FULL_TARGETS: dict[str, LanguageTarget] = {
         generator="rust",
         additional_properties="packageName=otari-client,library=reqwest",
         sdk_repo="mozilla-ai/otari-sdk-rust",
-        target_path="client",
+        # Inlined as a private module of the SDK crate (not a separate crate), so
+        # the crate publishes to crates.io as a single unit with no path
+        # dependency. The SDK's src/lib.rs declares `mod _client` and re-exports
+        # `apis` / `models` at the crate root for the generated code's
+        # `crate::models` / `crate::apis` paths.
+        target_path="src/_client",
+        inline_module=True,
     ),
 }
+
+
+# Header prepended to the inlined Rust core's mod.rs (replacing the generator's
+# own crate-root attributes). Exempts the generated code from the SDK crate's
+# strict lints, the way it had its own relaxed lints as a separate crate.
+_RUST_MODULE_HEADER = """\
+//! OpenAPI-generated typed core. This module is produced by the otari codegen
+//! pipeline (scripts/sdk_codegen) and is not hand-edited; the lint allowances
+//! below exempt it from the SDK crate's strict lints, which it escaped when it
+//! lived in its own crate. Do not add hand-written code here.
+#![allow(unused_imports)]
+#![allow(dead_code)]
+#![allow(clippy::all)]
+#![allow(clippy::pedantic)]
+#![allow(clippy::nursery)]
+
+"""
 
 
 # Helper that this generator version's typescript-fetch models import from
@@ -377,7 +410,142 @@ def normalize(language: str, dest: Path, python_package: str) -> None:
             shutil.move(str(staged), str(dest))
 
 
-def generate_language(language: str, spec_path: Path, out_dir: Path, target: LanguageTarget) -> Path:
+def _go_package_name(target: LanguageTarget) -> str:
+    """Read ``packageName=`` out of a go target's additional properties.
+
+    The marker file must declare the same ``package`` as the rest of the generated
+    Go core (``generated`` for control-plane, ``client`` for full); fall back to the
+    target path's last segment if the property is absent.
+    """
+    for prop in target.additional_properties.split(","):
+        key, _, value = prop.partition("=")
+        if key.strip() == "packageName" and value.strip():
+            return value.strip()
+    return target.target_path.rsplit("/", 1)[-1]
+
+
+def write_spec_version(language: str, dest: Path, version: str, target: LanguageTarget) -> None:
+    """Stamp ``version`` into the generated core as a language-native marker file.
+
+    Compatibility between an SDK and the gateway is expressed through the spec
+    version, not matching package numbers, so each generated core carries the
+    gateway/spec version it was generated from. The SDK's hand-written shell reads
+    this marker to surface it (``__spec_version__`` / ``SPEC_VERSION`` / equivalent).
+
+    Each file is self-contained so no SDK-side wiring beyond an import is needed:
+    Python and TypeScript are imported by path; Go shares the core's package and so
+    the const is in scope automatically; for Rust the marker is declared as a
+    submodule of the inlined core's ``mod.rs`` (created by ``_rust_inline_module``).
+    Runs last in ``generate_language`` so ``dest`` is already in its final layout.
+    """
+    if language == "python":
+        (dest / "_spec_version.py").write_text(f'__spec_version__ = "{version}"\n')
+    elif language == "typescript":
+        (dest / "specVersion.ts").write_text(f'export const SPEC_VERSION = "{version}";\n')
+    elif language == "go":
+        package = _go_package_name(target)
+        (dest / "spec_version.go").write_text(f'package {package}\n\nconst SpecVersion = "{version}"\n')
+    elif language == "rust":
+        # The crate root is ``dest/mod.rs`` for the inlined full core, or
+        # ``dest/src/lib.rs`` for the standalone crate the rust generator emits in
+        # control-plane mode. Place the marker beside whichever root exists and
+        # declare the module there, so it is compiled and importable in both
+        # layouts (the bare ``dest/mod.rs`` fallback covers a partial payload).
+        root = dest / "mod.rs"
+        if not root.exists() and (dest / "src" / "lib.rs").exists():
+            root = dest / "src" / "lib.rs"
+        (root.parent / "spec_version.rs").write_text(f'pub const SPEC_VERSION: &str = "{version}";\n')
+        declaration = "pub mod spec_version;"
+        if root.exists():
+            text = root.read_text()
+            if declaration not in text:
+                root.write_text(f"{text.rstrip()}\n{declaration}\n")
+        else:
+            root.write_text(f"{declaration}\n")
+
+
+def _rustfmt_tree(dest: Path) -> None:
+    """Format the inlined Rust module in place with rustfmt.
+
+    The inlined core becomes part of the SDK crate, so it is reached by the SDK
+    repo's ``cargo fmt --all -- --check``; the old separate crate was exempted
+    via ``rustfmt.toml``. rustfmt recurses into child ``mod`` declarations by
+    default, so formatting the module root (``mod.rs``) formats the whole tree.
+    Missing rustfmt warns and skips rather than failing, mirroring the go path.
+    """
+    rustfmt = shutil.which("rustfmt")
+    if rustfmt is None:
+        warnings.warn(
+            "rustfmt not found on PATH; skipping format of the generated Rust "
+            "core (the SDK repo's `cargo fmt --all -- --check` may then fail).",
+            stacklevel=2,
+        )
+        return
+    root = dest / "mod.rs"
+    if root.exists():
+        subprocess.run([rustfmt, "--edition", "2021", str(root)], check=True)
+
+
+def _rust_inline_module(dest: Path) -> None:
+    """Reduce the generated Rust crate at ``dest`` to a single module tree.
+
+    The crate split (`otari` shell + generated `otari-client` core wired as a
+    path dependency) made the SDK unpublishable: ``cargo publish`` rejects a path
+    dependency with no version. Inlining the core as a private module of the SDK
+    crate fixes that (see mozilla-ai/otari-sdk-rust#37). This rewrites the
+    generator's crate output so it drops cleanly into the SDK's ``src/_client``:
+
+    - ``src/lib.rs`` -> ``mod.rs`` with the crate-root attributes replaced by the
+      SDK lint-exemption header (the module declarations are preserved);
+    - the rest of ``src/`` (``apis/``, ``models/``) is hoisted to ``dest``;
+    - crate scaffolding (``Cargo.toml``, docs, generator metadata, etc.) is
+      dropped, since the core's dependencies live in the SDK crate's Cargo.toml;
+    - every ``.rs`` file is formatted (the old separate crate was rustfmt-exempt).
+    """
+    src = dest / "src"
+    lib = src / "lib.rs"
+    if lib.exists():
+        lines = lib.read_text().splitlines()
+        start = next(
+            (i for i, line in enumerate(lines) if line.startswith(("pub mod ", "mod "))),
+            len(lines),
+        )
+        body = "\n".join(lines[start:]).strip()
+        lib.unlink()
+    else:
+        body = "pub mod apis;\npub mod models;"
+
+    for child in sorted(src.iterdir()):
+        # Clear any same-named entry first so re-running into a non-empty
+        # out-dir overwrites rather than nesting (e.g. apis/ into apis/apis/).
+        target = dest / child.name
+        if target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+        shutil.move(str(child), str(target))
+    src.rmdir()
+    (dest / "mod.rs").write_text(_RUST_MODULE_HEADER + body + "\n")
+
+    for name in (
+        "Cargo.toml",
+        "README.md",
+        ".travis.yml",
+        "git_push.sh",
+        ".gitignore",
+        "rustfmt.toml",
+        ".openapi-generator-ignore",
+    ):
+        (dest / name).unlink(missing_ok=True)
+    for directory in ("docs", ".openapi-generator"):
+        shutil.rmtree(dest / directory, ignore_errors=True)
+
+    _rustfmt_tree(dest)
+
+
+def generate_language(
+    language: str, spec_path: Path, out_dir: Path, target: LanguageTarget, spec_version: str
+) -> Path:
     """Run OpenAPI Generator for ``language`` and return the output directory."""
     dest = out_dir / language
     cmd = [
@@ -393,8 +561,12 @@ def generate_language(language: str, spec_path: Path, out_dir: Path, target: Lan
         target.additional_properties,
     ]
     subprocess.run(cmd, check=True)
-    postprocess(language, dest)
-    normalize(language, dest, target.target_path.rsplit("/", 1)[-1])
+    if target.inline_module:
+        _rust_inline_module(dest)
+    else:
+        postprocess(language, dest)
+        normalize(language, dest, target.target_path.rsplit("/", 1)[-1])
+    write_spec_version(language, dest, spec_version, target)
     return dest
 
 
@@ -411,6 +583,13 @@ def main() -> int:
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument(
+        "--spec-version",
+        default=None,
+        help="Gateway/spec version stamped into each generated core (and into the "
+        "spec's info.version). Defaults to the spec's own info.version. The codegen "
+        "workflow passes the gateway release tag here.",
+    )
+    parser.add_argument(
         "--write-spec",
         type=Path,
         default=None,
@@ -419,6 +598,9 @@ def main() -> int:
     args = parser.parse_args()
 
     spec: dict[str, Any] = json.loads(Path(args.spec).read_text())
+    spec_version = args.spec_version or spec.get("info", {}).get("version", DEFAULT_SPEC_VERSION)
+    if args.spec_version:
+        spec.setdefault("info", {})["version"] = args.spec_version
     if args.mode == "full":
         prepared = enrich_spec(spec)
         targets = FULL_TARGETS
@@ -438,8 +620,8 @@ def main() -> int:
         spec_path = Path(tmp) / spec_name
         spec_path.write_text(json.dumps(prepared, indent=2))
         for language in languages:
-            dest = generate_language(language, spec_path, out_dir, targets[language])
-            print(f"generated {language} ({args.mode}) -> {dest}")
+            dest = generate_language(language, spec_path, out_dir, targets[language], spec_version)
+            print(f"generated {language} ({args.mode}) at spec version {spec_version} -> {dest}")
 
     return 0
 

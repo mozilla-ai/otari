@@ -32,6 +32,28 @@ The shell is **not** regenerated; only the core is. Audio and images are left
 opaque in the core: they return binary/file payloads that do not map onto a
 JSON response schema.
 
+## Spec version stamping
+
+Compatibility between an SDK and the gateway is expressed through the spec
+version, not matching package numbers (each SDK is versioned independently). So
+every generated core carries the gateway/spec version it was generated from, as a
+language-native marker file the SDK's hand-written shell reads to surface it
+(`__spec_version__` / `SPEC_VERSION` / equivalent):
+
+| Language   | Marker file        | Symbol                            |
+|------------|--------------------|-----------------------------------|
+| python     | `_spec_version.py` | `__spec_version__`                |
+| typescript | `specVersion.ts`   | `SPEC_VERSION`                    |
+| go         | `spec_version.go`  | `SpecVersion` (core's package)    |
+| rust       | `spec_version.rs`  | `SPEC_VERSION` (`spec_version` mod) |
+
+The version is the spec's `info.version` by default; the codegen workflow passes
+the gateway release version (the tag without its leading `v`) via `--spec-version`
+on a release so the stamp is the real release version rather than the `0.0.0-dev`
+placeholder in the committed spec. See
+[`docs/sdk-compatibility.md`](../../docs/sdk-compatibility.md) for the release
+policy and the spec-version to minimum-SDK-version matrix.
+
 ## Endpoint-coverage drift gate
 
 Because the core is generated but the shell is hand-written, a new gateway
@@ -80,7 +102,7 @@ repo with the regenerated client core dropped into:
 | python     | `mozilla-ai/otari-sdk-python` | `src/otari/_client`         |
 | typescript | `mozilla-ai/otari-sdk-ts`     | `src/_client`               |
 | go         | `mozilla-ai/otari-sdk-go`     | `otari/client`              |
-| rust       | `mozilla-ai/otari-sdk-rust`   | `client`                    |
+| rust       | `mozilla-ai/otari-sdk-rust`   | `src/_client`               |
 
 The matrix in the workflow mirrors `FULL_TARGETS` in `generate.py`; keep them in
 sync. Target paths match what each SDK's hand-written shell imports from.
@@ -94,11 +116,22 @@ with `Contents:write` and `Pull-requests:write` on the four SDK repos. The defau
 Raw generator output needs small fix-ups (applied by `postprocess`/`normalize`
 in `generate.py`, so no per-repo hand-edits to generated code are required):
 
-- **rust** — a `rustfmt.toml` with `disable_all_formatting` is written into the
-  crate, because the SDK's CI runs `cargo fmt --all -- --check`, which reaches
-  the generated crate (and `ignore` needs nightly). The emitted `Cargo.toml` is
-  also patched (placeholder version, and a `reqwest` pin/feature set that does
-  not build against the SDK's pinned `reqwest 0.12`).
+- **rust**: the generator emits a standalone crate, but the SDK inlines it as a
+  private `src/_client` module so the crate publishes to crates.io as a single
+  unit (a path dependency on a separate `otari-client` crate is unpublishable;
+  see mozilla-ai/otari-sdk-rust#37). `_rust_inline_module` reduces the crate to a
+  module tree: `src/lib.rs` becomes `mod.rs` with the crate-root attributes
+  replaced by a lint-exemption header (the module declarations are kept), the
+  rest of `src/` is hoisted up, the crate scaffolding (`Cargo.toml`, docs,
+  generator metadata) is dropped, and every `.rs` file is run through `rustfmt`
+  (the module is now reached by the SDK's `cargo fmt --all -- --check`).
+
+  Because the emitted `Cargo.toml` is dropped, the generated core's
+  dependencies live in the SDK crate's `Cargo.toml` (`serde_with`, `url`,
+  `uuid`, the `chrono` `serde` feature, the `reqwest` `multipart` feature). If a
+  regeneration starts using a new crate, add that dependency to the SDK
+  `Cargo.toml` by hand; the endpoint-coverage drift gate will not catch a
+  missing dependency.
 - **typescript** — the `mapValues` helper the models import is appended to
   `runtime.ts` (this generator version omits it).
 - **go** — the generated `test/` dir is dropped (its unfilled

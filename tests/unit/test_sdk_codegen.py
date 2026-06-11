@@ -246,3 +246,207 @@ def test_control_plane_tags_are_typed_management_only() -> None:
     # untyped in the spec (so generation would regress them).
     for excluded in ("chat", "responses", "embeddings", "batches"):
         assert excluded not in generate.CONTROL_PLANE_TAGS
+
+
+def _fake_rust_crate(dest: Path) -> None:
+    """Build a minimal stand-in for the rust generator's crate output."""
+    src = dest / "src"
+    (src / "apis").mkdir(parents=True)
+    (src / "models").mkdir(parents=True)
+    (src / "lib.rs").write_text(
+        "#![allow(unused_imports)]\n"
+        "#![allow(clippy::too_many_arguments)]\n"
+        "\n"
+        "extern crate serde;\n"
+        "extern crate reqwest;\n"
+        "\n"
+        "pub mod apis;\n"
+        "pub mod models;\n"
+    )
+    (src / "apis" / "mod.rs").write_text("pub mod configuration;\n")
+    (src / "apis" / "configuration.rs").write_text("pub struct Configuration {}\n")
+    (src / "models" / "mod.rs").write_text("pub mod thing;\n")
+    (src / "models" / "thing.rs").write_text("pub struct Thing {}\n")
+    (dest / "Cargo.toml").write_text('[package]\nname = "otari-client"\n')
+    (dest / "README.md").write_text("# generated\n")
+    (dest / ".travis.yml").write_text("language: rust\n")
+    (dest / "rustfmt.toml").write_text("disable_all_formatting = true\n")
+    docs = dest / "docs"
+    docs.mkdir()
+    (docs / "Thing.md").write_text("# Thing\n")
+    meta = dest / ".openapi-generator"
+    meta.mkdir()
+    (meta / "VERSION").write_text("7.0.0\n")
+
+
+def test_rust_inline_module_reduces_crate_to_module(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Format is exercised separately; stub it so this test is deterministic and
+    # does not depend on rustfmt being installed.
+    monkeypatch.setattr(generate, "_rustfmt_tree", lambda _dest: None)
+    dest = tmp_path / "rust"
+    dest.mkdir()
+    _fake_rust_crate(dest)
+
+    generate._rust_inline_module(dest)
+
+    # lib.rs -> mod.rs: SDK lint header replaces the crate-root attributes /
+    # extern crate lines, module declarations preserved.
+    mod = dest / "mod.rs"
+    assert mod.exists()
+    text = mod.read_text()
+    assert "pub mod apis;" in text
+    assert "pub mod models;" in text
+    assert "#![allow(clippy::pedantic)]" in text
+    assert "extern crate" not in text
+    assert "clippy::too_many_arguments" not in text
+
+    # src/ hoisted up to the module root; nested module files preserved.
+    assert (dest / "apis" / "configuration.rs").exists()
+    assert (dest / "models" / "thing.rs").exists()
+    assert not (dest / "src").exists()
+
+    # crate scaffolding dropped.
+    for gone in ("Cargo.toml", "README.md", ".travis.yml", "rustfmt.toml", "lib.rs"):
+        assert not (dest / gone).exists()
+    assert not (dest / "docs").exists()
+    assert not (dest / ".openapi-generator").exists()
+
+
+def test_rust_inline_module_without_lib_rs_falls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A partial payload with no lib.rs must still yield a usable mod.rs.
+    monkeypatch.setattr(generate, "_rustfmt_tree", lambda _dest: None)
+    dest = tmp_path / "rust"
+    (dest / "src" / "apis").mkdir(parents=True)
+    (dest / "src" / "models").mkdir(parents=True)
+
+    generate._rust_inline_module(dest)
+
+    text = (dest / "mod.rs").read_text()
+    assert "pub mod apis;" in text
+    assert "pub mod models;" in text
+
+
+def test_rust_inline_module_is_idempotent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Re-running into the same out-dir (a fresh generator payload dropped beside
+    # the previous inlined output) must overwrite, not nest (no apis/apis/).
+    monkeypatch.setattr(generate, "_rustfmt_tree", lambda _dest: None)
+    dest = tmp_path / "rust"
+    dest.mkdir()
+    _fake_rust_crate(dest)
+    generate._rust_inline_module(dest)
+
+    # Second generator run drops a fresh crate payload beside the inlined output.
+    _fake_rust_crate(dest)
+    generate._rust_inline_module(dest)
+
+    assert (dest / "apis" / "configuration.rs").exists()
+    assert not (dest / "apis" / "apis").exists()
+    assert not (dest / "models" / "models").exists()
+    assert not (dest / "src").exists()
+
+
+def test_rust_inline_module_skips_rustfmt_gracefully(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # When rustfmt is absent, the transform still runs and only formatting is
+    # skipped (with a warning), mirroring the go/gofmt path.
+    monkeypatch.setattr(generate.shutil, "which", lambda _name: None)
+    dest = tmp_path / "rust"
+    dest.mkdir()
+    _fake_rust_crate(dest)
+
+    with pytest.warns(UserWarning, match="rustfmt"):
+        generate._rust_inline_module(dest)
+
+    assert (dest / "mod.rs").exists()
+    assert (dest / "apis" / "configuration.rs").exists()
+    assert not (dest / "src").exists()
+
+
+def test_full_rust_target_is_inlined_module() -> None:
+    # The full rust target must drop into src/_client as an inlined module, so a
+    # regeneration does not recreate the separate `client/` crate that made the
+    # SDK unpublishable.
+    rust = generate.FULL_TARGETS["rust"]
+    assert rust.target_path == "src/_client"
+    assert rust.inline_module is True
+
+
+def test_spec_version_python_marker(tmp_path: Path) -> None:
+    generate.write_spec_version("python", tmp_path, "1.2.3", generate.FULL_TARGETS["python"])
+    assert (tmp_path / "_spec_version.py").read_text() == '__spec_version__ = "1.2.3"\n'
+
+
+def test_spec_version_typescript_marker(tmp_path: Path) -> None:
+    generate.write_spec_version("typescript", tmp_path, "1.2.3", generate.FULL_TARGETS["typescript"])
+    assert (tmp_path / "specVersion.ts").read_text() == 'export const SPEC_VERSION = "1.2.3";\n'
+
+
+def test_spec_version_go_marker_uses_core_package(tmp_path: Path) -> None:
+    # The full go core is package `client`; the marker must share that package so
+    # the const compiles into the same package as the rest of the core.
+    generate.write_spec_version("go", tmp_path, "1.2.3", generate.FULL_TARGETS["go"])
+    assert (tmp_path / "spec_version.go").read_text() == 'package client\n\nconst SpecVersion = "1.2.3"\n'
+
+
+def test_spec_version_go_marker_uses_control_plane_package(tmp_path: Path) -> None:
+    # The control-plane go core is package `generated`; the marker follows it.
+    generate.write_spec_version("go", tmp_path, "1.2.3", generate.TARGETS["go"])
+    assert (tmp_path / "spec_version.go").read_text().startswith("package generated\n")
+
+
+def test_spec_version_rust_marker_and_mod_declaration(tmp_path: Path) -> None:
+    # mod.rs already exists (created by _rust_inline_module); the marker module
+    # declaration is appended without disturbing existing declarations.
+    (tmp_path / "mod.rs").write_text("pub mod apis;\npub mod models;\n")
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.FULL_TARGETS["rust"])
+    assert (tmp_path / "spec_version.rs").read_text() == 'pub const SPEC_VERSION: &str = "1.2.3";\n'
+    mod_text = (tmp_path / "mod.rs").read_text()
+    assert "pub mod apis;" in mod_text
+    assert "pub mod models;" in mod_text
+    assert "pub mod spec_version;" in mod_text
+
+
+def test_spec_version_rust_marker_declaration_is_idempotent(tmp_path: Path) -> None:
+    (tmp_path / "mod.rs").write_text("pub mod apis;\n")
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.FULL_TARGETS["rust"])
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.FULL_TARGETS["rust"])
+    assert (tmp_path / "mod.rs").read_text().count("pub mod spec_version;") == 1
+
+
+def test_spec_version_rust_marker_non_inlined_crate_layout(tmp_path: Path) -> None:
+    # Control-plane mode emits a standalone crate (src/lib.rs), not an inlined
+    # mod.rs. The marker must land under src/ and be declared in lib.rs so it is
+    # compiled, not dropped beside an unreferenced top-level mod.rs.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "lib.rs").write_text("pub mod apis;\npub mod models;\n")
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.TARGETS["rust"])
+    assert (src / "spec_version.rs").read_text() == 'pub const SPEC_VERSION: &str = "1.2.3";\n'
+    assert not (tmp_path / "spec_version.rs").exists()
+    assert not (tmp_path / "mod.rs").exists()
+    lib_text = (src / "lib.rs").read_text()
+    assert "pub mod apis;" in lib_text
+    assert "pub mod spec_version;" in lib_text
+
+
+def test_spec_version_rust_marker_without_mod_rs(tmp_path: Path) -> None:
+    # A partial payload with no mod.rs must still yield a usable declaration.
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.FULL_TARGETS["rust"])
+    assert (tmp_path / "mod.rs").read_text() == "pub mod spec_version;\n"
+
+
+def test_go_package_name_falls_back_to_target_path() -> None:
+    target = generate.LanguageTarget(
+        generator="go",
+        additional_properties="withGoMod=false",
+        sdk_repo="x/y",
+        target_path="otari/client",
+    )
+    assert generate._go_package_name(target) == "client"

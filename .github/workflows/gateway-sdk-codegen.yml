@@ -51,7 +51,7 @@ jobs:
             target_path: otari/client
           - language: rust
             sdk_repo: mozilla-ai/otari-sdk-rust
-            target_path: client
+            target_path: src/_client
 
     steps:
       - name: Checkout gateway
@@ -74,8 +74,29 @@ jobs:
       - name: Install OpenAPI Generator CLI
         run: npm install -g @openapitools/openapi-generator-cli
 
+      - name: Install rustfmt (rust core is inlined and formatted in place)
+        if: matrix.language == 'rust'
+        # Pinned to the stable branch tip (immutable SHA); the action still
+        # installs the latest stable toolchain at runtime.
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: rustfmt
+
       - name: Generate ${{ matrix.language }} client (full typed core)
-        run: uv run python scripts/sdk_codegen/generate.py --language ${{ matrix.language }} --mode full --out-dir dist
+        # On a release, stamp the release version as the spec version into the
+        # generated core so each SDK can surface the gateway/spec version it was
+        # generated from. The leading "v" is stripped so the stamp is clean semver
+        # (matching how the SDK publish flows derive the version from the tag). On
+        # spec-change pushes there is no release tag, so the spec's own
+        # info.version is used.
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          args=(--language "${{ matrix.language }}" --mode full --out-dir dist)
+          if [ -n "${RELEASE_TAG}" ]; then
+            args+=(--spec-version "${RELEASE_TAG#v}")
+          fi
+          uv run python scripts/sdk_codegen/generate.py "${args[@]}"
 
       - name: Checkout ${{ matrix.sdk_repo }}
         uses: actions/checkout@v6

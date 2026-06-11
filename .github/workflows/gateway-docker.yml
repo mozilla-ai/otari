@@ -126,9 +126,9 @@ jobs:
           app-id: ${{ secrets.PLATFORM_DISPATCH_APP_ID }}
           private-key: ${{ secrets.PLATFORM_DISPATCH_APP_PRIVATE_KEY }}
           owner: mozilla-ai
-          repositories: any-llm-platform
+          repositories: otari-ai
 
-      - name: Dispatch deploy event to any-llm-platform
+      - name: Dispatch deploy event to otari-ai
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           IMAGE_REF: ${{ needs.build-and-push-image.outputs.image }}
