@@ -30,6 +30,7 @@ You'll hear a few names. Here's how they fit together:
 | **Otari** | The proxy server otari.ai deploys (this repo). Run it standalone or connected to the platform. | [mozilla-ai/otari](https://github.com/mozilla-ai/otari) |
 | **any-llm** | The Python SDK Otari uses for core LLM routing across 40+ providers. | [mozilla-ai/any-llm](https://github.com/mozilla-ai/any-llm) |
 | **Otari SDKs** | Client SDKs you use to talk to otari.ai or a self-hosted Otari. | [Python](https://github.com/mozilla-ai/otari-sdk-python) · [TypeScript](https://github.com/mozilla-ai/otari-sdk-ts) · [Rust](https://github.com/mozilla-ai/otari-sdk-rust) · [Go](https://github.com/mozilla-ai/otari-sdk-go) |
+| **Otari CLI** | Command-line tool for accessing and managing Otari, a thin wrapper over the Python SDK (`pip install otari-cli`). | [mozilla-ai/otari-cli](https://github.com/mozilla-ai/otari-cli) |
 
 You can also use Otari with any OpenAI-compatible client (see [First request](#first-request-openai-sdk)).
 

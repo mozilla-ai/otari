@@ -136,4 +136,4 @@ jobs:
           IMAGE_TAG="${IMAGE_REF##*:}"
           jq -nc --arg tag "$IMAGE_TAG" \
             '{event_type:"otari-image-published",client_payload:{image_tag:$tag}}' \
-            | gh api -X POST /repos/mozilla-ai/any-llm-platform/dispatches --input -
+            | gh api -X POST /repos/mozilla-ai/otari-ai/dispatches --input -
