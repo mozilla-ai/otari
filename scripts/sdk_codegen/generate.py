@@ -446,15 +446,22 @@ def write_spec_version(language: str, dest: Path, version: str, target: Language
         package = _go_package_name(target)
         (dest / "spec_version.go").write_text(f'package {package}\n\nconst SpecVersion = "{version}"\n')
     elif language == "rust":
-        (dest / "spec_version.rs").write_text(f'pub const SPEC_VERSION: &str = "{version}";\n')
-        mod_rs = dest / "mod.rs"
+        # The crate root is ``dest/mod.rs`` for the inlined full core, or
+        # ``dest/src/lib.rs`` for the standalone crate the rust generator emits in
+        # control-plane mode. Place the marker beside whichever root exists and
+        # declare the module there, so it is compiled and importable in both
+        # layouts (the bare ``dest/mod.rs`` fallback covers a partial payload).
+        root = dest / "mod.rs"
+        if not root.exists() and (dest / "src" / "lib.rs").exists():
+            root = dest / "src" / "lib.rs"
+        (root.parent / "spec_version.rs").write_text(f'pub const SPEC_VERSION: &str = "{version}";\n')
         declaration = "pub mod spec_version;"
-        if mod_rs.exists():
-            text = mod_rs.read_text()
+        if root.exists():
+            text = root.read_text()
             if declaration not in text:
-                mod_rs.write_text(f"{text.rstrip()}\n{declaration}\n")
+                root.write_text(f"{text.rstrip()}\n{declaration}\n")
         else:
-            mod_rs.write_text(f"{declaration}\n")
+            root.write_text(f"{declaration}\n")
 
 
 def _rustfmt_tree(dest: Path) -> None:

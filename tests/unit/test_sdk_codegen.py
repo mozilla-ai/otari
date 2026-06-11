@@ -420,6 +420,22 @@ def test_spec_version_rust_marker_declaration_is_idempotent(tmp_path: Path) -> N
     assert (tmp_path / "mod.rs").read_text().count("pub mod spec_version;") == 1
 
 
+def test_spec_version_rust_marker_non_inlined_crate_layout(tmp_path: Path) -> None:
+    # Control-plane mode emits a standalone crate (src/lib.rs), not an inlined
+    # mod.rs. The marker must land under src/ and be declared in lib.rs so it is
+    # compiled, not dropped beside an unreferenced top-level mod.rs.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "lib.rs").write_text("pub mod apis;\npub mod models;\n")
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.TARGETS["rust"])
+    assert (src / "spec_version.rs").read_text() == 'pub const SPEC_VERSION: &str = "1.2.3";\n'
+    assert not (tmp_path / "spec_version.rs").exists()
+    assert not (tmp_path / "mod.rs").exists()
+    lib_text = (src / "lib.rs").read_text()
+    assert "pub mod apis;" in lib_text
+    assert "pub mod spec_version;" in lib_text
+
+
 def test_spec_version_rust_marker_without_mod_rs(tmp_path: Path) -> None:
     # A partial payload with no mod.rs must still yield a usable declaration.
     generate.write_spec_version("rust", tmp_path, "1.2.3", generate.FULL_TARGETS["rust"])
