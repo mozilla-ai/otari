@@ -238,6 +238,20 @@ def test_enrich_types_otari_owned_inference_endpoints() -> None:
     assert messages_field["items"]["$ref"].endswith("/ChatMessageInput")
 
 
+def test_enrich_types_reasoning_as_string_matching_wire_format() -> None:
+    # The gateway serializes ``message.reasoning`` as a plain string (any-llm's
+    # ``Reasoning`` model has a ``model_serializer`` that emits a string), but the
+    # validation-mode JSON Schema typed it as an object, so the generated client
+    # rejected the string the server returns. Generating the response schemas in
+    # serialization mode keeps the schema aligned with the wire format.
+    # Regression test for mozilla-ai/otari#143.
+    spec = generate.enrich_spec(_full_spec_stub())
+    schemas = spec["components"]["schemas"]
+    for prefix in ("CC", "CCK"):
+        reasoning = schemas[f"{prefix}_Reasoning"]
+        assert reasoning == {"type": "string"}, f"{prefix}_Reasoning must be a plain string, got {reasoning}"
+
+
 def test_control_plane_tags_are_typed_management_only() -> None:
     assert generate.CONTROL_PLANE_TAGS == frozenset(
         {"keys", "users", "budgets", "pricing", "usage"}
