@@ -37,9 +37,12 @@ app = FastAPI(title="otari web-search Tavily adapter")
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    # Surfaces a misconfigured deployment (missing key) without a live query.
-    return {"status": "healthy" if TAVILY_API_KEY else "missing TAVILY_API_KEY"}
+async def health() -> JSONResponse:
+    # Fail closed when misconfigured (missing key) so orchestrators don't treat
+    # an unusable adapter as healthy.
+    if not TAVILY_API_KEY:
+        return JSONResponse(status_code=503, content={"status": "missing TAVILY_API_KEY"})
+    return JSONResponse(status_code=200, content={"status": "healthy"})
 
 
 @app.get("/search")
@@ -92,7 +95,11 @@ async def search(
     if not isinstance(payload, dict):
         return JSONResponse(status_code=502, content={"error": "tavily search returned an unexpected shape"})
 
-    hits = payload.get("results") or []
+    hits = payload.get("results")
+    if not isinstance(hits, list):
+        # A missing/non-list `results` is an upstream contract break, not "no
+        # hits" — surface it as a 502 instead of silently returning empty.
+        return JSONResponse(status_code=502, content={"error": "tavily search returned an unexpected shape"})
     results: list[dict[str, Any]] = []
     for h in hits:
         if not isinstance(h, dict) or not h.get("url"):

@@ -34,7 +34,7 @@ async def test_health_reports_missing_key(monkeypatch: pytest.MonkeyPatch) -> No
     transport = httpx.ASGITransport(app=module.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://adapter") as client:
         resp = await client.get("/health")
-    assert resp.status_code == 200
+    assert resp.status_code == 503
     assert resp.json() == {"status": "missing TAVILY_API_KEY"}
 
 
@@ -150,6 +150,23 @@ async def test_search_invalid_json_returns_502(monkeypatch: pytest.MonkeyPatch) 
 
     assert resp.status_code == 502
     assert "invalid JSON" in resp.json()["error"]
+
+
+@pytest.mark.asyncio
+async def test_search_non_list_results_returns_502(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_adapter(monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": "not-a-list"})
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", _mock_async_client(handler))
+
+    transport = httpx.ASGITransport(app=module.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://adapter") as client:
+        resp = await client.get("/search", params={"q": "x"})
+
+    assert resp.status_code == 502
+    assert "unexpected shape" in resp.json()["error"]
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app.py .
 
+# Run as a non-root user to limit blast radius if the process is compromised.
+RUN addgroup --system app && adduser --system --ingroup app app
+USER app
+
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=5s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')" || exit 1

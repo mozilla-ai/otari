@@ -207,8 +207,9 @@ services:
     ports:
       # Localhost-only, like the other internal backends — the gateway reaches
       # it over the Docker network at `tavily-adapter:8080`; this mapping is for
-      # ad-hoc curl/debugging.
-      - "127.0.0.1:8184:8080"
+      # ad-hoc curl/debugging. 8184 is taken by encoderfile, so use 8185 to
+      # avoid a clash when the web-search-tavily and guardrails profiles run together.
+      - "127.0.0.1:8185:8080"
     environment:
       # Tavily Search API key. Kept here, not in the gateway.
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
