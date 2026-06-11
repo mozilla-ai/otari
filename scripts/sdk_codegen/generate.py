@@ -41,6 +41,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_SPEC = REPO_ROOT / "docs" / "public" / "openapi.json"
 DEFAULT_OUT_DIR = REPO_ROOT / "dist" / "sdk-codegen"
 
+# Placeholder stamped into the spec's ``info.version`` until a real gateway
+# release supplies one (see gateway.version.__version__). Mirrors that default so
+# a marker is always written even outside a release build.
+DEFAULT_SPEC_VERSION = "0.0.0-dev"
+
 # Operations carrying one of these tags form the control plane we generate: the
 # management endpoints whose responses are fully typed in the spec. See the
 # module docstring for what is excluded and why (notably batches, whose
@@ -405,6 +410,53 @@ def normalize(language: str, dest: Path, python_package: str) -> None:
             shutil.move(str(staged), str(dest))
 
 
+def _go_package_name(target: LanguageTarget) -> str:
+    """Read ``packageName=`` out of a go target's additional properties.
+
+    The marker file must declare the same ``package`` as the rest of the generated
+    Go core (``generated`` for control-plane, ``client`` for full); fall back to the
+    target path's last segment if the property is absent.
+    """
+    for prop in target.additional_properties.split(","):
+        key, _, value = prop.partition("=")
+        if key.strip() == "packageName" and value.strip():
+            return value.strip()
+    return target.target_path.rsplit("/", 1)[-1]
+
+
+def write_spec_version(language: str, dest: Path, version: str, target: LanguageTarget) -> None:
+    """Stamp ``version`` into the generated core as a language-native marker file.
+
+    Compatibility between an SDK and the gateway is expressed through the spec
+    version, not matching package numbers, so each generated core carries the
+    gateway/spec version it was generated from. The SDK's hand-written shell reads
+    this marker to surface it (``__spec_version__`` / ``SPEC_VERSION`` / equivalent).
+
+    Each file is self-contained so no SDK-side wiring beyond an import is needed:
+    Python and TypeScript are imported by path; Go shares the core's package and so
+    the const is in scope automatically; for Rust the marker is declared as a
+    submodule of the inlined core's ``mod.rs`` (created by ``_rust_inline_module``).
+    Runs last in ``generate_language`` so ``dest`` is already in its final layout.
+    """
+    if language == "python":
+        (dest / "_spec_version.py").write_text(f'__spec_version__ = "{version}"\n')
+    elif language == "typescript":
+        (dest / "specVersion.ts").write_text(f'export const SPEC_VERSION = "{version}";\n')
+    elif language == "go":
+        package = _go_package_name(target)
+        (dest / "spec_version.go").write_text(f'package {package}\n\nconst SpecVersion = "{version}"\n')
+    elif language == "rust":
+        (dest / "spec_version.rs").write_text(f'pub const SPEC_VERSION: &str = "{version}";\n')
+        mod_rs = dest / "mod.rs"
+        declaration = "pub mod spec_version;"
+        if mod_rs.exists():
+            text = mod_rs.read_text()
+            if declaration not in text:
+                mod_rs.write_text(f"{text.rstrip()}\n{declaration}\n")
+        else:
+            mod_rs.write_text(f"{declaration}\n")
+
+
 def _rustfmt_tree(dest: Path) -> None:
     """Format the inlined Rust module in place with rustfmt.
 
@@ -484,7 +536,9 @@ def _rust_inline_module(dest: Path) -> None:
     _rustfmt_tree(dest)
 
 
-def generate_language(language: str, spec_path: Path, out_dir: Path, target: LanguageTarget) -> Path:
+def generate_language(
+    language: str, spec_path: Path, out_dir: Path, target: LanguageTarget, spec_version: str
+) -> Path:
     """Run OpenAPI Generator for ``language`` and return the output directory."""
     dest = out_dir / language
     cmd = [
@@ -505,6 +559,7 @@ def generate_language(language: str, spec_path: Path, out_dir: Path, target: Lan
     else:
         postprocess(language, dest)
         normalize(language, dest, target.target_path.rsplit("/", 1)[-1])
+    write_spec_version(language, dest, spec_version, target)
     return dest
 
 
@@ -521,6 +576,13 @@ def main() -> int:
     parser.add_argument("--spec", type=Path, default=DEFAULT_SPEC)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument(
+        "--spec-version",
+        default=None,
+        help="Gateway/spec version stamped into each generated core (and into the "
+        "spec's info.version). Defaults to the spec's own info.version. The codegen "
+        "workflow passes the gateway release tag here.",
+    )
+    parser.add_argument(
         "--write-spec",
         type=Path,
         default=None,
@@ -529,6 +591,9 @@ def main() -> int:
     args = parser.parse_args()
 
     spec: dict[str, Any] = json.loads(Path(args.spec).read_text())
+    spec_version = args.spec_version or spec.get("info", {}).get("version", DEFAULT_SPEC_VERSION)
+    if args.spec_version:
+        spec.setdefault("info", {})["version"] = args.spec_version
     if args.mode == "full":
         prepared = enrich_spec(spec)
         targets = FULL_TARGETS
@@ -548,8 +613,8 @@ def main() -> int:
         spec_path = Path(tmp) / spec_name
         spec_path.write_text(json.dumps(prepared, indent=2))
         for language in languages:
-            dest = generate_language(language, spec_path, out_dir, targets[language])
-            print(f"generated {language} ({args.mode}) -> {dest}")
+            dest = generate_language(language, spec_path, out_dir, targets[language], spec_version)
+            print(f"generated {language} ({args.mode}) at spec version {spec_version} -> {dest}")
 
     return 0
 

@@ -28,3 +28,4 @@ Start with the [Quickstart](quickstart.md). It gets the gateway running locally 
 - [Use with opencode](use-with-opencode.md) — point the opencode CLI at the gateway.
 - [Supported models](supported-models.md) — providers, model format, and capabilities.
 - [Platform protocol](platform-protocol.md) — the gateway/platform wire contract, for platform builders.
+- [SDK compatibility](sdk-compatibility.md) — how the language SDKs are released and which SDK version works with which gateway.
