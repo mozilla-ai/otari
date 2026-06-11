@@ -376,3 +376,77 @@ def test_full_rust_target_is_inlined_module() -> None:
     rust = generate.FULL_TARGETS["rust"]
     assert rust.target_path == "src/_client"
     assert rust.inline_module is True
+
+
+def test_spec_version_python_marker(tmp_path: Path) -> None:
+    generate.write_spec_version("python", tmp_path, "1.2.3", generate.FULL_TARGETS["python"])
+    assert (tmp_path / "_spec_version.py").read_text() == '__spec_version__ = "1.2.3"\n'
+
+
+def test_spec_version_typescript_marker(tmp_path: Path) -> None:
+    generate.write_spec_version("typescript", tmp_path, "1.2.3", generate.FULL_TARGETS["typescript"])
+    assert (tmp_path / "specVersion.ts").read_text() == 'export const SPEC_VERSION = "1.2.3";\n'
+
+
+def test_spec_version_go_marker_uses_core_package(tmp_path: Path) -> None:
+    # The full go core is package `client`; the marker must share that package so
+    # the const compiles into the same package as the rest of the core.
+    generate.write_spec_version("go", tmp_path, "1.2.3", generate.FULL_TARGETS["go"])
+    assert (tmp_path / "spec_version.go").read_text() == 'package client\n\nconst SpecVersion = "1.2.3"\n'
+
+
+def test_spec_version_go_marker_uses_control_plane_package(tmp_path: Path) -> None:
+    # The control-plane go core is package `generated`; the marker follows it.
+    generate.write_spec_version("go", tmp_path, "1.2.3", generate.TARGETS["go"])
+    assert (tmp_path / "spec_version.go").read_text().startswith("package generated\n")
+
+
+def test_spec_version_rust_marker_and_mod_declaration(tmp_path: Path) -> None:
+    # mod.rs already exists (created by _rust_inline_module); the marker module
+    # declaration is appended without disturbing existing declarations.
+    (tmp_path / "mod.rs").write_text("pub mod apis;\npub mod models;\n")
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.FULL_TARGETS["rust"])
+    assert (tmp_path / "spec_version.rs").read_text() == 'pub const SPEC_VERSION: &str = "1.2.3";\n'
+    mod_text = (tmp_path / "mod.rs").read_text()
+    assert "pub mod apis;" in mod_text
+    assert "pub mod models;" in mod_text
+    assert "pub mod spec_version;" in mod_text
+
+
+def test_spec_version_rust_marker_declaration_is_idempotent(tmp_path: Path) -> None:
+    (tmp_path / "mod.rs").write_text("pub mod apis;\n")
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.FULL_TARGETS["rust"])
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.FULL_TARGETS["rust"])
+    assert (tmp_path / "mod.rs").read_text().count("pub mod spec_version;") == 1
+
+
+def test_spec_version_rust_marker_non_inlined_crate_layout(tmp_path: Path) -> None:
+    # Control-plane mode emits a standalone crate (src/lib.rs), not an inlined
+    # mod.rs. The marker must land under src/ and be declared in lib.rs so it is
+    # compiled, not dropped beside an unreferenced top-level mod.rs.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "lib.rs").write_text("pub mod apis;\npub mod models;\n")
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.TARGETS["rust"])
+    assert (src / "spec_version.rs").read_text() == 'pub const SPEC_VERSION: &str = "1.2.3";\n'
+    assert not (tmp_path / "spec_version.rs").exists()
+    assert not (tmp_path / "mod.rs").exists()
+    lib_text = (src / "lib.rs").read_text()
+    assert "pub mod apis;" in lib_text
+    assert "pub mod spec_version;" in lib_text
+
+
+def test_spec_version_rust_marker_without_mod_rs(tmp_path: Path) -> None:
+    # A partial payload with no mod.rs must still yield a usable declaration.
+    generate.write_spec_version("rust", tmp_path, "1.2.3", generate.FULL_TARGETS["rust"])
+    assert (tmp_path / "mod.rs").read_text() == "pub mod spec_version;\n"
+
+
+def test_go_package_name_falls_back_to_target_path() -> None:
+    target = generate.LanguageTarget(
+        generator="go",
+        additional_properties="withGoMod=false",
+        sdk_repo="x/y",
+        target_path="otari/client",
+    )
+    assert generate._go_package_name(target) == "client"

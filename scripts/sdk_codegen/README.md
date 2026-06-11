@@ -32,6 +32,28 @@ The shell is **not** regenerated; only the core is. Audio and images are left
 opaque in the core: they return binary/file payloads that do not map onto a
 JSON response schema.
 
+## Spec version stamping
+
+Compatibility between an SDK and the gateway is expressed through the spec
+version, not matching package numbers (each SDK is versioned independently). So
+every generated core carries the gateway/spec version it was generated from, as a
+language-native marker file the SDK's hand-written shell reads to surface it
+(`__spec_version__` / `SPEC_VERSION` / equivalent):
+
+| Language   | Marker file        | Symbol                            |
+|------------|--------------------|-----------------------------------|
+| python     | `_spec_version.py` | `__spec_version__`                |
+| typescript | `specVersion.ts`   | `SPEC_VERSION`                    |
+| go         | `spec_version.go`  | `SpecVersion` (core's package)    |
+| rust       | `spec_version.rs`  | `SPEC_VERSION` (`spec_version` mod) |
+
+The version is the spec's `info.version` by default; the codegen workflow passes
+the gateway release version (the tag without its leading `v`) via `--spec-version`
+on a release so the stamp is the real release version rather than the `0.0.0-dev`
+placeholder in the committed spec. See
+[`docs/sdk-compatibility.md`](../../docs/sdk-compatibility.md) for the release
+policy and the spec-version to minimum-SDK-version matrix.
+
 ## Endpoint-coverage drift gate
 
 Because the core is generated but the shell is hand-written, a new gateway
