@@ -35,8 +35,8 @@ on shell work across four repos.
 Each SDK reports the gateway/spec version its generated core was built from. The
 gateway stamps that version into the core during codegen
 (`scripts/sdk_codegen/generate.py`); on a gateway release the codegen workflow
-passes the release tag, so the stamp is the real release version rather than the
-`0.0.0-dev` placeholder in the committed spec.
+passes the release version (the tag without its leading `v`), so the stamp is the
+real release version rather than the `0.0.0-dev` placeholder in the committed spec.
 
 How each SDK surfaces it:
 
