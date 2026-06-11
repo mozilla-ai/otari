@@ -57,9 +57,9 @@ def pr_age_days(pr: dict[str, Any], now: datetime) -> float:
 
 
 def select_stale(prs: list[dict[str, Any]], max_age_days: float, now: datetime) -> list[dict[str, Any]]:
-    """Return ``prs`` older than ``max_age_days``, newest-first.
+    """Return ``prs`` older than ``max_age_days``, oldest-first.
 
-    A PR exactly at the threshold is not yet stale; it must exceed it.
+    A PR at the threshold is not yet stale; it must exceed it.
     """
     stale = [pr for pr in prs if pr_age_days(pr, now) > max_age_days]
     return sorted(stale, key=lambda pr: pr["createdAt"])

@@ -30,7 +30,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout gateway
+        # The script authenticates via the gh CLI using the env tokens below, so
+        # the checkout's persisted git credential is unused; drop it to avoid
+        # leaving GITHUB_TOKEN in .git/config while repository code runs.
         uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@v7
         with:
