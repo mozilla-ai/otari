@@ -5,7 +5,7 @@ on:
     branches:
       - 'main'
     paths:
-      - 'src/Otari/**'
+      - 'src/gateway/**'
       - 'alembic/**'
       - 'Dockerfile'
       - 'docker-compose*.yml'

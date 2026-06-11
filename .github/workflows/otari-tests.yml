@@ -4,7 +4,7 @@ on:
   push:
     branches: [ main, develop ]
     paths:
-      - 'src/Otari/**'
+      - 'src/gateway/**'
       - 'alembic/**'
       - 'tests/integration/**'
       - 'tests/unit/**'
@@ -15,7 +15,7 @@ on:
   pull_request:
     branches: [ main ]
     paths:
-      - 'src/Otari/**'
+      - 'src/gateway/**'
       - 'alembic/**'
       - 'tests/integration/**'
       - 'tests/unit/**'
