@@ -35,7 +35,7 @@ Then drive it with the helper script or raw curl:
 ./demo_flow.sh                                                     # full guided walkthrough
 ```
 
-`GATEWAY_URL` defaults to `http://localhost:${OTARI_PORT:-8000}` (the demo
+`OTARI_URL` defaults to `http://localhost:${OTARI_PORT:-8000}` (the demo
 `.env` sets `OTARI_PORT=8088`); the master key defaults to `demo-master-key`.
 
 The encoderfile images are published **per-arch** (the architecture is in the
@@ -149,7 +149,7 @@ curl -sS http://localhost:8088/v1/responses \
     "profile": "prompt-injection",          // required: profile name configured on the guardrails service
     "mode": "monitor",            // optional: "monitor" (default) | "block"
     "on": ["input"],              // optional: defaults to ["input"]; "output" accepted but not yet enforced
-    "url": "http://...:8000",     // optional: per-request override of GATEWAY_GUARDRAILS_URL (SSRF-checked)
+    "url": "http://...:8000",     // optional: per-request override of OTARI_GUARDRAILS_URL (SSRF-checked)
     "validate_kwargs": {}         // optional: extra kwargs forwarded to the service's /validate call
   }
 ]
@@ -171,7 +171,7 @@ curl -sS http://localhost:8088/v1/responses \
 | `start.sh` / `stop.sh` | bring the stack up / down (default: PIGuard encoderfile; `--in-process` for HuggingFace) |
 | `ask.sh` | single guarded request (`--profile`, `--mode`, `--model` flags) |
 | `demo_flow.sh` | guided walkthrough: `/profiles`, direct `/validate`, then block / monitor through the gateway |
-| `gateway-config.yml` | demo gateway config (standalone mode, `demo-master-key`) |
+| `otari-config.yml` | demo gateway config (standalone mode, `demo-master-key`) |
 | `guardrails-encoderfile-service.yaml` | **default** config — `prompt-injection` via the PIGuard encoderfile container |
 | `guardrails-service.yaml` | `--in-process` config — InjecGuard `prompt-injection` (HuggingFace, in-process) |
 | `.env.example` | copy to `.env` and fill in your keys |

@@ -33,16 +33,16 @@ class GuardrailConfig(BaseModel):
 
     URL safety: when ``url`` is supplied it is validated at parse time with the
     same SSRF guard used for MCP server URLs (loopback allowed by default for
-    same-host sidecars; gated by ``GATEWAY_MCP_ALLOW_LOOPBACK`` /
-    ``GATEWAY_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely
-    on the operator-set ``GATEWAY_GUARDRAILS_URL`` instead.
+    same-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /
+    ``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely
+    on the operator-set ``OTARI_GUARDRAILS_URL`` instead.
     """
 
     profile: str = Field(min_length=1, max_length=128)
     """Profile name configured on the guardrails service (e.g. ``"alinia"``)."""
 
     url: str | None = Field(default=None, min_length=1)
-    """Optional per-request override of the operator-set ``GATEWAY_GUARDRAILS_URL``."""
+    """Optional per-request override of the operator-set ``OTARI_GUARDRAILS_URL``."""
 
     on: list[GuardrailDirection] = Field(default_factory=_default_directions)
     """Which directions to check. v1 enforces ``input`` only; ``output`` is

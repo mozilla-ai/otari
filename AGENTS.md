@@ -6,7 +6,7 @@ Scope: entire repo.
 `CLAUDE.md` is a symlink to this file. Always edit `AGENTS.md` directly; never modify `CLAUDE.md`.
 
 ## Project Snapshot
-- Project: `otari`, an OpenAI-compatible LLM gateway (API key management, budget enforcement, usage tracking). The Python package is still named `gateway`.
+- Project: `otari`, an OpenAI-compatible LLM gateway (API key management, budget enforcement, usage tracking). The Python package is named `gateway` (not `otari`): the `otari` distribution name on PyPI belongs to the Otari client SDK, which `any-llm-sdk` depends on, so a top-level `otari` import package here would collide with it. User-facing names (CLI, env vars, docs, OpenAPI title) are `otari`; only the internal import path stays `gateway`.
 - Language/runtime: Python 3.13+.
 - Package manager + task runner: `uv`.
 - App type: FastAPI gateway service with async SQLAlchemy + Alembic.
@@ -19,7 +19,7 @@ Scope: entire repo.
 Read these together before changing request behavior, the flow spans several files.
 
 ### Two runtime modes
-- Mode is derived, not configured directly: `GatewayConfig.is_platform_mode` / `effective_mode` (`src/gateway/core/config.py`) return `platform` when a platform token (`OTARI_AI_TOKEN`, plus legacy aliases) is set, else `standalone`. Setting `GATEWAY_MODE=platform` without a token fails at startup.
+- Mode is derived, not configured directly: `GatewayConfig.is_platform_mode` / `effective_mode` (`src/gateway/core/config.py`) return `platform` when a platform token (`OTARI_AI_TOKEN`, plus legacy aliases) is set, else `standalone`. Setting `OTARI_MODE=platform` (legacy alias `GATEWAY_MODE`) without a token fails at startup.
 - **Standalone**: provider credentials come from the `providers:` block in `config.yml`; users/keys/budgets/usage live in the local DB. All routers are registered.
 - **Platform**: per-request provider credentials are resolved from the platform service; local DB/user/budget management is skipped and usage is reported upstream. `register_routers()` (`src/gateway/api/main.py`) only mounts `chat`, `messages`, `responses`, and `health`; management routers (keys/users/budgets/pricing/usage/etc.) are standalone-only.
 
@@ -31,7 +31,7 @@ Read these together before changing request behavior, the flow spans several fil
 5. Usage + budget reconciliation: standalone writes a `UsageLog` row via the log writer and reconciles spend; platform reports usage upstream.
 
 ### Budget enforcement
-`src/gateway/services/budget_service.py` reserves an estimated cost before the call and reconciles/refunds after. Strategy is selectable (`for_update` row-lock, `cas` compare-and-swap, or `disabled`) via `GATEWAY_BUDGET_STRATEGY`. Per-period resets are driven by `next_budget_reset_at` on the user.
+`src/gateway/services/budget_service.py` reserves an estimated cost before the call and reconciles/refunds after. Strategy is selectable (`for_update` row-lock, `cas` compare-and-swap, or `disabled`) via `OTARI_BUDGET_STRATEGY` (legacy `GATEWAY_BUDGET_STRATEGY`). Per-period resets are driven by `next_budget_reset_at` on the user.
 
 ### Built-in tools vs pass-through
 Only `otari_*` tool types are run by the gateway; every other tool type is forwarded to the provider untouched (`src/gateway/api/routes/_tools.py`). `otari_code_execution` → `SandboxBackend` (`services/sandbox_backend.py`), `otari_web_search` → `WebSearchBackend` (`services/web_search_backend.py`). The agentic tool/MCP loop lives in `services/mcp_loop.py`. Request-level guardrails (`services/guardrails.py`) are a caller-opted, input-side check run before the provider; SSRF checks for outbound URLs live in `services/url_safety.py`.
@@ -40,18 +40,18 @@ Only `otari_*` tool types are run by the gateway; every other tool type is forwa
 ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, UsageLog, ModelPricing, BudgetResetLog). The async engine/session factory and `init_db` live in `src/gateway/core/database.py`; routes get a session via the `get_db` dependency, non-request code uses `create_session()`. Alembic migrations are in `alembic/versions/` and run on startup when `auto_migrate` is set.
 
 ### Config layering
-`GatewayConfig` (`src/gateway/core/config.py`) loads `config.yml` (with `${VAR}` env interpolation) and layers env vars on top using the `GATEWAY_` prefix, with `OTARI_*` accepted as legacy aliases.
+`GatewayConfig` (`src/gateway/core/config.py`) loads `config.yml` (with `${VAR}` env interpolation) and layers env vars on top. The user-facing prefix is `OTARI_` (applied as init overrides for every scalar field via `_apply_otari_env_overrides`); the legacy `GATEWAY_` prefix is still honored as the native pydantic prefix and as a fallback (`OTARI_` wins when both are set). Service-level env vars (e.g. web search, guardrails) read through `otari_env()` in `core/env.py`, which applies the same `OTARI_`-then-`GATEWAY_` precedence.
 ## Setup Commands
 - Create venv: `uv venv`
 - Activate venv: `source .venv/bin/activate`
 - Install deps (dev): `uv sync --dev`
 - Install deps exactly as lockfile (CI-style): `uv sync --dev --frozen`
 ## Run Commands
-- Run gateway from config: `uv run gateway serve --config config.yml`
+- Run Otari from config: `uv run otari serve --config config.yml` (the `gateway` command remains as a legacy alias)
 - Run dev server (reload + `.env`): `make dev`
-- Initialize DB schema: `uv run gateway init-db --config config.yml`
-- Run migrations to head: `uv run gateway migrate --config config.yml`
-- Run migrations to specific revision: `uv run gateway migrate --revision <rev>`
+- Initialize DB schema: `uv run otari init-db --config config.yml`
+- Run migrations to head: `uv run otari migrate --config config.yml`
+- Run migrations to specific revision: `uv run otari migrate --revision <rev>`
 ## Build / Packaging Commands
 - Python package build backend is configured via `setuptools` in `pyproject.toml`.
 - If you need a local package build artifact, use: `uv build`
@@ -60,11 +60,11 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 ## Lint / Typecheck Commands
 - Ruff is configured for linting (rules: `E`, `F`, `I`; line length: 120) in `pyproject.toml`.
 - Run lint checks with `make lint` (or `uv run ruff check src tests scripts`).
-- Ruff is also enforced in CI via `.github/workflows/gateway-lint.yml`.
+- Ruff is also enforced in CI via `.github/workflows/otari-lint.yml`.
 - Primary static checks present in dev dependencies: `ruff`, `mypy`.
 - mypy is configured `strict` over `src`, `tests`, and `scripts` (`pyproject.toml`).
 - Run type checks with `make typecheck` (or `uv run mypy`).
-- mypy is also enforced in CI via `.github/workflows/gateway-typecheck.yml`.
+- mypy is also enforced in CI via `.github/workflows/otari-typecheck.yml`.
 - If introducing a formatter/linter, keep changes in a separate PR unless requested.
 ## Test Commands
 - Main local suite (matches Makefile):
@@ -149,7 +149,7 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - Prefer structured/contextual log messages with `%s` formatting placeholders.
 - Do not log secrets, tokens, or raw API keys (bootstrap exception is intentional one-time behavior).
 ## CI Rules to Mirror Locally
-- Python version for CI: 3.13 (`.github/workflows/gateway-tests.yml`).
+- Python version for CI: 3.13 (`.github/workflows/otari-tests.yml`).
 - Install deps with frozen lockfile in CI.
 - Tests run with coverage and xdist in CI.
 - OpenAPI spec freshness is enforced in CI (`--check`).

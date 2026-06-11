@@ -19,9 +19,9 @@ separate top-level field, so they get their own per-format helpers here.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
+from gateway.core.env import otari_env
 from gateway.services.mcp_loop import PURPOSE_HINT_HEADER
 
 
@@ -61,10 +61,10 @@ def openai_to_anthropic_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any
 def _resolve_header(header: str | None) -> str:
     """Pick the effective purpose-hint preamble header.
 
-    Priority: ``header`` arg → ``GATEWAY_TOOLS_HEADER`` env → built-in default.
+    Priority: ``header`` arg → ``OTARI_TOOLS_HEADER`` env → built-in default.
     Mirrors :func:`gateway.services.mcp_loop.inject_purpose_hints`.
     """
-    return header or os.environ.get("GATEWAY_TOOLS_HEADER") or PURPOSE_HINT_HEADER
+    return header or otari_env("TOOLS_HEADER") or PURPOSE_HINT_HEADER
 
 
 def _build_hint_block(hints: list[tuple[str, str]], header: str | None) -> str:

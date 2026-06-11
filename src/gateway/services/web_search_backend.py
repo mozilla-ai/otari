@@ -2,7 +2,7 @@
 
 A backend the tool-use loop in :mod:`gateway.services.mcp_loop` dispatches
 to whenever the model emits a ``web_search(query=…)`` call. The search
-service is operator-configurable via ``GATEWAY_WEB_SEARCH_URL`` and is
+service is operator-configurable via ``OTARI_WEB_SEARCH_URL`` and is
 expected to speak a SearXNG-compatible JSON API:
 
 * ``GET {base_url}/search?q=…&format=json&engines=…``
@@ -68,7 +68,7 @@ _FETCH_MAX_REDIRECTS = 5
 # Operators who enable scraping-of-major-engines do so consciously.
 # Commercial/production deployments should swap the bundled SearXNG container
 # for a licensed-API backend (Tavily, Brave API, Exa, Linkup, Serper) by
-# pointing GATEWAY_WEB_SEARCH_URL at any service exposing the same
+# pointing OTARI_WEB_SEARCH_URL at any service exposing the same
 # /search?format=json shape.
 _DEFAULT_ENGINES = ("duckduckgo", "mojeek", "qwant", "wikipedia")
 _CONTENT_TRUNCATE_CHARS = 1500
@@ -312,7 +312,7 @@ class WebSearchBackend:
                 current_url,
                 timeout=self._extract_timeout_s,
                 follow_redirects=False,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; otari-gateway-web-search)"},
+                headers={"User-Agent": "Mozilla/5.0 (compatible; otari-web-search)"},
             ) as response:
                 if response.is_redirect:
                     location = response.headers.get("location")

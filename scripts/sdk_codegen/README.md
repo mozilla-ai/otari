@@ -93,7 +93,7 @@ original scope; the published SDKs and the codegen workflow now use
 
 ## Automation
 
-`.github/workflows/gateway-sdk-codegen.yml` runs `generate.py --mode full` on
+`.github/workflows/otari-sdk-codegen.yml` runs `generate.py --mode full` on
 release, on spec change to `main`, or manually, and opens a PR against each SDK
 repo with the regenerated client core dropped into:
 

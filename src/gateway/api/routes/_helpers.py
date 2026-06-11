@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Response, status
 
+from gateway.core.env import otari_env
 from gateway.models.guardrails import GuardrailConfig
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 
@@ -156,7 +156,7 @@ async def apply_input_guardrails(
     if not guardrails:
         return
 
-    default_url = os.environ.get("GATEWAY_GUARDRAILS_URL") or None
+    default_url = otari_env("GUARDRAILS_URL") or None
     try:
         verdict = await run_input_guardrails(guardrails, input_text, default_url=default_url)
     except GuardrailsNotReachableError as exc:

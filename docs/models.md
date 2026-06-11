@@ -1,6 +1,6 @@
 # Models
 
-The gateway routes requests to LLM providers through [any-llm-sdk](https://pypi.org/project/any-llm-sdk/). This page covers the model format, supported providers, and capabilities.
+Otari routes requests to LLM providers through [any-llm-sdk](https://pypi.org/project/any-llm-sdk/). This page covers the model format, supported providers, and capabilities.
 
 ## Model format
 
@@ -13,13 +13,13 @@ mistral:mistral-large-latest
 vertexai:gemini-2.0-flash
 ```
 
-The `provider` prefix tells the gateway which backend to route to. The `model_name` is passed directly to that provider's API.
+The `provider` prefix tells Otari which backend to route to. The `model_name` is passed directly to that provider's API.
 
 ## Supported providers
 
-The gateway depends on `any-llm-sdk[all]`. Provider support can change as the SDK evolves.
+Otari depends on `any-llm-sdk[all]`. Provider support can change as the SDK evolves.
 
-Use this list as a quick reference for common providers supported by the current gateway build.
+Use this list as a quick reference for common providers supported by the current Otari build.
 
 | Provider | Config key | Example model | Notes |
 |----------|-----------|---------------|-------|
@@ -100,7 +100,7 @@ For the full configuration reference, see [Configuration](configuration.md).
 
 ## Listing available models
 
-Query the gateway to see which models are available:
+Query Otari to see which models are available:
 
 ```bash
 curl http://localhost:8000/v1/models \

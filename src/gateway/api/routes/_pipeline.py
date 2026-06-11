@@ -29,7 +29,6 @@ Settlement invariants owned here:
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -72,6 +71,7 @@ from gateway.api.routes._tools import (
     _resolve_sandbox_purpose_hint,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.metrics import record_cost, record_tokens
 from gateway.models.entities import UsageLog
@@ -121,7 +121,7 @@ ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 SANDBOX_NOT_CONFIGURED_DETAIL = (
     "otari_code_execution tool requested but no sandbox is configured on this gateway. "
-    "Set GATEWAY_SANDBOX_URL on the gateway, or remove otari_code_execution from `tools`."
+    "Set OTARI_SANDBOX_URL on the gateway, or remove otari_code_execution from `tools`."
 )
 SANDBOX_MCP_CONFLICT_DETAIL = (
     "otari_code_execution and mcp_servers cannot be combined in the same request yet; "
@@ -129,14 +129,14 @@ SANDBOX_MCP_CONFLICT_DETAIL = (
 )
 WEB_SEARCH_NOT_CONFIGURED_DETAIL = (
     "otari_web_search tool requested but no search backend is configured on this gateway. "
-    "Set GATEWAY_WEB_SEARCH_URL on the gateway, or remove otari_web_search from `tools`."
+    "Set OTARI_WEB_SEARCH_URL on the gateway, or remove otari_web_search from `tools`."
 )
 WEB_SEARCH_CONFLICT_DETAIL = (
     "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same "
     "request yet; pick one."
 )
-SANDBOX_UNREACHABLE_DETAIL = "code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL"
-WEB_SEARCH_UNREACHABLE_DETAIL = "web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL"
+SANDBOX_UNREACHABLE_DETAIL = "code_execution sandbox unreachable — check OTARI_SANDBOX_URL"
+WEB_SEARCH_UNREACHABLE_DETAIL = "web_search backend unreachable — check OTARI_WEB_SEARCH_URL"
 
 
 class ErrorKind(Enum):
@@ -484,7 +484,7 @@ async def prepare_gateway_tools(
             mcp_servers = (mcp_servers or []) + resolved_mcp_servers
 
         sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
-        sandbox_url: str | None = os.environ.get("GATEWAY_SANDBOX_URL") or None
+        sandbox_url: str | None = otari_env("SANDBOX_URL") or None
         use_sandbox = False
         if sandbox_tool_entry is not None:
             if sandbox_url is None:
@@ -494,7 +494,7 @@ async def prepare_gateway_tools(
             use_sandbox = True
 
         web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
-        web_search_url: str | None = os.environ.get("GATEWAY_WEB_SEARCH_URL") or None
+        web_search_url: str | None = otari_env("WEB_SEARCH_URL") or None
         use_web_search = False
         if web_search_tool_entry is not None:
             if web_search_url is None:

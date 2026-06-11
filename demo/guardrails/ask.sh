@@ -13,9 +13,9 @@
 #                    the X-Otari-Guardrails response header.
 #
 # Env vars:
-#   GATEWAY_URL  — default http://localhost:${OTARI_PORT:-8000}
-#   GATEWAY_KEY  — default 'demo-master-key'  (your master key or API key)
-#   GATEWAY_USER — default 'demo'
+#   OTARI_URL  — default http://localhost:${OTARI_PORT:-8000}
+#   OTARI_KEY  — default 'demo-master-key'  (your master key or API key)
+#   OTARI_USER — default 'demo'
 #
 # Usage (mode defaults to `monitor`, matching the gateway default):
 #   ./ask.sh "What is the capital of France?"                          # passes
@@ -26,7 +26,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GATEWAY_ROOT="$(cd "$HERE/../.." && pwd)"
+OTARI_ROOT="$(cd "$HERE/../.." && pwd)"
 if [[ -f "$HERE/.env" ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -34,13 +34,13 @@ if [[ -f "$HERE/.env" ]]; then
   set +a
 fi
 
-GATEWAY_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q gateway 2>/dev/null | head -1 || true)
-GUARDRAILS_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q anyguardrails 2>/dev/null | head -1 || true)
+OTARI_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q otari 2>/dev/null | head -1 || true)
+GUARDRAILS_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q anyguardrails 2>/dev/null | head -1 || true)
 
-GATEWAY_PORT=${OTARI_PORT:-${GATEWAY_PORT:-8000}}
-GATEWAY_URL=${GATEWAY_URL:-http://localhost:${GATEWAY_PORT}}
-GATEWAY_KEY=${GATEWAY_KEY:-demo-master-key}
-GATEWAY_USER=${GATEWAY_USER:-demo}
+OTARI_PORT=${OTARI_PORT:-${OTARI_PORT:-8000}}
+OTARI_URL=${OTARI_URL:-http://localhost:${OTARI_PORT}}
+OTARI_KEY=${OTARI_KEY:-demo-master-key}
+OTARI_USER=${OTARI_USER:-demo}
 
 MODEL="anthropic:claude-sonnet-4-6"
 PROFILE="prompt-injection"
@@ -64,10 +64,10 @@ done
 query="${1:?usage: ./ask.sh [--model M] [--profile P] [--mode block|monitor] \"your prompt\"}"
 
 # Ensure the demo user exists (idempotent — 409 on later calls is fine).
-curl -sf -X POST "$GATEWAY_URL/v1/users" \
-  -H "Authorization: Bearer $GATEWAY_KEY" \
+curl -sf -X POST "$OTARI_URL/v1/users" \
+  -H "Authorization: Bearer $OTARI_KEY" \
   -H "Content-Type: application/json" \
-  -d "{\"user_id\": \"$GATEWAY_USER\"}" >/dev/null 2>&1 || true
+  -d "{\"user_id\": \"$OTARI_USER\"}" >/dev/null 2>&1 || true
 
 body=$(python3 -c '
 import json, sys
@@ -77,7 +77,7 @@ print(json.dumps({
     "guardrails": [{"profile": sys.argv[4], "mode": sys.argv[5]}],
     "user": sys.argv[3],
 }))
-' "$MODEL" "$query" "$GATEWAY_USER" "$PROFILE" "$MODE")
+' "$MODEL" "$query" "$OTARI_USER" "$PROFILE" "$MODE")
 
 echo "──────────────────────────────────────────────────────────"
 echo "Q: $query"
@@ -86,14 +86,14 @@ echo "    guardrail: $PROFILE (mode=$MODE)"
 echo "──────────────────────────────────────────────────────────"
 echo
 
-_gw_before=$(docker logs $GATEWAY_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
+_gw_before=$(docker logs $OTARI_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 _gr_before=$(docker logs $GUARDRAILS_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 
 # Non-streaming: the interesting signal is the status code (403 vs 200), the
 # X-Otari-Guardrails header (monitor mode), and the body.
 status=$(curl -sS -o /tmp/.guardrails-body -D /tmp/.guardrails-headers -w '%{http_code}' \
-  -X POST "$GATEWAY_URL/v1/chat/completions" \
-  -H "Authorization: Bearer $GATEWAY_KEY" \
+  -X POST "$OTARI_URL/v1/chat/completions" \
+  -H "Authorization: Bearer $OTARI_KEY" \
   -H "Content-Type: application/json" \
   -d "$body")
 
@@ -141,7 +141,7 @@ PY
 DIM=$'\e[2m'; BOLD=$'\e[1m'; RST=$'\e[0m'
 echo
 echo "${BOLD}${DIM}── gateway saw ──${RST}"
-docker logs $GATEWAY_CONTAINER 2>&1 \
+docker logs $OTARI_CONTAINER 2>&1 \
   | tail -n +$((_gw_before + 1)) \
   | grep -iE "POST .*chat|guardrail|ERROR" \
   | sed "s/^/${DIM}  /; s/$/${RST}/" \

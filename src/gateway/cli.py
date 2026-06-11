@@ -16,7 +16,7 @@ from gateway.main import create_app
 
 @click.group()
 def cli() -> None:
-    """otari-gateway CLI."""
+    """Otari CLI."""
 
 
 @cli.command()
@@ -57,7 +57,7 @@ def serve(
     workers: int,
     log_level: int,
 ) -> None:
-    """Start the gateway server."""
+    """Start the Otari server."""
     try:
         gateway_config = load_config(config)
     except ValueError as e:
@@ -93,7 +93,7 @@ def serve(
         )
         logger.warning("Set OTARI_MASTER_KEY environment variable or use --master-key flag.")
 
-    logger.info("Starting otari-gateway on %s:%s", gateway_config.host, gateway_config.port)
+    logger.info("Starting Otari on %s:%s", gateway_config.host, gateway_config.port)
     if gateway_config.is_platform_mode:
         logger.info("Database: disabled (platform mode)")
     else:
@@ -112,7 +112,7 @@ def serve(
             workers=workers,
         )
     except KeyboardInterrupt:
-        logger.info("\nShutting down gateway...")
+        logger.info("\nShutting down Otari...")
         sys.exit(0)
 
 

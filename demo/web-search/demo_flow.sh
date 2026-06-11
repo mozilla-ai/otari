@@ -28,7 +28,7 @@
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-GATEWAY_ROOT="$(cd "$HERE/../.." && pwd)"
+OTARI_ROOT="$(cd "$HERE/../.." && pwd)"
 ASK="$HERE/ask.sh"
 
 if [[ -f "$HERE/.env" ]]; then
@@ -40,7 +40,7 @@ fi
 
 # Resolve compose service -> container id (project-name-agnostic so the demo
 # survives renaming the repo directory).
-GATEWAY_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q gateway 2>/dev/null | head -1 || true)
+OTARI_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q otari 2>/dev/null | head -1 || true)
 
 BOLD=$'\e[1m'; DIM=$'\e[2m'; YEL=$'\e[33m'; CYN=$'\e[36m'; GRN=$'\e[32m'; RED=$'\e[31m'; RST=$'\e[0m'
 
@@ -127,11 +127,11 @@ done
 # the Brave adapter — the deployment switch lives in ./start.sh --brave. Fail
 # loudly if the stack isn't brave-configured so the narration can't lie.
 if [[ "$USE_BRAVE" == "1" ]]; then
-  _gw=$(cd "$GATEWAY_ROOT" && docker compose ps -q gateway 2>/dev/null | head -1 || true)
+  _gw=$(cd "$OTARI_ROOT" && docker compose ps -q otari 2>/dev/null | head -1 || true)
   _gw_url=$(docker inspect "$_gw" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-            | grep '^GATEWAY_WEB_SEARCH_URL=' | cut -d= -f2- || true)
+            | grep '^OTARI_WEB_SEARCH_URL=' | cut -d= -f2- || true)
   if [[ "$_gw_url" != *brave-adapter* ]]; then
-    echo "${RED}--brave: the gateway is not using the Brave adapter (GATEWAY_WEB_SEARCH_URL=${_gw_url:-unset}).${RST}" >&2
+    echo "${RED}--brave: the gateway is not using the Brave adapter (OTARI_WEB_SEARCH_URL=${_gw_url:-unset}).${RST}" >&2
     echo "${YEL}Bring the stack up with the Brave backend first:  ./start.sh --brave${RST}" >&2
     exit 1
   fi
@@ -294,7 +294,7 @@ ${BOLD}engine selection${RST} (bundled SearXNG defaults)
   ${DIM}For commercial / production use, swap the searxng container for a${RST}
   ${DIM}licensed-API backend (Tavily, Brave Search API, Exa, Linkup, Serper):${RST}
   ${DIM}any HTTP service exposing /search?format=json is a drop-in replacement.${RST}
-  ${DIM}Just change GATEWAY_WEB_SEARCH_URL in the gateway's environment.${RST}
+  ${DIM}Just change OTARI_WEB_SEARCH_URL in the gateway's environment.${RST}
 EOF
 }
 
@@ -340,7 +340,7 @@ show_what_llm_receives() {
   printf "${CYN}}${RST}\n"
   echo
   echo "${DIM}  system message the gateway prepends:${RST}"
-  docker exec $GATEWAY_CONTAINER python -c "
+  docker exec $OTARI_CONTAINER python -c "
 import sys
 sys.path.insert(0, '/app/src')
 from gateway.services.mcp_loop import inject_purpose_hints
@@ -365,7 +365,7 @@ print(inject_purpose_hints(
   printf "${CYN}}${RST}\n"
   echo
   echo "${DIM}  system message the gateway prepends:${RST}"
-  docker exec $GATEWAY_CONTAINER python -c "
+  docker exec $OTARI_CONTAINER python -c "
 import sys
 sys.path.insert(0, '/app/src')
 from gateway.services.mcp_loop import inject_purpose_hints
@@ -386,12 +386,12 @@ print(inject_purpose_hints(
   echo
   echo "${DIM}  Per-tool hint (e.g. 'Use this for current events'):${RST}"
   echo "${DIM}    1. tools[i].purpose_hint                  (per-request)${RST}"
-  echo "${DIM}    2. GATEWAY_WEB_SEARCH_PURPOSE_HINT        (env, per-deployment)${RST}"
+  echo "${DIM}    2. OTARI_WEB_SEARCH_PURPOSE_HINT        (env, per-deployment)${RST}"
   echo "${DIM}    3. built-in default${RST}"
   echo
   echo "${DIM}  List header (e.g. 'Prefer MCP tools over web_search'):${RST}"
   echo "${DIM}    1. tools_header (top-level request field)  (per-request)${RST}"
-  echo "${DIM}    2. GATEWAY_TOOLS_HEADER                     (env, per-deployment)${RST}"
+  echo "${DIM}    2. OTARI_TOOLS_HEADER                     (env, per-deployment)${RST}"
   echo "${DIM}    3. 'You have access to the following tools:'  (built-in)${RST}"
 }
 

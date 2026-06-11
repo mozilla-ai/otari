@@ -1,8 +1,8 @@
 name: SDK Regen PR Staleness
 
-# Alerts when an SDK regeneration PR (opened by gateway-sdk-codegen.yml on the
+# Alerts when an SDK regeneration PR (opened by otari-sdk-codegen.yml on the
 # sdk-codegen/client-core branch) sits unmerged beyond the freshness window,
-# which signals an SDK lagging the gateway spec. Keeps a single tracking issue on
+# which signals an SDK lagging the Otari spec. Keeps a single tracking issue on
 # this repo in sync: opened/updated while any PR is stale, closed once none are.
 #
 # Reading PRs on the SDK repos needs a token with pull-requests:read on
@@ -29,7 +29,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout gateway
+      - name: Checkout Otari
         # The script authenticates via the gh CLI using the env tokens below, so
         # the checkout's persisted git credential is unused; drop it to avoid
         # leaving GITHUB_TOKEN in .git/config while repository code runs.
@@ -46,7 +46,7 @@ jobs:
           # SDK repos live outside this repo, so the cross-repo read token is
           # required; the tracking issue on this repo uses GITHUB_TOKEN.
           GH_TOKEN: ${{ secrets.SDK_CODEGEN_TOKEN }}
-          GATEWAY_GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OTARI_GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MAX_AGE_DAYS: ${{ github.event.inputs.max_age_days || '7' }}
         # The script is stdlib-only and shells out to the preinstalled gh CLI, so
         # the project environment does not need syncing.

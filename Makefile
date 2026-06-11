@@ -2,7 +2,7 @@
 
 help:
 	@printf "Available targets:\n"
-	@printf "  dev  Run gateway with uvicorn --reload using .env\n"
+	@printf "  dev  Run Otari with uvicorn --reload using .env\n"
 	@printf "  test Run full test suite (unit + integration)\n"
 	@printf "  test-unit Run unit tests\n"
 	@printf "  test-integration Run integration tests\n"

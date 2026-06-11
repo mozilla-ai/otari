@@ -385,7 +385,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional override for the lead-in that the gateway prepends before the per-tool hint block in the system message. Useful for expressing global tool-selection policy (e.g. 'prefer MCP tools over code_execution'). Falls back to GATEWAY_TOOLS_HEADER env, then to the built-in default.",
+            "description": "Optional override for the lead-in that the gateway prepends before the per-tool hint block in the system message. Useful for expressing global tool-selection policy (e.g. 'prefer MCP tools over code_execution'). Falls back to OTARI_TOOLS_HEADER env, then to the built-in default.",
             "title": "Tools Header"
           },
           "top_p": {
@@ -848,7 +848,7 @@
         "type": "object"
       },
       "GuardrailConfig": {
-        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated at parse time with the\nsame SSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``GATEWAY_MCP_ALLOW_LOOPBACK`` /\n``GATEWAY_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``GATEWAY_GUARDRAILS_URL`` instead.",
+        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated at parse time with the\nsame SSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
         "properties": {
           "mode": {
             "default": "monitor",
@@ -1077,7 +1077,7 @@
         "type": "object"
       },
       "McpServerConfig": {
-        "description": "Inline MCP server configuration accepted on the chat completions request.\n\nStreamable HTTP transport. The `url` must be reachable from the gateway process.\n\nURL safety is enforced at parse time:\n\n* SSRF guard rejects private, link-local, and reserved IP ranges. Loopback is\n  allowed by default (sidecars, dev) \u2014 set ``GATEWAY_MCP_ALLOW_LOOPBACK=false`` to disable.\n* Plain ``http://`` is rejected when ``authorization_token`` is set, to keep\n  bearer tokens off the wire in cleartext.",
+        "description": "Inline MCP server configuration accepted on the chat completions request.\n\nStreamable HTTP transport. The `url` must be reachable from the gateway process.\n\nURL safety is enforced at parse time:\n\n* SSRF guard rejects private, link-local, and reserved IP ranges. Loopback is\n  allowed by default (sidecars, dev) \u2014 set ``OTARI_MCP_ALLOW_LOOPBACK=false`` to disable.\n* Plain ``http://`` is rejected when ``authorization_token`` is set, to keep\n  bearer tokens off the wire in cleartext.",
         "properties": {
           "allowed_tools": {
             "anyOf": [
@@ -2377,8 +2377,8 @@
     }
   },
   "info": {
-    "description": "A clean FastAPI gateway for otari with API key management",
-    "title": "otari-gateway",
+    "description": "Otari, an OpenAI-compatible LLM gateway with API key management",
+    "title": "otari",
     "version": "0.0.0-dev"
   },
   "openapi": "3.1.0",

@@ -34,6 +34,18 @@ only** — platform mode resolves budgets/pricing upstream and is unaffected.
 - Startup warning when `require_pricing` is enabled but no pricing is configured.
 - `SECURITY.md`.
 
+### Changed
+
+- **Renamed "Otari Gateway" to "Otari" across the product surface.** The CLI is
+  now `otari` (the `gateway` command stays as a legacy alias). Environment
+  variables use the `OTARI_` prefix; the legacy `GATEWAY_` prefix still works as a
+  fallback, and `OTARI_` wins when both are set. The OpenAPI title, the default
+  SQLite filename (`otari.db`), the Docker Compose service (`otari`), and the CI
+  workflow files (`otari-*.yml`) were renamed to match. The Python import package
+  stays `gateway`: the `otari` distribution name on PyPI belongs to the Otari
+  client SDK. Existing `GATEWAY_*` variables and the `gateway` command keep
+  working, so no configuration change is required.
+
 ### Changed (BREAKING — standalone mode)
 
 - **`require_pricing` defaults to `true`:** requests for models with no pricing

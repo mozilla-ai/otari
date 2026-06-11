@@ -16,11 +16,11 @@ The keyword alone says who runs the code — no flag, no env toggle.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from enum import StrEnum, auto
 from typing import Any
 
+from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.services.web_search_backend import WebSearchBackend
 
@@ -108,12 +108,12 @@ def _strip_gateway_fields(
 def _resolve_sandbox_purpose_hint(sandbox_tool_entry: dict[str, Any] | None) -> str | None:
     """Resolve the per-tool ``purpose_hint`` for the sandbox.
 
-    Priority: tool entry's ``purpose_hint`` → ``GATEWAY_SANDBOX_PURPOSE_HINT``
+    Priority: tool entry's ``purpose_hint`` → ``OTARI_SANDBOX_PURPOSE_HINT``
     env → ``None`` (SandboxBackend falls back to its built-in default).
     """
     return (
         (sandbox_tool_entry.get("purpose_hint") if sandbox_tool_entry else None)
-        or os.environ.get("GATEWAY_SANDBOX_PURPOSE_HINT")
+        or otari_env("SANDBOX_PURPOSE_HINT")
         or None
     )
 
@@ -166,10 +166,10 @@ def _extract_web_search_tool(
 
 
 def _resolve_web_search_purpose_hint(tool_entry: dict[str, Any] | None) -> str | None:
-    """Per-tool entry → ``GATEWAY_WEB_SEARCH_PURPOSE_HINT`` → ``None`` (backend default)."""
+    """Per-tool entry → ``OTARI_WEB_SEARCH_PURPOSE_HINT`` → ``None`` (backend default)."""
     return (
         (tool_entry.get("purpose_hint") if tool_entry else None)
-        or os.environ.get("GATEWAY_WEB_SEARCH_PURPOSE_HINT")
+        or otari_env("WEB_SEARCH_PURPOSE_HINT")
         or None
     )
 
@@ -181,36 +181,36 @@ def _build_web_search_backend(*, base_url: str, tool_entry: dict[str, Any]) -> W
     ``blocked_domains``, ``purpose_hint``) override env-level defaults.
     Operator-level env knobs:
 
-      * ``GATEWAY_WEB_SEARCH_ENGINES`` — comma-separated SearXNG engine list
-      * ``GATEWAY_WEB_SEARCH_MAX_RESULTS`` — default cap on returned hits
-      * ``GATEWAY_WEB_SEARCH_EXTRACT`` — "0"/"false" to disable in-process
+      * ``OTARI_WEB_SEARCH_ENGINES`` — comma-separated SearXNG engine list
+      * ``OTARI_WEB_SEARCH_MAX_RESULTS`` — default cap on returned hits
+      * ``OTARI_WEB_SEARCH_EXTRACT`` — "0"/"false" to disable in-process
         content extraction (snippet-only mode).
-      * ``GATEWAY_WEB_SEARCH_PURPOSE_HINT`` — per-deployment hint override.
+      * ``OTARI_WEB_SEARCH_PURPOSE_HINT`` — per-deployment hint override.
     """
     kwargs: dict[str, Any] = {"base_url": base_url}
 
-    engines_str = os.environ.get("GATEWAY_WEB_SEARCH_ENGINES")
+    engines_str = otari_env("WEB_SEARCH_ENGINES")
     if engines_str:
         engines = tuple(e.strip() for e in engines_str.split(",") if e.strip())
         if engines:
             kwargs["engines"] = engines
 
-    max_env = os.environ.get("GATEWAY_WEB_SEARCH_MAX_RESULTS")
+    max_env = otari_env("WEB_SEARCH_MAX_RESULTS")
     if max_env:
         try:
             parsed_max = int(max_env)
         except ValueError:
-            logger.warning("GATEWAY_WEB_SEARCH_MAX_RESULTS=%r is not an int; ignoring", max_env)
+            logger.warning("OTARI_WEB_SEARCH_MAX_RESULTS=%r is not an int; ignoring", max_env)
         else:
             if parsed_max >= 1:
                 kwargs["max_results"] = parsed_max
             else:
-                logger.warning("GATEWAY_WEB_SEARCH_MAX_RESULTS=%r is not >= 1; ignoring", max_env)
+                logger.warning("OTARI_WEB_SEARCH_MAX_RESULTS=%r is not >= 1; ignoring", max_env)
     req_max = tool_entry.get("max_results")
     if isinstance(req_max, int) and req_max > 0:
         kwargs["max_results"] = req_max
 
-    extract_env = os.environ.get("GATEWAY_WEB_SEARCH_EXTRACT")
+    extract_env = otari_env("WEB_SEARCH_EXTRACT")
     if extract_env is not None:
         kwargs["extract_content"] = extract_env.lower() not in {"0", "false", "no", "off"}
 

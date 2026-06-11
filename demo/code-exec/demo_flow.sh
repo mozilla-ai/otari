@@ -29,7 +29,7 @@
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-GATEWAY_ROOT="$(cd "$HERE/../.." && pwd)"
+OTARI_ROOT="$(cd "$HERE/../.." && pwd)"
 ASK="$HERE/ask.sh"
 
 if [[ -f "$HERE/.env" ]]; then
@@ -41,7 +41,7 @@ fi
 
 # Resolve compose service -> container id (project-name-agnostic so the demo
 # survives renaming the repo directory).
-GATEWAY_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q gateway 2>/dev/null | head -1 || true)
+OTARI_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q otari 2>/dev/null | head -1 || true)
 
 BOLD=$'\e[1m'; DIM=$'\e[2m'; YEL=$'\e[33m'; CYN=$'\e[36m'; GRN=$'\e[32m'; RED=$'\e[31m'; RST=$'\e[0m'
 
@@ -320,7 +320,7 @@ show_what_llm_receives() {
   printf "${CYN}}${RST}\n"
   echo
   echo "${DIM}  system message the gateway prepends:${RST}"
-  docker exec $GATEWAY_CONTAINER python -c "
+  docker exec $OTARI_CONTAINER python -c "
 import sys
 sys.path.insert(0, '/app/src')
 from gateway.services.mcp_loop import inject_purpose_hints
@@ -345,7 +345,7 @@ print(inject_purpose_hints(
   printf "${CYN}}${RST}\n"
   echo
   echo "${DIM}  system message the gateway prepends:${RST}"
-  docker exec $GATEWAY_CONTAINER python -c "
+  docker exec $OTARI_CONTAINER python -c "
 import sys
 sys.path.insert(0, '/app/src')
 from gateway.services.mcp_loop import inject_purpose_hints
@@ -366,12 +366,12 @@ print(inject_purpose_hints(
   echo
   echo "${DIM}  Per-tool hint (e.g. 'Use this for math'):${RST}"
   echo "${DIM}    1. tools[i].purpose_hint              (per-request)${RST}"
-  echo "${DIM}    2. GATEWAY_SANDBOX_PURPOSE_HINT       (env, per-deployment)${RST}"
+  echo "${DIM}    2. OTARI_SANDBOX_PURPOSE_HINT       (env, per-deployment)${RST}"
   echo "${DIM}    3. built-in default${RST}"
   echo
   echo "${DIM}  List header (e.g. 'Prefer MCP tools over code_execution'):${RST}"
   echo "${DIM}    1. tools_header (top-level request field)  (per-request)${RST}"
-  echo "${DIM}    2. GATEWAY_TOOLS_HEADER                     (env, per-deployment)${RST}"
+  echo "${DIM}    2. OTARI_TOOLS_HEADER                     (env, per-deployment)${RST}"
   echo "${DIM}    3. 'You have access to the following tools:'  (built-in)${RST}"
 }
 

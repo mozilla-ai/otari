@@ -1,5 +1,5 @@
 services:
-  gateway:
+  otari:
     # Pulls from Docker Hub by default. Contributors testing a feature branch
     # with unreleased code should build the image locally first:
     #     docker build -t mzdotai/otari:latest .
@@ -10,45 +10,45 @@ services:
     ports:
       # Host port 8000 by default. Override via $OTARI_PORT when other
       # services on the host already own :8000 (e.g. another local backend).
-      - "${OTARI_PORT:-${GATEWAY_PORT:-8000}}:8000"
+      - "${OTARI_PORT:-8000}:8000"
     volumes:
       # Default `./config.yml` matches the existing operator convention
       # (gitignored, operator-supplied). The demo overrides this via
-      # GATEWAY_CONFIG_PATH=./demo/code-exec/gateway-config.yml so the
+      # OTARI_CONFIG_PATH=./demo/code-exec/otari-config.yml so the
       # repo's main config.yml stays untouched.
-      - ${GATEWAY_CONFIG_PATH:-./config.yml}:/app/config.yml
+      - ${OTARI_CONFIG_PATH:-./config.yml}:/app/config.yml
       - ./service_account.json:/app/service_account.json
-    command: ["gateway", "serve", "--config", "/app/config.yml"]
+    command: ["otari", "serve", "--config", "/app/config.yml"]
     environment:
       # In-network URL of the sandbox image — set so the gateway can dispatch
       # `code_execution` tool calls to the sandbox container without any
       # client-side configuration.
-      - GATEWAY_SANDBOX_URL=http://sandbox:8080
+      - OTARI_SANDBOX_URL=http://sandbox:8080
       # Optional operator-level purpose hint for the code_execution tool. Falls
       # back to a Python/pandas/numpy-flavoured default if unset. Per-request
       # tools[i].purpose_hint still wins over this.
-      - GATEWAY_SANDBOX_PURPOSE_HINT=${GATEWAY_SANDBOX_PURPOSE_HINT:-}
+      - OTARI_SANDBOX_PURPOSE_HINT=${OTARI_SANDBOX_PURPOSE_HINT:-}
       # In-network URL of the web-search backend — any HTTP service exposing
       # a SearXNG-compatible /search?format=json endpoint. The bundled
       # `searxng` profile container is the default; swap by changing this URL
       # to point at any other adapter (commercial-API fronting service etc.).
-      - GATEWAY_WEB_SEARCH_URL=${GATEWAY_WEB_SEARCH_URL:-http://searxng:8080}
+      - OTARI_WEB_SEARCH_URL=${OTARI_WEB_SEARCH_URL:-http://searxng:8080}
       # Optional knobs. Defaults are conservative — see web_search_backend.py.
-      - GATEWAY_WEB_SEARCH_ENGINES=${GATEWAY_WEB_SEARCH_ENGINES:-}
-      - GATEWAY_WEB_SEARCH_MAX_RESULTS=${GATEWAY_WEB_SEARCH_MAX_RESULTS:-}
-      - GATEWAY_WEB_SEARCH_EXTRACT=${GATEWAY_WEB_SEARCH_EXTRACT:-}
-      - GATEWAY_WEB_SEARCH_PURPOSE_HINT=${GATEWAY_WEB_SEARCH_PURPOSE_HINT:-}
+      - OTARI_WEB_SEARCH_ENGINES=${OTARI_WEB_SEARCH_ENGINES:-}
+      - OTARI_WEB_SEARCH_MAX_RESULTS=${OTARI_WEB_SEARCH_MAX_RESULTS:-}
+      - OTARI_WEB_SEARCH_EXTRACT=${OTARI_WEB_SEARCH_EXTRACT:-}
+      - OTARI_WEB_SEARCH_PURPOSE_HINT=${OTARI_WEB_SEARCH_PURPOSE_HINT:-}
       # In-network URL of the guardrails service — the otari-anyguardrails
       # container, which exposes POST /validate over `any-guardrail`. Callers
       # opt a request in per-request via the top-level `guardrails` field; the
       # gateway runs the configured profile(s) against this URL before calling
       # the provider. Brought up by the `guardrails` compose profile below.
-      - GATEWAY_GUARDRAILS_URL=${GATEWAY_GUARDRAILS_URL:-http://anyguardrails:8000}
+      - OTARI_GUARDRAILS_URL=${OTARI_GUARDRAILS_URL:-http://anyguardrails:8000}
       # Optional operator-level header for the per-tool hint block in the system
       # message. Falls back to "You have access to the following tools:" if unset.
       # Useful for tone/translation/deployment-wide preferences. Not per-request:
       # callers who want a custom framing should set their own system message.
-      - GATEWAY_TOOLS_HEADER=${GATEWAY_TOOLS_HEADER:-}
+      - OTARI_TOOLS_HEADER=${OTARI_TOOLS_HEADER:-}
       # Pass provider API keys from host env so config.yml stays free of
       # secrets. any-llm/the underlying SDK picks them up when the config
       # doesn't override.
@@ -69,16 +69,16 @@ services:
       # Host port 5433 (container still :5432) — avoids clashing with another
       # local postgres on the default port. Gateway connects via the Docker
       # network at postgres:5432, so the host mapping is only for external
-      # tools (psql / TablePlus / etc.). Override with $GATEWAY_POSTGRES_PORT.
-      - "${GATEWAY_POSTGRES_PORT:-5433}:5432"
+      # tools (psql / TablePlus / etc.). Override with $OTARI_POSTGRES_PORT.
+      - "${OTARI_POSTGRES_PORT:-5433}:5432"
     environment:
-      - POSTGRES_USER=gateway
-      - POSTGRES_PASSWORD=gateway
-      - POSTGRES_DB=gateway
+      - POSTGRES_USER=otari
+      - POSTGRES_PASSWORD=otari
+      - POSTGRES_DB=otari
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gateway"]
+      test: ["CMD-SHELL", "pg_isready -U otari"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -131,7 +131,7 @@ services:
   # uses a licensed API (Tavily, Brave Search API with key, Exa, Linkup,
   # Serper). Any HTTP service that exposes a SearXNG-compatible
   # /search?format=json shape is a drop-in replacement — just change
-  # GATEWAY_WEB_SEARCH_URL in the gateway's environment.
+  # OTARI_WEB_SEARCH_URL in the gateway's environment.
   #
   # Opt-in via the `web-search` compose profile so operators who don't use
   # the web_search tool aren't forced to pull this image. Bring it up with
@@ -158,7 +158,7 @@ services:
       # SearXNG uses a per-instance secret for CSRF tokens etc. The default
       # below is fine for a single-tenant gateway-internal deployment; rotate
       # via $SEARXNG_SECRET for multi-tenant or public-facing setups.
-      - SEARXNG_SECRET=${SEARXNG_SECRET:-otari-gateway-local-dev-secret}
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-otari-local-dev-secret}
     restart: unless-stopped
 
   # Commercial-API web-search backend — a thin adapter that fronts the Brave
@@ -168,7 +168,7 @@ services:
   # results. Source + how-to live in scripts/web-search-brave-adapter/.
   #
   # Opt-in via the `web-search-brave` profile. To use it, set
-  #   GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
+  #   OTARI_WEB_SEARCH_URL=http://brave-adapter:8080
   #   BRAVE_API_KEY=<your key from https://brave.com/search/api/>
   # then `docker compose --profile web-search-brave up -d --build brave-adapter gateway`.
   brave-adapter:

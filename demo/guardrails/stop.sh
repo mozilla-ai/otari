@@ -3,9 +3,9 @@
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-GATEWAY_ROOT="$(cd "$HERE/../.." && pwd)"
+OTARI_ROOT="$(cd "$HERE/../.." && pwd)"
 
-cd "$GATEWAY_ROOT"
+cd "$OTARI_ROOT"
 # The `guardrails` profile covers both anyguardrails and the encoderfile
 # container, so a single profile tears down everything regardless of how the
 # stack was started. --env-file is conditional — tear-down needs no env vars,

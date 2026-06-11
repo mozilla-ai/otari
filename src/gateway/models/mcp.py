@@ -15,7 +15,7 @@ class McpServerConfig(BaseModel):
     URL safety is enforced at parse time:
 
     * SSRF guard rejects private, link-local, and reserved IP ranges. Loopback is
-      allowed by default (sidecars, dev) — set ``GATEWAY_MCP_ALLOW_LOOPBACK=false`` to disable.
+      allowed by default (sidecars, dev) — set ``OTARI_MCP_ALLOW_LOOPBACK=false`` to disable.
     * Plain ``http://`` is rejected when ``authorization_token`` is set, to keep
       bearer tokens off the wire in cleartext.
     """

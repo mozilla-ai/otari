@@ -1,5 +1,5 @@
 services:
-  gateway:
+  otari:
     build:
       context: .
       dockerfile: Dockerfile

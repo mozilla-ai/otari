@@ -1,5 +1,7 @@
 import os
 import re
+import types
+import typing
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -17,14 +19,14 @@ PLATFORM_TOKEN_ENV_VARS = (
     "OTARI_PLATFORM_TOKEN",
     "ANY_LLM_PLATFORM_TOKEN",
 )
-OTARI_ENV_ALIASES_TO_GATEWAY = {
-    "OTARI_MASTER_KEY": ("master_key", str),
-    "OTARI_DATABASE_URL": ("database_url", str),
-    "OTARI_HOST": ("host", str),
-    "OTARI_PORT": ("port", int),
-    "OTARI_AUTO_MIGRATE": ("auto_migrate", bool),
-    "OTARI_BOOTSTRAP_API_KEY": ("bootstrap_api_key", bool),
-}
+# User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
+# OTARI_PORT). The GATEWAY_ prefix below is the legacy native pydantic prefix,
+# still honored for backward compatibility; OTARI_ wins when both are set.
+OTARI_ENV_PREFIX = "OTARI_"
+
+
+class _NonScalarField(Exception):
+    """Raised when a config field is not a simple scalar settable from a plain env string."""
 
 
 def _get_platform_token_from_env() -> str | None:
@@ -57,7 +59,7 @@ class GatewayConfig(BaseSettings):
     )
 
     database_url: str = Field(
-        default="sqlite:///./otari-gateway.db",
+        default="sqlite:///./otari.db",
         description="Database connection URL (SQLite default for local use; PostgreSQL recommended for production)",
     )
     auto_migrate: bool = Field(
@@ -164,7 +166,7 @@ class GatewayConfig(BaseSettings):
         ge=0,
         description="TTL in seconds for the in-memory model discovery cache (0 disables caching)",
     )
-    mode: str = Field(default="standalone", description="Gateway operating mode: standalone or platform")
+    mode: str = Field(default="standalone", description="Otari operating mode: standalone or platform")
     platform: dict[str, Any] = Field(default_factory=dict, description="Platform integration settings")
 
     @property
@@ -194,13 +196,13 @@ class GatewayConfig(BaseSettings):
     def validate_mode_selection(self) -> None:
         configured_mode = self.mode.strip().lower()
         if configured_mode not in {"standalone", "platform"}:
-            msg = "Invalid GATEWAY_MODE value. Expected 'standalone' or 'platform'."
+            msg = "Invalid OTARI_MODE value (legacy: GATEWAY_MODE). Expected 'standalone' or 'platform'."
             raise ValueError(msg)
 
         token_present = self.platform_token is not None
         if configured_mode == "platform" and not token_present:
             msg = (
-                "GATEWAY_MODE=platform requires OTARI_AI_TOKEN to be set "
+                "OTARI_MODE=platform requires OTARI_AI_TOKEN to be set "
                 "(legacy aliases: OTARI_PLATFORM_TOKEN, ANY_LLM_PLATFORM_TOKEN)."
             )
             raise ValueError(msg)
@@ -244,15 +246,43 @@ def _parse_bool_env(value: str) -> bool:
     raise ValueError(msg)
 
 
+def _coerce_scalar_env(value: str, annotation: Any) -> Any:
+    """Coerce an env-var string to a scalar field type, or raise _NonScalarField."""
+    origin = typing.get_origin(annotation)
+    if origin in (types.UnionType, typing.Union):
+        non_none = [arg for arg in typing.get_args(annotation) if arg is not type(None)]
+        if len(non_none) != 1:
+            raise _NonScalarField
+        annotation = non_none[0]
+        origin = typing.get_origin(annotation)
+    if origin is not None:
+        raise _NonScalarField  # parameterized generics (list[...], dict[...]) are not scalars
+    if annotation is bool:
+        return _parse_bool_env(value)
+    if annotation is int:
+        return int(value)
+    if annotation is float:
+        return float(value)
+    if annotation is str:
+        return value
+    raise _NonScalarField
+
+
 def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
-    for env_name, (field_name, caster) in OTARI_ENV_ALIASES_TO_GATEWAY.items():
-        value = os.getenv(env_name)
+    """Layer OTARI_<FIELD> env vars over the config dict for every scalar field.
+
+    Written into the init dict so they take precedence over both YAML and the
+    legacy GATEWAY_ pydantic prefix. Complex fields (lists/dicts) are left to
+    YAML and pydantic's native env handling.
+    """
+    for field_name in GatewayConfig.model_fields:
+        value = os.getenv(f"{OTARI_ENV_PREFIX}{field_name.upper()}")
         if value is None or value == "":
             continue
-        if caster is bool:
-            config[field_name] = _parse_bool_env(value)
-        else:
-            config[field_name] = caster(value)
+        try:
+            config[field_name] = _coerce_scalar_env(value, GatewayConfig.model_fields[field_name].annotation)
+        except _NonScalarField:
+            continue
 
 
 def _apply_platform_env_overrides(config: dict[str, Any]) -> None:

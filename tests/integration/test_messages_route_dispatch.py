@@ -402,7 +402,7 @@ def test_code_execution_without_sandbox_env_returns_400_anthropic_body(
         headers=api_key_header,
     )
     assert resp.status_code == 400
-    _assert_anthropic_error(resp.json(), error_type="invalid_request_error", message_substr="GATEWAY_SANDBOX_URL")
+    _assert_anthropic_error(resp.json(), error_type="invalid_request_error", message_substr="OTARI_SANDBOX_URL")
 
 
 def test_code_execution_combined_with_mcp_servers_returns_400(

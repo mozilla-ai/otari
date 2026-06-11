@@ -102,7 +102,7 @@ class ChatCompletionRequest(BaseModel):
             "Optional override for the lead-in that the gateway prepends before the "
             "per-tool hint block in the system message. Useful for expressing "
             "global tool-selection policy (e.g. 'prefer MCP tools over code_execution'). "
-            "Falls back to GATEWAY_TOOLS_HEADER env, then to the built-in default."
+            "Falls back to OTARI_TOOLS_HEADER env, then to the built-in default."
         ),
     )
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
