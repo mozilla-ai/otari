@@ -116,9 +116,18 @@ export GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
 docker compose --profile web-search-brave up -d --build brave-adapter gateway
 ```
 
+A ready-to-run **Tavily** adapter also ships in
+`scripts/web-search-tavily-adapter/`:
+
+```bash
+export TAVILY_API_KEY=...   # from https://tavily.com/
+export GATEWAY_WEB_SEARCH_URL=http://tavily-adapter:8080
+docker compose --profile web-search-tavily up -d --build tavily-adapter gateway
+```
+
 `WebSearchBackend` is URL-configured, so any service exposing a
 SearXNG-compatible `/search?format=json` endpoint works — copy the adapter to
-front Tavily, Exa, Serper, etc.
+front Exa, Serper, etc.
 
 Both code-exec and web-search profiles can be combined:
 

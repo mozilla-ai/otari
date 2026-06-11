@@ -225,4 +225,10 @@ def _build_web_search_backend(*, base_url: str, tool_entry: dict[str, Any]) -> W
     if purpose_hint:
         kwargs["purpose_hint"] = purpose_hint
 
+    # Provider-specific knobs (e.g. Tavily's search_depth / topic). The gateway
+    # forwards these to the search backend as-is; the adapter interprets them.
+    provider_options = tool_entry.get("provider_options")
+    if isinstance(provider_options, dict) and provider_options:
+        kwargs["provider_options"] = provider_options
+
     return WebSearchBackend(**kwargs)
