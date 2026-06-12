@@ -36,7 +36,7 @@ fi
 OTARI_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q otari 2>/dev/null | head -1 || true)
 SANDBOX_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q sandbox 2>/dev/null | head -1 || true)
 
-OTARI_PORT=${OTARI_PORT:-${OTARI_PORT:-8000}}
+OTARI_PORT=${OTARI_PORT:-8000}
 OTARI_URL=${OTARI_URL:-http://localhost:${OTARI_PORT}}
 OTARI_KEY=${OTARI_KEY:-demo-master-key}
 OTARI_USER=${OTARI_USER:-demo}

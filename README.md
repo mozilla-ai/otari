@@ -150,7 +150,7 @@ uv run pytest tests/unit/test_gateway_cli.py -v
 
 ## Docker
 
-Otari image is published on [Docker Hub](https://hub.docker.com/r/mzdotai/otari).
+The Otari image is published on [Docker Hub](https://hub.docker.com/r/mzdotai/otari).
 
 ### Run with docker compose (Otari + PostgreSQL)
 

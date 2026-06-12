@@ -29,7 +29,7 @@ if [[ -f "$HERE/.env" ]]; then
   set +a
 fi
 
-OTARI_PORT=${OTARI_PORT:-${OTARI_PORT:-8000}}
+OTARI_PORT=${OTARI_PORT:-8000}
 OTARI_URL=${OTARI_URL:-http://localhost:${OTARI_PORT}}
 OTARI_KEY=${OTARI_KEY:-demo-master-key}
 

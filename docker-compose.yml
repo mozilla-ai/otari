@@ -188,7 +188,7 @@ services:
 
   # Guardrails service — the otari-anyguardrails container, a stateless FastAPI
   # service that wraps `any-guardrail` (https://github.com/mozilla-ai/any-guardrail)
-  # behind `POST /validate`. The Otari calls it whenever a request carries the
+  # behind `POST /validate`. Otari calls it whenever a request carries the
   # top-level `guardrails` field (see services/guardrails.py). Source lives at
   # https://github.com/mozilla-ai/otari-anyguardrails-container.
   #
@@ -207,7 +207,7 @@ services:
     profiles: ["guardrails"]
     image: ${OTARI_ANYGUARDRAILS_IMAGE:-docker.io/mzdotai/otari-any-guardrail-container:latest}
     ports:
-      # Localhost-only, like the other internal backends. The Otari reaches it
+      # Localhost-only, like the other internal backends. Otari reaches it
       # over the Docker network at `anyguardrails:8000`; this mapping is for
       # ad-hoc curl/debugging (e.g. GET /profiles, POST /validate).
       - "127.0.0.1:8183:8000"

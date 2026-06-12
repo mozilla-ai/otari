@@ -82,6 +82,8 @@ pricing:
 
 The following `OTARI_` variables override config file values for their matching fields. For example, `OTARI_PORT=9000` overrides `port: 8000` in the YAML.
 
+`OTARI_` overrides apply to scalar fields (strings, numbers, booleans). List and dict fields (`cors_allow_origins`, `providers`, `pricing`, and the `platform` block) are not read from `OTARI_` variables; set them in the YAML file instead. The `platform` block also has dedicated `PLATFORM_*` variables (see the otari.ai variables below).
+
 The config file also supports `${ENV_VAR}` interpolation:
 
 ```yaml
