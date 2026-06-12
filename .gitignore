@@ -17,5 +17,6 @@ config.yaml
 service_account.json
 gateway.db
 otari-gateway.db
+otari.db
 
 .DS_Store
