@@ -236,6 +236,15 @@ class GatewayConfig(BaseSettings):
             "to keep captioning free. When unset, 'describe' falls back to a logged drop."
         ),
     )
+    vision_describe_max_tokens: int = Field(
+        default=1024,
+        gt=0,
+        description=(
+            "Cap on the describe model's output tokens per image. Bounds the cost and latency "
+            "of the vision side-call, which is billed to the user and runs once per image (and "
+            "once per page for scanned PDFs)."
+        ),
+    )
     model_capabilities: dict[str, ModelCapabilityConfig] = Field(
         default_factory=dict,
         description=(

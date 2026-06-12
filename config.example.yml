@@ -34,6 +34,7 @@ master_key: YOUR_MASTER_KEY_HERE
 # model, falling back to a logged drop), 'ocr' (extract text only), or 'off'.
 # vision_strategy: "describe"
 # vision_describe_model: "ollama:qwen2-vl"   # may be local (free) or frontier
+# vision_describe_max_tokens: 1024           # cap per-image caption output (billed to the user)
 
 # Per-model capability overrides. any-llm's provider-level flags over-report for
 # text-only models served behind OpenAI-compatible servers (vLLM, llama.cpp,

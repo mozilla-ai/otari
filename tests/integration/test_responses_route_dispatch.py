@@ -73,6 +73,34 @@ def test_no_tools_falls_through_to_plain_aresponses(
     assert "tools" not in captured
 
 
+def test_bare_string_input_not_corrupted_by_normalization(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """A bare-string ``input`` must reach the provider verbatim.
+
+    The default config enables file understanding; the normalizer used to iterate
+    ``input`` as a sequence, rewriting a plain string into a list of one-character
+    items. Regression guard: the string survives unchanged.
+    """
+    captured: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return _response()
+
+    prompt = "What is the capital of France?"
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        resp = client.post(
+            "/v1/responses",
+            json={"model": _MODEL, "input": prompt},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["input_data"] == prompt
+
+
 def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
     client: TestClient,
     api_key_header: dict[str, str],

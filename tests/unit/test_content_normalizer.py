@@ -43,6 +43,25 @@ async def test_string_content_untouched() -> None:
 
 
 @pytest.mark.asyncio
+async def test_bare_string_messages_untouched() -> None:
+    # The Responses endpoint accepts a bare-string ``input``. Iterating it would
+    # walk the string character-by-character; it must be returned verbatim.
+    cfg = GatewayConfig()
+    text = "What is the capital of France?"
+    out, stats = await normalize_messages(
+        cast("list[dict[str, Any]]", text),
+        config=cfg,
+        caps=_TEXT_ONLY,
+        fmt="responses",
+        db=None,
+        file_store=None,
+        user_id="u",
+    )
+    assert cast("Any", out) == text
+    assert not stats.touched
+
+
+@pytest.mark.asyncio
 async def test_native_image_passthrough() -> None:
     cfg = GatewayConfig()
     msg = _image_msg()

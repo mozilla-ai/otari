@@ -10,6 +10,20 @@ class Base(DeclarativeBase):
     """Base class for SQLAlchemy models."""
 
 
+def _epoch_seconds(value: datetime | None) -> int | None:
+    """Return a UTC epoch from a stored datetime.
+
+    SQLite hands datetimes back naive; ``datetime.timestamp()`` would then read
+    them as local time and skew the epoch by the server's UTC offset. Treat a
+    naive value as the UTC it was stored as before converting.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return int(value.timestamp())
+
+
 class APIKey(Base):
     """API Key model for authentication and authorization."""
 
@@ -230,8 +244,8 @@ class FileObject(Base):
             "id": self.id,
             "object": "file",
             "bytes": self.bytes,
-            "created_at": int(self.created_at.timestamp()) if self.created_at else None,
-            "expires_at": int(self.expires_at.timestamp()) if self.expires_at else None,
+            "created_at": _epoch_seconds(self.created_at),
+            "expires_at": _epoch_seconds(self.expires_at),
             "filename": self.filename,
             "purpose": self.purpose,
         }

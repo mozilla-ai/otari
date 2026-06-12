@@ -1,7 +1,7 @@
 # File uploads & document understanding
 
 Frontier models read PDFs, office documents, and images natively. Most local /
-open-source models can't — many are text-only. The gateway closes that gap: a
+open-source models can't; many are text-only. The gateway closes that gap: a
 user can attach a file and a text-only local model can still understand it,
 because the gateway extracts the file to text (and captions images) before the
 model ever sees the request.
@@ -58,9 +58,9 @@ sent through the image path.
 The gateway must know whether the target model is natively multimodal. It uses,
 in order:
 
-1. **`model_capabilities` config override** — authoritative.
-2. **any-llm provider metadata** — trusted only for hosted providers.
-3. **Default: extract** — safe, since a needless extraction still yields a
+1. **`model_capabilities` config override**: authoritative.
+2. **any-llm provider metadata**: trusted only for hosted providers.
+3. **Default: extract**, safe, since a needless extraction still yields a
    correct answer while a wrong passthrough silently drops the file.
 
 > any-llm's capability flags are set per provider *class*, so they over-report
@@ -73,17 +73,17 @@ in order:
 See [`config.example.yml`](../config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_local_dir`, `files_max_bytes`,
-  `files_retention_hours` — upload storage.
-- `file_understanding_enabled` — master switch for content normalization.
-- `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model` —
+  `files_retention_hours`: upload storage.
+- `file_understanding_enabled`: master switch for content normalization.
+- `vision_strategy` (`describe` | `ocr` | `off`) and `vision_describe_model`:
   how images are handled for text-only models. The describe model may be a local
   vision model (e.g. `ollama:qwen2-vl`) to keep captioning free.
-- `model_capabilities` — per-model `supports_image` / `supports_pdf` overrides.
+- `model_capabilities`: per-model `supports_image` / `supports_pdf` overrides.
 
 ## Dependencies
 
 Text/office/PDF extraction uses [`markitdown`](https://github.com/microsoft/markitdown)
 (MIT); scanned-PDF rasterization uses [`pypdfium2`](https://github.com/pypdfium2-team/pypdfium2)
-(Apache-2.0). Both are permissively licensed — deliberately avoiding AGPL PDF
+(Apache-2.0). Both are permissively licensed, deliberately avoiding AGPL PDF
 libraries since the gateway is a network service. OCR is optional; install the
 `ocr` extra (`pip install gateway[ocr]`) to enable it.
