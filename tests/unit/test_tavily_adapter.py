@@ -170,6 +170,16 @@ async def test_search_non_list_results_returns_502(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.asyncio
+async def test_search_invalid_time_range_returns_422(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Bad time_range is rejected at the edge (Query pattern) before any Tavily call.
+    module = _load_adapter(monkeypatch)
+    transport = httpx.ASGITransport(app=module.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://adapter") as client:
+        resp = await client.get("/search", params={"q": "x", "time_range": "bogus"})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_search_503_when_key_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     module = _load_adapter(monkeypatch, api_key="")
     transport = httpx.ASGITransport(app=module.app)

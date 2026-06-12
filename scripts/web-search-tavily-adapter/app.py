@@ -14,7 +14,7 @@ The gateway may forward provider-specific knobs as extra query params
 (``provider_options`` on the ``otari_web_search`` tool entry). This adapter
 WHITELISTS only the Tavily params it knows about (``max_results``,
 ``search_depth``, ``topic``, ``time_range``, ``include_answer``) and ignores
-anything else — arbitrary params are never forwarded to Tavily.
+anything else; arbitrary params are never forwarded to Tavily.
 
 Tavily's ``raw_content`` (full extracted page text) is mapped onto each
 result's ``extracted_content`` when present, so the gateway can skip its own
@@ -51,14 +51,14 @@ async def search(
     max_results: int | None = Query(default=None, ge=1),
     search_depth: str | None = Query(default=None, pattern="^(basic|advanced)$"),
     topic: str | None = Query(default=None, pattern="^(general|news|finance)$"),
-    time_range: str | None = Query(default=None),
+    time_range: str | None = Query(default=None, pattern="^(day|week|month|year|d|w|m|y)$"),
     include_answer: bool | None = Query(default=None),
 ) -> JSONResponse:
     """Translate a SearXNG-style query into a Tavily Search API call."""
     if not TAVILY_API_KEY:
         return JSONResponse(status_code=503, content={"error": "TAVILY_API_KEY is not set"})
 
-    # Whitelist: only known Tavily params are forwarded — never arbitrary
+    # Whitelist: only known Tavily params are forwarded, never arbitrary
     # query string keys.
     body: dict[str, Any] = {"query": q, "include_raw_content": True}
     if max_results is not None:
@@ -98,7 +98,7 @@ async def search(
     hits = payload.get("results")
     if not isinstance(hits, list):
         # A missing/non-list `results` is an upstream contract break, not "no
-        # hits" — surface it as a 502 instead of silently returning empty.
+        # hits", so surface it as a 502 instead of silently returning empty.
         return JSONResponse(status_code=502, content={"error": "tavily search returned an unexpected shape"})
     results: list[dict[str, Any]] = []
     for h in hits:

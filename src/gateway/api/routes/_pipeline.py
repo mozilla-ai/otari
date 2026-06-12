@@ -508,8 +508,11 @@ async def prepare_gateway_tools(
             # enabled at all, plus workspace-default max_results / domain filters /
             # purpose hint / provider_options). Mirrors the mcp_server_ids resolve
             # above. Precedence is "per-request overrides workspace default":
-            #  * top-level keys are applied only when the request's own tool entry
-            #    didn't already set them;
+            #  * top-level keys are applied only when the request didn't supply a
+            #    meaningful (truthy) value of its own. An empty list / empty string
+            #    reads as "no preference" and falls back to the workspace value
+            #    rather than silently clearing the workspace's policy (e.g. a
+            #    request `allowed_domains: []` must NOT wipe a workspace allow-list);
             #  * provider_options is shallow-merged so workspace defaults fill the
             #    keys the request omitted while per-request keys still win (rather
             #    than the request's dict replacing the workspace dict wholesale).
@@ -524,7 +527,7 @@ async def prepare_gateway_tools(
                     raise adapter.error(403, WEB_SEARCH_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
                 for key in ("max_results", "allowed_domains", "blocked_domains", "purpose_hint"):
                     resolved_value = web_search_policy.get(key)
-                    if key not in web_search_tool_entry and resolved_value is not None:
+                    if not web_search_tool_entry.get(key) and resolved_value is not None:
                         web_search_tool_entry[key] = resolved_value
                 workspace_options = web_search_policy.get("provider_options")
                 if isinstance(workspace_options, dict):

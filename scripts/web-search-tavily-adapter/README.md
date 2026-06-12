@@ -6,8 +6,8 @@ search API instead of the bundled SearXNG metasearch (whose free engines
 rate-limit/CAPTCHA automated queries by IP).
 
 It exposes `GET /search?q=…&format=json` returning
-`{"results": [{"url", "title", "content", "extracted_content"?}]}` — the exact
-shape `WebSearchBackend` expects — and translates that to/from Tavily's API.
+`{"results": [{"url", "title", "content", "extracted_content"?}]}` (the exact
+shape `WebSearchBackend` expects) and translates that to/from Tavily's API.
 The Tavily key lives in this service, never in the gateway.
 
 Tavily can return the full extracted page text (`raw_content`); the adapter
@@ -19,7 +19,7 @@ per-URL fetch + trafilatura step.
 The gateway forwards provider-specific knobs (set via `provider_options` on the
 `otari_web_search` tool entry, or as workspace defaults in platform mode) as
 extra query params. This adapter whitelists only the Tavily params it knows
-about — anything else is ignored:
+about; anything else is ignored:
 
 - `max_results` (int)
 - `search_depth` (`basic` | `advanced`)
@@ -29,7 +29,7 @@ about — anything else is ignored:
 
 ## Run it via docker-compose
 
-1. Get a key from <https://tavily.com/>. Provide it via the environment —
+1. Get a key from <https://tavily.com/>. Provide it via the environment:
    either `export TAVILY_API_KEY=...`, or (cleaner) drop it in a gitignored
    `.env` in the repo root, which `docker compose` auto-loads. You also need to
    point the gateway at the adapter, so set both:
@@ -55,7 +55,7 @@ about — anything else is ignored:
 3. `otari_web_search` requests now resolve through Tavily. Verify directly:
 
    ```bash
-   curl -s "http://localhost:8184/search?q=latest+python+version&format=json" | jq '.results | length'
+   curl -s "http://localhost:8185/search?q=latest+python+version&format=json" | jq '.results | length'
    ```
 
 ## Swapping in a different provider
