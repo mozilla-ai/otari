@@ -264,11 +264,20 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
             schemas[f"{prefix}_{name}"] = body
         return js
 
+    # These are response shapes, so generate the JSON Schema in ``serialization``
+    # mode: it reflects the bytes the gateway actually puts on the wire, not the
+    # (looser) validation shape. The any-llm ``Reasoning`` type is the motivating
+    # case: it accepts ``{"content": str}`` on input but a ``model_serializer``
+    # emits a plain string, so ``message.reasoning`` is a string in responses.
+    # Validation-mode schema typed it as an object, and the generated client then
+    # rejected the string the server sends. See mozilla-ai/otari#143.
     schemas["ChatCompletion"] = absorb(
-        ChatCompletion.model_json_schema(ref_template="#/components/schemas/CC_{model}"), "CC"
+        ChatCompletion.model_json_schema(mode="serialization", ref_template="#/components/schemas/CC_{model}"),
+        "CC",
     )
     schemas["ChatCompletionChunk"] = absorb(
-        ChatCompletionChunk.model_json_schema(ref_template="#/components/schemas/CCK_{model}"), "CCK"
+        ChatCompletionChunk.model_json_schema(mode="serialization", ref_template="#/components/schemas/CCK_{model}"),
+        "CCK",
     )
     msgs = absorb(
         TypeAdapter(list[ChatCompletionMessageParam]).json_schema(ref_template="#/components/schemas/MSG_{model}"),
@@ -281,14 +290,21 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     # inject them so the generated core returns typed models instead of ``object``.
     # Audio/images are intentionally left opaque: they return binary/file payloads
     # that do not map onto a JSON response schema.
+    # Response shapes too: serialization mode keeps the schema aligned with the
+    # serialized wire format (see the ChatCompletion note above).
     schemas["MessageResponse"] = absorb(
-        MessageResponse.model_json_schema(ref_template="#/components/schemas/MR_{model}"), "MR"
+        MessageResponse.model_json_schema(mode="serialization", ref_template="#/components/schemas/MR_{model}"),
+        "MR",
     )
     schemas["RerankResponse"] = absorb(
-        RerankResponse.model_json_schema(ref_template="#/components/schemas/RR_{model}"), "RR"
+        RerankResponse.model_json_schema(mode="serialization", ref_template="#/components/schemas/RR_{model}"),
+        "RR",
     )
     schemas["CreateEmbeddingResponse"] = absorb(
-        CreateEmbeddingResponse.model_json_schema(ref_template="#/components/schemas/EMB_{model}"), "EMB"
+        CreateEmbeddingResponse.model_json_schema(
+            mode="serialization", ref_template="#/components/schemas/EMB_{model}"
+        ),
+        "EMB",
     )
 
     def set_json_200(path: str, schema_name: str, description: str) -> None:

@@ -10,6 +10,7 @@ from gateway.models.entities import Budget, ModelPricing, User
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budget_service import (
     estimate_cost,
+    increase_reservation,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
@@ -166,6 +167,80 @@ async def test_reserve_budget_clamps_negative_estimate(async_db: Any) -> None:
     assert user is not None
     assert user.reserved == pytest.approx(4.0)  # unchanged — negative clamped to 0
     assert user.spend == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
+async def test_increase_reservation_grows_hold_and_folds_handle(async_db: Any) -> None:
+    """A fitting top-up adds to `reserved` and folds the delta into the handle."""
+    async_db.add(Budget(budget_id="inc-budget", max_budget=100.0))
+    async_db.add(User(user_id="inc-user", spend=10.0, budget_id="inc-budget"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "inc-user", 5.0)
+    await increase_reservation(async_db, handle, 7.0)
+
+    # Delta folded into the handle so the single reconcile/refund covers it all.
+    assert handle.estimate == pytest.approx(12.0)
+    async_db.expire_all()
+    user = await get_active_user(async_db, "inc-user")
+    assert user is not None and user.reserved == pytest.approx(12.0)
+
+    # Reconcile releases the full held amount.
+    await reconcile_reservation(async_db, handle, 9.0)
+    async_db.expire_all()
+    user = await get_active_user(async_db, "inc-user")
+    assert user is not None
+    assert user.reserved == pytest.approx(0.0)
+    assert user.spend == pytest.approx(19.0)  # 10 + actual 9
+
+
+@pytest.mark.asyncio
+async def test_increase_reservation_rejects_without_touching_original(async_db: Any) -> None:
+    """An over-budget top-up raises and leaves the original hold for the caller.
+
+    Like ``reserve_budget``, ``increase_reservation`` does not self-refund — the
+    request routes own refunding on failure. The rejected delta must not have
+    been added to ``reserved`` (the atomic UPDATE either fully applies or not).
+    """
+    async_db.add(Budget(budget_id="incr-budget", max_budget=10.0))
+    async_db.add(User(user_id="incr-user", spend=8.0, budget_id="incr-budget"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "incr-user", 1.0)  # 8 + 1 <= 10, fits
+    # Topping up by 5 would need 8 + 1 + 5 = 14 > 10 → rejected.
+    with pytest.raises(HTTPException) as exc_info:
+        await increase_reservation(async_db, handle, 5.0)
+    assert exc_info.value.status_code == 403
+
+    # Only the original 1.0 hold remains; the delta was not applied. The caller
+    # (a request route) is responsible for refunding the original on failure.
+    async_db.expire_all()
+    user = await get_active_user(async_db, "incr-user")
+    assert user is not None
+    assert user.reserved == pytest.approx(1.0)
+    assert user.spend == pytest.approx(8.0)
+
+    await refund_reservation(async_db, handle)
+    async_db.expire_all()
+    user = await get_active_user(async_db, "incr-user")
+    assert user is not None and user.reserved == pytest.approx(0.0)
+
+
+@pytest.mark.asyncio
+async def test_increase_reservation_noop_for_nonpositive_delta(async_db: Any) -> None:
+    """A zero/negative delta leaves the reservation untouched."""
+    async_db.add(Budget(budget_id="incn-budget", max_budget=100.0))
+    async_db.add(User(user_id="incn-user", spend=0.0, budget_id="incn-budget"))
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, "incn-user", 5.0)
+    await increase_reservation(async_db, handle, 0.0)
+    await increase_reservation(async_db, handle, -3.0)
+
+    assert handle.estimate == pytest.approx(5.0)
+    async_db.expire_all()
+    user = await get_active_user(async_db, "incn-user")
+    assert user is not None and user.reserved == pytest.approx(5.0)
 
 
 @pytest.mark.asyncio

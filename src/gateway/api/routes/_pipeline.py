@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
@@ -62,6 +62,7 @@ from gateway.api.routes._platform import (
     _report_platform_usage,
     _resolve_platform_credentials,
     _resolve_platform_mcp_servers,
+    _resolve_platform_web_search,
     run_platform_attempts,
 )
 from gateway.api.routes._tools import (
@@ -81,6 +82,7 @@ from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budget_service import (
     ReservationHandle,
     estimate_cost,
+    increase_reservation,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
@@ -132,9 +134,9 @@ WEB_SEARCH_NOT_CONFIGURED_DETAIL = (
     "Set OTARI_WEB_SEARCH_URL on the gateway, or remove otari_web_search from `tools`."
 )
 WEB_SEARCH_CONFLICT_DETAIL = (
-    "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same "
-    "request yet; pick one."
+    "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same request yet; pick one."
 )
+WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
 SANDBOX_UNREACHABLE_DETAIL = "code_execution sandbox unreachable — check OTARI_SANDBOX_URL"
 WEB_SEARCH_UNREACHABLE_DETAIL = "web_search backend unreachable — check OTARI_WEB_SEARCH_URL"
 
@@ -289,6 +291,52 @@ class RequestContext:
         self.reservation = reservation
 
 
+async def _bill_vision_side_call(
+    *,
+    db: AsyncSession,
+    log_writer: LogWriter,
+    config: GatewayConfig,
+    api_key_id: str | None,
+    user_id: str,
+    endpoint: str,
+    usage: CompletionUsage,
+) -> None:
+    """Meter and bill a vision describe side-call made during normalization.
+
+    The describe model already ran (to caption an image for a text-only target
+    model), so its cost is recorded as its own usage-log row for the configured
+    vision model and committed directly to ``users.spend``. It is intentionally
+    not gated or refundable: the cost is already incurred, so a budget reject
+    here would lose it, and refunding the main request must not erase it.
+    No-op when no vision model is configured or its selector can't be parsed.
+    """
+    model_selector = config.vision_describe_model
+    if not model_selector:
+        return
+    try:
+        provider, model = AnyLLM.split_model_provider(model_selector)
+    except (ValueError, AnyLLMError):
+        logger.warning("vision billing: cannot parse vision_describe_model %r", model_selector)
+        return
+    cost = await log_usage(
+        db=db,
+        log_writer=log_writer,
+        api_key_id=api_key_id,
+        model=model,
+        provider=provider.value if provider else None,
+        endpoint=endpoint,
+        user_id=user_id,
+        usage_override=usage,
+    )
+    # Commit the spend directly via an unreserved handle (no held estimate to
+    # release): this just adds the actual cost to users.spend.
+    await reconcile_reservation(
+        db,
+        ReservationHandle(user_id=user_id, estimate=0.0, reserved=False, strategy=config.budget_strategy),
+        cost or 0.0,
+    )
+
+
 async def resolve_request_context(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -303,6 +351,8 @@ async def resolve_request_context(
     estimate_max_output_tokens: int | None,
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
+    normalize_messages: Callable[[str, LLMProvider | None, str], Awaitable[tuple[int, CompletionUsage | None]]]
+    | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
@@ -314,6 +364,17 @@ async def resolve_request_context(
     before the missing-pricing gate so user/blocked/budget rejections
     (404/403) take precedence over the 402; it is refunded if the request is
     then rejected for missing pricing.
+
+    ``normalize_messages`` (standalone only) is an optional hook the file
+    feature uses to resolve uploaded attachments into the wire payload before
+    the cost estimate. It runs after the billed user is known (file access is
+    user-scoped) and after the provider/model split (capability detection needs
+    it), and returns the post-normalization prompt-char count so the reservation
+    reflects any text extracted from attachments. It is never called in platform
+    mode, where the files feature is unavailable. It returns
+    ``(prompt_chars, vision_usage)``; any vision describe side-call it made is
+    metered and billed here as committed spend (the call already happened, so it
+    is not gated or refundable).
     """
     platform_mode = config.is_platform_mode
     route: ResolvedRoute | None = None
@@ -364,6 +425,7 @@ async def resolve_request_context(
             gate_provider, gate_model = AnyLLM.split_model_provider(model)
         except (ValueError, AnyLLMError):
             gate_provider, gate_model = None, model
+
         gate_pricing = await find_model_pricing(db, gate_provider, gate_model)
         estimate = estimate_cost(
             gate_pricing,
@@ -382,6 +444,52 @@ async def resolve_request_context(
                 f"No pricing configured for model '{model}'",
                 ErrorKind.INVALID_REQUEST,
             )
+
+        # Resolve uploaded attachments only once the request is authorized
+        # (user exists, not blocked, within budget, pricing OK). Done after the
+        # budget gate so a blocked/over-budget user can't trigger extraction or
+        # vision side-calls. Attachments may expand the prompt (extracted
+        # document text, image captions), so top up the reservation to the
+        # post-normalization size; the top-up rejects if it no longer fits.
+        # Refund on any failure in this setup phase, which the downstream
+        # provider-call settlement does not cover.
+        if normalize_messages is not None:
+            try:
+                post_chars, vision_usage = await normalize_messages(user_id, gate_provider, gate_model)
+                post_estimate = estimate_cost(
+                    gate_pricing,
+                    prompt_chars=post_chars,
+                    max_output_tokens=estimate_max_output_tokens,
+                    default_output_tokens=config.budget_estimate_default_output_tokens,
+                )
+                await increase_reservation(
+                    db,
+                    reservation,
+                    post_estimate - estimate,
+                    model=model,
+                    strategy=config.budget_strategy,
+                )
+                if vision_usage is not None:
+                    await _bill_vision_side_call(
+                        db=db,
+                        log_writer=log_writer,
+                        config=config,
+                        api_key_id=api_key_id,
+                        user_id=user_id,
+                        endpoint=adapter.endpoint,
+                        usage=vision_usage,
+                    )
+            except HTTPException:
+                await refund_reservation(db, reservation)
+                raise
+            except Exception as exc:
+                await refund_reservation(db, reservation)
+                logger.error("Request setup failed after reservation: %s", exc)
+                raise adapter.error(
+                    500,
+                    "Failed to process request attachments",
+                    ErrorKind.API,
+                ) from exc
 
     return RequestContext(
         config=config,
@@ -502,6 +610,40 @@ async def prepare_gateway_tools(
             if use_sandbox or mcp_servers:
                 raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
             use_web_search = True
+
+            # Platform mode owns the per-workspace web-search policy (whether it's
+            # enabled at all, plus workspace-default max_results / domain filters /
+            # purpose hint / provider_options). Mirrors the mcp_server_ids resolve
+            # above. Precedence is "per-request overrides workspace default":
+            #  * top-level keys are applied only when the request didn't supply a
+            #    meaningful (truthy) value of its own. An empty list / empty string
+            #    reads as "no preference" and falls back to the workspace value
+            #    rather than silently clearing the workspace's policy (e.g. a
+            #    request `allowed_domains: []` must NOT wipe a workspace allow-list);
+            #  * provider_options is shallow-merged so workspace defaults fill the
+            #    keys the request omitted while per-request keys still win (rather
+            #    than the request's dict replacing the workspace dict wholesale).
+            # Standalone mode has no platform to consult.
+            if ctx.platform_mode:
+                assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+                web_search_policy = await _resolve_platform_web_search(
+                    config=ctx.config,
+                    user_token=ctx.user_token,
+                )
+                if not web_search_policy.get("enabled"):
+                    raise adapter.error(403, WEB_SEARCH_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
+                for key in ("max_results", "allowed_domains", "blocked_domains", "purpose_hint"):
+                    resolved_value = web_search_policy.get(key)
+                    if not web_search_tool_entry.get(key) and resolved_value is not None:
+                        web_search_tool_entry[key] = resolved_value
+                workspace_options = web_search_policy.get("provider_options")
+                if isinstance(workspace_options, dict):
+                    request_options = web_search_tool_entry.get("provider_options")
+                    web_search_tool_entry["provider_options"] = (
+                        {**workspace_options, **request_options}
+                        if isinstance(request_options, dict)
+                        else workspace_options
+                    )
     except HTTPException:
         await release_reservation(ctx)
         raise

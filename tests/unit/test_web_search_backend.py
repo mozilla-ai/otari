@@ -196,12 +196,7 @@ async def test_blocked_domains_filter_in_gateway(monkeypatch: pytest.MonkeyPatch
 
 @pytest.mark.asyncio
 async def test_max_results_truncates(monkeypatch: pytest.MonkeyPatch) -> None:
-    body = {
-        "results": [
-            {"url": f"https://ex.com/{i}", "title": f"T{i}", "content": f"s{i}"}
-            for i in range(10)
-        ]
-    }
+    body = {"results": [{"url": f"https://ex.com/{i}", "title": f"T{i}", "content": f"s{i}"} for i in range(10)]}
     _patched_async_client(
         {("searxng", "/search"): httpx.Response(200, json=body)},
         monkeypatch,
@@ -213,6 +208,64 @@ async def test_max_results_truncates(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "[1] T0" in result
     assert "[3] T2" in result
     assert "[4]" not in result
+
+
+@pytest.mark.asyncio
+async def test_provider_options_forwarded_as_query_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scalar provider_options become extra /search query params; bools
+    serialise as lowercase strings and None/complex values are dropped."""
+    transport = _patched_async_client(
+        {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
+        monkeypatch,
+    )
+
+    async with WebSearchBackend(
+        base_url="http://searxng:8080",
+        extract_content=False,
+        provider_options={
+            "search_depth": "advanced",
+            "max_results": 7,
+            "include_answer": True,
+            "exclude_news": False,
+            "dropped_none": None,
+            "dropped_list": ["a", "b"],
+        },
+    ) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "x"})
+
+    req = transport.captured[0]
+    params = dict(req.url.params)
+    assert params["q"] == "x"
+    assert params["format"] == "json"
+    assert params["search_depth"] == "advanced"
+    assert params["max_results"] == "7"
+    assert params["include_answer"] == "true"
+    assert params["exclude_news"] == "false"
+    assert "dropped_none" not in params
+    assert "dropped_list" not in params
+
+
+@pytest.mark.asyncio
+async def test_provider_options_cannot_override_reserved_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    """provider_options must never override the gateway-controlled q/format/engines."""
+    transport = _patched_async_client(
+        {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
+        monkeypatch,
+    )
+
+    async with WebSearchBackend(
+        base_url="http://searxng:8080",
+        engines=("duckduckgo",),
+        extract_content=False,
+        provider_options={"q": "evil", "format": "xml", "engines": "google", "topic": "news"},
+    ) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "real query"})
+
+    params = dict(transport.captured[0].url.params)
+    assert params["q"] == "real query"
+    assert params["format"] == "json"
+    assert params["engines"] == "duckduckgo"
+    assert params["topic"] == "news"
 
 
 @pytest.mark.asyncio
@@ -376,9 +429,7 @@ async def test_ssrf_guard_blocks_redirect_to_metadata(monkeypatch: pytest.Monkey
     naive client follows. We walk redirects manually and re-validate each
     hop — the metadata IP must be rejected here too.
     """
-    body = {
-        "results": [{"url": "https://attacker.example.com/start", "title": "trap", "content": "snippet"}]
-    }
+    body = {"results": [{"url": "https://attacker.example.com/start", "title": "trap", "content": "snippet"}]}
     transport = _patched_async_client(
         {
             ("searxng", "/search"): httpx.Response(200, json=body),
@@ -413,9 +464,7 @@ async def test_fetch_capped_truncates_huge_response(monkeypatch: pytest.MonkeyPa
     that's fine; the contract is "don't OOM", not "always extract").
     """
     huge_html = "<html><body>" + "A" * (10 * 1024 * 1024) + "</body></html>"
-    body = {
-        "results": [{"url": "https://example.com/huge", "title": "Huge", "content": "snippet"}]
-    }
+    body = {"results": [{"url": "https://example.com/huge", "title": "Huge", "content": "snippet"}]}
     _patched_async_client(
         {
             ("searxng", "/search"): httpx.Response(200, json=body),

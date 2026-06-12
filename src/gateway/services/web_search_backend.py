@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 
 WEB_SEARCH_TOOL_NAME = "web_search"
 
+# Gateway-controlled /search query params that provider_options must never override.
+_RESERVED_SEARCH_PARAMS = frozenset({"q", "format", "engines"})
+
 _DEFAULT_SEARCH_TIMEOUT_S = 15.0
 _DEFAULT_FETCH_TIMEOUT_S = 5.0
 _DEFAULT_MAX_RESULTS = 5
@@ -109,6 +112,7 @@ class WebSearchBackend:
         extract_concurrency: int = _DEFAULT_EXTRACT_CONCURRENCY,
         search_timeout_s: float = _DEFAULT_SEARCH_TIMEOUT_S,
         purpose_hint: str | None = None,
+        provider_options: dict[str, Any] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._engines = engines
@@ -125,6 +129,11 @@ class WebSearchBackend:
         self._extract_concurrency = extract_concurrency
         self._search_timeout_s = search_timeout_s
         self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
+        # Sanitised copy of provider-specific knobs forwarded to the search
+        # backend as extra `/search` query params. Only scalar values survive
+        # (see `_search`); complex / None values are dropped so a misconfigured
+        # entry can't smuggle structured payloads into the GET.
+        self._provider_options = dict(provider_options) if provider_options else {}
         self._client: httpx.AsyncClient | None = None
         self._stack: AsyncExitStack = AsyncExitStack()
 
@@ -201,12 +210,30 @@ class WebSearchBackend:
     # ----- internals -----
 
     async def _search(self, query: str) -> list[dict[str, Any]]:
+        """Issue the backend's ``/search`` GET.
+
+        ``q`` / ``format`` / ``engines`` are the fixed SearXNG params. Any
+        configured ``provider_options`` are forwarded as additional query
+        params so the backend (the adapter) can interpret provider-specific
+        knobs; the gateway does not interpret these keys itself. Only scalar
+        values (str / int / float / bool) are forwarded — bools serialise as
+        lowercase ``"true"`` / ``"false"`` — and None / complex values are
+        skipped. Reserved gateway-controlled params (``q`` / ``format`` /
+        ``engines``) are never overridable by ``provider_options``.
+        """
         assert self._client is not None
-        params = {
+        params: dict[str, str | int | float] = {
             "q": query,
             "format": "json",
             "engines": ",".join(self._engines),
         }
+        for key, value in self._provider_options.items():
+            if key in _RESERVED_SEARCH_PARAMS or value is None:
+                continue
+            if isinstance(value, bool):
+                params[key] = "true" if value else "false"
+            elif isinstance(value, (str, int, float)):
+                params[key] = value
         response = await self._client.get(
             f"{self._base_url}/search",
             params=params,

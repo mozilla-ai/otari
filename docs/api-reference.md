@@ -104,6 +104,20 @@ See [Use with Claude Code](use-with-claude-code.md) for a full client setup.
 | `POST` | `/v1/audio/transcriptions` | Transcribe audio to text (multipart upload). | API key or master key |
 | `POST` | `/v1/audio/speech` | Generate speech from text (TTS). | API key or master key |
 
+### Files
+
+OpenAI-compatible file storage. Upload a file, then reference it from a chat
+request by `file_id`. See [files.md](files.md) for how uploaded files are turned
+into something a text-only local model can read.
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `POST` | `/v1/files` | Upload a file (multipart: `file`, `purpose`). Returns a file object with an `id`. | API key or master key |
+| `GET` | `/v1/files` | List the caller's files. Query params: `purpose`. | API key or master key |
+| `GET` | `/v1/files/{file_id}` | Get file metadata. | API key or master key |
+| `GET` | `/v1/files/{file_id}/content` | Download the raw file bytes. | API key or master key |
+| `DELETE` | `/v1/files/{file_id}` | Delete a file. | API key or master key |
+
 ### Batches
 
 | Method | Path | Description | Auth |

@@ -10,6 +10,20 @@ class Base(DeclarativeBase):
     """Base class for SQLAlchemy models."""
 
 
+def _epoch_seconds(value: datetime | None) -> int | None:
+    """Return a UTC epoch from a stored datetime.
+
+    SQLite hands datetimes back naive; ``datetime.timestamp()`` would then read
+    them as local time and skew the epoch by the server's UTC offset. Treat a
+    naive value as the UTC it was stored as before converting.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return int(value.timestamp())
+
+
 class APIKey(Base):
     """API Key model for authentication and authorization."""
 
@@ -193,6 +207,47 @@ class UsageLog(Base):
             "cost": self.cost,
             "status": self.status,
             "error_message": self.error_message,
+        }
+
+
+class FileObject(Base):
+    """Uploaded file metadata for the OpenAI-compatible /v1/files API.
+
+    The raw bytes live in a pluggable blob backend (see
+    gateway.services.file_store); this row holds metadata plus the backend
+    ``storage_ref`` used to fetch them. Files are scoped to ``user_id`` for
+    tenant isolation and soft-deleted via ``deleted_at``.
+    """
+
+    __tablename__ = "file_objects"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: f"file-{uuid.uuid4().hex}")
+    # Always set to the authenticated user; non-null enforces the user-scoping
+    # contract at the schema level. CASCADE removes a user's files on delete.
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    filename: Mapped[str] = mapped_column()
+    mime_type: Mapped[str] = mapped_column()
+    bytes: Mapped[int] = mapped_column()
+    purpose: Mapped[str] = mapped_column(default="user_data")
+    storage_ref: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
+
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to the OpenAI file object shape."""
+        return {
+            "id": self.id,
+            "object": "file",
+            "bytes": self.bytes,
+            "created_at": _epoch_seconds(self.created_at),
+            "expires_at": _epoch_seconds(self.expires_at),
+            "filename": self.filename,
+            "purpose": self.purpose,
         }
 
 

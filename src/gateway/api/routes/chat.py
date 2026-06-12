@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
 import httpx
-from any_llm import AnyLLM, acompletion
+from any_llm import AnyLLM, LLMProvider, acompletion
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
 from gateway.api.routes._helpers import latest_user_text
+from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
     ALL_PROVIDERS_FAILED_DETAIL,
     ALL_PROVIDERS_TIMED_OUT_DETAIL,
@@ -247,6 +248,25 @@ async def chat_completions(
             detail="Invalid request: model is required",
         )
 
+    async def _normalize(
+        user_id: str, provider: LLMProvider | None, model: str
+    ) -> tuple[int, CompletionUsage | None]:
+        # Resolve uploaded file/image blocks into the wire payload (extract to
+        # text for text-only models, inline for natively-capable ones) before
+        # the cost estimate. Standalone only; no-op when the files feature is
+        # off or the request has no attachments.
+        request.messages, stats = await normalize_request_messages(
+            request.messages,
+            fmt="openai",
+            config=config,
+            provider=provider,
+            model=model,
+            db=db,
+            raw_request=raw_request,
+            user_id=user_id,
+        )
+        return len(str(request.messages)), stats.vision_usage()
+
     ctx = await resolve_request_context(
         adapter=_ADAPTER,
         raw_request=raw_request,
@@ -262,6 +282,7 @@ async def chat_completions(
         ),
         master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
         user_forbidden_detail=_USER_FORBIDDEN,
+        normalize_messages=_normalize,
     )
 
     tool_ctx = await prepare_gateway_tools(

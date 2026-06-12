@@ -14,6 +14,7 @@ from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayC
 from gateway.core.database import create_session, init_db
 from gateway.rate_limit import RateLimiter
 from gateway.services.bootstrap_service import bootstrap_first_api_key
+from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
@@ -170,6 +171,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 await initialize_pricing_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
             log_writer = create_log_writer(config.log_writer_strategy)
+            app.state.file_store = build_file_store(config)
 
         await log_writer.start()
         app.state.log_writer = log_writer

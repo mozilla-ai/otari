@@ -48,6 +48,28 @@ class PricingConfig(BaseModel):
     )
 
 
+class ModelCapabilityConfig(BaseModel):
+    """Per-model multimodal capability override.
+
+    any-llm exposes provider-class-level ``SUPPORTS_COMPLETION_IMAGE`` /
+    ``SUPPORTS_COMPLETION_PDF`` flags, but those are set on the OpenAI-compatible
+    base class and so over-report for text-only local models served behind an
+    OpenAI-compatible endpoint (vLLM, llama.cpp, LM Studio). This map lets an
+    operator state the truth per ``provider/model`` key so the content
+    normalizer extracts files to text instead of forwarding blocks the model
+    silently drops. See gateway.services.model_capabilities.
+    """
+
+    supports_image: bool = Field(
+        default=False,
+        description="Model can natively understand image content blocks (vision).",
+    )
+    supports_pdf: bool = Field(
+        default=False,
+        description="Model can natively understand PDF/document content blocks.",
+    )
+
+
 class GatewayConfig(BaseSettings):
     """Gateway configuration with support for YAML files and environment variables."""
 
@@ -166,6 +188,73 @@ class GatewayConfig(BaseSettings):
         ge=0,
         description="TTL in seconds for the in-memory model discovery cache (0 disables caching)",
     )
+    files_enabled: bool = Field(
+        default=True,
+        description="Enable the /v1/files upload/storage endpoints (standalone mode).",
+    )
+    files_backend: str = Field(
+        default="local",
+        description="Blob backend for uploaded file bytes: 'local' (filesystem). Future: 's3', 'gcs'.",
+    )
+    files_local_dir: str = Field(
+        default="./otari-files",
+        description="Directory for the 'local' files backend to store uploaded bytes.",
+    )
+    files_max_bytes: int = Field(
+        default=512 * 1024 * 1024,
+        ge=1,
+        description="Maximum size in bytes for a single uploaded file.",
+    )
+    files_retention_hours: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Stop serving files older than this many hours: expired files become inaccessible "
+            "(404) and can no longer be referenced. Their stored bytes are not yet reclaimed "
+            "automatically, so periodic cleanup is an operator task. None keeps files indefinitely."
+        ),
+    )
+    file_understanding_enabled: bool = Field(
+        default=True,
+        description=(
+            "Normalize file/image content blocks before the provider call: pass through for "
+            "natively-capable models, extract to text for text-only models. When False, content "
+            "blocks are forwarded unchanged (legacy pass-through)."
+        ),
+    )
+    vision_strategy: str = Field(
+        default="describe",
+        description=(
+            "How image blocks are handled for text-only models: 'describe' (side-call a vision "
+            "model, falling back to a logged drop if none is configured), 'ocr' (extract text only), "
+            "or 'off' (drop with a log line)."
+        ),
+    )
+    vision_describe_model: str | None = Field(
+        default=None,
+        description=(
+            "provider/model used to caption images for text-only target models when "
+            "vision_strategy='describe'. May point at a local vision model (e.g. ollama/qwen2-vl) "
+            "to keep captioning free. When unset, 'describe' falls back to a logged drop."
+        ),
+    )
+    vision_describe_max_tokens: int = Field(
+        default=1024,
+        gt=0,
+        description=(
+            "Cap on the describe model's output tokens per image. Bounds the cost and latency "
+            "of the vision side-call, which is billed to the user and runs once per image (and "
+            "once per page for scanned PDFs)."
+        ),
+    )
+    model_capabilities: dict[str, ModelCapabilityConfig] = Field(
+        default_factory=dict,
+        description=(
+            "Per-model multimodal capability overrides (provider/model -> {supports_image, "
+            "supports_pdf}). Authoritative over any-llm's provider-level flags; needed for text-only "
+            "local models behind OpenAI-compatible servers."
+        ),
+    )
     mode: str = Field(default="standalone", description="Otari operating mode: standalone or platform")
     platform: dict[str, Any] = Field(default_factory=dict, description="Platform integration settings")
 
@@ -190,6 +279,16 @@ class GatewayConfig(BaseSettings):
         allowed = {"estimate", "fail", "allow_free"}
         if normalized not in allowed:
             msg = f"stream_missing_usage_policy must be one of {sorted(allowed)}, got '{value}'"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("vision_strategy")
+    @classmethod
+    def _validate_vision_strategy(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"describe", "ocr", "off"}
+        if normalized not in allowed:
+            msg = f"vision_strategy must be one of {sorted(allowed)}, got '{value}'"
             raise ValueError(msg)
         return normalized
 
