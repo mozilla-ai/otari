@@ -354,9 +354,12 @@ async def normalize_messages(
 
     Messages whose ``content`` is a plain string are returned untouched (the
     common, zero-overhead path). Only list-content messages are walked.
+
+    The Responses endpoint accepts a bare-string ``input``; iterating that would
+    walk it character-by-character, so non-list ``messages`` are returned as-is.
     """
     stats = NormalizationStats()
-    if not config.file_understanding_enabled:
+    if not config.file_understanding_enabled or not isinstance(messages, list):
         return messages, stats
 
     out: list[dict[str, Any]] = []

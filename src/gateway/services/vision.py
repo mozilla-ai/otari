@@ -55,6 +55,7 @@ async def describe_image(config: GatewayConfig, image_data_url: str) -> tuple[st
                     ],
                 }
             ],
+            max_tokens=config.vision_describe_max_tokens,
             **provider_kwargs,
         )
     except Exception as exc:  # noqa: BLE001 — captioning is best-effort
