@@ -236,6 +236,9 @@ A ready-to-run **Brave Search** adapter ships in
 `scripts/web-search-brave-adapter/`: set `BRAVE_API_KEY` and
 `GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080`, then
 `docker compose --profile web-search-brave up -d --build brave-adapter gateway`.
+A **Tavily** adapter ships in `scripts/web-search-tavily-adapter/` (set
+`TAVILY_API_KEY` and `GATEWAY_WEB_SEARCH_URL=http://tavily-adapter:8080`, then
+`docker compose --profile web-search-tavily up -d --build tavily-adapter gateway`).
 See that folder's README for details and how to adapt it to another provider.
 
 Per-tool overrides (`max_results`, `allowed_domains`, `blocked_domains`,

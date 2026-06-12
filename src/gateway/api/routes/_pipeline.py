@@ -63,6 +63,7 @@ from gateway.api.routes._platform import (
     _report_platform_usage,
     _resolve_platform_credentials,
     _resolve_platform_mcp_servers,
+    _resolve_platform_web_search,
     run_platform_attempts,
 )
 from gateway.api.routes._tools import (
@@ -132,9 +133,9 @@ WEB_SEARCH_NOT_CONFIGURED_DETAIL = (
     "Set GATEWAY_WEB_SEARCH_URL on the gateway, or remove otari_web_search from `tools`."
 )
 WEB_SEARCH_CONFLICT_DETAIL = (
-    "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same "
-    "request yet; pick one."
+    "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same request yet; pick one."
 )
+WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
 SANDBOX_UNREACHABLE_DETAIL = "code_execution sandbox unreachable — check GATEWAY_SANDBOX_URL"
 WEB_SEARCH_UNREACHABLE_DETAIL = "web_search backend unreachable — check GATEWAY_WEB_SEARCH_URL"
 
@@ -502,6 +503,40 @@ async def prepare_gateway_tools(
             if use_sandbox or mcp_servers:
                 raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
             use_web_search = True
+
+            # Platform mode owns the per-workspace web-search policy (whether it's
+            # enabled at all, plus workspace-default max_results / domain filters /
+            # purpose hint / provider_options). Mirrors the mcp_server_ids resolve
+            # above. Precedence is "per-request overrides workspace default":
+            #  * top-level keys are applied only when the request didn't supply a
+            #    meaningful (truthy) value of its own. An empty list / empty string
+            #    reads as "no preference" and falls back to the workspace value
+            #    rather than silently clearing the workspace's policy (e.g. a
+            #    request `allowed_domains: []` must NOT wipe a workspace allow-list);
+            #  * provider_options is shallow-merged so workspace defaults fill the
+            #    keys the request omitted while per-request keys still win (rather
+            #    than the request's dict replacing the workspace dict wholesale).
+            # Standalone mode has no platform to consult.
+            if ctx.platform_mode:
+                assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+                web_search_policy = await _resolve_platform_web_search(
+                    config=ctx.config,
+                    user_token=ctx.user_token,
+                )
+                if not web_search_policy.get("enabled"):
+                    raise adapter.error(403, WEB_SEARCH_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
+                for key in ("max_results", "allowed_domains", "blocked_domains", "purpose_hint"):
+                    resolved_value = web_search_policy.get(key)
+                    if not web_search_tool_entry.get(key) and resolved_value is not None:
+                        web_search_tool_entry[key] = resolved_value
+                workspace_options = web_search_policy.get("provider_options")
+                if isinstance(workspace_options, dict):
+                    request_options = web_search_tool_entry.get("provider_options")
+                    web_search_tool_entry["provider_options"] = (
+                        {**workspace_options, **request_options}
+                        if isinstance(request_options, dict)
+                        else workspace_options
+                    )
     except HTTPException:
         await release_reservation(ctx)
         raise

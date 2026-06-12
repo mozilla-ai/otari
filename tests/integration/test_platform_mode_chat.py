@@ -852,3 +852,221 @@ def test_platform_mode_tool_loop_streaming_falls_through_pre_lock_in(
     assert response.headers["X-Correlation-ID"] == "tool-att-openai"
     assert calls == ["anthropic:claude-haiku-4-5", "openai:gpt-4o-mini"]
     assert "hello" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Web-search platform policy resolution
+# ---------------------------------------------------------------------------
+#
+# In platform mode an `otari_web_search` request consults the platform's
+# `/gateway/web-search/resolve` endpoint: if web search is disabled for the
+# workspace the gateway 403s; otherwise the resolved workspace config is
+# merged into the tool entry (per-request values win) before the backend runs.
+
+
+class _FakeWebSearchBackend:
+    """Minimal WebSearchBackend duck-type that records the tool_entry it was
+    built from and resolves the tool loop in a single round (no real search)."""
+
+    last_tool_entry: dict[str, Any] | None = None
+
+    def __init__(self, *, base_url: str, tool_entry: dict[str, Any]) -> None:
+        type(self).last_tool_entry = dict(tool_entry)
+
+    async def __aenter__(self) -> "_FakeWebSearchBackend":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "web_search", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "web_search"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        return "results"
+
+
+def _single_attempt_resolve_response(*, request_id: str) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "request_id": request_id,
+            "fallback_enabled": False,
+            "attempts": [
+                {
+                    "attempt_id": request_id,
+                    "position": 0,
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "api_key": "sk-platform-key",
+                    "api_base": "https://api.openai.com/v1",
+                    "managed": True,
+                }
+            ],
+        },
+    )
+
+
+def test_platform_mode_web_search_403_when_disabled(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An `otari_web_search` request whose workspace has web search disabled
+    is rejected with 403 before any provider call."""
+    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://searxng:8080")
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="ws-req-disabled")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(200, json={"enabled": False})
+        return httpx.Response(204)
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_web_search"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "web search is not enabled for this workspace"}
+
+
+def test_platform_mode_web_search_merges_workspace_config(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When enabled, the resolved workspace config is merged into the tool
+    entry with per-request values winning over workspace defaults."""
+    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://searxng:8080")
+    _FakeWebSearchBackend.last_tool_entry = None
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="ws-req-enabled")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "enabled": True,
+                    "max_results": 9,
+                    "allowed_domains": ["docs.python.org"],
+                    "purpose_hint": "workspace hint",
+                    "provider_options": {"search_depth": "advanced"},
+                },
+            )
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        return ChatCompletion(
+            id="cmpl-ws",
+            object="chat.completion",
+            created=0,
+            model="openai:gpt-4o-mini",
+            choices=[
+                Choice(
+                    finish_reason="stop",
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="answer"),
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", _FakeWebSearchBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            # Per-request max_results=3 must win over the workspace default 9.
+            "tools": [{"type": "otari_web_search", "max_results": 3}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    merged = _FakeWebSearchBackend.last_tool_entry
+    assert merged is not None
+    # Per-request value wins.
+    assert merged["max_results"] == 3
+    # Workspace defaults fill in the unset keys.
+    assert merged["allowed_domains"] == ["docs.python.org"]
+    assert merged["purpose_hint"] == "workspace hint"
+    assert merged["provider_options"] == {"search_depth": "advanced"}
+
+
+def test_platform_mode_web_search_empty_request_list_keeps_workspace_policy(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A request `allowed_domains: []` reads as "no preference" and must NOT clear
+    the workspace allow-list — empty/falsy per-request values fall back to the
+    workspace value instead of overriding it."""
+    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://searxng:8080")
+    _FakeWebSearchBackend.last_tool_entry = None
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="ws-req-empty")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(200, json={"enabled": True, "allowed_domains": ["docs.python.org"]})
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        return ChatCompletion(
+            id="cmpl-ws",
+            object="chat.completion",
+            created=0,
+            model="openai:gpt-4o-mini",
+            choices=[
+                Choice(
+                    finish_reason="stop",
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="answer"),
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", _FakeWebSearchBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_web_search", "allowed_domains": []}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    merged = _FakeWebSearchBackend.last_tool_entry
+    assert merged is not None
+    # Empty per-request list did not wipe the workspace allow-list.
+    assert merged["allowed_domains"] == ["docs.python.org"]

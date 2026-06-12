@@ -131,7 +131,9 @@ services:
   # uses a licensed API (Tavily, Brave Search API with key, Exa, Linkup,
   # Serper). Any HTTP service that exposes a SearXNG-compatible
   # /search?format=json shape is a drop-in replacement — just change
-  # GATEWAY_WEB_SEARCH_URL in the gateway's environment.
+  # GATEWAY_WEB_SEARCH_URL in the gateway's environment. Bundled adapters:
+  # the `web-search-brave` profile (Brave API) and the `web-search-tavily`
+  # profile (Tavily API) below.
   #
   # Opt-in via the `web-search` compose profile so operators who don't use
   # the web_search tool aren't forced to pull this image. Bring it up with
@@ -184,6 +186,33 @@ services:
     environment:
       # Brave Search API subscription token. Kept here, not in the gateway.
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+    restart: unless-stopped
+
+  # Commercial-API web-search backend — a thin adapter that fronts the Tavily
+  # Search API with the SearXNG-compatible /search?format=json shape the
+  # gateway expects. Tavily is LLM-oriented (returns extracted page content
+  # directly), so the gateway can skip its own per-URL fetch. Use this instead
+  # of the `searxng` profile when the free metasearch engines rate-limit your
+  # IP. Source + how-to live in scripts/web-search-tavily-adapter/.
+  #
+  # Opt-in via the `web-search-tavily` profile. To use it, set
+  #   GATEWAY_WEB_SEARCH_URL=http://tavily-adapter:8080
+  #   TAVILY_API_KEY=<your key from https://tavily.com/>
+  # then `docker compose --profile web-search-tavily up -d --build tavily-adapter gateway`.
+  tavily-adapter:
+    profiles: ["web-search-tavily"]
+    build:
+      context: ./scripts/web-search-tavily-adapter
+      dockerfile: Dockerfile
+    ports:
+      # Localhost-only, like the other internal backends — the gateway reaches
+      # it over the Docker network at `tavily-adapter:8080`; this mapping is for
+      # ad-hoc curl/debugging. 8184 is taken by encoderfile, so use 8185 to
+      # avoid a clash when the web-search-tavily and guardrails profiles run together.
+      - "127.0.0.1:8185:8080"
+    environment:
+      # Tavily Search API key. Kept here, not in the gateway.
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
     restart: unless-stopped
 
   # Guardrails service — the otari-anyguardrails container, a stateless FastAPI

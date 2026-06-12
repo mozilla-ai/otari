@@ -67,6 +67,11 @@ select = ["E", "F", "I"]
 python_version = "3.13"
 strict = true
 files = ["src", "tests", "scripts"]
+# Standalone web-search adapters are independent services (own Dockerfile +
+# requirements), not part of the gateway package. They each ship a top-level
+# `app.py`, so type-checking them together trips mypy's duplicate-module guard.
+# Their behaviour is covered by tests/unit/test_*_adapter.py.
+exclude = ["scripts/web-search-[^/]+-adapter/"]
 
 [[tool.mypy.overrides]]
 module = ["testcontainers.*"]
