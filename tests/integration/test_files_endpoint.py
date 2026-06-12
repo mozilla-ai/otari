@@ -94,7 +94,10 @@ def test_files_are_user_scoped(
 
     # A second, independent key (its own auto-created user) must not see it.
     other = client.post("/v1/keys", json={"key_name": "other"}, headers=master_key_header)
-    other_header = {list(api_key_header)[0]: f"Bearer {other.json()['key']}"}
+    # Match the fixture's auth scheme: the gateway requires a "Bearer " prefix on
+    # every header form, including Otari-Key (see api_key_header / deps.py
+    # _extract_bearer_token), so reuse the fixture's header name with a Bearer value.
+    other_header = {next(iter(api_key_header)): f"Bearer {other.json()['key']}"}
 
     assert client.get(f"/v1/files/{file_id}", headers=other_header).status_code == 404
     assert client.get(f"/v1/files/{file_id}/content", headers=other_header).status_code == 404
