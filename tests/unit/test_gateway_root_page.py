@@ -16,9 +16,9 @@ def test_root_tutorial_page_is_available(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "AI Gateway (Proxy Server)" in response.text
-    assert "Gateway Quickstart" in response.text
+    assert "Otari (Proxy Server)" in response.text
+    assert "Otari Quickstart" in response.text
     assert "bootstrap API key" in response.text
     assert "from openai import OpenAI" in response.text
-    assert "YOUR_BOOTSTRAP_GATEWAY_KEY" in response.text
+    assert "YOUR_BOOTSTRAP_OTARI_KEY" in response.text
     assert "mozilla-ai.github.io/otari/gateway/quickstart" in response.text

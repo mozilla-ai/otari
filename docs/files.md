@@ -1,12 +1,12 @@
 # File uploads & document understanding
 
 Frontier models read PDFs, office documents, and images natively. Most local /
-open-source models can't; many are text-only. The gateway closes that gap: a
+open-source models can't; many are text-only. Otari closes that gap: a
 user can attach a file and a text-only local model can still understand it,
-because the gateway extracts the file to text (and captions images) before the
+because Otari extracts the file to text (and captions images) before the
 model ever sees the request.
 
-This works the same way the gateway's other "frontier capabilities" do: it
+This works the same way Otari's other "frontier capabilities" do: it
 inspects the request, decides what to do per attachment, and only does work the
 target model actually needs.
 
@@ -41,7 +41,7 @@ blocks and Responses `input_file` items work too):
 You can also inline a file as a base64 `data:` URL (`file.file_data`) or send an
 `image_url` block, with or without uploading first.
 
-## What the gateway does per attachment
+## What Otari does per attachment
 
 For each file/image block it resolves the **target model's** capabilities, then:
 
@@ -55,7 +55,7 @@ sent through the image path.
 
 ### Capability resolution
 
-The gateway must know whether the target model is natively multimodal. It uses,
+Otari must know whether the target model is natively multimodal. It uses,
 in order:
 
 1. **`model_capabilities` config override**: authoritative.
@@ -85,5 +85,5 @@ See [`config.example.yml`](../config.example.yml) for the full list. Key knobs:
 Text/office/PDF extraction uses [`markitdown`](https://github.com/microsoft/markitdown)
 (MIT); scanned-PDF rasterization uses [`pypdfium2`](https://github.com/pypdfium2-team/pypdfium2)
 (Apache-2.0). Both are permissively licensed, deliberately avoiding AGPL PDF
-libraries since the gateway is a network service. OCR is optional; install the
+libraries since Otari is a network service. OCR is optional; install the
 `ocr` extra (`pip install gateway[ocr]`) to enable it.

@@ -9,7 +9,7 @@
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-GATEWAY_ROOT="$(cd "$HERE/../.." && pwd)"
+OTARI_ROOT="$(cd "$HERE/../.." && pwd)"
 
 ENV_FILE="$HERE/.env"
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -35,14 +35,14 @@ for arg in "$@"; do
         exit 1
       fi
       PROFILE="web-search-brave"
-      export GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
-      echo "ℹ --brave: web_search backed by the Brave adapter (GATEWAY_WEB_SEARCH_URL → brave-adapter:8080)"
+      export OTARI_WEB_SEARCH_URL=http://brave-adapter:8080
+      echo "ℹ --brave: web_search backed by the Brave adapter (OTARI_WEB_SEARCH_URL → brave-adapter:8080)"
       ;;
     *) PASSTHRU+=("$arg") ;;
   esac
 done
 
-cd "$GATEWAY_ROOT"
+cd "$OTARI_ROOT"
 
 # If we're on a non-main branch, the published `mzdotai/otari:latest` may not
 # have the unreleased code on this branch. Surface the manual-build recipe

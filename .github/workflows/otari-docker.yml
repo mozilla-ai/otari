@@ -1,4 +1,4 @@
-name: Publish Gateway Docker Image
+name: Publish Otari Docker Image
 
 on:
   push:
@@ -13,7 +13,7 @@ on:
       - 'pyproject.toml'
       - 'uv.lock'
       - 'scripts/docker_liveness_check.sh'
-      - '.github/workflows/gateway-docker.yml'
+      - '.github/workflows/otari-docker.yml'
   release:
     types: [published]
   workflow_dispatch:
@@ -68,7 +68,7 @@ jobs:
           load: true
           tags: otari-test:${{ github.sha }}
           build-args: |
-            GATEWAY_VERSION=${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+            OTARI_VERSION=${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -87,7 +87,7 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.GITHUB_SHA_SHORT }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
-            GATEWAY_VERSION=${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
+            OTARI_VERSION=${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
           cache-from: type=gha
           provenance: mode=max
           sbom: true

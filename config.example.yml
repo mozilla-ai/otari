@@ -1,7 +1,7 @@
-# Configuration for otari-gateway
+# Configuration for Otari
 
 # Database connection URL
-database_url: "postgresql://gateway:gateway@postgres:5432/gateway"
+database_url: "postgresql://otari:otari@postgres:5432/otari"
 
 # Server configuration - if you want to use a different port, change it here and in the docker-compose.yml file.
 host: "0.0.0.0"

@@ -5,7 +5,7 @@
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-GATEWAY_ROOT="$(cd "$HERE/../.." && pwd)"
+OTARI_ROOT="$(cd "$HERE/../.." && pwd)"
 
 ENV_FILE="$HERE/.env"
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -18,7 +18,7 @@ if grep -qE '^[A-Z_]+=.*REPLACE_ME' "$ENV_FILE"; then
   exit 1
 fi
 
-cd "$GATEWAY_ROOT"
+cd "$OTARI_ROOT"
 
 # If we're on a non-main branch, the published `mzdotai/otari:latest` may not
 # have the unreleased code on this branch. Surface the manual-build recipe

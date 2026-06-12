@@ -5,14 +5,14 @@ Two distinct call sites with overlapping but not identical threat models:
 * **MCP server endpoints** (:func:`validate_mcp_url`) — URL comes from the
   request body. We block private/link-local/reserved IPs to prevent SSRF.
   Loopback is allowed by default (useful for same-host sidecar deployments)
-  and gated by ``GATEWAY_MCP_ALLOW_LOOPBACK``. Also enforces TLS when a
+  and gated by ``OTARI_MCP_ALLOW_LOOPBACK``. Also enforces TLS when a
   bearer token is supplied.
 
 * **Web-search result URLs** (:func:`validate_outbound_fetch_url`) — URL
   comes from a third-party search engine via the configured search backend.
   Tighter defaults: loopback is blocked too (the gateway has no legitimate
   reason to fetch search results from itself). Gated by
-  ``GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`` for operators with unusual
+  ``OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`` for operators with unusual
   setups (private indexes etc.).
 
 These checks are intentionally conservative: DNS rebinding can defeat host-based
@@ -24,9 +24,10 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
-import os
 import socket
 from urllib.parse import urlparse
+
+from gateway.core.env import otari_env
 
 
 class UnsafeURLError(ValueError):
@@ -34,11 +35,11 @@ class UnsafeURLError(ValueError):
 
 
 def _allow_loopback() -> bool:
-    return os.environ.get("GATEWAY_MCP_ALLOW_LOOPBACK", "true").lower() not in {"0", "false", "no"}
+    return otari_env("MCP_ALLOW_LOOPBACK", "true").lower() not in {"0", "false", "no"}
 
 
 def _allow_private_hosts() -> bool:
-    return os.environ.get("GATEWAY_MCP_ALLOW_PRIVATE_HOSTS", "false").lower() in {"1", "true", "yes"}
+    return otari_env("MCP_ALLOW_PRIVATE_HOSTS", "false").lower() in {"1", "true", "yes"}
 
 
 def _resolve_all(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
@@ -87,12 +88,12 @@ def validate_mcp_url(url: str, *, has_authorization_token: bool) -> None:
             # classic DNS-rebinding TOCTOU). Operators that explicitly want
             # to allow unresolvable hostnames (private DNS,
             # hosts-file-driven setups, etc.) can opt in via
-            # GATEWAY_MCP_ALLOW_PRIVATE_HOSTS, which short-circuits this
+            # OTARI_MCP_ALLOW_PRIVATE_HOSTS, which short-circuits this
             # whole function above.
             raise UnsafeURLError(
                 f"MCP server host {host!r} could not be resolved at validation time; "
                 "rejecting to avoid DNS-rebinding (a later lookup could resolve to a "
-                "private address). Set GATEWAY_MCP_ALLOW_PRIVATE_HOSTS=true to override."
+                "private address). Set OTARI_MCP_ALLOW_PRIVATE_HOSTS=true to override."
             )
 
     for addr in addresses:
@@ -102,7 +103,7 @@ def validate_mcp_url(url: str, *, has_authorization_token: bool) -> None:
         if reason is not None:
             raise UnsafeURLError(
                 f"MCP server host {host!r} resolves to {addr} which is {reason}; "
-                "rejecting to prevent SSRF. Set GATEWAY_MCP_ALLOW_PRIVATE_HOSTS=true to override."
+                "rejecting to prevent SSRF. Set OTARI_MCP_ALLOW_PRIVATE_HOSTS=true to override."
             )
 
 
@@ -125,7 +126,7 @@ def _blocked_reason(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str 
 
 
 def _allow_web_search_private_hosts() -> bool:
-    return os.environ.get("GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS", "false").lower() in {"1", "true", "yes"}
+    return otari_env("WEB_SEARCH_ALLOW_PRIVATE_HOSTS", "false").lower() in {"1", "true", "yes"}
 
 
 async def _resolve_all_async(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
@@ -178,7 +179,7 @@ async def validate_outbound_fetch_url(url: str) -> None:
         if not addresses:
             raise UnsafeURLError(
                 f"fetch host {host!r} could not be resolved; rejecting to avoid "
-                "DNS-rebinding. Set GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS=true to override."
+                "DNS-rebinding. Set OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS=true to override."
             ) from None
 
     for addr in addresses:
@@ -186,5 +187,5 @@ async def validate_outbound_fetch_url(url: str) -> None:
         if reason is not None:
             raise UnsafeURLError(
                 f"fetch host {host!r} resolves to {addr} which is {reason}; "
-                "rejecting to prevent SSRF. Set GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS=true to override."
+                "rejecting to prevent SSRF. Set OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS=true to override."
             )

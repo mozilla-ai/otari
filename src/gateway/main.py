@@ -29,7 +29,7 @@ _ROOT_TUTORIAL_HTML = """<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AI Gateway</title>
+    <title>Otari</title>
     <style>
       body {
         background: #efefef;
@@ -80,18 +80,18 @@ _ROOT_TUTORIAL_HTML = """<!doctype html>
   </head>
   <body>
     <main>
-      <h1>AI Gateway (Proxy Server)</h1>
+      <h1>Otari (Proxy Server)</h1>
       <div class="sub">
-        <a class="link" href="https://mozilla-ai.github.io/otari/gateway/quickstart/">Gateway Quickstart</a>
+        <a class="link" href="https://mozilla-ai.github.io/otari/gateway/quickstart/">Otari Quickstart</a>
       </div>
 
       <p class="note">
-        On first startup, the gateway prints a bootstrap API key in logs. Export it as
-        <code>GATEWAY_API_KEY</code> and use that value in your client.
+        On first startup, Otari prints a bootstrap API key in logs. Export it as
+        <code>OTARI_API_KEY</code> and use that value in your client.
       </p>
 
       <div class="block">
-        <pre><code>export GATEWAY_API_KEY=YOUR_BOOTSTRAP_GATEWAY_KEY
+        <pre><code>export OTARI_API_KEY=YOUR_BOOTSTRAP_OTARI_KEY
 </code></pre>
       </div>
 
@@ -106,7 +106,7 @@ _ROOT_TUTORIAL_HTML = """<!doctype html>
 from openai import OpenAI
 
 client = OpenAI(
-    api_key=os.environ["GATEWAY_API_KEY"],
+    api_key=os.environ["OTARI_API_KEY"],
     base_url="http://localhost:8000/v1",
 )
 
@@ -191,8 +191,8 @@ def create_app(config: GatewayConfig) -> FastAPI:
     set_config(config)
 
     app = FastAPI(
-        title="otari-gateway",
-        description="A clean FastAPI gateway for otari with API key management",
+        title="otari",
+        description="Otari, an OpenAI-compatible LLM gateway with API key management",
         version=__version__,
         docs_url="/docs" if config.enable_docs else None,
         redoc_url="/redoc" if config.enable_docs else None,

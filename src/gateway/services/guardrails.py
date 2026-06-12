@@ -16,7 +16,7 @@ tool-loop ``pool`` protocol: guardrails never enter the tool loop. It is a flat
 pre-provider interceptor — see :func:`run_input_guardrails`, which the three
 route handlers call right after auth and before dispatching to the provider.
 
-The service URL is operator-controlled (``GATEWAY_GUARDRAILS_URL``); callers may
+The service URL is operator-controlled (``OTARI_GUARDRAILS_URL``); callers may
 override it per-guardrail via :attr:`GuardrailConfig.url`, which is SSRF-checked
 at parse time (see :mod:`gateway.models.guardrails`).
 """
@@ -170,7 +170,7 @@ async def run_input_guardrails(
                 if not base_url:
                     raise GuardrailsNotReachableError(
                         f"guardrail profile {cfg.profile!r} requested but no guardrails service is "
-                        "configured. Set GATEWAY_GUARDRAILS_URL on the gateway or pass `url` on the "
+                        "configured. Set OTARI_GUARDRAILS_URL on the gateway or pass `url` on the "
                         "guardrail entry."
                     )
                 result = await _validate_one(client, base_url=base_url, cfg=cfg, input_text=input_text)

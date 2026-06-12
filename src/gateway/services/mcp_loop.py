@@ -14,12 +14,12 @@ yields `ChatCompletionChunk` objects across the entire loop as a single
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
 from any_llm import acompletion
 
+from gateway.core.env import otari_env
 from gateway.log_config import logger
 
 if TYPE_CHECKING:
@@ -68,13 +68,13 @@ def inject_purpose_hints(
 
     Header resolution priority:
       1. ``header`` arg (per-request override, set from the request body)
-      2. ``GATEWAY_TOOLS_HEADER`` env (per-deployment override)
+      2. ``OTARI_TOOLS_HEADER`` env (per-deployment override)
       3. :data:`PURPOSE_HINT_HEADER` built-in default
     """
     if not hints:
         return messages
 
-    effective_header = header or os.environ.get("GATEWAY_TOOLS_HEADER") or PURPOSE_HINT_HEADER
+    effective_header = header or otari_env("TOOLS_HEADER") or PURPOSE_HINT_HEADER
     lines = [effective_header]
     for name, hint in hints:
         lines.append(f"- {name}: {hint}")

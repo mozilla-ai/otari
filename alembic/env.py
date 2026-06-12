@@ -30,7 +30,7 @@ if config.get_main_option("sqlalchemy.url") is None:
         os.getenv("OTARI_DATABASE_URL")
         or os.getenv("GATEWAY_DATABASE_URL")
         or os.getenv("DATABASE_URL")
-        or "sqlite:///./otari-gateway.db"
+        or "sqlite:///./otari.db"
     )
     config.set_main_option("sqlalchemy.url", database_url)
 

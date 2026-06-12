@@ -18,27 +18,27 @@ if [[ -z "$IMAGE_TAG" ]]; then
 fi
 
 POSTGRES_CONTAINER="test-postgres"
-GATEWAY_CONTAINER="test-gateway"
-CONFIG_FILE="/tmp/gateway-config.yml"
+OTARI_CONTAINER="test-otari"
+CONFIG_FILE="/tmp/otari-config.yml"
 
 cleanup() {
     echo "Cleaning up containers..."
-    docker rm -f "$GATEWAY_CONTAINER" "$POSTGRES_CONTAINER" 2>/dev/null || true
+    docker rm -f "$OTARI_CONTAINER" "$POSTGRES_CONTAINER" 2>/dev/null || true
 }
 
 trap cleanup EXIT
 
 echo "Starting PostgreSQL container..."
 docker run -d --name "$POSTGRES_CONTAINER" \
-    -e POSTGRES_USER=gateway \
-    -e POSTGRES_PASSWORD=gateway \
-    -e POSTGRES_DB=gateway \
+    -e POSTGRES_USER=otari \
+    -e POSTGRES_PASSWORD=otari \
+    -e POSTGRES_DB=otari \
     -p 5432:5432 \
     postgres:16-alpine
 
 echo "Waiting for PostgreSQL to be ready..."
 for i in {1..30}; do
-    if docker exec "$POSTGRES_CONTAINER" pg_isready -U gateway > /dev/null 2>&1; then
+    if docker exec "$POSTGRES_CONTAINER" pg_isready -U otari > /dev/null 2>&1; then
         echo "PostgreSQL is ready"
         break
     fi
@@ -52,19 +52,19 @@ done
 
 echo "Creating gateway config..."
 cat > "$CONFIG_FILE" << 'EOF'
-database_url: "postgresql://gateway:gateway@host.docker.internal:5432/gateway"
+database_url: "postgresql://otari:otari@host.docker.internal:5432/otari"
 host: "0.0.0.0"
 port: 8000
 master_key: "test-master-key"
 EOF
 
 echo "Starting gateway container with image: $IMAGE_TAG"
-docker run -d --name "$GATEWAY_CONTAINER" \
+docker run -d --name "$OTARI_CONTAINER" \
     --add-host=host.docker.internal:host-gateway \
     -p 8000:8000 \
     -v "$CONFIG_FILE":/app/config.yml \
     "$IMAGE_TAG" \
-    gateway serve --config /app/config.yml
+    otari serve --config /app/config.yml
 
 echo "Waiting for gateway to be healthy..."
 for i in {1..60}; do
@@ -75,7 +75,7 @@ for i in {1..60}; do
     if [[ $i -eq 60 ]]; then
         echo "Gateway failed to become healthy within 60 seconds"
         echo "=== Gateway logs ==="
-        docker logs "$GATEWAY_CONTAINER"
+        docker logs "$OTARI_CONTAINER"
         exit 1
     fi
     sleep 1

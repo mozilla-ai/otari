@@ -1,5 +1,5 @@
 services:
-  gateway:
+  otari:
     # Pulls from Docker Hub by default. Contributors testing a feature branch
     # with unreleased code should build the image locally first:
     #     docker build -t mzdotai/otari:latest .
@@ -10,52 +10,52 @@ services:
     ports:
       # Host port 8000 by default. Override via $OTARI_PORT when other
       # services on the host already own :8000 (e.g. another local backend).
-      - "${OTARI_PORT:-${GATEWAY_PORT:-8000}}:8000"
+      - "${OTARI_PORT:-8000}:8000"
     volumes:
       # Default `./config.yml` matches the existing operator convention
       # (gitignored, operator-supplied). The demo overrides this via
-      # GATEWAY_CONFIG_PATH=./demo/code-exec/gateway-config.yml so the
+      # OTARI_CONFIG_PATH=./demo/code-exec/otari-config.yml so the
       # repo's main config.yml stays untouched.
-      - ${GATEWAY_CONFIG_PATH:-./config.yml}:/app/config.yml
+      - ${OTARI_CONFIG_PATH:-./config.yml}:/app/config.yml
       - ./service_account.json:/app/service_account.json
-    command: ["gateway", "serve", "--config", "/app/config.yml"]
+    command: ["otari", "serve", "--config", "/app/config.yml"]
     environment:
-      # In-network URL of the sandbox image — set so the gateway can dispatch
+      # In-network URL of the sandbox image — set so Otari can dispatch
       # `code_execution` tool calls to the sandbox container without any
       # client-side configuration.
-      - GATEWAY_SANDBOX_URL=http://sandbox:8080
+      - OTARI_SANDBOX_URL=http://sandbox:8080
       # Optional operator-level purpose hint for the code_execution tool. Falls
       # back to a Python/pandas/numpy-flavoured default if unset. Per-request
       # tools[i].purpose_hint still wins over this.
-      - GATEWAY_SANDBOX_PURPOSE_HINT=${GATEWAY_SANDBOX_PURPOSE_HINT:-}
+      - OTARI_SANDBOX_PURPOSE_HINT=${OTARI_SANDBOX_PURPOSE_HINT:-}
       # In-network URL of the web-search backend — any HTTP service exposing
       # a SearXNG-compatible /search?format=json endpoint. The bundled
       # `searxng` profile container is the default; swap by changing this URL
       # to point at any other adapter (commercial-API fronting service etc.).
-      - GATEWAY_WEB_SEARCH_URL=${GATEWAY_WEB_SEARCH_URL:-http://searxng:8080}
+      - OTARI_WEB_SEARCH_URL=${OTARI_WEB_SEARCH_URL:-http://searxng:8080}
       # Optional knobs. Defaults are conservative — see web_search_backend.py.
-      - GATEWAY_WEB_SEARCH_ENGINES=${GATEWAY_WEB_SEARCH_ENGINES:-}
-      - GATEWAY_WEB_SEARCH_MAX_RESULTS=${GATEWAY_WEB_SEARCH_MAX_RESULTS:-}
-      - GATEWAY_WEB_SEARCH_EXTRACT=${GATEWAY_WEB_SEARCH_EXTRACT:-}
-      - GATEWAY_WEB_SEARCH_PURPOSE_HINT=${GATEWAY_WEB_SEARCH_PURPOSE_HINT:-}
+      - OTARI_WEB_SEARCH_ENGINES=${OTARI_WEB_SEARCH_ENGINES:-}
+      - OTARI_WEB_SEARCH_MAX_RESULTS=${OTARI_WEB_SEARCH_MAX_RESULTS:-}
+      - OTARI_WEB_SEARCH_EXTRACT=${OTARI_WEB_SEARCH_EXTRACT:-}
+      - OTARI_WEB_SEARCH_PURPOSE_HINT=${OTARI_WEB_SEARCH_PURPOSE_HINT:-}
       # In-network URL of the guardrails service — the otari-anyguardrails
       # container, which exposes POST /validate over `any-guardrail`. Callers
       # opt a request in per-request via the top-level `guardrails` field; the
-      # gateway runs the configured profile(s) against this URL before calling
+      # Otari runs the configured profile(s) against this URL before calling
       # the provider. Brought up by the `guardrails` compose profile below.
-      - GATEWAY_GUARDRAILS_URL=${GATEWAY_GUARDRAILS_URL:-http://anyguardrails:8000}
+      - OTARI_GUARDRAILS_URL=${OTARI_GUARDRAILS_URL:-http://anyguardrails:8000}
       # Optional operator-level header for the per-tool hint block in the system
       # message. Falls back to "You have access to the following tools:" if unset.
       # Useful for tone/translation/deployment-wide preferences. Not per-request:
       # callers who want a custom framing should set their own system message.
-      - GATEWAY_TOOLS_HEADER=${GATEWAY_TOOLS_HEADER:-}
+      - OTARI_TOOLS_HEADER=${OTARI_TOOLS_HEADER:-}
       # Pass provider API keys from host env so config.yml stays free of
       # secrets. any-llm/the underlying SDK picks them up when the config
       # doesn't override.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Local llamafile (open-weight model) endpoint. host.docker.internal
-      # routes from the gateway container back to a llamafile running on
+      # routes from Otari container back to a llamafile running on
       # the macOS/Windows host. Override if you run the model elsewhere.
       - LLAMAFILE_API_BASE=${LLAMAFILE_API_BASE:-http://host.docker.internal:8080/v1}
     depends_on:
@@ -69,22 +69,22 @@ services:
       # Host port 5433 (container still :5432) — avoids clashing with another
       # local postgres on the default port. Gateway connects via the Docker
       # network at postgres:5432, so the host mapping is only for external
-      # tools (psql / TablePlus / etc.). Override with $GATEWAY_POSTGRES_PORT.
-      - "${GATEWAY_POSTGRES_PORT:-5433}:5432"
+      # tools (psql / TablePlus / etc.). Override with $OTARI_POSTGRES_PORT.
+      - "${OTARI_POSTGRES_PORT:-5433}:5432"
     environment:
-      - POSTGRES_USER=gateway
-      - POSTGRES_PASSWORD=gateway
-      - POSTGRES_DB=gateway
+      - POSTGRES_USER=otari
+      - POSTGRES_PASSWORD=otari
+      - POSTGRES_DB=otari
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gateway"]
+      test: ["CMD-SHELL", "pg_isready -U otari"]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
-  # Code-execution sandbox — a Python REPL container the gateway dispatches
+  # Code-execution sandbox — a Python REPL container Otari dispatches
   # `code_execution` tool calls to. Source + build live in their own repo:
   # https://github.com/mozilla-ai/otari-sandbox-container — CI publishes
   # `mzdotai/otari-sandbox-container:{latest,<sha>}` on Docker Hub on every
@@ -95,7 +95,7 @@ services:
   # code_execution aren't forced to pull this image or wait on its health
   # check. Bring it up with `docker compose --profile code-exec up` (the
   # demo's start.sh passes this flag automatically). When the sandbox is
-  # not running, the gateway returns a clean 502 to any request that
+  # not running, Otari returns a clean 502 to any request that
   # actually tries to dispatch `code_execution`.
   sandbox:
     profiles: ["code-exec"]
@@ -103,7 +103,7 @@ services:
     ports:
       # Bound to localhost only: the sandbox runs arbitrary user-supplied
       # code, so an open port on the host network would be an RCE surface
-      # to anyone on the LAN. The gateway container reaches it via the
+      # to anyone on the LAN. The Otari container reaches it via the
       # Docker network at `sandbox:8080`; this host-side mapping is just
       # for ad-hoc curl/debugging from the operator's own machine.
       - "127.0.0.1:8180:8080"
@@ -119,9 +119,9 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  # Web-search backend — a SearXNG instance the gateway dispatches `web_search`
+  # Web-search backend — a SearXNG instance Otari dispatches `web_search`
   # tool calls to. SearXNG is a metasearch front-end over many upstream
-  # engines; the gateway's default engine list deliberately excludes Google,
+  # engines; Otari's default engine list deliberately excludes Google,
   # Bing, Yahoo and Brave (which forbid automated querying or sell a paid
   # API) and uses duckduckgo/mojeek/qwant/wikipedia — the most defensible
   # OSS combination. Operators who enable scraping-of-major-engines do so
@@ -131,21 +131,21 @@ services:
   # uses a licensed API (Tavily, Brave Search API with key, Exa, Linkup,
   # Serper). Any HTTP service that exposes a SearXNG-compatible
   # /search?format=json shape is a drop-in replacement — just change
-  # GATEWAY_WEB_SEARCH_URL in the gateway's environment. Bundled adapters:
+  # OTARI_WEB_SEARCH_URL in Otari's environment. Bundled adapters:
   # the `web-search-brave` profile (Brave API) and the `web-search-tavily`
   # profile (Tavily API) below.
   #
   # Opt-in via the `web-search` compose profile so operators who don't use
   # the web_search tool aren't forced to pull this image. Bring it up with
   # `docker compose --profile web-search up`. When the searxng container is
-  # not running, the gateway returns a clean 502 to any request that tries
+  # not running, Otari returns a clean 502 to any request that tries
   # to dispatch `web_search`.
   searxng:
     profiles: ["web-search"]
     image: docker.io/searxng/searxng:latest
     ports:
       # Bound to localhost only — like sandbox, this is internal infra. The
-      # gateway reaches it via the Docker network at `searxng:8080`; the
+      # Otari reaches it via the Docker network at `searxng:8080`; the
       # host mapping is just for ad-hoc curl/debugging.
       - "127.0.0.1:8181:8080"
     volumes:
@@ -153,71 +153,71 @@ services:
     environment:
       # Public-facing base URL SearXNG uses for self-references (OpenSearch
       # descriptor, UI links, CSP origins). Must match the host port mapping
-      # above so ad-hoc curl / browser access lines up; the gateway itself
+      # above so ad-hoc curl / browser access lines up; Otari itself
       # reaches SearXNG over the Docker network at ``searxng:8080`` and
       # doesn't use this value.
       - SEARXNG_BASE_URL=http://localhost:8181/
       # SearXNG uses a per-instance secret for CSRF tokens etc. The default
-      # below is fine for a single-tenant gateway-internal deployment; rotate
+      # below is fine for a single-tenant Otari-internal deployment; rotate
       # via $SEARXNG_SECRET for multi-tenant or public-facing setups.
-      - SEARXNG_SECRET=${SEARXNG_SECRET:-otari-gateway-local-dev-secret}
+      - SEARXNG_SECRET=${SEARXNG_SECRET:-otari-local-dev-secret}
     restart: unless-stopped
 
   # Commercial-API web-search backend — a thin adapter that fronts the Brave
   # Search API with the SearXNG-compatible /search?format=json shape the
-  # gateway expects. Use this instead of the `searxng` profile when the free
+  # Otari expects. Use this instead of the `searxng` profile when the free
   # metasearch engines rate-limit/CAPTCHA your IP and you want reliable
   # results. Source + how-to live in scripts/web-search-brave-adapter/.
   #
   # Opt-in via the `web-search-brave` profile. To use it, set
-  #   GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
+  #   OTARI_WEB_SEARCH_URL=http://brave-adapter:8080
   #   BRAVE_API_KEY=<your key from https://brave.com/search/api/>
-  # then `docker compose --profile web-search-brave up -d --build brave-adapter gateway`.
+  # then `docker compose --profile web-search-brave up -d --build brave-adapter otari`.
   brave-adapter:
     profiles: ["web-search-brave"]
     build:
       context: ./scripts/web-search-brave-adapter
       dockerfile: Dockerfile
     ports:
-      # Localhost-only, like the other internal backends — the gateway reaches
+      # Localhost-only, like the other internal backends — Otari reaches
       # it over the Docker network at `brave-adapter:8080`; this mapping is for
       # ad-hoc curl/debugging.
       - "127.0.0.1:8182:8080"
     environment:
-      # Brave Search API subscription token. Kept here, not in the gateway.
+      # Brave Search API subscription token. Kept here, not in Otari.
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
     restart: unless-stopped
 
   # Commercial-API web-search backend — a thin adapter that fronts the Tavily
   # Search API with the SearXNG-compatible /search?format=json shape the
-  # gateway expects. Tavily is LLM-oriented (returns extracted page content
-  # directly), so the gateway can skip its own per-URL fetch. Use this instead
+  # Otari expects. Tavily is LLM-oriented (returns extracted page content
+  # directly), so Otari can skip its own per-URL fetch. Use this instead
   # of the `searxng` profile when the free metasearch engines rate-limit your
   # IP. Source + how-to live in scripts/web-search-tavily-adapter/.
   #
   # Opt-in via the `web-search-tavily` profile. To use it, set
-  #   GATEWAY_WEB_SEARCH_URL=http://tavily-adapter:8080
+  #   OTARI_WEB_SEARCH_URL=http://tavily-adapter:8080
   #   TAVILY_API_KEY=<your key from https://tavily.com/>
-  # then `docker compose --profile web-search-tavily up -d --build tavily-adapter gateway`.
+  # then `docker compose --profile web-search-tavily up -d --build tavily-adapter otari`.
   tavily-adapter:
     profiles: ["web-search-tavily"]
     build:
       context: ./scripts/web-search-tavily-adapter
       dockerfile: Dockerfile
     ports:
-      # Localhost-only, like the other internal backends — the gateway reaches
+      # Localhost-only, like the other internal backends — Otari reaches
       # it over the Docker network at `tavily-adapter:8080`; this mapping is for
       # ad-hoc curl/debugging. 8184 is taken by encoderfile, so use 8185 to
       # avoid a clash when the web-search-tavily and guardrails profiles run together.
       - "127.0.0.1:8185:8080"
     environment:
-      # Tavily Search API key. Kept here, not in the gateway.
+      # Tavily Search API key. Kept here, not in Otari.
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
     restart: unless-stopped
 
   # Guardrails service — the otari-anyguardrails container, a stateless FastAPI
   # service that wraps `any-guardrail` (https://github.com/mozilla-ai/any-guardrail)
-  # behind `POST /validate`. The gateway calls it whenever a request carries the
+  # behind `POST /validate`. Otari calls it whenever a request carries the
   # top-level `guardrails` field (see services/guardrails.py). Source lives at
   # https://github.com/mozilla-ai/otari-anyguardrails-container.
   #
@@ -228,7 +228,7 @@ services:
   # Opt-in via the `guardrails` compose profile — which also includes the
   # `encoderfile` container below, so `docker compose --profile guardrails up`
   # brings up the whole PIGuard-via-encoderfile guardrail with no extra flags.
-  # When this container is not running, the gateway returns a clean 502 to any
+  # When this container is not running, Otari returns a clean 502 to any
   # request that uses `guardrails`. The mounted service config defaults to the
   # encoderfile profile; `./start.sh --in-process` swaps in the
   # InjecGuard/HuggingFace config and skips the encoderfile container.
@@ -236,7 +236,7 @@ services:
     profiles: ["guardrails"]
     image: ${OTARI_ANYGUARDRAILS_IMAGE:-docker.io/mzdotai/otari-any-guardrail-container:latest}
     ports:
-      # Localhost-only, like the other internal backends. The gateway reaches it
+      # Localhost-only, like the other internal backends. Otari reaches it
       # over the Docker network at `anyguardrails:8000`; this mapping is for
       # ad-hoc curl/debugging (e.g. GET /profiles, POST /validate).
       - "127.0.0.1:8183:8000"
@@ -265,7 +265,7 @@ services:
   #
   # Part of the `guardrails` profile, so `docker compose --profile guardrails up`
   # brings up the full prompt-injection guardrail (anyguardrails + encoderfile)
-  # with no extra flags. (`./start.sh --in-process` runs only gateway/postgres/
+  # with no extra flags. (`./start.sh --in-process` runs only Otari/postgres/
   # anyguardrails with the HuggingFace config instead.)
   #
   # The encoderfile binary is architecture-specific, so the images are published

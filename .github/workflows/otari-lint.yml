@@ -1,4 +1,4 @@
-name: Gateway Lint
+name: Otari Lint
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
       - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
-      - '.github/workflows/gateway-lint.yml'
+      - '.github/workflows/otari-lint.yml'
   pull_request:
     branches: [ main ]
     paths:
@@ -18,7 +18,7 @@ on:
       - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
-      - '.github/workflows/gateway-lint.yml'
+      - '.github/workflows/otari-lint.yml'
   workflow_dispatch:
 
 jobs:

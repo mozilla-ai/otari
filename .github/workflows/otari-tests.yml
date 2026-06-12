@@ -1,4 +1,4 @@
-name: Gateway Tests
+name: Otari Tests
 
 on:
   push:
@@ -11,7 +11,7 @@ on:
       - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
-      - '.github/workflows/gateway-tests.yml'
+      - '.github/workflows/otari-tests.yml'
   pull_request:
     branches: [ main ]
     paths:
@@ -22,7 +22,7 @@ on:
       - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
-      - '.github/workflows/gateway-tests.yml'
+      - '.github/workflows/otari-tests.yml'
   workflow_dispatch:
 
 jobs:
@@ -42,13 +42,13 @@ jobs:
       run: |
          uv sync --dev --frozen
 
-    - name: Run gateway unit tests
+    - name: Run Otari unit tests
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
         uv run pytest tests/unit -v --cov --cov-report=xml -n auto
 
-    - name: Run gateway integration tests
+    - name: Run Otari integration tests
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |

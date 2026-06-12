@@ -1,4 +1,4 @@
-name: Gateway Typecheck
+name: Otari Typecheck
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
       - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
-      - '.github/workflows/gateway-typecheck.yml'
+      - '.github/workflows/otari-typecheck.yml'
   pull_request:
     branches: [ main ]
     paths:
@@ -18,7 +18,7 @@ on:
       - 'scripts/**'
       - 'pyproject.toml'
       - 'uv.lock'
-      - '.github/workflows/gateway-typecheck.yml'
+      - '.github/workflows/otari-typecheck.yml'
   workflow_dispatch:
 
 jobs:

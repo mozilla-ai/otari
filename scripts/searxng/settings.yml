@@ -17,7 +17,7 @@
 use_default_settings: true
 
 general:
-  instance_name: "otari-gateway-search"
+  instance_name: "otari-search"
   privacypolicy_url: false
   donation_url: false
   contact_url: false

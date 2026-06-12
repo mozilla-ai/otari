@@ -9,7 +9,7 @@
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-GATEWAY_ROOT="$(cd "$HERE/../.." && pwd)"
+OTARI_ROOT="$(cd "$HERE/../.." && pwd)"
 
 ENV_FILE="$HERE/.env"
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -56,7 +56,7 @@ else
   echo "ℹ encoderfile (default): ${ef_model} via the encoderfile container (${OTARI_ENCODERFILE_IMAGE})."
 fi
 
-cd "$GATEWAY_ROOT"
+cd "$OTARI_ROOT"
 
 # Pre-pull the guardrails app image; a 401 here means the Docker Hub repo is
 # still private (it must be public for external users) or you're not logged in.

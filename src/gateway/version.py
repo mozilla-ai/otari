@@ -1,3 +1,3 @@
-import os
+from gateway.core.env import otari_env
 
-__version__ = os.getenv("GATEWAY_VERSION", "0.0.0-dev")
+__version__ = otari_env("VERSION", "0.0.0-dev")

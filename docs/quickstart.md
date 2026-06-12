@@ -1,6 +1,6 @@
 # Quickstart
 
-Get the Otari Gateway running locally and make your first request in about five minutes. This guide uses **standalone mode**: the gateway runs entirely on your own machine, manages its own database, and talks to providers using credentials you supply. Nothing leaves your environment, and you don't need an otari.ai account.
+Get Otari running locally and make your first request in about five minutes. This guide uses **standalone mode**: Otari runs entirely on your own machine, manages its own database, and talks to providers using credentials you supply. Nothing leaves your environment, and you don't need an otari.ai account.
 
 ## Prerequisites
 
@@ -33,15 +33,15 @@ pricing:
     output_price_per_million: 0.60
 ```
 
-The `pricing` entry matters: by default the gateway rejects requests for any model it can't price, so it can enforce budgets. Add an entry for the model you plan to call.
+The `pricing` entry matters: by default Otari rejects requests for any model it can't price, so it can enforce budgets. Add an entry for the model you plan to call.
 
-## 2. Start your gateway
+## 2. Start your Otari
 
 ```bash
 docker compose up -d
 ```
 
-This starts the gateway on port 8000 and a Postgres database. Confirm it's healthy:
+This starts Otari on port 8000 and a Postgres database. Confirm it's healthy:
 
 ```bash
 curl http://localhost:8000/health
@@ -62,11 +62,11 @@ curl -X POST http://localhost:8000/v1/keys \
  
 The response includes your new key. Copy it, this is the only time it's shown in full. You'll use it in the next step.
  
-> The gateway also creates a bootstrap key on first startup and prints it to the logs. Creating a key explicitly, as above, is more reliable for getting started.
+> Otari also creates a bootstrap key on first startup and prints it to the logs. Creating a key explicitly, as above, is more reliable for getting started.
 
 ## 4. Make your first request
 
-The gateway is OpenAI-compatible, so any standard client works. With curl:
+Otari is OpenAI-compatible, so any standard client works. With curl:
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
@@ -78,7 +78,7 @@ curl http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-Or with the OpenAI Python SDK, just point `base_url` at the gateway:
+Or with the OpenAI Python SDK, just point `base_url` at Otari:
 
 ```python
 from openai import OpenAI
@@ -100,12 +100,12 @@ Either way, you'll get a standard chat completion back. Prefer a typed client? U
 
 ## What just happened
 
-Your request went to the gateway, not directly to OpenAI. The gateway authenticated your key, checked the request against your budget, resolved the provider credential from your config, forwarded the call, and logged the usage. Your provider key never left the gateway, and every request is now tracked and queryable through `/v1/usage`.
+Your request went to Otari, not directly to OpenAI. Otari authenticated your key, checked the request against your budget, resolved the provider credential from your config, forwarded the call, and logged the usage. Your provider key never left Otari, and every request is now tracked and queryable through `/v1/usage`.
 
 ## Next steps
 
 - [Deployment](deployment.md) picks up from here with platform mode, optional services, and deployment-specific configuration.
-- [Built-in tools](tools.md) — let any model use a sandboxed code REPL or web search the gateway runs itself.
+- [Built-in tools](tools.md) — let any model use a sandboxed code REPL or web search Otari runs itself.
 - [Guardrails](guardrails.md) — request-level checks like prompt-injection detection, enforced before the provider is called.
 - [Configuration](configuration.md) is the full reference for budgets, rate limits, pricing, and provider options.
 - [Models](models.md) lists every supported provider and the model format.

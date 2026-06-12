@@ -10,9 +10,9 @@
 #     provider, which runs it in its native sandbox (the gateway just proxies)
 #
 # Env vars:
-#   GATEWAY_URL  — default http://localhost:${OTARI_PORT:-8000}
-#   GATEWAY_KEY  — default 'demo-master-key'  (your master key or API key)
-#   GATEWAY_USER — default 'demo'
+#   OTARI_URL  — default http://localhost:${OTARI_PORT:-8000}
+#   OTARI_KEY  — default 'demo-master-key'  (your master key or API key)
+#   OTARI_USER — default 'demo'
 #
 # Usage:
 #   ./ask.sh "What is 23 factorial?"                              # gateway sandbox
@@ -22,7 +22,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GATEWAY_ROOT="$(cd "$HERE/../.." && pwd)"
+OTARI_ROOT="$(cd "$HERE/../.." && pwd)"
 if [[ -f "$HERE/.env" ]]; then
   set -a
   # shellcheck disable=SC1091
@@ -33,13 +33,13 @@ fi
 # Resolve compose service -> container id (project-name-agnostic so the demo
 # survives renaming the repo directory). Empty fallback when the service is
 # not running; callers tolerate it via `|| echo 0` / 2>&1.
-GATEWAY_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q gateway 2>/dev/null | head -1 || true)
-SANDBOX_CONTAINER=$(cd "$GATEWAY_ROOT" && docker compose ps -q sandbox 2>/dev/null | head -1 || true)
+OTARI_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q otari 2>/dev/null | head -1 || true)
+SANDBOX_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q sandbox 2>/dev/null | head -1 || true)
 
-GATEWAY_PORT=${OTARI_PORT:-${GATEWAY_PORT:-8000}}
-GATEWAY_URL=${GATEWAY_URL:-http://localhost:${GATEWAY_PORT}}
-GATEWAY_KEY=${GATEWAY_KEY:-demo-master-key}
-GATEWAY_USER=${GATEWAY_USER:-demo}
+OTARI_PORT=${OTARI_PORT:-8000}
+OTARI_URL=${OTARI_URL:-http://localhost:${OTARI_PORT}}
+OTARI_KEY=${OTARI_KEY:-demo-master-key}
+OTARI_USER=${OTARI_USER:-demo}
 
 MODEL="anthropic:claude-sonnet-4-6"
 TOOL_TYPE="otari_code_execution"
@@ -66,10 +66,10 @@ query="${1:?usage: ./ask.sh [--model MODEL] [--tool-type TYPE] [--no-stream] \"y
 # the request's `user` to be a registered user (budget enforcement reads its
 # spend record); first-boot the demo user doesn't exist yet. Idempotent —
 # 409 on subsequent calls is fine.
-curl -sf -X POST "$GATEWAY_URL/v1/users" \
-  -H "Authorization: Bearer $GATEWAY_KEY" \
+curl -sf -X POST "$OTARI_URL/v1/users" \
+  -H "Authorization: Bearer $OTARI_KEY" \
   -H "Content-Type: application/json" \
-  -d "{\"user_id\": \"$GATEWAY_USER\"}" >/dev/null 2>&1 || true
+  -d "{\"user_id\": \"$OTARI_USER\"}" >/dev/null 2>&1 || true
 
 body=$(python3 -c '
 import json, sys
@@ -80,10 +80,10 @@ print(json.dumps({
     "stream": sys.argv[3] == "1",
     "user": sys.argv[4],
 }))
-' "$MODEL" "$query" "$stream" "$GATEWAY_USER" "$TOOL_TYPE")
+' "$MODEL" "$query" "$stream" "$OTARI_USER" "$TOOL_TYPE")
 
 if [[ "$TOOL_TYPE" == "otari_code_execution" ]]; then
-  runs_in="gateway sandbox (GATEWAY_SANDBOX_URL set in compose)"
+  runs_in="gateway sandbox (OTARI_SANDBOX_URL set in compose)"
 else
   runs_in="provider's native sandbox (gateway passes '$TOOL_TYPE' through)"
 fi
@@ -96,12 +96,12 @@ echo "    runs in:   $runs_in"
 echo "──────────────────────────────────────────────────────────"
 echo
 
-_gw_before=$(docker logs $GATEWAY_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
+_gw_before=$(docker logs $OTARI_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 _sbx_before=$(docker logs $SANDBOX_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 
 if [[ "$stream" == "1" ]]; then
-  curl -sN -X POST "$GATEWAY_URL/v1/chat/completions" \
-    -H "Authorization: Bearer $GATEWAY_KEY" \
+  curl -sN -X POST "$OTARI_URL/v1/chat/completions" \
+    -H "Authorization: Bearer $OTARI_KEY" \
     -H "Content-Type: application/json" \
     -d "$body" -D /tmp/.ask-headers | python3 -u -c '
 import json, os, sys
@@ -174,8 +174,8 @@ if is_error:
 print()
 '
 else
-  curl -sS -X POST "$GATEWAY_URL/v1/chat/completions" \
-    -H "Authorization: Bearer $GATEWAY_KEY" \
+  curl -sS -X POST "$OTARI_URL/v1/chat/completions" \
+    -H "Authorization: Bearer $OTARI_KEY" \
     -H "Content-Type: application/json" \
     -d "$body" | python3 -c '
 import json, sys
@@ -208,7 +208,7 @@ fi
 DIM=$'\e[2m'; BOLD=$'\e[1m'; RST=$'\e[0m'
 echo
 echo "${BOLD}${DIM}── gateway saw ──${RST}"
-docker logs $GATEWAY_CONTAINER 2>&1 \
+docker logs $OTARI_CONTAINER 2>&1 \
   | tail -n +$((_gw_before + 1)) \
   | grep -iE "POST .*chat|ERROR" \
   | sed "s/^/${DIM}  /; s/$/${RST}/" \

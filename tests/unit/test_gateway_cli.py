@@ -23,5 +23,5 @@ def test_main_invokes_cli(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_gateway_config_defaults_to_sqlite() -> None:
     config = GatewayConfig()
-    assert config.database_url == "sqlite:///./otari-gateway.db"
+    assert config.database_url == "sqlite:///./otari.db"
     assert config.bootstrap_api_key is True

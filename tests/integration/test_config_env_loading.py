@@ -107,6 +107,52 @@ def test_load_config_prefers_otari_prefix_over_gateway_aliases(
     assert config.port == 9001
 
 
+def test_load_config_otari_prefix_covers_all_scalar_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fields beyond the original hand-listed aliases must also resolve from OTARI_*.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_BUDGET_STRATEGY", "cas")
+    monkeypatch.setenv("OTARI_REQUIRE_PRICING", "false")
+    monkeypatch.setenv("OTARI_MODEL_CACHE_TTL_SECONDS", "42")
+    monkeypatch.setenv("OTARI_DB_POOL_TIMEOUT", "12.5")
+
+    config = load_config(str(config_file))
+
+    assert config.budget_strategy == "cas"
+    assert config.require_pricing is False
+    assert config.model_cache_ttl_seconds == 42
+    assert config.db_pool_timeout == 12.5
+
+
+def test_load_config_honors_legacy_gateway_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The GATEWAY_ prefix predates the rename to Otari and must keep working.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.delenv("OTARI_BUDGET_STRATEGY", raising=False)
+    monkeypatch.setenv("GATEWAY_BUDGET_STRATEGY", "cas")
+    monkeypatch.setenv("GATEWAY_PORT", "7100")
+
+    config = load_config(str(config_file))
+
+    assert config.budget_strategy == "cas"
+    assert config.port == 7100
+
+
+def test_load_config_otari_env_overrides_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("budget_strategy: for_update\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_BUDGET_STRATEGY", "disabled")
+
+    config = load_config(str(config_file))
+
+    assert config.budget_strategy == "disabled"
+
+
 def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("mode: platform\n", encoding="utf-8")

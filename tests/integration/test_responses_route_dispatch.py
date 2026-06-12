@@ -381,7 +381,7 @@ def test_code_execution_without_sandbox_env_returns_400(
         headers=api_key_header,
     )
     assert resp.status_code == 400
-    assert "GATEWAY_SANDBOX_URL" in resp.json()["detail"]
+    assert "OTARI_SANDBOX_URL" in resp.json()["detail"]
 
 
 def test_code_execution_combined_with_mcp_servers_returns_400(

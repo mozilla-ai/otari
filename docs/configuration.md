@@ -1,20 +1,20 @@
 # Configuration
 
-The gateway is configured through a YAML file and environment variables.
+Otari is configured through a YAML file and environment variables.
 
 ## Config file
 
 The config file is passed at startup with `--config`:
 
 ```bash
-gateway serve --config config.yml
+otari serve --config config.yml
 ```
 
 ### Full example
 
 ```yaml
 # Database
-database_url: "postgresql://gateway:gateway@postgres:5432/gateway"
+database_url: "postgresql://otari:otari@postgres:5432/otari"
 
 # Server
 host: "0.0.0.0"
@@ -53,7 +53,7 @@ pricing:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `database_url` | string | `sqlite:///./otari-gateway.db` | Database connection URL (SQLite or PostgreSQL) |
+| `database_url` | string | `sqlite:///./otari.db` | Database connection URL (SQLite or PostgreSQL) |
 | `auto_migrate` | bool | `true` | Run Alembic migrations automatically on startup |
 | `db_pool_size` | int | `10` | Persistent DB connections per worker |
 | `db_max_overflow` | int | `20` | Extra burst connections above pool size |
@@ -81,6 +81,8 @@ pricing:
 ## Environment variables
 
 The following `OTARI_` variables override config file values for their matching fields. For example, `OTARI_PORT=9000` overrides `port: 8000` in the YAML.
+
+`OTARI_` overrides apply to scalar fields (strings, numbers, booleans). List and dict fields (`cors_allow_origins`, `providers`, `pricing`, and the `platform` block) are not read from `OTARI_` variables; set them in the YAML file instead. The `platform` block also has dedicated `PLATFORM_*` variables (see the otari.ai variables below).
 
 The config file also supports `${ENV_VAR}` interpolation:
 
@@ -118,7 +120,7 @@ These are only relevant when running connected to [otari.ai](https://otari.ai). 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OTARI_AI_TOKEN` | -- | Gateway token from otari.ai (enables platform connection) |
+| `OTARI_AI_TOKEN` | -- | Otari token from otari.ai (enables platform connection) |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Timeout for provider resolution calls |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Timeout for usage reporting calls |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage reporting failures |

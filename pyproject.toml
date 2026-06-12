@@ -3,9 +3,13 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
+# Distribution + import package stay `gateway`: the `otari` name on PyPI is the
+# Otari client SDK (a transitive dep via any-llm-sdk), so a top-level `otari`
+# package here would collide with it. User-facing names (CLI, env vars, docs)
+# are `otari`; only the internal import path remains `gateway`.
 name = "gateway"
 version = "0.0.0"
-description = "otari gateway service"
+description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
     "any-llm-sdk[all]>=1.17.0",
@@ -51,6 +55,8 @@ dev = [
 ]
 
 [project.scripts]
+otari = "gateway.cli:main"
+# Legacy alias: the CLI was named `gateway` before the rename to `otari`.
 gateway = "gateway.cli:main"
 
 [tool.setuptools]

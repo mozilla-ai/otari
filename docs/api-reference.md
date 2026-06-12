@@ -2,7 +2,7 @@
 
 All endpoints are under `http://localhost:8000` by default.
 
-For full request/response schemas, see the [OpenAPI spec](public/openapi.json) or the interactive docs at `/docs` when the gateway is running.
+For full request/response schemas, see the [OpenAPI spec](public/openapi.json) or the interactive docs at `/docs` when Otari is running.
 
 ## Endpoint availability
 

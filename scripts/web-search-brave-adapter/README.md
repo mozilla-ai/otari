@@ -20,7 +20,7 @@ key lives in this service, never in the gateway.
    ```bash
    # ./.env  (gitignored)
    BRAVE_API_KEY=brv-xxxxxxxx
-   GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
+   OTARI_WEB_SEARCH_URL=http://brave-adapter:8080
    ```
 
    (If you pass an explicit `--env-file PATH`, compose reads that instead of
@@ -29,7 +29,7 @@ key lives in this service, never in the gateway.
 2. Start the adapter and the gateway:
 
    ```bash
-   docker compose --profile web-search-brave up -d --build brave-adapter gateway
+   docker compose --profile web-search-brave up -d --build brave-adapter otari
    ```
 
    (The `web-search-brave` profile brings up the adapter; the `searxng`

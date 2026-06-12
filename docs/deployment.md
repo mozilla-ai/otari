@@ -1,8 +1,8 @@
 # Deployment
 
-Use this guide after the [Quickstart](quickstart.md). The quickstart gets a standalone gateway running locally and walks through the first authenticated request. This page picks up from there with deployment-specific setup: platform mode, optional services, and environment-based configuration.
+Use this guide after the [Quickstart](quickstart.md). The quickstart gets a standalone Otari running locally and walks through the first authenticated request. This page picks up from there with deployment-specific setup: platform mode, optional services, and environment-based configuration.
 
-The gateway is distributed as a Docker image on [Docker Hub](https://hub.docker.com/r/mzdotai/otari).
+Otari is distributed as a Docker image on [Docker Hub](https://hub.docker.com/r/mzdotai/otari).
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ When turning that setup into a longer-lived deployment:
 
 ## Connect to otari.ai
 
-In platform mode, the gateway delegates provider routing, authentication, and usage tracking to [otari.ai](https://otari.ai). No local database or provider credentials are needed.
+In platform mode, Otari delegates provider routing, authentication, and usage tracking to [otari.ai](https://otari.ai). No local database or provider credentials are needed.
 
 ### 1. Create a minimal config file
 
@@ -34,7 +34,7 @@ No `providers` block, no `database_url`, no `master_key`.
 
 ### 2. Set your otari.ai credentials
 
-You need your gateway token from your otari.ai account.
+You need your Otari token from your otari.ai account.
 
 Pass them as environment variables. Create a `.env` file:
 
@@ -42,7 +42,7 @@ Pass them as environment variables. Create a `.env` file:
 OTARI_AI_TOKEN=gw_your_token_here
 ```
 
-### 3. Start the gateway
+### 3. Start Otari
 
 ```bash
 docker run --rm \
@@ -50,7 +50,7 @@ docker run --rm \
   --env-file .env \
   -v "$(pwd)/config.yml:/app/config.yml:ro" \
   mzdotai/otari:latest \
-  gateway serve --config /app/config.yml
+  otari serve --config /app/config.yml
 ```
 
 No postgres container is needed -- otari.ai handles storage.
@@ -87,7 +87,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 ## Optional services
 
-The gateway supports two opt-in services via Docker Compose profiles.
+Otari supports two opt-in services via Docker Compose profiles.
 
 ### Code execution sandbox
 
@@ -112,8 +112,8 @@ ships in `scripts/web-search-brave-adapter/`:
 
 ```bash
 export BRAVE_API_KEY=...   # from https://brave.com/search/api/
-export GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080
-docker compose --profile web-search-brave up -d --build brave-adapter gateway
+export OTARI_WEB_SEARCH_URL=http://brave-adapter:8080
+docker compose --profile web-search-brave up -d --build brave-adapter otari
 ```
 
 A ready-to-run **Tavily** adapter also ships in
@@ -121,8 +121,8 @@ A ready-to-run **Tavily** adapter also ships in
 
 ```bash
 export TAVILY_API_KEY=...   # from https://tavily.com/
-export GATEWAY_WEB_SEARCH_URL=http://tavily-adapter:8080
-docker compose --profile web-search-tavily up -d --build tavily-adapter gateway
+export OTARI_WEB_SEARCH_URL=http://tavily-adapter:8080
+docker compose --profile web-search-tavily up -d --build tavily-adapter otari
 ```
 
 `WebSearchBackend` is URL-configured, so any service exposing a
@@ -135,7 +135,7 @@ Both code-exec and web-search profiles can be combined:
 docker compose --profile code-exec --profile web-search up -d
 ```
 
-When a profile is not running, the gateway returns a 502 to requests that try to use that tool.
+When a profile is not running, Otari returns a 502 to requests that try to use that tool.
 
 ## Environment variables
 
@@ -147,8 +147,8 @@ Provider API keys can be passed as environment variables instead of putting them
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `MISTRAL_API_KEY` | Mistral API key |
 | `GEMINI_API_KEY` | Google Gemini API key |
-| `OTARI_PORT` | Gateway server bind port (default: `8000`) |
+| `OTARI_PORT` | Otari server bind port (default: `8000`) |
 | `OTARI_MASTER_KEY` | Master key for management endpoints |
-| `OTARI_AI_TOKEN` | otari.ai gateway token |
+| `OTARI_AI_TOKEN` | Platform token from otari.ai |
 
 See [Configuration](configuration.md) for the full reference.

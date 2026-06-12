@@ -2,7 +2,7 @@
 """Alert when an SDK regeneration PR sits unmerged beyond a threshold.
 
 The gateway opens a regeneration PR against each SDK repo whenever the OpenAPI
-spec changes (``.github/workflows/gateway-sdk-codegen.yml``, branch
+spec changes (``.github/workflows/otari-sdk-codegen.yml``, branch
 ``sdk-codegen/client-core``). That PR is the human review gate: the generated
 core can land in the spec without the matching hand-written shell wiring, so the
 PR is meant to be reviewed and merged, not left open. A regeneration PR that
@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 # The SDK repos the codegen workflow opens regeneration PRs against. Keep in sync
-# with the matrix in .github/workflows/gateway-sdk-codegen.yml.
+# with the matrix in .github/workflows/otari-sdk-codegen.yml.
 DEFAULT_SDK_REPOS: tuple[str, ...] = (
     "mozilla-ai/otari-sdk-python",
     "mozilla-ai/otari-sdk-ts",
@@ -208,9 +208,9 @@ def main() -> int:
 
     if args.apply:
         # PR reads above used the ambient GH_TOKEN (the cross-repo PAT); the
-        # tracking issue on this repo uses GATEWAY_GH_TOKEN when supplied.
+        # tracking issue on this repo uses OTARI_GH_TOKEN when supplied.
         sync_tracking_issue(
-            args.tracking_repo, stale, report, token=os.environ.get("GATEWAY_GH_TOKEN")
+            args.tracking_repo, stale, report, token=os.environ.get("OTARI_GH_TOKEN")
         )
 
     return 0
