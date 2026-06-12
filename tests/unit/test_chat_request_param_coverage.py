@@ -22,18 +22,17 @@ from gateway.api.routes.chat import ChatCompletionRequest
 KNOWN_UNSUPPORTED: dict[str, str] = {
     "model_id": "any-llm's internal name; the gateway exposes it as `model`",
     "reasoning_effort": "BUG: dropped today, so reasoning never reaches the provider (mozilla-ai/otari#150)",
-    # Standard OpenAI completion params the gateway does not currently forward. Each should be
-    # triaged: either wired into ChatCompletionRequest, or kept here as an intentional non-support
-    # decision with a clearer reason / tracking issue.
-    "n": "not currently forwarded; triage: support or document as intentional",
-    "stop": "not currently forwarded; triage: support or document as intentional",
-    "seed": "not currently forwarded; triage: support or document as intentional",
-    "presence_penalty": "not currently forwarded; triage: support or document as intentional",
-    "frequency_penalty": "not currently forwarded; triage: support or document as intentional",
-    "parallel_tool_calls": "not currently forwarded; triage: support or document as intentional",
-    "logprobs": "not currently forwarded; triage: support or document as intentional",
-    "top_logprobs": "not currently forwarded; triage: support or document as intentional",
-    "logit_bias": "not currently forwarded; triage: support or document as intentional",
+    # Standard OpenAI completion params the gateway does not currently forward; triage (forward or
+    # document as intentional) is tracked in mozilla-ai/otari#152. Remove each entry as it is resolved.
+    "n": "not currently forwarded (mozilla-ai/otari#152)",
+    "stop": "not currently forwarded (mozilla-ai/otari#152)",
+    "seed": "not currently forwarded (mozilla-ai/otari#152)",
+    "presence_penalty": "not currently forwarded (mozilla-ai/otari#152)",
+    "frequency_penalty": "not currently forwarded (mozilla-ai/otari#152)",
+    "parallel_tool_calls": "not currently forwarded (mozilla-ai/otari#152)",
+    "logprobs": "not currently forwarded (mozilla-ai/otari#152)",
+    "top_logprobs": "not currently forwarded (mozilla-ai/otari#152)",
+    "logit_bias": "not currently forwarded (mozilla-ai/otari#152)",
 }
 
 
