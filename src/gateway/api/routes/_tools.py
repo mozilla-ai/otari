@@ -20,6 +20,7 @@ from collections.abc import Callable
 from enum import StrEnum, auto
 from typing import Any
 
+from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.services.web_search_backend import WebSearchBackend
@@ -94,8 +95,17 @@ def _strip_gateway_fields(
     web_search / future), pass ``tools_extracted=True`` and the remaining
     user-supplied tools; the original ``tools`` list is replaced (or popped
     entirely if none remain).
+
+    Sensitive provider-call fields (credentials, ``provider`` selection, ...) are
+    also stripped: the request schemas never derive them (see
+    ``_schema_derive.SENSITIVE_PARAM_FIELDS``), but the Responses request allows
+    extra fields, so a client could still smuggle one in. The gateway resolves
+    these itself, and the provider-call merge spreads request fields last, so a
+    client value would otherwise override the operator-controlled one.
     """
     for k in _GATEWAY_INTERNAL_FIELDS:
+        fields.pop(k, None)
+    for k in SENSITIVE_PARAM_FIELDS:
         fields.pop(k, None)
     if tools_extracted:
         if remaining_user_tools:
