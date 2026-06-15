@@ -149,7 +149,7 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - Prefer structured/contextual log messages with `%s` formatting placeholders.
 - Do not log secrets, tokens, or raw API keys (bootstrap exception is intentional one-time behavior).
 ## CI Rules to Mirror Locally
-- Python version for CI: 3.13 (`.github/workflows/otari-tests.yml`).
+- Python version for CI: 3.14 (`.github/workflows/otari-tests.yml`), matching the Docker image; the package still supports 3.13+ (`requires-python = ">=3.13"`).
 - Install deps with frozen lockfile in CI.
 - Tests run with coverage and xdist in CI.
 - OpenAPI spec freshness is enforced in CI (`--check`).

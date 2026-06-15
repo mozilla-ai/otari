@@ -8,11 +8,12 @@ from any_llm import AnyLLM, LLMProvider, acompletion
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
+    CompletionParams,
     CompletionUsage,
 )
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
@@ -38,6 +39,7 @@ from gateway.api.routes._pipeline import (
     run_streaming_with_fallback,
 )
 from gateway.api.routes._platform import ResolvedAttempt
+from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -68,11 +70,24 @@ __all__ = [
 ]
 
 
-class ChatCompletionRequest(BaseModel):
-    """OpenAI-compatible chat completion request."""
+class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ignore[misc]
+    """OpenAI-compatible chat completion request.
 
-    model: str
+    The completion-param fields are derived from any-llm's ``CompletionParams``
+    (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
+    forwards. Fields below either tighten a derived field (``messages``,
+    ``response_format``) or add gateway-internal behavior (``mcp_servers``,
+    ``mcp_server_ids``, ``guardrails``, ``tools_header``, ``max_tool_iterations``)
+    that is stripped before the request is forwarded upstream.
+    """
+
     messages: list[dict[str, Any]] = Field(min_length=1)
+    # any-llm types this as ``dict | type | None``; the wire body only ever
+    # carries the dict form.
+    response_format: dict[str, Any] | None = None
+    # any-llm types ``stream`` as ``bool | None``; keep the OpenAI wire contract
+    # (a non-nullable boolean defaulting to false) for stable SDK generation.
+    stream: bool = False
 
     @field_validator("messages")
     @classmethod
@@ -83,16 +98,6 @@ class ChatCompletionRequest(BaseModel):
                 raise ValueError(msg)
         return v
 
-    user: str | None = None
-    temperature: float | None = None
-    max_tokens: int | None = None
-    max_completion_tokens: int | None = None
-    top_p: float | None = None
-    stream: bool = False
-    stream_options: dict[str, Any] | None = None
-    tools: list[dict[str, Any]] | None = None
-    tool_choice: str | dict[str, Any] | None = None
-    response_format: dict[str, Any] | None = None
     mcp_servers: list[McpServerConfig] | None = None
     mcp_server_ids: list[uuid.UUID] | None = None
     guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)

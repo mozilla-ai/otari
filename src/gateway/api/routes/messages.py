@@ -10,6 +10,7 @@ from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
     MessageDeltaEvent,
     MessageResponse,
+    MessagesParams,
     MessageStartEvent,
     MessageStreamEvent,
 )
@@ -45,6 +46,7 @@ from gateway.api.routes._platform import (
     _extract_platform_user_token,
     _resolve_platform_credentials,
 )
+from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -66,30 +68,23 @@ from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 router = APIRouter(prefix="/v1", tags=["messages"])
 
 
-class MessagesRequest(BaseModel):
+class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc]
     """Anthropic Messages API-compatible request.
 
-    Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
+    The wire fields are derived from any-llm's ``MessagesParams`` (see
+    ``_schema_derive``) so the schema cannot silently drop a param any-llm
+    forwards. Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
     ``guardrails``, ``tools_header``, ``max_tool_iterations``) opt the request
     into gateway-managed MCP / sandbox / web_search / guardrails without
     changing the upstream wire shape. They're stripped before the request is
     forwarded.
     """
 
-    model: str
     messages: list[dict[str, Any]] = Field(min_length=1)
-    max_tokens: int
-    system: str | list[dict[str, Any]] | None = None
-    temperature: float | None = None
-    top_p: float | None = None
-    top_k: int | None = None
+    # any-llm types ``stream`` as ``bool | None``; keep the Anthropic wire
+    # contract (a non-nullable boolean defaulting to false) for stable SDK
+    # generation.
     stream: bool = False
-    stop_sequences: list[str] | None = None
-    tools: list[dict[str, Any]] | None = None
-    tool_choice: dict[str, Any] | None = None
-    metadata: dict[str, Any] | None = None
-    thinking: dict[str, Any] | None = None
-    cache_control: dict[str, Any] | None = None
 
     # Gateway-internal: identical semantics to ChatCompletionRequest.
     mcp_servers: list[McpServerConfig] | None = None
