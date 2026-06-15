@@ -177,14 +177,12 @@ def _extract_web_search_tool(
 
 def _resolve_web_search_purpose_hint(tool_entry: dict[str, Any] | None) -> str | None:
     """Per-tool entry → ``OTARI_WEB_SEARCH_PURPOSE_HINT`` → ``None`` (backend default)."""
-    return (
-        (tool_entry.get("purpose_hint") if tool_entry else None)
-        or otari_env("WEB_SEARCH_PURPOSE_HINT")
-        or None
-    )
+    return (tool_entry.get("purpose_hint") if tool_entry else None) or otari_env("WEB_SEARCH_PURPOSE_HINT") or None
 
 
-def _build_web_search_backend(*, base_url: str, tool_entry: dict[str, Any]) -> WebSearchBackend:
+def _build_web_search_backend(
+    *, base_url: str, tool_entry: dict[str, Any], auth_token: str | None = None
+) -> WebSearchBackend:
     """Construct a WebSearchBackend honouring env-level + per-tool config.
 
     Per-tool entry fields (``max_results``, ``allowed_domains``,
@@ -240,5 +238,10 @@ def _build_web_search_backend(*, base_url: str, tool_entry: dict[str, Any]) -> W
     provider_options = tool_entry.get("provider_options")
     if isinstance(provider_options, dict) and provider_options:
         kwargs["provider_options"] = provider_options
+
+    # Forwarded to the search backend as `X-Gateway-Token` so the platform-hosted
+    # backend can authenticate the gateway. Unset (and so unsent) in standalone.
+    if auth_token:
+        kwargs["auth_token"] = auth_token
 
     return WebSearchBackend(**kwargs)

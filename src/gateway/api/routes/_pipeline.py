@@ -523,6 +523,7 @@ class ToolContext:
         use_web_search: bool,
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
+        web_search_auth_token: str | None,
         remaining_user_tools: list[dict[str, Any]] | None,
         max_tool_iterations: int,
         tools_header: str | None,
@@ -534,6 +535,7 @@ class ToolContext:
         self.use_web_search = use_web_search
         self.web_search_tool_entry = web_search_tool_entry
         self.web_search_url = web_search_url
+        self.web_search_auth_token = web_search_auth_token
         self.remaining_user_tools = remaining_user_tools
         self.max_tool_iterations = max_tool_iterations
         self.tools_header = tools_header
@@ -603,6 +605,11 @@ async def prepare_gateway_tools(
 
         web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
         web_search_url: str | None = otari_env("WEB_SEARCH_URL") or None
+        # Forwarded to the search backend as `X-Gateway-Token`. Only set in
+        # platform mode, where the backend may be the platform-hosted web-search
+        # endpoint that authenticates the gateway. Standalone backends (SearXNG /
+        # self-hosted adapter) get no token and ignore the header.
+        web_search_auth_token: str | None = None
         use_web_search = False
         if web_search_tool_entry is not None:
             if web_search_url is None:
@@ -626,6 +633,7 @@ async def prepare_gateway_tools(
             # Standalone mode has no platform to consult.
             if ctx.platform_mode:
                 assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+                web_search_auth_token = ctx.config.platform_token
                 web_search_policy = await _resolve_platform_web_search(
                     config=ctx.config,
                     user_token=ctx.user_token,
@@ -656,6 +664,7 @@ async def prepare_gateway_tools(
         use_web_search=use_web_search,
         web_search_tool_entry=web_search_tool_entry,
         web_search_url=web_search_url,
+        web_search_auth_token=web_search_auth_token,
         remaining_user_tools=remaining_user_tools,
         max_tool_iterations=min(
             max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
@@ -828,6 +837,7 @@ async def dispatch_non_stream(
     async with _build_web_search_backend(
         base_url=tool_ctx.web_search_url,
         tool_entry=tool_ctx.web_search_tool_entry,
+        auth_token=tool_ctx.web_search_auth_token,
     ) as web_backend:
         kwargs = adapter.inject_hints(call_kwargs, web_backend.purpose_hints(), header=tool_ctx.tools_header)
         return await adapter.run_tool_loop(kwargs, web_backend, tool_ctx.max_tool_iterations, on_first_response)
@@ -899,6 +909,7 @@ async def open_stream(
     web_search_backend = _build_web_search_backend(
         base_url=tool_ctx.web_search_url,
         tool_entry=tool_ctx.web_search_tool_entry,
+        auth_token=tool_ctx.web_search_auth_token,
     )
     await web_search_backend.__aenter__()  # may raise WebSearchNotReachableError
     return _eager_backend_stream(adapter, kwargs, web_search_backend, tool_ctx)
@@ -1196,6 +1207,7 @@ async def run_streaming_with_fallback(
                 _build_web_search_backend(
                     base_url=tool_ctx.web_search_url,
                     tool_entry=tool_ctx.web_search_tool_entry,
+                    auth_token=tool_ctx.web_search_auth_token,
                 ),
             )
     except BaseException:

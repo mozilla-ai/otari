@@ -549,3 +549,38 @@ def test_max_results_clamps_above_cap_to_max_results_cap() -> None:
 
     backend = WebSearchBackend(base_url="http://searxng:8080", max_results=10_000)
     assert backend._max_results == _MAX_RESULTS_CAP  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_auth_token_forwarded_as_gateway_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When ``auth_token`` is set, the /search request carries X-Gateway-Token.
+
+    This lets the platform-hosted web-search backend authenticate the gateway.
+    """
+    transport = _patched_async_client(
+        {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
+        monkeypatch,
+    )
+
+    async with WebSearchBackend(
+        base_url="http://searxng:8080",
+        extract_content=False,
+        auth_token="gw-secret-token",  # noqa: S106 — test fixture, not a real secret
+    ) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "x"})
+
+    assert transport.captured[0].headers["X-Gateway-Token"] == "gw-secret-token"
+
+
+@pytest.mark.asyncio
+async def test_no_gateway_header_when_auth_token_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A standalone backend (no auth_token) sends no X-Gateway-Token header."""
+    transport = _patched_async_client(
+        {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
+        monkeypatch,
+    )
+
+    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=False) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "x"})
+
+    assert "X-Gateway-Token" not in transport.captured[0].headers
