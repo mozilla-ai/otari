@@ -82,6 +82,10 @@ class ResponsesRequest(derive_request_base(ResponsesParams)):  # type: ignore[mi
     # ``response_format`` only ever carries the dict form on the wire.
     input: Any
     response_format: dict[str, Any] | None = None
+    # any-llm types ``stream`` as ``bool | None``; keep the OpenAI Responses wire
+    # contract (a non-nullable boolean defaulting to false) for stable SDK
+    # generation.
+    stream: bool = False
 
     # Gateway-internal: identical semantics to ChatCompletionRequest.
     mcp_servers: list[McpServerConfig] | None = None

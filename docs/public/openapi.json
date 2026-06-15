@@ -467,15 +467,9 @@
             "title": "Stop"
           },
           "stream": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stream"
+            "default": false,
+            "title": "Stream",
+            "type": "boolean"
           },
           "stream_options": {
             "anyOf": [
@@ -1422,15 +1416,9 @@
             "title": "Stop Sequences"
           },
           "stream": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stream"
+            "default": false,
+            "title": "Stream",
+            "type": "boolean"
           },
           "system": {
             "anyOf": [
@@ -2141,15 +2129,9 @@
             "title": "Store"
           },
           "stream": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stream"
+            "default": false,
+            "title": "Stream",
+            "type": "boolean"
           },
           "stream_options": {
             "anyOf": [

@@ -81,6 +81,10 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     """
 
     messages: list[dict[str, Any]] = Field(min_length=1)
+    # any-llm types ``stream`` as ``bool | None``; keep the Anthropic wire
+    # contract (a non-nullable boolean defaulting to false) for stable SDK
+    # generation.
+    stream: bool = False
 
     # Gateway-internal: identical semantics to ChatCompletionRequest.
     mcp_servers: list[McpServerConfig] | None = None

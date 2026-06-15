@@ -85,6 +85,9 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # any-llm types this as ``dict | type | None``; the wire body only ever
     # carries the dict form.
     response_format: dict[str, Any] | None = None
+    # any-llm types ``stream`` as ``bool | None``; keep the OpenAI wire contract
+    # (a non-nullable boolean defaulting to false) for stable SDK generation.
+    stream: bool = False
 
     @field_validator("messages")
     @classmethod
