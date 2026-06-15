@@ -303,8 +303,8 @@ class GatewayConfig(BaseSettings):
         token_present = self.platform_token is not None
         if configured_mode in {"connected", "platform"} and not token_present:
             msg = (
-                "OTARI_MODE=connected requires OTARI_AI_TOKEN to be set "
-                "(legacy aliases: OTARI_PLATFORM_TOKEN, ANY_LLM_PLATFORM_TOKEN)."
+                "OTARI_MODE=connected (legacy value: platform) requires OTARI_AI_TOKEN to be set "
+                "(legacy token aliases: OTARI_PLATFORM_TOKEN, ANY_LLM_PLATFORM_TOKEN)."
             )
             raise ValueError(msg)
 
