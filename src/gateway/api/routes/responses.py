@@ -7,13 +7,13 @@ import httpx
 from any_llm import AnyLLM, LLMProvider, aresponses
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.responses import Response as ResponsesResponse
-from any_llm.types.responses import ResponseStreamEvent
+from any_llm.types.responses import ResponsesParams, ResponseStreamEvent
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi import Response as FastAPIResponse
 from fastapi.responses import StreamingResponse
 from openai.types.responses import ResponseUsage
 from openresponses_types.types import Usage as OpenResponsesUsage
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
@@ -38,6 +38,7 @@ from gateway.api.routes._pipeline import (
     run_streaming_with_fallback,
 )
 from gateway.api.routes._platform import ResolvedAttempt
+from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -62,10 +63,12 @@ _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in 
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
 
-class ResponsesRequest(BaseModel):
+class ResponsesRequest(derive_request_base(ResponsesParams)):  # type: ignore[misc]
     """OpenAI Responses API-compatible request.
 
-    Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
+    The wire fields are derived from any-llm's ``ResponsesParams`` (see
+    ``_schema_derive``) so the schema cannot silently drop a param any-llm
+    forwards. Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,
     ``guardrails``, ``tools_header``, ``max_tool_iterations``) opt the request
     into gateway-managed MCP / sandbox / web_search / guardrails without
     changing the upstream wire shape. They're stripped before the request is
@@ -74,11 +77,11 @@ class ResponsesRequest(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    model: str
+    # any-llm types ``input`` as a large union of OpenAI item shapes; keep the
+    # loose ``Any`` the gateway has always accepted (still required). Likewise
+    # ``response_format`` only ever carries the dict form on the wire.
     input: Any
-    stream: bool = False
-    user: str | None = None
-    tools: list[dict[str, Any]] | None = None
+    response_format: dict[str, Any] | None = None
 
     # Gateway-internal: identical semantics to ChatCompletionRequest.
     mcp_servers: list[McpServerConfig] | None = None

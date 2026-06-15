@@ -5,14 +5,14 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from any_llm import AnyLLM, aspeech, atranscription
-from any_llm.types.audio import Transcription
+from any_llm.types.audio import AudioSpeechParams, Transcription
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes.chat import get_provider_kwargs, rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -178,15 +178,18 @@ async def create_transcription(
     return result.model_dump()
 
 
-class AudioSpeechRequest(BaseModel):
-    """OpenAI-compatible audio speech (TTS) request."""
+class AudioSpeechRequest(derive_request_base(AudioSpeechParams)):  # type: ignore[misc]
+    """OpenAI-compatible audio speech (TTS) request.
 
-    model: str
-    input: str
-    voice: str
-    instructions: str | None = None
+    The speech fields are derived from any-llm's ``AudioSpeechParams`` (see
+    ``_schema_derive``) so the schema cannot silently drop a param any-llm
+    forwards. ``user`` is gateway-only (billing / auth scoping); it is not an
+    any-llm param and is stripped before the request is forwarded.
+    """
+
+    # any-llm types this as a provider-specific ``Literal``; keep the permissive
+    # ``str`` the gateway has always accepted across providers.
     response_format: str | None = None
-    speed: float | None = None
     user: str | None = None
 
 

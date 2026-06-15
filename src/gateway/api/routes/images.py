@@ -5,13 +5,13 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from any_llm import AnyLLM, aimage_generation
-from any_llm.types.image import ImagesResponse
+from any_llm.types.image import ImageGenerationParams, ImagesResponse
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes.chat import get_provider_kwargs, rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -28,17 +28,17 @@ from gateway.services.pricing_service import find_model_pricing, pricing_require
 router = APIRouter(prefix="/v1", tags=["images"])
 
 
-class ImageGenerationRequest(BaseModel):
-    """OpenAI-compatible image generation request."""
+class ImageGenerationRequest(derive_request_base(ImageGenerationParams)):  # type: ignore[misc]
+    """OpenAI-compatible image generation request.
 
-    model: str
-    prompt: str
-    n: int | None = None
-    size: str | None = None
-    quality: str | None = None
-    style: str | None = None
+    Fields are derived from any-llm's ``ImageGenerationParams`` (see
+    ``_schema_derive``) so the schema cannot silently drop a param any-llm
+    forwards.
+    """
+
+    # any-llm types this as a ``Literal['url', 'b64_json']``; keep the permissive
+    # ``str`` the gateway has always accepted across providers.
     response_format: str | None = None
-    user: str | None = None
 
 
 @router.post("/images/generations", response_model=None)
