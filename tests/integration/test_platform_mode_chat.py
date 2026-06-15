@@ -869,9 +869,11 @@ class _FakeWebSearchBackend:
     built from and resolves the tool loop in a single round (no real search)."""
 
     last_tool_entry: dict[str, Any] | None = None
+    last_auth_token: str | None = None
 
-    def __init__(self, *, base_url: str, tool_entry: dict[str, Any]) -> None:
+    def __init__(self, *, base_url: str, tool_entry: dict[str, Any], auth_token: str | None = None) -> None:
         type(self).last_tool_entry = dict(tool_entry)
+        type(self).last_auth_token = auth_token
 
     async def __aenter__(self) -> "_FakeWebSearchBackend":
         return self
@@ -1014,6 +1016,9 @@ def test_platform_mode_web_search_merges_workspace_config(
     assert merged["allowed_domains"] == ["docs.python.org"]
     assert merged["purpose_hint"] == "workspace hint"
     assert merged["provider_options"] == {"search_depth": "advanced"}
+    # Platform mode forwards the gateway token so the search backend can
+    # authenticate the gateway (e.g. a platform-hosted backend).
+    assert _FakeWebSearchBackend.last_auth_token == "gw_test_token"
 
 
 def test_platform_mode_web_search_empty_request_list_keeps_workspace_policy(
