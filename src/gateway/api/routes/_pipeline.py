@@ -36,6 +36,7 @@ from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
 from typing import Any, Generic, Protocol, TypeVar
+from urllib.parse import urlparse
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
@@ -152,6 +153,28 @@ class ErrorKind(Enum):
     INVALID_REQUEST = auto()
     API = auto()
     PERMISSION = auto()
+
+
+def web_search_url_targets_platform(web_search_url: str, platform_base_url: str | None) -> bool:
+    """True when ``web_search_url`` is the platform itself (same origin, under its base path).
+
+    Gates forwarding the platform token to the web-search backend: it is only
+    safe to hand that high-privilege credential to the platform — the host the
+    gateway already trusts it with for resolve. A raw string prefix check is not
+    enough: with a path-less ``PLATFORM_BASE_URL`` (e.g. ``https://api.otari.ai``)
+    a confusable URL like ``https://api.otari.ai.evil.com`` or
+    ``https://api.otari.ai@evil.com`` would satisfy ``startswith`` and leak the
+    token. So compare the parsed (scheme, host, port) origin exactly, and require
+    the search path to sit under the base path at a ``/`` boundary.
+    """
+    if not platform_base_url:
+        return False
+    base = urlparse(platform_base_url)
+    target = urlparse(web_search_url)
+    if (target.scheme, target.hostname, target.port) != (base.scheme, base.hostname, base.port):
+        return False
+    base_path = base.path.rstrip("/")
+    return target.path == base_path or target.path.startswith(base_path + "/")
 
 
 def rate_limit_headers(info: RateLimitInfo) -> dict[str, str]:
@@ -638,8 +661,7 @@ async def prepare_gateway_tools(
                 # already trusts this token with for resolve). Never leak this
                 # high-privilege credential to a bundled SearXNG or a third-party
                 # adapter that an operator happened to point GATEWAY_WEB_SEARCH_URL at.
-                platform_base = (ctx.config.platform.get("base_url") or "").rstrip("/")
-                if platform_base and web_search_url.startswith(platform_base):
+                if web_search_url_targets_platform(web_search_url, ctx.config.platform.get("base_url")):
                     web_search_auth_token = ctx.config.platform_token
                 web_search_policy = await _resolve_platform_web_search(
                     config=ctx.config,

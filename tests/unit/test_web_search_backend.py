@@ -584,3 +584,32 @@ async def test_no_gateway_header_when_auth_token_unset(monkeypatch: pytest.Monke
         await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "x"})
 
     assert "X-Gateway-Token" not in transport.captured[0].headers
+
+
+@pytest.mark.asyncio
+async def test_auth_token_not_leaked_to_result_page_fetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With extraction enabled, X-Gateway-Token rides only the /search call to the
+    backend — never the per-result page fetches (headers are per-request). Locks
+    in the no-leak behaviour against future refactors."""
+    transport = _patched_async_client(
+        {
+            ("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY),
+            ("example.com", "/post-a"): httpx.Response(200, text="<html><body><p>A</p></body></html>"),
+            ("example.org", "/post-b"): httpx.Response(200, text="<html><body><p>B</p></body></html>"),
+        },
+        monkeypatch,
+    )
+
+    with patch("gateway.services.web_search_backend.trafilatura.extract") as mock_extract:
+        mock_extract.side_effect = lambda html, **_: "extracted"
+        async with WebSearchBackend(
+            base_url="http://searxng:8080",
+            extract_content=True,
+            auth_token="gw-secret-token",  # noqa: S106 — test fixture, not a real secret
+        ) as backend:
+            await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
+
+    search_reqs = [r for r in transport.captured if r.url.path == "/search"]
+    fetch_reqs = [r for r in transport.captured if r.url.path in ("/post-a", "/post-b")]
+    assert search_reqs and all(r.headers.get("X-Gateway-Token") == "gw-secret-token" for r in search_reqs)
+    assert fetch_reqs and all("X-Gateway-Token" not in r.headers for r in fetch_reqs)
