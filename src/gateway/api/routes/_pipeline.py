@@ -36,6 +36,7 @@ from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
 from typing import Any, Generic, Protocol, TypeVar
+from urllib.parse import ParseResult, urlparse
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
@@ -152,6 +153,42 @@ class ErrorKind(Enum):
     INVALID_REQUEST = auto()
     API = auto()
     PERMISSION = auto()
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _normalized_origin(parsed: ParseResult) -> tuple[str, str | None, int | None]:
+    """(scheme, host, port) with the scheme's default port filled in.
+
+    So ``https://h`` and ``https://h:443`` compare equal (and ``http`` / ``:80``),
+    rather than failing on ``None != 443`` and silently not forwarding the token.
+    """
+    port = parsed.port if parsed.port is not None else _DEFAULT_PORTS.get(parsed.scheme)
+    return (parsed.scheme, parsed.hostname, port)
+
+
+def web_search_url_targets_platform(web_search_url: str, platform_base_url: str | None) -> bool:
+    """True when ``web_search_url`` is the platform itself (same origin, under its base path).
+
+    Gates forwarding the platform token to the web-search backend: it is only
+    safe to hand that high-privilege credential to the platform — the host the
+    gateway already trusts it with for resolve. A raw string prefix check is not
+    enough: with a path-less ``PLATFORM_BASE_URL`` (e.g. ``https://api.otari.ai``)
+    a confusable URL like ``https://api.otari.ai.evil.com`` or
+    ``https://api.otari.ai@evil.com`` would satisfy ``startswith`` and leak the
+    token. So compare the parsed (scheme, host, port) origin exactly — with
+    default ports normalized — and require the search path to sit under the base
+    path at a ``/`` boundary.
+    """
+    if not platform_base_url:
+        return False
+    base = urlparse(platform_base_url)
+    target = urlparse(web_search_url)
+    if _normalized_origin(target) != _normalized_origin(base):
+        return False
+    base_path = base.path.rstrip("/")
+    return target.path == base_path or target.path.startswith(base_path + "/")
 
 
 def rate_limit_headers(info: RateLimitInfo) -> dict[str, str]:
@@ -523,6 +560,7 @@ class ToolContext:
         use_web_search: bool,
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
+        web_search_auth_token: str | None,
         remaining_user_tools: list[dict[str, Any]] | None,
         max_tool_iterations: int,
         tools_header: str | None,
@@ -534,6 +572,7 @@ class ToolContext:
         self.use_web_search = use_web_search
         self.web_search_tool_entry = web_search_tool_entry
         self.web_search_url = web_search_url
+        self.web_search_auth_token = web_search_auth_token
         self.remaining_user_tools = remaining_user_tools
         self.max_tool_iterations = max_tool_iterations
         self.tools_header = tools_header
@@ -603,6 +642,11 @@ async def prepare_gateway_tools(
 
         web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
         web_search_url: str | None = otari_env("WEB_SEARCH_URL") or None
+        # Forwarded to the search backend as `X-Gateway-Token`. Only set in
+        # platform mode, where the backend may be the platform-hosted web-search
+        # endpoint that authenticates the gateway. Standalone backends (SearXNG /
+        # self-hosted adapter) get no token and ignore the header.
+        web_search_auth_token: str | None = None
         use_web_search = False
         if web_search_tool_entry is not None:
             if web_search_url is None:
@@ -626,6 +670,13 @@ async def prepare_gateway_tools(
             # Standalone mode has no platform to consult.
             if ctx.platform_mode:
                 assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+                # Forward the platform token only when the search backend IS the
+                # platform (its URL is under the platform base URL the gateway
+                # already trusts this token with for resolve). Never leak this
+                # high-privilege credential to a bundled SearXNG or a third-party
+                # adapter that an operator happened to point GATEWAY_WEB_SEARCH_URL at.
+                if web_search_url_targets_platform(web_search_url, ctx.config.platform.get("base_url")):
+                    web_search_auth_token = ctx.config.platform_token
                 web_search_policy = await _resolve_platform_web_search(
                     config=ctx.config,
                     user_token=ctx.user_token,
@@ -656,6 +707,7 @@ async def prepare_gateway_tools(
         use_web_search=use_web_search,
         web_search_tool_entry=web_search_tool_entry,
         web_search_url=web_search_url,
+        web_search_auth_token=web_search_auth_token,
         remaining_user_tools=remaining_user_tools,
         max_tool_iterations=min(
             max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
@@ -828,6 +880,7 @@ async def dispatch_non_stream(
     async with _build_web_search_backend(
         base_url=tool_ctx.web_search_url,
         tool_entry=tool_ctx.web_search_tool_entry,
+        auth_token=tool_ctx.web_search_auth_token,
     ) as web_backend:
         kwargs = adapter.inject_hints(call_kwargs, web_backend.purpose_hints(), header=tool_ctx.tools_header)
         return await adapter.run_tool_loop(kwargs, web_backend, tool_ctx.max_tool_iterations, on_first_response)
@@ -899,6 +952,7 @@ async def open_stream(
     web_search_backend = _build_web_search_backend(
         base_url=tool_ctx.web_search_url,
         tool_entry=tool_ctx.web_search_tool_entry,
+        auth_token=tool_ctx.web_search_auth_token,
     )
     await web_search_backend.__aenter__()  # may raise WebSearchNotReachableError
     return _eager_backend_stream(adapter, kwargs, web_search_backend, tool_ctx)
@@ -1196,6 +1250,7 @@ async def run_streaming_with_fallback(
                 _build_web_search_backend(
                     base_url=tool_ctx.web_search_url,
                     tool_entry=tool_ctx.web_search_tool_entry,
+                    auth_token=tool_ctx.web_search_auth_token,
                 ),
             )
     except BaseException:

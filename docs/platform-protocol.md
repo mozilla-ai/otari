@@ -27,6 +27,13 @@ deployment. The resolve endpoint additionally requires `X-User-Token: <tk_...>`,
 which is the workspace API token forwarded opaquely from the end user's
 `Authorization: Bearer ...` header.
 
+When the operator points Otari's web-search backend at the platform
+(`GATEWAY_WEB_SEARCH_URL` under `base_url`), Otari also sends `X-Gateway-Token`
+on its search queries (`GET {base}/gateway/web-search/search`) so a
+platform-hosted search endpoint can authenticate the gateway. The token is sent
+only when that URL shares the platform origin (scheme/host/port, under the base
+path); it is never sent to a standalone or third-party search backend.
+
 ## Resolve
 
 ### Request
