@@ -1,0 +1,69 @@
+name: Otari SDK Codegen Check
+
+# Verifies the typed SDK core still generates cleanly from the OpenAPI spec for
+# every target language, so a spec change that breaks generation (for example a
+# new schema the Go generator names into invalid syntax) is caught on the PR
+# instead of failing the post-merge codegen workflow (otari-sdk-codegen.yml) and
+# stalling every SDK repo.
+#
+# This runs the same generate step as that workflow but stops there: it does not
+# check out or open PRs against the SDK repos, so it needs no cross-repo token.
+# Keep the toolchain in sync with otari-sdk-codegen.yml so a green check here
+# guarantees that workflow's generate step succeeds.
+
+on:
+  pull_request:
+    paths:
+      - 'docs/public/openapi.json'
+      - 'scripts/sdk_codegen/**'
+      - 'openapitools.json'
+      - '.github/workflows/otari-sdk-codegen.yml'
+      - '.github/workflows/otari-sdk-codegen-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Keep this matrix in sync with FULL_TARGETS in scripts/sdk_codegen/generate.py
+      # and the matrix in otari-sdk-codegen.yml.
+      matrix:
+        language: [python, typescript, go, rust]
+    steps:
+      - name: Checkout Otari
+        uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.14
+          activate-environment: true
+
+      - name: Install Otari deps
+        run: uv sync --dev --frozen
+
+      - name: Set up Java (OpenAPI Generator runtime)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install OpenAPI Generator CLI
+        run: npm install -g @openapitools/openapi-generator-cli
+
+      - name: Install rustfmt (rust core is inlined and formatted in place)
+        if: matrix.language == 'rust'
+        # Pinned to the stable branch tip (immutable SHA); the action still
+        # installs the latest stable toolchain at runtime.
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          components: rustfmt
+
+      - name: Generate ${{ matrix.language }} client (full typed core)
+        # gofmt (Go postprocessing) and the other language formatters are exercised
+        # here; gofmt is preinstalled on the runner image, matching the codegen
+        # workflow. A generation or format failure fails the check.
+        run: uv run python scripts/sdk_codegen/generate.py --language "${{ matrix.language }}" --mode full --out-dir dist

@@ -107,6 +107,12 @@ repo with the regenerated client core dropped into:
 The matrix in the workflow mirrors `FULL_TARGETS` in `generate.py`; keep them in
 sync. Target paths match what each SDK's hand-written shell imports from.
 
+`.github/workflows/otari-sdk-codegen-check.yml` runs the same generate step on
+pull requests that touch the spec or codegen tooling (but opens no PRs and needs
+no token), so a spec change that breaks generation for any language is caught on
+the PR rather than failing the post-merge codegen workflow. Keep its toolchain
+and matrix in sync with `otari-sdk-codegen.yml`.
+
 **Required secret:** `SDK_CODEGEN_TOKEN`, a fine-grained PAT or GitHub App token
 with `Contents:write` and `Pull-requests:write` on the four SDK repos. The default
 `GITHUB_TOKEN` cannot push to other repositories.
@@ -140,3 +146,11 @@ in `generate.py`, so no per-repo hand-edits to generated code are required):
   fails the SDK repo's `gofmt -l` check).
 - **python** — output is collapsed to the package directory so the workflow drops
   `otari._client` directly into the SDK.
+
+The spec is also sanitized before generation (`sanitize_freeform_object_arrays`):
+any-llm types Anthropic's `system` as `str | list[dict] | None`, whose array
+variant has inline free-form-object items. In a union with two or more non-null
+variants the Go generator names the array field from that inline item type and
+emits an invalid identifier (`ArrayOf*mapmapOfStringAny`), which fails `gofmt`.
+The sanitizer points every such array at a shared `FreeFormObject` schema so the
+variant name is deterministic across all languages.

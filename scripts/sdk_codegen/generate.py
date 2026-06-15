@@ -327,6 +327,71 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     return spec
 
 
+# Shared schema name for an arbitrary JSON object (``{"type": "object"}`` with
+# free-form values). Injected by ``sanitize_freeform_object_arrays`` so union
+# members that are arrays of such objects reference a named type instead of an
+# inline one.
+_FREE_FORM_OBJECT = "FreeFormObject"
+
+
+def _is_free_form_object(node: Any) -> bool:
+    """True for a bare ``{"type": "object"}`` schema with no declared properties."""
+    return (
+        isinstance(node, dict)
+        and node.get("type") == "object"
+        and "properties" not in node
+        and set(node) <= {"type", "additionalProperties"}
+    )
+
+
+def sanitize_freeform_object_arrays(spec: dict[str, Any]) -> dict[str, Any]:
+    """Give ``array``-of-free-form-object union members a named item type.
+
+    any-llm's Anthropic params type fields like ``system`` as
+    ``str | list[dict] | None``, which the spec encodes as an ``anyOf`` whose
+    array variant has inline free-form-object ``items``
+    (``{"type": "object", "additionalProperties": true}``). When such a union
+    has two or more non-null variants the Go generator synthesizes a wrapper
+    struct and names the array field from that inline item type, emitting an
+    invalid identifier (``ArrayOf*mapmapOfStringAny`` — the ``*`` comes from the
+    pointer-typed item). That fails ``gofmt`` and breaks the Go SDK build. The
+    naming is generator-internal and inconsistent (a sibling field with two
+    array variants generates cleanly), so rather than depend on it, point every
+    such array at a shared named schema; the variant name is then deterministic
+    across all SDK languages.
+    """
+    schemas = spec.get("components", {}).get("schemas")
+    if not isinstance(schemas, dict):
+        return spec
+    used = False
+
+    def walk(node: Any) -> None:
+        nonlocal used
+        if isinstance(node, dict):
+            for key in ("anyOf", "oneOf"):
+                members = node.get(key)
+                if not isinstance(members, list):
+                    continue
+                for member in members:
+                    if (
+                        isinstance(member, dict)
+                        and member.get("type") == "array"
+                        and _is_free_form_object(member.get("items"))
+                    ):
+                        member["items"] = {"$ref": f"#/components/schemas/{_FREE_FORM_OBJECT}"}
+                        used = True
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(spec)
+    if used:
+        schemas[_FREE_FORM_OBJECT] = {"type": "object", "additionalProperties": True}
+    return spec
+
+
 def _generator_cli() -> str:
     return os.environ.get("OPENAPI_GENERATOR_CLI", "openapi-generator-cli")
 
@@ -625,6 +690,7 @@ def main() -> int:
         prepared = filter_spec(spec, CONTROL_PLANE_TAGS)
         targets = TARGETS
         spec_name = "control-plane.openapi.json"
+    prepared = sanitize_freeform_object_arrays(prepared)
 
     languages = list(targets) if args.language == "all" else [str(args.language)]
     out_dir = Path(args.out_dir)

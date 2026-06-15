@@ -252,6 +252,66 @@ def test_enrich_types_reasoning_as_string_matching_wire_format() -> None:
         assert reasoning == {"type": "string"}, f"{prefix}_Reasoning must be a plain string, got {reasoning}"
 
 
+def _spec_with_freeform_union() -> dict[str, Any]:
+    # Mirrors how any-llm types Anthropic's ``system`` (``str | list[dict] | None``):
+    # an anyOf whose array variant has inline free-form-object items, alongside a
+    # single-variant ``tools`` (``list[dict] | None``) array.
+    free_form = {"additionalProperties": True, "type": "object"}
+    return {
+        "openapi": "3.1.0",
+        "info": {"title": "t", "version": "0"},
+        "components": {
+            "schemas": {
+                "MessagesRequest": {
+                    "type": "object",
+                    "properties": {
+                        "system": {
+                            "anyOf": [
+                                {"type": "string"},
+                                {"type": "array", "items": dict(free_form)},
+                                {"type": "null"},
+                            ]
+                        },
+                        "tools": {
+                            "anyOf": [
+                                {"type": "array", "items": dict(free_form)},
+                                {"type": "null"},
+                            ]
+                        },
+                    },
+                }
+            }
+        },
+    }
+
+
+def test_sanitize_freeform_object_arrays_names_union_array_items() -> None:
+    spec = generate.sanitize_freeform_object_arrays(_spec_with_freeform_union())
+    schemas = spec["components"]["schemas"]
+    assert schemas[generate._FREE_FORM_OBJECT] == {"type": "object", "additionalProperties": True}
+    props = schemas["MessagesRequest"]["properties"]
+    for field in ("system", "tools"):
+        array_variant = next(v for v in props[field]["anyOf"] if v.get("type") == "array")
+        assert array_variant["items"] == {
+            "$ref": f"#/components/schemas/{generate._FREE_FORM_OBJECT}"
+        }, f"{field} array items should reference the shared free-form object schema"
+
+
+def test_sanitize_freeform_object_arrays_is_noop_without_freeform_unions() -> None:
+    spec = {
+        "components": {
+            "schemas": {
+                "Plain": {
+                    "type": "object",
+                    "properties": {"items": {"type": "array", "items": {"type": "string"}}},
+                }
+            }
+        }
+    }
+    out = generate.sanitize_freeform_object_arrays(spec)
+    assert generate._FREE_FORM_OBJECT not in out["components"]["schemas"]
+
+
 def test_control_plane_tags_are_typed_management_only() -> None:
     assert generate.CONTROL_PLANE_TAGS == frozenset(
         {"keys", "users", "budgets", "pricing", "usage"}
