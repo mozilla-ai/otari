@@ -35,7 +35,7 @@ jobs:
 
     - uses: astral-sh/setup-uv@v7
       with:
-        python-version: 3.13
+        python-version: 3.14
         activate-environment: true
 
     - name: Install dependencies
@@ -68,7 +68,7 @@ jobs:
 
     - uses: astral-sh/setup-uv@v7
       with:
-        python-version: 3.13
+        python-version: 3.14
         activate-environment: true
 
     - name: Install dependencies

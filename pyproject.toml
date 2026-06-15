@@ -59,6 +59,18 @@ otari = "gateway.cli:main"
 # Legacy alias: the CLI was named `gateway` before the rename to `otari`.
 gateway = "gateway.cli:main"
 
+[tool.uv]
+# Otari is deployed as a Linux server and developed on Linux / macOS; it is
+# never packaged for Windows. Pinning the resolution environments keeps the
+# universal lock from inheriting magika's win32-only `onnxruntime<=1.20.1`
+# cap, which otherwise forces an onnxruntime build with no cp314 wheels and
+# breaks the Python 3.14 Docker image. With win32 excluded, onnxruntime
+# resolves to a release that ships cp314 wheels for linux and macOS.
+environments = [
+    "sys_platform == 'linux'",
+    "sys_platform == 'darwin'",
+]
+
 [tool.setuptools]
 package-dir = {"" = "src"}
 
