@@ -142,7 +142,7 @@ multi-attempt shape.
 ## MCP server resolution
 
 Called only when a request references one or more workspace-scoped MCP server
-ids (a platform-only feature). Otari swaps those ids for the inline server
+ids (a connected-only feature). Otari swaps those ids for the inline server
 configs it needs to open the connections.
 
 ### Request

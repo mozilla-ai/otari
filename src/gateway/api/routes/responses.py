@@ -405,7 +405,7 @@ async def create_response(
                     detail=(PROVIDER_ERROR_DETAIL if is_single_attempt else ALL_PROVIDERS_FAILED_DETAIL),
                 ) from exc
 
-        # Single-attempt streaming (standalone, or platform + tool-loop).
+        # Single-attempt streaming (standalone, or connected + tool-loop).
         platform_correlation_id: str | None = None
         platform_request_id: str | None = None
         if ctx.connected_mode:

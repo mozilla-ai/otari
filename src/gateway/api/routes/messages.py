@@ -385,11 +385,11 @@ async def create_message(
                     status.HTTP_502_BAD_GATEWAY,
                 ) from exc
 
-        # Standalone (or platform + tool-loop): single attempt streaming.
+        # Standalone (or connected + tool-loop): single attempt streaming.
         platform_correlation_id: str | None = None
         platform_request_id: str | None = None
         if ctx.connected_mode:
-            # Tool-loop platform path: build call_kwargs from the primary
+            # Tool-loop connected path: build call_kwargs from the primary
             # attempt and keep the platform contract (X-Correlation-ID,
             # X-Otari-Request-ID, usage reported via _report_platform_usage).
             route = ctx.route

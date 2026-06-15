@@ -97,7 +97,7 @@ uv run otari serve --config config.yml
 Notes:
 
 - `OTARI_MODE` is optional; effective mode is derived from `OTARI_AI_TOKEN`.
-- If you explicitly set `OTARI_MODE=platform`, startup fails unless `OTARI_AI_TOKEN` is also set.
+- If you explicitly set `OTARI_MODE=connected` (the legacy value `platform` still works), startup fails unless `OTARI_AI_TOKEN` is also set.
 - In connected mode, local `providers` configuration is not used.
 - Otari/platform wire contract (resolve and usage endpoints, request/response shapes, retry semantics) is documented in [`docs/connected-mode-protocol.md`](docs/connected-mode-protocol.md).
 

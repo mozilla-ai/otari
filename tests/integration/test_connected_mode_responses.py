@@ -243,7 +243,7 @@ def test_connected_mode_provider_without_responses_support_returns_400(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ``SUPPORTS_RESPONSES`` provider guard must still fire in platform
+    """The ``SUPPORTS_RESPONSES`` provider guard must still fire in connected
     mode — once credentials are resolved, the guard checks the primary
     attempt's provider before any upstream call.
     """

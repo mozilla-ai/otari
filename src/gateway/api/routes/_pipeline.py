@@ -407,7 +407,7 @@ async def resolve_request_context(
     the cost estimate. It runs after the billed user is known (file access is
     user-scoped) and after the provider/model split (capability detection needs
     it), and returns the post-normalization prompt-char count so the reservation
-    reflects any text extracted from attachments. It is never called in platform
+    reflects any text extracted from attachments. It is never called in connected
     mode, where the files feature is unavailable. It returns
     ``(prompt_chars, vision_usage)``; any vision describe side-call it made is
     metered and billed here as committed spend (the call already happened, so it
@@ -607,7 +607,7 @@ async def prepare_gateway_tools(
     ``block``-mode flags raise 403 here (provider never called);
     ``monitor``-mode flags annotate the response header and fall through.
 
-    ``mcp_server_ids`` is platform-only: standalone mode has no platform to
+    ``mcp_server_ids`` is connected-only: standalone mode has no platform to
     resolve the ids against, so the field is rejected with a 400 rather than
     silently ignored. The sandbox and web_search opt-ins follow the wire shape
     of Anthropic / OpenAI tool entries; their backend URLs are operator
