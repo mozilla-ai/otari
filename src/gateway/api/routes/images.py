@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._schema_derive import derive_request_base
+from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.api.routes.chat import get_provider_kwargs, rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -108,22 +109,18 @@ async def create_image(
 
     provider_kwargs = get_provider_kwargs(config, provider)
 
+    # Forward every field the schema accepts (it is derived from
+    # ImageGenerationParams), so a new any-llm param is passed through without a
+    # code change. `model` is replaced by the split short name passed explicitly;
+    # gateway-internal (`user`) and sensitive fields are stripped.
+    forward = _strip_gateway_fields(request.model_dump(exclude_unset=True))
+    forward.pop("model", None)
     image_kwargs: dict[str, Any] = {
         "model": model,
-        "prompt": request.prompt,
         "provider": provider,
         **provider_kwargs,
+        **forward,
     }
-    if request.n is not None:
-        image_kwargs["n"] = request.n
-    if request.size is not None:
-        image_kwargs["size"] = request.size
-    if request.quality is not None:
-        image_kwargs["quality"] = request.quality
-    if request.style is not None:
-        image_kwargs["style"] = request.style
-    if request.response_format is not None:
-        image_kwargs["response_format"] = request.response_format
 
     try:
         result: ImagesResponse = await aimage_generation(**image_kwargs)
