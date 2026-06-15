@@ -5,8 +5,8 @@ delegates per-request authorization and provider-credential resolution to a
 peer platform service over HTTP. This document describes the wire contract
 Otari expects from that peer.
 
-The reference peer implementation is the [Otari platform](https://github.com/mozilla-ai/otari-ai),
-but any service that implements this contract can stand in.
+The reference peer is the [otari.ai](https://otari.ai) platform, but any service
+that implements this contract can stand in.
 
 ## Endpoints
 
@@ -38,10 +38,9 @@ Otari ignores any it does not recognise. Consumers of this contract MUST do the
 same (ignore unknown fields) so the platform can add fields without breaking
 older gateways.
 
-For example, the reference platform's resolve response (`GatewayResolveResponse`
-in otari-ai) also carries `workspace_id`, `organization_id`, `provider_key_id`,
-and `allowed_models`. Otari does not read these today, so they are intentionally
-absent from the shapes documented here.
+For example, the otari.ai resolve response also carries `workspace_id`,
+`organization_id`, `provider_key_id`, and `allowed_models`. Otari does not read
+these today, so they are intentionally absent from the shapes documented here.
 
 ## Resolve
 
