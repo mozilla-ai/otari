@@ -1,0 +1,142 @@
+name: Otari Release (open PR)
+
+# Step 1 of the release flow. Manually dispatched with a version. Regenerates
+# CHANGELOG.md from Conventional Commits via git-cliff (stamped with the target
+# tag) and opens a `release/vX.Y.Z` PR labeled `release`. A maintainer reviews
+# the changelog diff and merges; otari-tag-release.yml then tags the squash
+# commit and publishes the GitHub Release, which fires otari-docker.yml.
+#
+# Otari has no version file to bump: the runtime version comes from the git tag
+# (baked in as OTARI_VERSION; see src/gateway/version.py), so this workflow only
+# regenerates the changelog.
+#
+# Requires a RELEASE_TOKEN secret (PAT or GitHub App token with contents:write
+# + pull-requests:write). The default GITHUB_TOKEN cannot be used: a branch it
+# pushes and a PR it opens do not trigger the PR's CI, so the release PR could
+# not satisfy required status checks. See RELEASE.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.4.0) - without the "v" prefix'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  open-release-pr:
+    name: Open release PR
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ github.event.inputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          # git-cliff walks tag history to render the changelog, so it needs
+          # the full history, not the default shallow clone.
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.13
+
+      - name: Validate version format
+        run: |
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Invalid version format: '$VERSION'. Expected semver like 0.4.0"
+            exit 1
+          fi
+
+      - name: Check tag does not already exist
+        run: |
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag v$VERSION already exists"
+            exit 1
+          fi
+
+      - name: Check release branch is free
+        run: |
+          BRANCH="release/v$VERSION"
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "::error::Branch $BRANCH already exists upstream; merge or delete it first"
+            exit 1
+          fi
+
+      - name: Regenerate CHANGELOG.md
+        env:
+          # git-cliff resolves PR numbers + author attribution via the GitHub
+          # API; without a token that metadata silently drops on large releases.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          uvx git-cliff@2.13.1 --config cliff.toml --tag "v$VERSION" --output CHANGELOG.md 2> cliff-stderr.log
+          cat cliff-stderr.log
+          # cliff.toml's catch-all parser routes unmatched commits to "Other";
+          # if git-cliff still skips any due to parse errors, fail the release.
+          if grep -q "skipped due to parse error" cliff-stderr.log; then
+            echo "::error::git-cliff skipped commits due to parse errors. Fix the offending commit messages or extend cliff.toml's catch-all parser."
+            exit 1
+          fi
+
+      - name: Render release notes preview
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          uvx git-cliff@2.13.1 --config cliff.toml --tag "v$VERSION" --unreleased --strip header > /tmp/notes.md
+          cat /tmp/notes.md
+
+      - name: Build PR body
+        run: |
+          {
+            echo "<!-- release-version: $VERSION -->"
+            echo
+            echo "## Description"
+            echo
+            echo "Automated release PR for \`v$VERSION\`. Regenerates \`CHANGELOG.md\` from Conventional Commits via git-cliff. Merging this PR tags the squash commit \`v$VERSION\` and publishes the GitHub Release, which triggers the Docker image build."
+            echo
+            echo "### Release notes preview"
+            echo
+            cat /tmp/notes.md
+            echo
+            echo "## PR Type"
+            echo
+            echo "- [x] Infrastructure / CI"
+            echo
+            echo "## Relevant issues"
+            echo
+            echo "## Checklist"
+            echo
+            echo "- [x] I understand the code I am submitting."
+            echo "- [x] Documentation was updated where necessary."
+            echo
+            echo "## AI Usage"
+            echo
+            echo "- [x] No AI was used."
+          } > /tmp/pr-body.md
+
+      - name: Commit, push, open PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          BRANCH="release/v$VERSION"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add CHANGELOG.md
+          git commit -m "chore: release v$VERSION"
+          git push -u origin "$BRANCH"
+          gh label create release \
+            --color "0e8a16" \
+            --description "Release PRs: tagged and published on merge" \
+            --force >/dev/null 2>&1 || true
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: release v$VERSION" \
+            --body-file /tmp/pr-body.md \
+            --label release
