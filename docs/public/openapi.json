@@ -335,6 +335,17 @@
             "title": "Model",
             "type": "string"
           },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning Effort"
+          },
           "response_format": {
             "anyOf": [
               {

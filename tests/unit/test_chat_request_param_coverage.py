@@ -21,7 +21,6 @@ from gateway.api.routes.chat import ChatCompletionRequest
 # enforces that the allowlist and the schema never overlap).
 KNOWN_UNSUPPORTED: dict[str, str] = {
     "model_id": "any-llm's internal name; the gateway exposes it as `model`",
-    "reasoning_effort": "BUG: dropped today, so reasoning never reaches the provider (mozilla-ai/otari#150)",
     # Standard OpenAI completion params the gateway does not currently forward; triage (forward or
     # document as intentional) is tracked in mozilla-ai/otari#152. Remove each entry as it is resolved.
     "n": "not currently forwarded (mozilla-ai/otari#152)",

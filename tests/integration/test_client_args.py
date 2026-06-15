@@ -140,3 +140,36 @@ async def test_provider_config_without_client_args(
         )
 
     assert "client_args" not in captured_kwargs or captured_kwargs.get("client_args") is None
+
+
+@pytest.mark.asyncio
+async def test_reasoning_effort_passed_to_acompletion(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    """`reasoning_effort` must reach acompletion (mozilla-ai/otari#150).
+
+    The schema is a hand-maintained allowlist, so a field missing from
+    ``ChatCompletionRequest`` is silently dropped by pydantic before the
+    provider call and reasoning never gets enabled.
+    """
+    captured_kwargs: dict[str, Any] = {}
+
+    async def mock_acompletion(**kwargs: Any) -> None:
+        captured_kwargs.update(kwargs)
+        raise MockCompletionError
+
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "openai:gpt-4",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "user": test_user["user_id"],
+                "reasoning_effort": "high",
+            },
+            headers=master_key_header,
+        )
+
+    assert captured_kwargs.get("reasoning_effort") == "high", "reasoning_effort not passed to acompletion"
