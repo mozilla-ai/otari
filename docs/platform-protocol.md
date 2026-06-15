@@ -220,6 +220,9 @@ its own value: `max_results`, `allowed_domains`, `blocked_domains`, and
 `purpose_hint` fill in when the per-request tool entry omits them (an empty list
 or empty string reads as "no preference" and does not clear the workspace
 value), and `provider_options` is shallow-merged with per-request keys winning.
+`provider` is informational: the active web-search backend is configured on the
+gateway itself via `WEB_SEARCH_URL`, so Otari does not switch backends based on
+this field.
 
 ### Failure
 
