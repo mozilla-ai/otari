@@ -338,9 +338,10 @@ def _is_free_form_object(node: Any) -> bool:
     """True for a bare ``{"type": "object"}`` schema that accepts arbitrary values.
 
     Matches an object with no declared ``properties`` whose only other key may be
-    ``additionalProperties``, and only when that does not explicitly close the
-    object (``additionalProperties: false``) -- a closed object is not free-form
-    and must not be collapsed to the shared ``FreeFormObject``.
+    ``additionalProperties``, and only when that is omitted or literally ``true``.
+    A closed object (``additionalProperties: false``) or a typed map
+    (``additionalProperties: {schema}``) is not free-form and must not be
+    collapsed to the shared open ``FreeFormObject``.
     """
     if not (
         isinstance(node, dict)
@@ -349,7 +350,7 @@ def _is_free_form_object(node: Any) -> bool:
         and set(node) <= {"type", "additionalProperties"}
     ):
         return False
-    return node.get("additionalProperties", True) is not False
+    return node.get("additionalProperties", True) is True
 
 
 def sanitize_freeform_object_arrays(spec: dict[str, Any]) -> dict[str, Any]:

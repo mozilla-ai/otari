@@ -318,6 +318,28 @@ def test_sanitize_freeform_object_arrays_leaves_closed_object_arrays() -> None:
     assert array_variant["items"] == {"type": "object", "additionalProperties": False}
 
 
+def test_sanitize_freeform_object_arrays_leaves_typed_map_arrays() -> None:
+    # A typed map (additionalProperties is a schema) constrains its values, so it
+    # is not free-form and must not be collapsed to the open FreeFormObject.
+    typed_map = {"type": "object", "additionalProperties": {"type": "string"}}
+    spec = {
+        "components": {
+            "schemas": {
+                "TypedMap": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": dict(typed_map)},
+                    ]
+                }
+            }
+        }
+    }
+    out = generate.sanitize_freeform_object_arrays(spec)
+    assert generate._FREE_FORM_OBJECT not in out["components"]["schemas"]
+    array_variant = next(v for v in out["components"]["schemas"]["TypedMap"]["anyOf"] if v.get("type") == "array")
+    assert array_variant["items"] == typed_map
+
+
 def test_sanitize_freeform_object_arrays_raises_on_conflicting_existing_schema() -> None:
     # A pre-existing FreeFormObject with different semantics must not be silently
     # overwritten; the sanitizer cannot safely reuse the name.
