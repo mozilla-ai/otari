@@ -1,6 +1,6 @@
 """Unit tests for the ``run_platform_attempts`` runner.
 
-The runner is exercised end-to-end through the platform-mode integration
+The runner is exercised end-to-end through the connected-mode integration
 tests; this file covers narrow defensive paths that are awkward to provoke
 through a full request, such as the empty-attempts guard.
 """

@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, status
 
-_DISABLED_DETAIL = "This endpoint is not available in platform mode. Manage this resource via the platform UI."
+_DISABLED_DETAIL = "This endpoint is not available in connected mode. Manage this resource via the platform UI."
 
-router = APIRouter(tags=["platform-mode"])
+router = APIRouter(tags=["connected-mode"])
 
 
 def _raise_disabled() -> None:

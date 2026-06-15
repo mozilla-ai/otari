@@ -77,15 +77,15 @@ def serve(
 
     gateway_config.validate_mode_selection()
 
-    if gateway_config.is_platform_mode:
+    if gateway_config.is_connected_mode:
         platform_base_url = gateway_config.platform.get("base_url")
         if not platform_base_url:
-            raise click.ClickException("platform.base_url is required when platform mode is active")
+            raise click.ClickException("platform.base_url is required when connected mode is active")
         if gateway_config.providers:
             raise click.ClickException(
-                "Local provider credentials are not supported in platform mode. Remove configured providers."
+                "Local provider credentials are not supported in connected mode. Remove configured providers."
             )
-        logger.info("Platform mode active. Base URL: %s", platform_base_url)
+        logger.info("Connected mode active. Base URL: %s", platform_base_url)
 
     if not gateway_config.master_key:
         logger.warning(
@@ -94,8 +94,8 @@ def serve(
         logger.warning("Set OTARI_MASTER_KEY environment variable or use --master-key flag.")
 
     logger.info("Starting Otari on %s:%s", gateway_config.host, gateway_config.port)
-    if gateway_config.is_platform_mode:
-        logger.info("Database: disabled (platform mode)")
+    if gateway_config.is_connected_mode:
+        logger.info("Database: disabled (connected mode)")
     else:
         logger.info("Database: %s", gateway_config.database_url)
 

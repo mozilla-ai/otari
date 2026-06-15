@@ -78,9 +78,9 @@ uv run otari serve --config config.yml
 
 Open API docs at `http://localhost:8000/docs`.
 
-## Start in platform mode
+## Start in connected mode
 
-Platform mode connects Otari to [otari.ai](https://otari.ai). It is enabled automatically when `OTARI_AI_TOKEN` is set.
+Connected mode connects Otari to [otari.ai](https://otari.ai). It is enabled automatically when `OTARI_AI_TOKEN` is set.
 
 1) Export platform env vars:
 
@@ -98,8 +98,8 @@ Notes:
 
 - `OTARI_MODE` is optional; effective mode is derived from `OTARI_AI_TOKEN`.
 - If you explicitly set `OTARI_MODE=platform`, startup fails unless `OTARI_AI_TOKEN` is also set.
-- In platform mode, local `providers` configuration is not used.
-- Otari/platform wire contract (resolve and usage endpoints, request/response shapes, retry semantics) is documented in [`docs/platform-protocol.md`](docs/platform-protocol.md).
+- In connected mode, local `providers` configuration is not used.
+- Otari/platform wire contract (resolve and usage endpoints, request/response shapes, retry semantics) is documented in [`docs/connected-mode-protocol.md`](docs/connected-mode-protocol.md).
 
 ## First request (OpenAI SDK)
 
@@ -299,7 +299,7 @@ gets a clean `502`.
 
 Otari exposes three core generation surfaces plus management and health
 endpoints. The three surfaces below and `/health` work in both standalone and
-platform mode; everything else, the management endpoints (keys, users, budgets,
+connected mode; everything else, the management endpoints (keys, users, budgets,
 pricing, usage) and the remaining OpenAI-compatible endpoints, is
 standalone-only.
 

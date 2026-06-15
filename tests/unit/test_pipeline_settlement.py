@@ -72,7 +72,7 @@ def _ctx(
         config=config,
         db=db,
         log_writer=log_writer,
-        platform_mode=False,
+        connected_mode=False,
         route=None,
         user_token=None,
         api_key_id="key-1",
@@ -88,11 +88,11 @@ def _ctx(
 
 
 @pytest.mark.parametrize("adapter", ADAPTERS)
-@pytest.mark.parametrize("platform_path", [False, True], ids=["standalone", "platform"])
+@pytest.mark.parametrize("connected_path", [False, True], ids=["standalone", "connected"])
 def test_all_settlement_callbacks_wired_for_every_format_and_path(
     monkeypatch: pytest.MonkeyPatch,
     adapter: Any,
-    platform_path: bool,
+    connected_path: bool,
 ) -> None:
     """Every streaming response, regardless of format and of single-attempt vs
     platform-fallback path, must wire on_complete / on_error / on_no_usage /
@@ -127,14 +127,14 @@ def test_all_settlement_callbacks_wired_for_every_format_and_path(
         user_id=None,
         rate_limit_info=None,
         reservation=None,
-        platform_correlation_id="corr-1" if platform_path else None,
-        platform_request_id="req-1" if platform_path else None,
+        platform_correlation_id="corr-1" if connected_path else None,
+        platform_request_id="req-1" if connected_path else None,
     )
 
     for callback_name in ("on_complete", "on_error", "on_no_usage", "on_incomplete"):
         assert callable(captured.get(callback_name)), f"{callback_name} not wired"
     assert captured["fmt"] is adapter.stream_format
-    if platform_path:
+    if connected_path:
         assert response.headers["X-Correlation-ID"] == "corr-1"
         assert response.headers["X-Otari-Request-ID"] == "req-1"
     else:

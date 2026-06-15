@@ -149,7 +149,7 @@ async def responses_tool_loop(
 
     ``on_first_response`` is invoked exactly once, right after the first
     upstream ``aresponses`` call returns successfully. Mirrors the contract
-    on :func:`gateway.services.mcp_loop.mcp_tool_loop` so platform-mode
+    on :func:`gateway.services.mcp_loop.mcp_tool_loop` so connected-mode
     callers can lock in to the chosen provider once an assistant turn has
     materialized — subsequent failures terminate the request instead of
     silently swapping providers (a Responses transcript carries

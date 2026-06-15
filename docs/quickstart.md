@@ -104,7 +104,7 @@ Your request went to Otari, not directly to OpenAI. Otari authenticated your key
 
 ## Next steps
 
-- [Deployment](deployment.md) picks up from here with platform mode, optional services, and deployment-specific configuration.
+- [Deployment](deployment.md) picks up from here with connected mode, optional services, and deployment-specific configuration.
 - [Built-in tools](tools.md) — let any model use a sandboxed code REPL or web search Otari runs itself.
 - [Guardrails](guardrails.md) — request-level checks like prompt-injection detection, enforced before the provider is called.
 - [Configuration](configuration.md) is the full reference for budgets, rate limits, pricing, and provider options.

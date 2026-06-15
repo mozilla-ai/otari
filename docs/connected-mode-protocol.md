@@ -1,6 +1,6 @@
-# Platform protocol
+# Connected-mode protocol
 
-When Otari runs in **platform mode** (`OTARI_AI_TOKEN` is set), it
+When Otari runs in **connected mode** (`OTARI_AI_TOKEN` is set), it
 delegates per-request authorization and provider-credential resolution to a
 peer platform service over HTTP. This document describes the wire contract
 Otari expects from that peer.
@@ -337,7 +337,7 @@ flag.
 
 | Env var | Default | Notes |
 |---|---|---|
-| `OTARI_AI_TOKEN` | — | Setting this enables platform mode. |
+| `OTARI_AI_TOKEN` | — | Setting this enables connected mode. |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Per-resolve timeout. |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |

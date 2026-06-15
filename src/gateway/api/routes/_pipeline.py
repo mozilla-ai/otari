@@ -116,7 +116,7 @@ ChunkT = TypeVar("ChunkT")
 DB_UNAVAILABLE_DETAIL = "Database session unavailable"
 API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
-MCP_SERVER_IDS_PLATFORM_ONLY_DETAIL = "mcp_server_ids is only available in platform mode"
+MCP_SERVER_IDS_CONNECTED_ONLY_DETAIL = "mcp_server_ids is only available in connected mode"
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
@@ -308,7 +308,7 @@ class RequestContext:
         config: GatewayConfig,
         db: AsyncSession | None,
         log_writer: LogWriter,
-        platform_mode: bool,
+        connected_mode: bool,
         route: ResolvedRoute | None,
         user_token: str | None,
         api_key_id: str | None,
@@ -319,7 +319,7 @@ class RequestContext:
         self.config = config
         self.db = db
         self.log_writer = log_writer
-        self.platform_mode = platform_mode
+        self.connected_mode = connected_mode
         self.route = route
         self.user_token = user_token
         self.api_key_id = api_key_id
@@ -393,7 +393,7 @@ async def resolve_request_context(
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
-    Platform mode: extract the caller's bearer token and resolve the routing
+    Connected mode: extract the caller's bearer token and resolve the routing
     plan against the platform; no local DB state is touched.
 
     Standalone mode: validate the API key, resolve the billed user, check the
@@ -413,7 +413,7 @@ async def resolve_request_context(
     metered and billed here as committed spend (the call already happened, so it
     is not gated or refundable).
     """
-    platform_mode = config.is_platform_mode
+    connected_mode = config.is_connected_mode
     route: ResolvedRoute | None = None
     user_token: str | None = None
     api_key_id: str | None = None
@@ -421,7 +421,7 @@ async def resolve_request_context(
     rate_limit_info: RateLimitInfo | None = None
     reservation: ReservationHandle | None = None
 
-    if platform_mode:
+    if connected_mode:
         user_token = _extract_platform_user_token(raw_request)
         start_time = time.perf_counter()
         route = await _resolve_platform_credentials(
@@ -532,7 +532,7 @@ async def resolve_request_context(
         config=config,
         db=db,
         log_writer=log_writer,
-        platform_mode=platform_mode,
+        connected_mode=connected_mode,
         route=route,
         user_token=user_token,
         api_key_id=api_key_id,
@@ -621,10 +621,10 @@ async def prepare_gateway_tools(
     try:
         await apply_input_guardrails(guardrails, guardrail_text, response=response)
 
-        if mcp_server_ids and not ctx.platform_mode:
-            raise adapter.error(400, MCP_SERVER_IDS_PLATFORM_ONLY_DETAIL, ErrorKind.INVALID_REQUEST)
-        if ctx.platform_mode and mcp_server_ids:
-            assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+        if mcp_server_ids and not ctx.connected_mode:
+            raise adapter.error(400, MCP_SERVER_IDS_CONNECTED_ONLY_DETAIL, ErrorKind.INVALID_REQUEST)
+        if ctx.connected_mode and mcp_server_ids:
+            assert ctx.user_token is not None  # guaranteed by the connected-mode preamble
             resolved_mcp_servers = await _resolve_platform_mcp_servers(
                 config=ctx.config,
                 user_token=ctx.user_token,
@@ -669,7 +669,7 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
             use_web_search = True
 
-            # Platform mode owns the per-workspace web-search policy (whether it's
+            # Connected mode owns the per-workspace web-search policy (whether it's
             # enabled at all, plus workspace-default max_results / domain filters /
             # purpose hint / provider_options). Mirrors the mcp_server_ids resolve
             # above. Precedence is "per-request overrides workspace default":
@@ -682,8 +682,8 @@ async def prepare_gateway_tools(
             #    keys the request omitted while per-request keys still win (rather
             #    than the request's dict replacing the workspace dict wholesale).
             # Standalone mode has no platform to consult.
-            if ctx.platform_mode:
-                assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+            if ctx.connected_mode:
+                assert ctx.user_token is not None  # guaranteed by the connected-mode preamble
                 # Forward the platform token only when the search backend IS the
                 # platform (its URL is under the platform base URL the gateway
                 # already trusts this token with for resolve). Never leak this
@@ -825,7 +825,7 @@ async def log_usage(
 async def release_reservation(ctx: RequestContext) -> None:
     """Refund the request's budget reservation, if one was taken.
 
-    No-op in platform mode and for requests that reserved nothing. Use this
+    No-op in connected mode and for requests that reserved nothing. Use this
     before raising on any path that rejects the request after
     :func:`resolve_request_context` pre-debited the estimate; otherwise the
     held amount shrinks the user's budget until the next reset (or forever,
@@ -1233,7 +1233,7 @@ async def run_streaming_with_fallback(
     rate_limit_info: RateLimitInfo | None,
     tool_ctx: ToolContext,
 ) -> StreamingResponse:
-    """Multi-attempt streaming for platform-mode requests.
+    """Multi-attempt streaming for connected-mode requests.
 
     Iterates ``route.attempts`` and falls through on any attempt that fails
     before its first chunk arrives. Once an attempt yields its first chunk,
@@ -1345,7 +1345,7 @@ async def run_streaming_with_fallback(
         provider=LLMProvider(chosen.provider),
         model=chosen.model,
         config=config,
-        db=None,  # platform mode does not use the local DB
+        db=None,  # connected mode does not use the local DB
         log_writer=None,  # unused when db is None
         api_key_id=None,
         user_id=None,
@@ -1378,7 +1378,7 @@ async def run_platform_non_stream(
     config: GatewayConfig,
     rate_limit_info: RateLimitInfo | None,
 ) -> ResultT:
-    """Drive the multi-attempt platform-mode non-streaming path via the shared
+    """Drive the multi-attempt connected-mode non-streaming path via the shared
     ``run_platform_attempts`` runner, dispatching each attempt through the
     shared backend ladder.
     """

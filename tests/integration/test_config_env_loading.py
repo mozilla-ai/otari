@@ -155,7 +155,7 @@ def test_load_config_otari_env_overrides_yaml(tmp_path: Path, monkeypatch: pytes
 
 def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: platform\n", encoding="utf-8")
+    config_file.write_text("mode: connected\n", encoding="utf-8")
 
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
     monkeypatch.setenv("PLATFORM_BASE_URL", "http://localhost:8100/api/v1")
@@ -165,7 +165,7 @@ def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.
 
     config = load_config(str(config_file))
 
-    assert config.is_platform_mode
+    assert config.is_connected_mode
     assert config.platform["base_url"] == "http://localhost:8100/api/v1"
     assert config.platform["resolve_timeout_ms"] == 1234
     assert config.platform["usage_timeout_ms"] == 2345
@@ -176,20 +176,20 @@ def test_load_config_sets_default_platform_base_url_when_token_is_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: platform\n", encoding="utf-8")
+    config_file.write_text("mode: connected\n", encoding="utf-8")
 
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
     monkeypatch.delenv("PLATFORM_BASE_URL", raising=False)
 
     config = load_config(str(config_file))
 
-    assert config.is_platform_mode
+    assert config.is_connected_mode
     assert config.platform["base_url"] == "https://api.otari.ai/api/v1"
 
 
-def test_load_config_rejects_platform_mode_without_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_config_rejects_connected_mode_without_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: platform\n", encoding="utf-8")
+    config_file.write_text("mode: connected\n", encoding="utf-8")
     monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
     monkeypatch.delenv("OTARI_PLATFORM_TOKEN", raising=False)
     monkeypatch.delenv("ANY_LLM_PLATFORM_TOKEN", raising=False)
@@ -198,7 +198,7 @@ def test_load_config_rejects_platform_mode_without_token(tmp_path: Path, monkeyp
         load_config(str(config_file))
 
 
-def test_load_config_prefers_platform_mode_when_token_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_config_prefers_connected_mode_when_token_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("mode: standalone\n", encoding="utf-8")
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
@@ -206,7 +206,20 @@ def test_load_config_prefers_platform_mode_when_token_is_set(tmp_path: Path, mon
     config = load_config(str(config_file))
 
     assert config.mode == "standalone"
-    assert config.is_platform_mode
+    assert config.is_connected_mode
+
+
+def test_load_config_accepts_legacy_platform_mode_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # "platform" is the pre-rename alias for the "connected" mode; it must keep
+    # working so existing configs do not break.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("mode: platform\n", encoding="utf-8")
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+
+    config = load_config(str(config_file))
+
+    assert config.is_connected_mode
+    assert config.effective_mode == "connected"
 
 
 def test_load_config_accepts_legacy_platform_token_aliases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -217,7 +230,7 @@ def test_load_config_accepts_legacy_platform_token_aliases(tmp_path: Path, monke
 
     config = load_config(str(config_file))
 
-    assert config.is_platform_mode
+    assert config.is_connected_mode
     assert config.platform_token == "legacy-token"
 
 
@@ -233,5 +246,5 @@ def test_load_config_prefers_otari_ai_token_over_legacy_aliases(
 
     config = load_config(str(config_file))
 
-    assert config.is_platform_mode
+    assert config.is_connected_mode
     assert config.platform_token == "new-token"

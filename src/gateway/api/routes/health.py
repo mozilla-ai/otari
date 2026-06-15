@@ -38,8 +38,8 @@ async def health_check(config: GatewayConfig = Depends(get_config)) -> dict[str,
     use /health/readiness or /health/liveness instead.
     """
     payload: dict[str, str] = {"status": "healthy"}
-    if config.is_platform_mode:
-        payload["mode"] = "platform"
+    if config.is_connected_mode:
+        payload["mode"] = "connected"
         payload["platform_reachable"] = "yes" if await _check_platform_reachability(config) else "no"
     return payload
 
@@ -79,21 +79,21 @@ async def health_readiness(
         HTTPException: 503 if service is not ready
 
     """
-    if config.is_platform_mode:
+    if config.is_connected_mode:
         platform_reachable = await _check_platform_reachability(config)
         if not platform_reachable:
             raise HTTPException(
                 status_code=503,
                 detail={
                     "status": "unhealthy",
-                    "mode": "platform",
+                    "mode": "connected",
                     "platform": "unavailable",
                     "version": __version__,
                 },
             )
         return {
             "status": "healthy",
-            "mode": "platform",
+            "mode": "connected",
             "platform": "connected",
             "version": __version__,
         }

@@ -234,7 +234,7 @@ async def get_db_if_needed(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> AsyncGenerator[AsyncSession | None, None]:
     """Get a database session in standalone mode, otherwise return None."""
-    if config.is_platform_mode:
+    if config.is_connected_mode:
         yield None
         return
 

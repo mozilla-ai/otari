@@ -310,14 +310,14 @@ async def chat_completions(
     )
 
     # ------------------------------------------------------------------
-    # Streaming path: in platform mode, iterate `route.attempts` before any
+    # Streaming path: in connected mode, iterate `route.attempts` before any
     # bytes are flushed, then commit to the first attempt that yields a chunk
     # (tool modes included, so they get per-attempt fallback up to the
     # lock-in point). Mid-stream failover (after first chunk) is out of
     # scope: errors after first chunk propagate to the client.
     # ------------------------------------------------------------------
     if request.stream:
-        if ctx.platform_mode:
+        if ctx.connected_mode:
             route = ctx.route
             if route is None or not route.attempts:
                 if route is not None:
@@ -384,12 +384,12 @@ async def chat_completions(
         )
 
     # ------------------------------------------------------------------
-    # Non-streaming path. Platform mode iterates `route.attempts` with
+    # Non-streaming path. Connected mode iterates `route.attempts` with
     # pre-lock-in fallback semantics: once an attempt's tool loop has
     # received its first assistant message, subsequent failures terminate
     # the request; we never swap providers between tool-use rounds.
     # ------------------------------------------------------------------
-    if ctx.platform_mode:
+    if ctx.connected_mode:
         route = ctx.route
         if route is None:
             raise HTTPException(

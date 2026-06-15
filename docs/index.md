@@ -18,7 +18,7 @@ Start with the [Quickstart](quickstart.md). It gets Otari running locally and wa
 ## Browse the docs
 
 - [Quickstart](quickstart.md) — get running and make your first request.
-- [Deployment](deployment.md) — platform mode, optional services, and deployment-specific configuration.
+- [Deployment](deployment.md) — connected mode, optional services, and deployment-specific configuration.
 - [Modes](modes.md) — standalone vs connected, and what changes between them.
 - [Built-in tools](tools.md) — sandboxed code execution and web search Otari runs itself.
 - [Files](files.md) — file uploads and document understanding for local models.
@@ -28,5 +28,5 @@ Start with the [Quickstart](quickstart.md). It gets Otari running locally and wa
 - [Use with Claude Code](use-with-claude-code.md) — point the Claude Code CLI at Otari.
 - [Use with opencode](use-with-opencode.md) — point the opencode CLI at Otari.
 - [Supported models](supported-models.md) — providers, model format, and capabilities.
-- [Platform protocol](platform-protocol.md) — Otari/platform wire contract, for platform builders.
+- [Connected-mode protocol](connected-mode-protocol.md) — Otari/platform wire contract, for platform builders.
 - [SDK compatibility](sdk-compatibility.md) — how the language SDKs are released and which SDK version works with which Otari version.
