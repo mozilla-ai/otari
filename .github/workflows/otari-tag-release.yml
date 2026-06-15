@@ -34,7 +34,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: 3.13
+          python-version: 3.14
 
       - name: Resolve release version
         id: ver

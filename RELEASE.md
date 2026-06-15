@@ -11,7 +11,12 @@ git tag, baked in as the `OTARI_VERSION` build arg (see `src/gateway/version.py`
 
 `CHANGELOG.md` and the GitHub Release body are generated from Conventional
 Commits by [git-cliff](https://git-cliff.org/) (config in
-[`cliff.toml`](cliff.toml)), at release time, not on every PR. See
+[`cliff.toml`](cliff.toml)), at release time, not on every PR. Generating once
+per release (rather than regenerating and re-committing the file on every PR)
+keeps the changelog out of day-to-day diffs, so feature PRs never collide on it
+and nobody hand-curates release notes. Correctness comes from the commit
+messages: the only per-PR requirement is a conventional PR title, which the
+**Otari PR Title Check** enforces. See
 [Changelog visibility](#changelog-visibility) for which commit types appear.
 
 ### Steps
