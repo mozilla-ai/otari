@@ -633,7 +633,14 @@ async def prepare_gateway_tools(
             # Standalone mode has no platform to consult.
             if ctx.platform_mode:
                 assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
-                web_search_auth_token = ctx.config.platform_token
+                # Forward the platform token only when the search backend IS the
+                # platform (its URL is under the platform base URL the gateway
+                # already trusts this token with for resolve). Never leak this
+                # high-privilege credential to a bundled SearXNG or a third-party
+                # adapter that an operator happened to point GATEWAY_WEB_SEARCH_URL at.
+                platform_base = (ctx.config.platform.get("base_url") or "").rstrip("/")
+                if platform_base and web_search_url.startswith(platform_base):
+                    web_search_auth_token = ctx.config.platform_token
                 web_search_policy = await _resolve_platform_web_search(
                     config=ctx.config,
                     user_token=ctx.user_token,

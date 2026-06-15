@@ -957,6 +957,7 @@ def test_platform_mode_web_search_merges_workspace_config(
     entry with per-request values winning over workspace defaults."""
     monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://searxng:8080")
     _FakeWebSearchBackend.last_tool_entry = None
+    _FakeWebSearchBackend.last_auth_token = None
 
     async def fake_post_platform(
         url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
@@ -1016,8 +1017,62 @@ def test_platform_mode_web_search_merges_workspace_config(
     assert merged["allowed_domains"] == ["docs.python.org"]
     assert merged["purpose_hint"] == "workspace hint"
     assert merged["provider_options"] == {"search_depth": "advanced"}
-    # Platform mode forwards the gateway token so the search backend can
-    # authenticate the gateway (e.g. a platform-hosted backend).
+    # The backend here is searxng (NOT the platform base URL), so the gateway
+    # must NOT leak the platform token to it.
+    assert _FakeWebSearchBackend.last_auth_token is None
+
+
+def test_platform_mode_web_search_forwards_token_to_platform_backend(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When GATEWAY_WEB_SEARCH_URL points at the platform itself, the gateway
+    forwards its platform token as X-Gateway-Token so the platform-hosted
+    backend can authenticate it. (Non-platform backends get no token.)"""
+    # platform_client's base_url is http://platform.test/api/v1.
+    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://platform.test/api/v1/gateway/web-search")
+    _FakeWebSearchBackend.last_auth_token = None
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="ws-req-platform")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(200, json={"enabled": True})
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        return ChatCompletion(
+            id="cmpl-ws-plat",
+            object="chat.completion",
+            created=0,
+            model="openai:gpt-4o-mini",
+            choices=[
+                Choice(
+                    finish_reason="stop",
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="answer"),
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", _FakeWebSearchBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_web_search"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
     assert _FakeWebSearchBackend.last_auth_token == "gw_test_token"
 
 
