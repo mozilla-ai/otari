@@ -36,7 +36,7 @@ from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
 from typing import Any, Generic, Protocol, TypeVar
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
@@ -155,6 +155,19 @@ class ErrorKind(Enum):
     PERMISSION = auto()
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _normalized_origin(parsed: ParseResult) -> tuple[str, str | None, int | None]:
+    """(scheme, host, port) with the scheme's default port filled in.
+
+    So ``https://h`` and ``https://h:443`` compare equal (and ``http`` / ``:80``),
+    rather than failing on ``None != 443`` and silently not forwarding the token.
+    """
+    port = parsed.port if parsed.port is not None else _DEFAULT_PORTS.get(parsed.scheme)
+    return (parsed.scheme, parsed.hostname, port)
+
+
 def web_search_url_targets_platform(web_search_url: str, platform_base_url: str | None) -> bool:
     """True when ``web_search_url`` is the platform itself (same origin, under its base path).
 
@@ -164,14 +177,15 @@ def web_search_url_targets_platform(web_search_url: str, platform_base_url: str 
     enough: with a path-less ``PLATFORM_BASE_URL`` (e.g. ``https://api.otari.ai``)
     a confusable URL like ``https://api.otari.ai.evil.com`` or
     ``https://api.otari.ai@evil.com`` would satisfy ``startswith`` and leak the
-    token. So compare the parsed (scheme, host, port) origin exactly, and require
-    the search path to sit under the base path at a ``/`` boundary.
+    token. So compare the parsed (scheme, host, port) origin exactly — with
+    default ports normalized — and require the search path to sit under the base
+    path at a ``/`` boundary.
     """
     if not platform_base_url:
         return False
     base = urlparse(platform_base_url)
     target = urlparse(web_search_url)
-    if (target.scheme, target.hostname, target.port) != (base.scheme, base.hostname, base.port):
+    if _normalized_origin(target) != _normalized_origin(base):
         return False
     base_path = base.path.rstrip("/")
     return target.path == base_path or target.path.startswith(base_path + "/")

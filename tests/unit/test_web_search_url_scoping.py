@@ -19,6 +19,11 @@ from gateway.api.routes._pipeline import web_search_url_targets_platform
         ("http://backend:8000/api/v1/gateway/web-search", "http://backend:8000/api/v1"),
         # Trailing slash on the base must not matter.
         ("http://backend:8000/api/v1/gateway/web-search", "http://backend:8000/api/v1/"),
+        # Path-less base (base_path == "") — any path on the same origin is "under" it.
+        ("https://api.otari.ai/gateway/web-search", "https://api.otari.ai"),
+        # Explicit default port on one side must normalize against an omitted one.
+        ("https://api.otari.ai:443/api/v1/gateway/web-search", "https://api.otari.ai/api/v1"),
+        ("http://backend/api/v1/gateway/web-search", "http://backend:80/api/v1"),
     ],
 )
 def test_accepts_platform_targets(web_search_url: str, platform_base: str) -> None:
