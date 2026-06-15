@@ -335,13 +335,21 @@ _FREE_FORM_OBJECT = "FreeFormObject"
 
 
 def _is_free_form_object(node: Any) -> bool:
-    """True for a bare ``{"type": "object"}`` schema with no declared properties."""
-    return (
+    """True for a bare ``{"type": "object"}`` schema that accepts arbitrary values.
+
+    Matches an object with no declared ``properties`` whose only other key may be
+    ``additionalProperties``, and only when that does not explicitly close the
+    object (``additionalProperties: false``) -- a closed object is not free-form
+    and must not be collapsed to the shared ``FreeFormObject``.
+    """
+    if not (
         isinstance(node, dict)
         and node.get("type") == "object"
         and "properties" not in node
         and set(node) <= {"type", "additionalProperties"}
-    )
+    ):
+        return False
+    return node.get("additionalProperties", True) is not False
 
 
 def sanitize_freeform_object_arrays(spec: dict[str, Any]) -> dict[str, Any]:
@@ -388,7 +396,14 @@ def sanitize_freeform_object_arrays(spec: dict[str, Any]) -> dict[str, Any]:
 
     walk(spec)
     if used:
-        schemas[_FREE_FORM_OBJECT] = {"type": "object", "additionalProperties": True}
+        desired = {"type": "object", "additionalProperties": True}
+        existing = schemas.get(_FREE_FORM_OBJECT)
+        if existing is not None and existing != desired:
+            raise ValueError(
+                f"schema {_FREE_FORM_OBJECT!r} already exists with a different shape; "
+                "cannot reuse it for free-form array-item sanitization"
+            )
+        schemas[_FREE_FORM_OBJECT] = desired
     return spec
 
 

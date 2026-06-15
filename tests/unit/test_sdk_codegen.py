@@ -297,6 +297,39 @@ def test_sanitize_freeform_object_arrays_names_union_array_items() -> None:
         }, f"{field} array items should reference the shared free-form object schema"
 
 
+def test_sanitize_freeform_object_arrays_leaves_closed_object_arrays() -> None:
+    # A closed object (additionalProperties: false) is not free-form: collapsing it
+    # to the open FreeFormObject would change the contract, so it must be left alone.
+    spec = {
+        "components": {
+            "schemas": {
+                "Closed": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "object", "additionalProperties": False}},
+                    ]
+                }
+            }
+        }
+    }
+    out = generate.sanitize_freeform_object_arrays(spec)
+    assert generate._FREE_FORM_OBJECT not in out["components"]["schemas"]
+    array_variant = next(v for v in out["components"]["schemas"]["Closed"]["anyOf"] if v.get("type") == "array")
+    assert array_variant["items"] == {"type": "object", "additionalProperties": False}
+
+
+def test_sanitize_freeform_object_arrays_raises_on_conflicting_existing_schema() -> None:
+    # A pre-existing FreeFormObject with different semantics must not be silently
+    # overwritten; the sanitizer cannot safely reuse the name.
+    spec = _spec_with_freeform_union()
+    spec["components"]["schemas"][generate._FREE_FORM_OBJECT] = {
+        "type": "object",
+        "properties": {"id": {"type": "string"}},
+    }
+    with pytest.raises(ValueError, match="different shape"):
+        generate.sanitize_freeform_object_arrays(spec)
+
+
 def test_sanitize_freeform_object_arrays_is_noop_without_freeform_unions() -> None:
     spec = {
         "components": {

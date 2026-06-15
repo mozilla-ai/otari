@@ -36,6 +36,11 @@ jobs:
     steps:
       - name: Checkout Otari
         uses: actions/checkout@v6
+        with:
+          # Read-only job: it generates clients and opens no PRs, so the checkout
+          # credential is unused. Drop it rather than leave a token in .git/config
+          # while the generator and project code run.
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@v7
         with:
