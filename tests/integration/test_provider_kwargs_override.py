@@ -129,6 +129,13 @@ async def test_unset_optional_fields_do_not_override_provider_defaults(
 
     master_key_header = {API_KEY_HEADER: "Bearer test-master-key"}
 
+    create_user = client_with_model_in_provider.post(
+        "/v1/users",
+        json={"user_id": "test-user", "alias": "Test User"},
+        headers=master_key_header,
+    )
+    assert create_user.status_code == 200
+
     with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
         client_with_model_in_provider.post(
             "/v1/chat/completions",
@@ -140,8 +147,68 @@ async def test_unset_optional_fields_do_not_override_provider_defaults(
             headers=master_key_header,
         )
 
+    # The call must be reached for the absence checks below to mean anything.
+    assert captured_kwargs, "acompletion was never called"
     # The user didn't set temperature, so it should not be in the kwargs
     # (exclude_unset=True prevents None from overwriting provider defaults)
     assert "temperature" not in captured_kwargs
     assert "max_tokens" not in captured_kwargs
     assert "tools" not in captured_kwargs
+
+
+@pytest.mark.asyncio
+async def test_completion_params_reach_provider(
+    client_with_model_in_provider: TestClient,
+) -> None:
+    """Every set completion param must reach ``acompletion``, not be dropped before the call.
+
+    Regression guard for the silent-param-drop bug: ``reasoning_effort``
+    (mozilla-ai/otari#150) and the standard OpenAI params (#152) were dropped
+    because the hand-maintained schema omitted them. The schema is now derived
+    from any-llm's ``CompletionParams`` and forwarded via ``model_dump``, so this
+    asserts the forwarding contract end to end rather than only at the schema.
+    """
+    captured_kwargs: dict[str, Any] = {}
+
+    async def mock_acompletion(**kwargs: Any) -> None:
+        captured_kwargs.update(kwargs)
+        raise _MockCompletionError
+
+    params: dict[str, Any] = {
+        "reasoning_effort": "high",
+        "seed": 42,
+        "stop": ["STOP"],
+        "presence_penalty": 0.5,
+        "frequency_penalty": 0.25,
+        "n": 2,
+        "parallel_tool_calls": False,
+        "logprobs": True,
+        "top_logprobs": 3,
+        "logit_bias": {"123": -1.0},
+    }
+
+    master_key_header = {API_KEY_HEADER: "Bearer test-master-key"}
+
+    create_user = client_with_model_in_provider.post(
+        "/v1/users",
+        json={"user_id": "test-user", "alias": "Test User"},
+        headers=master_key_header,
+    )
+    assert create_user.status_code == 200
+
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        response = client_with_model_in_provider.post(
+            "/v1/chat/completions",
+            json={
+                "model": "openai:gpt-4",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "user": "test-user",
+                **params,
+            },
+            headers=master_key_header,
+        )
+
+    # The mock raises after capturing, so the call is reached but the request errors out.
+    assert captured_kwargs, f"acompletion was never called (status {response.status_code})"
+    for name, value in params.items():
+        assert captured_kwargs.get(name) == value, f"{name} was dropped before the provider call"
