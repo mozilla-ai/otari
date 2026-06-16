@@ -153,6 +153,12 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - Install deps with frozen lockfile in CI.
 - Tests run with coverage and xdist in CI.
 - OpenAPI spec freshness is enforced in CI (`--check`).
+- `CHANGELOG.md` and the GitHub Release body are generated from Conventional
+  Commits by git-cliff (`cliff.toml`) at release time, not per-PR. Because PRs are
+  squash-merged, the PR title is what git-cliff parses; `otari-pr-title.yml`
+  enforces a conventional title. Visibility rules live in `RELEASE.md`
+  ("Changelog visibility"). Do not hand-edit `CHANGELOG.md`; the release
+  workflows regenerate it.
 ## Practical Agent Workflow
 - Before coding: read nearby module + related tests.
 - After coding: run the smallest relevant pytest node id first.

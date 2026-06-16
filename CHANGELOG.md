@@ -1,81 +1,187 @@
 # Changelog
 
-All notable changes to this project are documented here. This project adheres to
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+All notable changes to Otari will be documented in this file.
+
+The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## [Unreleased]
 
+
+
+### Bug Fixes
+
+- Add root path bootstrap for migrated test suite by [@tbille](https://github.com/tbille) ([`742ee21`](https://github.com/mozilla-ai/otari/commit/742ee210eae9b4af68a25714aacda19633002bf1))
+- Fix preserve existing Vary header values in [#10](https://github.com/mozilla-ai/otari/pull/10) by [@tbille](https://github.com/tbille) ([`c9700dd`](https://github.com/mozilla-ai/otari/commit/c9700ddbe58682458e217cdf9d8099d8064c1686))
+- Satisfy lint in platform mode tests and config by [@tbille](https://github.com/tbille) ([`49c2fbb`](https://github.com/mozilla-ai/otari/commit/49c2fbb1231c5b69351b6134afa8f825061a5977))
+- Default to platform mode when token is set by [@tbille](https://github.com/tbille) ([`3aea381`](https://github.com/mozilla-ai/otari/commit/3aea38136eab0c1e9237899a51894ccfa5200cae))
+- Resolve mypy type errors and regenerate OpenAPI spec by [@tbille](https://github.com/tbille) ([`85469ad`](https://github.com/mozilla-ai/otari/commit/85469add5e966a03e53a4224a8d24e02d7bce83a))
+- **chat:** Map stream-creation errors to 502 + narrow route for mypy by [@agpituk](https://github.com/agpituk) ([`b7078ec`](https://github.com/mozilla-ai/otari/commit/b7078ecbca551f3604183dfa0f78aa93c3da646b))
+- **streaming:** Bake X-Otari-Request-ID into StreamingResponse headers by [@agpituk](https://github.com/agpituk) ([`100a1d3`](https://github.com/mozilla-ai/otari/commit/100a1d36c84485221944bd0c0f9dc10cde65db46))
+- **api:** Normalise naive datetimes from SQLite before tz-aware comparison by [@agpituk](https://github.com/agpituk) ([`8705c11`](https://github.com/mozilla-ai/otari/commit/8705c1127fea5e96b0b67944d5a1388b86f05d59))
+- **chat:** Duck-type tool_call detection in MCP loop by [@agpituk](https://github.com/agpituk) ([`bdab428`](https://github.com/mozilla-ai/otari/commit/bdab428b83591eef742839f878f8882eb6240187))
+- Address Copilot review feedback on PR #63 by [@agpituk](https://github.com/agpituk) ([`6145a7a`](https://github.com/mozilla-ai/otari/commit/6145a7a056e63f716d7b13a8ff10610ecc3dca56))
+- Use requested n as fallback for image count in cost calculation by [@tbille](https://github.com/tbille) ([`cf09b00`](https://github.com/mozilla-ai/otari/commit/cf09b0084999162ec201d51f03ce0ea5ceff0e7d))
+- Address Copilot review feedback on audio endpoints by [@tbille](https://github.com/tbille) ([`ba98380`](https://github.com/mozilla-ai/otari/commit/ba983802461de2355c3ae0600bd6f738df58ab0a))
+- Address Copilot review feedback on PR #65 by [@agpituk](https://github.com/agpituk) ([`8855127`](https://github.com/mozilla-ai/otari/commit/88551271ffb52b11bda80710949ab34ca2f16c5d))
+- **demo:** Auto-start a llamafile via $LLAMAFILE_BIN, no home-dir guessing by [@agpituk](https://github.com/agpituk) ([`bb6a6a1`](https://github.com/mozilla-ai/otari/commit/bb6a6a172185829d8aa075b4fe4d629ccc2ca087))
+- **demo:** Handle empty model id from /v1/models and fix HF recipe URL by [@agpituk](https://github.com/agpituk) ([`af8af69`](https://github.com/mozilla-ai/otari/commit/af8af69f8866182b80a4d1bd07d9f23134e5f44e))
+- **chat,sandbox:** Address tbille review on PR #65 by [@agpituk](https://github.com/agpituk) ([`1a001c8`](https://github.com/mozilla-ai/otari/commit/1a001c838d49b47005261bb8f8d84fe18ba75b97))
+- **deps:** Use git source for any-llm-sdk instead of local path by [@tbille](https://github.com/tbille) ([`ba848ba`](https://github.com/mozilla-ai/otari/commit/ba848ba0a1d2c90c9c587d97642f9a014e101797))
+- Import BatchRequestCounts from canonical module to satisfy mypy attr-defined check by [@tbille](https://github.com/tbille) ([`6fc7934`](https://github.com/mozilla-ai/otari/commit/6fc7934447c59032ec1919449ac754d7e2b9803a))
+- Inject provider field into all batch endpoint responses by [@tbille](https://github.com/tbille) ([`d54e86f`](https://github.com/mozilla-ai/otari/commit/d54e86f8a739bd850f302a43d907bcd0d6ccb1c8))
+- Revert AGENTS.md to main branch version by [@tbille](https://github.com/tbille) ([`ec0c21d`](https://github.com/mozilla-ai/otari/commit/ec0c21dc8e1585400178b80bd9a1e72ad8a58630))
+- **deps:** Use any-llm-sdk from PyPI instead of git branch source by [@tbille](https://github.com/tbille) ([`fcfa511`](https://github.com/mozilla-ai/otari/commit/fcfa51198e5b0c748a18494bac47304583ea6bed))
+- Address Copilot review feedback on batch endpoints by [@tbille](https://github.com/tbille) ([`8e33cc0`](https://github.com/mozilla-ai/otari/commit/8e33cc0e38334beaf4792143ea13d42983cf90e0))
+- Address review feedback on PR #52 by [@tbille](https://github.com/tbille) ([`ce5d7c9`](https://github.com/mozilla-ai/otari/commit/ce5d7c9b43f833d4f7978347f842417362600156))
+- **mypy:** Resolve type errors for moderation types and amoderation import by [@tbille](https://github.com/tbille) ([`ac4c01a`](https://github.com/mozilla-ai/otari/commit/ac4c01a55063975bbfac930a47a69b20ddc62706))
+- Avoid name redefinition in moderation type shim by [@tbille](https://github.com/tbille) ([`f291039`](https://github.com/mozilla-ai/otari/commit/f291039b4e70f1757ce11836888267f23c90204b))
+- Address Copilot review feedback on rerank endpoint by [@tbille](https://github.com/tbille) ([`6102855`](https://github.com/mozilla-ai/otari/commit/6102855a8515bed7ffa1ca84ef2ed32e88c0e28f))
+- Use direct arerank import now that SDK exports it by [@tbille](https://github.com/tbille) ([`99bce51`](https://github.com/mozilla-ai/otari/commit/99bce51975286518e968d8874645899235a82e9c))
+- **chat:** Align mcp-servers resolver status semantics with credentials resolver by [@agpituk](https://github.com/agpituk) ([`e047521`](https://github.com/mozilla-ai/otari/commit/e047521f1a25894c9979d796debfa1966ea06841))
+- **web-search:** Address copilot review on PR #72 by [@agpituk](https://github.com/agpituk) ([`64cd537`](https://github.com/mozilla-ai/otari/commit/64cd5377795cedccba57c5a4e928193255bb513c))
+- **web-search:** Silence init errors for unused searxng engines by [@agpituk](https://github.com/agpituk) ([`c20f170`](https://github.com/mozilla-ai/otari/commit/c20f170284f12114a40db09cbc9aa3625d63a663))
+- Add missing type annotations for mypy strict mode by [@tbille](https://github.com/tbille) ([`040f26a`](https://github.com/mozilla-ai/otari/commit/040f26ac3d059f29f216d1e9cca05cc10a5ea580))
+- Address Copilot review feedback on model discovery by [@tbille](https://github.com/tbille) ([`7af6773`](https://github.com/mozilla-ai/otari/commit/7af677344a066c16481c2e1f723d930706d81058))
+- Address remaining Copilot review comments on model discovery by [@tbille](https://github.com/tbille) ([`ab2829d`](https://github.com/mozilla-ai/otari/commit/ab2829df9677e291569df986d9289b282586318d))
+- **chat:** Align streaming tool-mode dispatch with tool_mode predicate by [@agpituk](https://github.com/agpituk) ([`934f471`](https://github.com/mozilla-ai/otari/commit/934f4716f3891989c1c5dfcbe567348ffb3433fe))
+- **routes:** Address Copilot review on PR 1 by [@agpituk](https://github.com/agpituk) ([`615b5c3`](https://github.com/mozilla-ai/otari/commit/615b5c37c15c32fd79e04bf95e7157dee81b23de))
+- **messages:** Map streaming backend-unreachable errors to 502 by [@agpituk](https://github.com/agpituk) ([`a61fda3`](https://github.com/mozilla-ai/otari/commit/a61fda33682af2b2e4978fa75da60853cf366bc1))
+- **messages:** Address Copilot review on PR 2 by [@agpituk](https://github.com/agpituk) ([`c154aaf`](https://github.com/mozilla-ai/otari/commit/c154aaf4b1b153a95a27ea5603f69dca143818e2))
+- **responses:** Map streaming backend-unreachable errors to 502 by [@agpituk](https://github.com/agpituk) ([`34f89a0`](https://github.com/mozilla-ai/otari/commit/34f89a04e303c5ecc46b5e16343af4217beb55e5))
+- **responses:** Address Copilot review on PR 3 by [@agpituk](https://github.com/agpituk) ([`3fc34b6`](https://github.com/mozilla-ai/otari/commit/3fc34b6b612ef0d89fd5c57ed3f27c2af03a478d))
+- **platform:** Address Copilot review on PR 4 by [@agpituk](https://github.com/agpituk) ([`c3ab2e0`](https://github.com/mozilla-ai/otari/commit/c3ab2e04d3820d75b18d4ae6d14004c5bc74ce27))
+- **messages,responses:** Streaming provider errors → HTTP error + regen OpenAPI spec by [@agpituk](https://github.com/agpituk) ([`1e3273f`](https://github.com/mozilla-ai/otari/commit/1e3273f1949eba8161424572501231bcdcd55f9e))
+- **tools:** Typecheck + address Copilot review on PR 86 by [@agpituk](https://github.com/agpituk) ([`f9442e7`](https://github.com/mozilla-ai/otari/commit/f9442e7f84cec7f6712ca41cb4ac8f382eabf85b))
+- **budget:** Close cross-user IDOR, overspend race, and unmetered-usage bypasses by [@khaledosman](https://github.com/khaledosman) ([`9b0abbe`](https://github.com/mozilla-ai/otari/commit/9b0abbe5536aff9a77fde17ea3ce0741da636d30))
+- **ci:** Typecheck async-generator aclose + regenerate openapi spec by [@khaledosman](https://github.com/khaledosman) ([`69fc2f9`](https://github.com/mozilla-ai/otari/commit/69fc2f9040d1d7e6e8ba3467fa2e6aa478256ac3))
+- **review:** Address PR review on budget fix by [@khaledosman](https://github.com/khaledosman) ([`5e17af0`](https://github.com/mozilla-ai/otari/commit/5e17af02eedadc2f0c7c217d755ce2e948b5be94))
+- **review:** Harden against negative/zero budget inputs + log estimated cost by [@khaledosman](https://github.com/khaledosman) ([`360bbfa`](https://github.com/mozilla-ai/otari/commit/360bbfa558d4847442d128f4bf11b37cf2e63ec3))
+- **guardrails:** Address Copilot review by [@agpituk](https://github.com/agpituk) ([`d134663`](https://github.com/mozilla-ai/otari/commit/d134663f1a4d4c0e64528417da4f2ab01f1ffb48))
+- **demo:** Repair guardrails demo_flow /validate formatter by [@agpituk](https://github.com/agpituk) ([`c2d7dc9`](https://github.com/mozilla-ai/otari/commit/c2d7dc9c66cd43079f2395d1e4876d0568dfe621))
+- **messages:** Address review on count_tokens endpoint by [@khaledosman](https://github.com/khaledosman) ([`691ac52`](https://github.com/mozilla-ai/otari/commit/691ac526fbcaafea7445c97fa6868f7d5a607280))
+- **bootstrap:** Keep bootstrap API key on a single log line in [#131](https://github.com/mozilla-ai/otari/pull/131) by [@njbrake](https://github.com/njbrake) ([`dcf2b00`](https://github.com/mozilla-ai/otari/commit/dcf2b00287b2a084d59077c5f582e5ba5e944fe6))
+- **budget:** Refund the reservation on streaming pre-commit provider errors in [#129](https://github.com/mozilla-ai/otari/pull/129) by [@njbrake](https://github.com/njbrake) ([`b0ee34e`](https://github.com/mozilla-ai/otari/commit/b0ee34ee498a28f8116b7c210a25387b7a6a77ce))
+- **deploy:** Dispatch to renamed otari-ai platform repo in [#141](https://github.com/mozilla-ai/otari/pull/141) by [@njbrake](https://github.com/njbrake) ([`8823fea`](https://github.com/mozilla-ai/otari/commit/8823feaa60ebd7f6ac06caab11e602716f19b682))
+- **sdk-codegen:** Type response schemas in serialization mode so reasoning is a string in [#145](https://github.com/mozilla-ai/otari/pull/145) by [@njbrake](https://github.com/njbrake) ([`55d80f2`](https://github.com/mozilla-ai/otari/commit/55d80f2cdb736e5bd2a9db1867e40e1882ca53a6))
+- **files:** Bill vision side-calls, harden delete + retention docs by [@khaledosman](https://github.com/khaledosman) ([`d849cfe`](https://github.com/mozilla-ai/otari/commit/d849cfe8dd380c9360992855d909214f5c7073af))
+- **files:** Address review (bare-string Responses input, vision token cap, epoch skew) by [@khaledosman](https://github.com/khaledosman) ([`34e642f`](https://github.com/mozilla-ai/otari/commit/34e642fcaf2962d51008308a55f52052e636ffa0))
+
+
+### Features
+
+- Extract gateway runtime into standalone service repo by [@tbille](https://github.com/tbille) ([`522fe09`](https://github.com/mozilla-ai/otari/commit/522fe09d2fa7f3c4860d8e1a90a9854d3a31aa3f))
+- Add platform mode startup gating and API surface by [@tbille](https://github.com/tbille) ([`68e9538`](https://github.com/mozilla-ai/otari/commit/68e953884699166f7b2a5074ecfb522ee6c0b0e2))
+- Integrate platform resolve and async usage reporting by [@tbille](https://github.com/tbille) ([`c491bba`](https://github.com/mozilla-ai/otari/commit/c491bba152d48fb92555f85e550a3e66c90e5b20))
+- **gateway:** Add enable_docs config to disable FastAPI docs endpoints by [@tbille](https://github.com/tbille) ([`786dc75`](https://github.com/mozilla-ai/otari/commit/786dc75266aa123e9a2a90e466188cb63190232a))
+- **asyncio:** Convert DB layer to async, add budget strategies and log writer by [@tbille](https://github.com/tbille) ([`3e593b6`](https://github.com/mozilla-ai/otari/commit/3e593b664154224d60fbf128d0c448892aebf94f))
+- **pricing:** Add effective_at to model_pricing for historical price tracking by [@tbille](https://github.com/tbille) ([`e1d69b9`](https://github.com/mozilla-ai/otari/commit/e1d69b9de3ece62ec7398fde8eefdb808658bc40))
+- **gateway:** Add GET /v1/usage bulk endpoint with time range filters by [@tbille](https://github.com/tbille) ([`139fef9`](https://github.com/mozilla-ai/otari/commit/139fef95ec734d63f47928b293cefcaf569ab525))
+- Add POST /v1/responses endpoint for OpenAI Responses API by [@tbille](https://github.com/tbille) ([`b9b0e59`](https://github.com/mozilla-ai/otari/commit/b9b0e59228ffd9fec8db013753c19a59f9101cbf))
+- **gateway:** Rename API_KEY_HEADER from X-AnyLLM-Key to AnyLLM-Key by [@peteski22](https://github.com/peteski22) ([`a006df8`](https://github.com/mozilla-ai/otari/commit/a006df8096a072ddd1ff66a1edfa9a6c3dab069e))
+- **gateway:** Accept legacy X-AnyLLM-Key header for back-compat by [@tbille](https://github.com/tbille) ([`a6f00e6`](https://github.com/mozilla-ai/otari/commit/a6f00e6d26153c476b4f5966a40128a16884183f))
+- **chat:** Walk multi-attempt resolve responses with retry on transient errors by [@agpituk](https://github.com/agpituk) ([`08e4370`](https://github.com/mozilla-ai/otari/commit/08e4370ab2160318b2b599e6e0ca612795823505))
+- **streaming:** First-chunk gate for routing-policy fallback (v1.1) by [@agpituk](https://github.com/agpituk) ([`24e39fe`](https://github.com/mozilla-ai/otari/commit/24e39fe307d5223c8f253058e990fa62ea710b57))
+- **chat:** MCP tool-use loop with streaming support by [@agpituk](https://github.com/agpituk) ([`850be4c`](https://github.com/mozilla-ai/otari/commit/850be4ce9da76fe240ab5414db2b986a4045ef42))
+- **chat:** URL safety, content-block rendering, hardened error handling by [@agpituk](https://github.com/agpituk) ([`5724cba`](https://github.com/mozilla-ai/otari/commit/5724cbad9c4cc69c893370d9fdd979802a8ab146))
+- Add POST /v1/images/generations endpoint by [@tbille](https://github.com/tbille) ([`f99061b`](https://github.com/mozilla-ai/otari/commit/f99061b16b7b2485f1a93e4404c606596c3947bd))
+- Add POST /v1/audio/transcriptions and /v1/audio/speech endpoints by [@tbille](https://github.com/tbille) ([`6749d47`](https://github.com/mozilla-ai/otari/commit/6749d474d12714e82f9e71f6a665e27cf99412f2))
+- **chat:** Code execution via sandbox container with multi-keyword detection by [@agpituk](https://github.com/agpituk) ([`0df1f89`](https://github.com/mozilla-ai/otari/commit/0df1f891d36c0d480251f4cecd7ea8d3ecb2f2b2))
+- **chat:** Resolve workspace-scoped MCP server ids in platform mode by [@agpituk](https://github.com/agpituk) ([`fe8bbf1`](https://github.com/mozilla-ai/otari/commit/fe8bbf14a6b0ec3873a4e45c15d0a68e2fe2849b))
+- **chat:** Hoist user_token + narrow type guard for platform resolve by [@agpituk](https://github.com/agpituk) ([`3cfbf8a`](https://github.com/mozilla-ai/otari/commit/3cfbf8aabe40a7049fc68a42ec4589ed11676283))
+- **chat:** Web_search tool via SearXNG-compatible backend with content extraction by [@agpituk](https://github.com/agpituk) ([`07c14c0`](https://github.com/mozilla-ai/otari/commit/07c14c0e09b76294479a2f4a4c9d1f5fb076efb1))
+- Auto-discover models from configured providers for /v1/models by [@tbille](https://github.com/tbille) ([`0c95f3b`](https://github.com/mozilla-ai/otari/commit/0c95f3bc65cf2aac16f365e6196164a8cf8fabb8))
+- **chat:** Pre-lock-in fallback for tool-loop requests by [@agpituk](https://github.com/agpituk) ([`b4866ce`](https://github.com/mozilla-ai/otari/commit/b4866ce413fc4b4f8b2140e4be719422dadc6389))
+- **messages:** MCP / sandbox / web_search on /v1/messages by [@agpituk](https://github.com/agpituk) ([`1fa3e47`](https://github.com/mozilla-ai/otari/commit/1fa3e47e8ab536b2b87233d5e5faf266d8b8cdef))
+- **messages:** Wire on_first_response into anthropic_tool_loop by [@agpituk](https://github.com/agpituk) ([`65ce24a`](https://github.com/mozilla-ai/otari/commit/65ce24a2619063e4667a8c2ccdba19b204a13ffe))
+- **responses:** MCP / sandbox / web_search on /v1/responses by [@agpituk](https://github.com/agpituk) ([`92b9aa1`](https://github.com/mozilla-ai/otari/commit/92b9aa12616b08e55032b84bb010ce27b2fde481))
+- **responses:** Wire on_first_response into responses_tool_loop by [@agpituk](https://github.com/agpituk) ([`a8bfe78`](https://github.com/mozilla-ai/otari/commit/a8bfe7847dee5b24530905969d1d09c12b2b0379))
+- **platform:** Platform-mode routing for /v1/messages and /v1/responses by [@agpituk](https://github.com/agpituk) ([`4cc54f8`](https://github.com/mozilla-ai/otari/commit/4cc54f80b2a58176f3a5fcd65215f7393696df58))
+- **tools:** Explicit otari_* gateway tool shapes (BREAKING) by [@agpituk](https://github.com/agpituk) ([`259a267`](https://github.com/mozilla-ai/otari/commit/259a267eb11eebdb49d90a32f8fb2ec8fd248fb1))
+- **demo:** --brave flag for the web-search demo by [@agpituk](https://github.com/agpituk) ([`b67b413`](https://github.com/mozilla-ai/otari/commit/b67b4136217b8a3f44d34a17d08a21568a1b5096))
+- **guardrails:** Request-level guardrails across all endpoints by [@agpituk](https://github.com/agpituk) ([`41bb2a9`](https://github.com/mozilla-ai/otari/commit/41bb2a9558d77c9df608e587cba94bed7aa1a1af))
+- **guardrails:** Default to PIGuard via encoderfile, monitor mode by [@agpituk](https://github.com/agpituk) ([`16632cd`](https://github.com/mozilla-ai/otari/commit/16632cd054ec5aee86e98009c1ff7343e32d5f16))
+- Add CodeRabbit configuration in [#110](https://github.com/mozilla-ai/otari/pull/110) by [@njbrake](https://github.com/njbrake) ([`f52cdd1`](https://github.com/mozilla-ai/otari/commit/f52cdd1616f3aeb1a197bfbb57a39d49cf5ab8aa))
+- **messages:** Add /v1/messages/count_tokens for Claude Code support by [@khaledosman](https://github.com/khaledosman) ([`2664e11`](https://github.com/mozilla-ai/otari/commit/2664e11d7e27ac65613ddca744660c8320a61afe))
+- Add PR template and enforcement workflow in [#123](https://github.com/mozilla-ai/otari/pull/123) by [@njbrake](https://github.com/njbrake) ([`690996c`](https://github.com/mozilla-ai/otari/commit/690996c33ac3f99a075dec6488ed88ebbb125059))
+- **sdk-codegen:** Emit the rust core as an inlined src/_client module in [#136](https://github.com/mozilla-ai/otari/pull/136) by [@njbrake](https://github.com/njbrake) ([`aca95e3`](https://github.com/mozilla-ai/otari/commit/aca95e34f12971a6d493fe4f40dcca72ba78d650))
+- **sdk-codegen:** Coordinate SDK releases with stamped spec version and staleness alert in [#137](https://github.com/mozilla-ai/otari/pull/137) by [@njbrake](https://github.com/njbrake) ([`3996758`](https://github.com/mozilla-ai/otari/commit/39967588208d6884f4569511237d9bd2e836df24))
+- **web-search:** Per-workspace web-search policy via platform resolve in [#144](https://github.com/mozilla-ai/otari/pull/144) by [@agpituk](https://github.com/agpituk) ([`a2fc5c8`](https://github.com/mozilla-ai/otari/commit/a2fc5c8bdfe0e196dadbda8d4fd14ee3af3f6428))
+- **files:** File uploads + document understanding for local models by [@khaledosman](https://github.com/khaledosman) ([`56ba31e`](https://github.com/mozilla-ai/otari/commit/56ba31e47b48d515445466ff6d7db7d7ec2f90f3))
+
+
+### Other
+
+- Standardize logger placeholders across gateway modules in [#12](https://github.com/mozilla-ai/otari/pull/12) by [@tbille](https://github.com/tbille) ([`8c92ed8`](https://github.com/mozilla-ai/otari/commit/8c92ed84387417751bdf1438fb0b5f6692c2b9fa))
+- Add Ruff linting with local and CI enforcement in [#14](https://github.com/mozilla-ai/otari/pull/14) by [@tbille](https://github.com/tbille) ([`e0bd004`](https://github.com/mozilla-ai/otari/commit/e0bd0044d2217f9172972c1bcb881cc749e7280c))
+- Make Vertex credential setup request-local in [#17](https://github.com/mozilla-ai/otari/pull/17) by [@tbille](https://github.com/tbille) ([`df52553`](https://github.com/mozilla-ai/otari/commit/df52553fb92aa01d5706d5780c0628da9d83a39f))
+- Avoid row lock during preflight budget checks in [#18](https://github.com/mozilla-ai/otari/pull/18) by [@tbille](https://github.com/tbille) ([`1deb7e9`](https://github.com/mozilla-ai/otari/commit/1deb7e95d3c8152475deafd4f63a4eb2cdb42c8c))
+- Remove unused domain exception hierarchy in [#23](https://github.com/mozilla-ai/otari/pull/23) by [@tbille](https://github.com/tbille) ([`87e30f5`](https://github.com/mozilla-ai/otari/commit/87e30f5986685371e2cf245c13e217c6657f5518))
+- Drop user_id labels from rate and budget counters in [#21](https://github.com/mozilla-ai/otari/pull/21) by [@tbille](https://github.com/tbille) ([`a88a432`](https://github.com/mozilla-ai/otari/commit/a88a4324a46e730c6e014488e77e86a7c9381a32))
+- Adding release actions by [@macaab26](https://github.com/macaab26) ([`eed4b97`](https://github.com/mozilla-ai/otari/commit/eed4b97946e800fdaebf084ba5f4f0ccc402ff6d))
+- Changing tags naming by [@macaab26](https://github.com/macaab26) ([`59550be`](https://github.com/mozilla-ai/otari/commit/59550be0ec5ef884eb95c6abc09153b0feef3f50))
+- Any-llm → otari across the project by [@tbille](https://github.com/tbille) ([`0153cc2`](https://github.com/mozilla-ai/otari/commit/0153cc22c98bf78aaa472e4633ef04176468e325))
+- Docker image mzdotai/gateway → mzdotai/otari by [@tbille](https://github.com/tbille) ([`2ffd357`](https://github.com/mozilla-ai/otari/commit/2ffd3578ed42182f7ba782e00623d4a77131eb4c))
+- Rename AWS ECS cluster and service to otari-ai naming convention by [@tbille](https://github.com/tbille) ([`d5ab256`](https://github.com/mozilla-ai/otari/commit/d5ab2568af5b3a506f9c6d8043cea805b5f84ae5))
+- Update to readme to include Otari in title by [@tbille](https://github.com/tbille) ([`d537202`](https://github.com/mozilla-ai/otari/commit/d537202597411b7f0f7a9720ff284defd415d9c2))
+- Add batch API endpoints for asynchronous LLM processing by [@tbille](https://github.com/tbille) ([`08d77e5`](https://github.com/mozilla-ai/otari/commit/08d77e5998dbb9dc9a5ab0e00c97887010d86885))
+- Fix batch API review issues: add FIXME for results endpoint, usage logging, error handling, and missing tests by [@tbille](https://github.com/tbille) ([`4960a8b`](https://github.com/mozilla-ai/otari/commit/4960a8b199e0276658daffbdb87acd47f8381469))
+- Move Batch import out of TYPE_CHECKING and add SDK batch result imports by [@tbille](https://github.com/tbille) ([`a042fd6`](https://github.com/mozilla-ai/otari/commit/a042fd691c794b367e1205c5237cf1756f5a2967))
+- Remove dead db parameter from log_batch_usage and fix model sentinel by [@tbille](https://github.com/tbille) ([`a0b6c1d`](https://github.com/mozilla-ai/otari/commit/a0b6c1dd459c58ac3063d3777511bab1418d3419))
+- Switch get_db to get_db_if_needed and add BackgroundTasks parameter by [@tbille](https://github.com/tbille) ([`b8c1159`](https://github.com/mozilla-ai/otari/commit/b8c1159ab4afe8e9e8cd24f9579316588c66e191))
+- Use aretrieve_batch_results and BatchNotCompleteError in results endpoint by [@tbille](https://github.com/tbille) ([`28f6ed8`](https://github.com/mozilla-ai/otari/commit/28f6ed8ae66add8ddac9dd305d5da71d57026c58))
+- Mock split_model_provider in invalid model format test by [@tbille](https://github.com/tbille) ([`f523fd4`](https://github.com/mozilla-ai/otari/commit/f523fd4f4631efa1c81d24fbff067de8a2a085e1))
+- Update results endpoint tests to use aretrieve_batch_results by [@tbille](https://github.com/tbille) ([`e2912a5`](https://github.com/mozilla-ai/otari/commit/e2912a52c146b63ac0335ee27006b3fb6dc31dd2))
+- Pin any-llm-sdk to local source with batch result types by [@tbille](https://github.com/tbille) ([`d70ca88`](https://github.com/mozilla-ai/otari/commit/d70ca88baa96f3131b5d7c8206f688d46447727b))
+- Update AGENTS.md with batch API spec and sync uv.lock for local SDK by [@tbille](https://github.com/tbille) ([`cae8709`](https://github.com/mozilla-ai/otari/commit/cae8709044dae686a7ae7c0b6b066d4fa09a4933))
+- Add moderations route mirroring /v1/embeddings by [@tbille](https://github.com/tbille) ([`85446bc`](https://github.com/mozilla-ai/otari/commit/85446bccabc349fb7b535fb23d7f9b5797626272))
+- Register moderations router in standalone mode by [@tbille](https://github.com/tbille) ([`0557127`](https://github.com/mozilla-ai/otari/commit/0557127dbbb1b946b8e65e06698b89a0e7537965))
+- Add integration tests for /v1/moderations endpoint by [@tbille](https://github.com/tbille) ([`e80faf3`](https://github.com/mozilla-ai/otari/commit/e80faf3a28177c65cdcff2ebfd4f14d7e5cffaa8))
+- Document /v1/moderations in README API surface by [@tbille](https://github.com/tbille) ([`69c9198`](https://github.com/mozilla-ai/otari/commit/69c919814a6fa9491124844b9c5fc873e0068884))
+- Add local ModerationResponse/ModerationResult types by [@tbille](https://github.com/tbille) ([`776c477`](https://github.com/mozilla-ai/otari/commit/776c477b6674cfa2ec99ed251edd72935ac2229b))
+- Fix moderations route import against older any-llm-sdk by [@tbille](https://github.com/tbille) ([`317b3f1`](https://github.com/mozilla-ai/otari/commit/317b3f1278c746c82234044427cc8c21899aec25))
+- Import moderation types from gateway-local module in tests by [@tbille](https://github.com/tbille) ([`db30a43`](https://github.com/mozilla-ai/otari/commit/db30a43b3e7f414a5a6ce464e46cd3cb6099a161))
+- Regenerate OpenAPI spec for /v1/moderations route by [@tbille](https://github.com/tbille) ([`7a799d6`](https://github.com/mozilla-ai/otari/commit/7a799d6234002bfa026dc6a2f6b06b420e4c2e81))
+- Final uncommitted changes for add-moderation-api-support by [@tbille](https://github.com/tbille) ([`7161e1f`](https://github.com/mozilla-ai/otari/commit/7161e1fa1e8865beda6a09424c45bf0999bf6d9d))
+- Add POST /v1/rerank route handler and register router by [@tbille](https://github.com/tbille) ([`cdc1ea4`](https://github.com/mozilla-ai/otari/commit/cdc1ea49be78db5c130f2273b44fa6847b99fefa))
+- Add integration tests for /v1/rerank endpoint by [@tbille](https://github.com/tbille) ([`a77162d`](https://github.com/mozilla-ai/otari/commit/a77162d253699c6cf18533440b4844226e84c4ef))
+- Regenerate OpenAPI spec with /v1/rerank endpoint by [@tbille](https://github.com/tbille) ([`d624ccb`](https://github.com/mozilla-ai/otari/commit/d624ccbbd9f31fc745284bf76e4e6fd997e8d12b))
+- Default PLATFORM_BASE_URL for otari.ai by [@tbille](https://github.com/tbille) ([`d373516`](https://github.com/mozilla-ai/otari/commit/d3735167388c03b80f37cc41e44cb492cccde7ef))
+- Rename platform token env var to OTARI_AI_TOKEN by [@tbille](https://github.com/tbille) ([`bc93f37`](https://github.com/mozilla-ai/otari/commit/bc93f37b1d9bfe6d5788782921ea25aee9e1d8b9))
+- Support OTARI_* env vars for core settings by [@tbille](https://github.com/tbille) ([`fdfcc35`](https://github.com/mozilla-ai/otari/commit/fdfcc359e812a976bf1308f14d2f4fa19c040192))
+- Deleting deployment actions by [@macaab26](https://github.com/macaab26) ([`6519e60`](https://github.com/mozilla-ai/otari/commit/6519e60a3657a9ca10e0fa78e0de82dd3b9cfed1))
+- Adding trigger for the platform by [@macaab26](https://github.com/macaab26) ([`bd29d0f`](https://github.com/mozilla-ai/otari/commit/bd29d0f13efc453f3ab7e463cbf94773d6c45386))
+- Accept gw_ API key prefix by [@tbille](https://github.com/tbille) ([`5c548ef`](https://github.com/mozilla-ai/otari/commit/5c548ef1552cbcc0ada99bed51757040bb40d5b2))
+- Add CLAUDE.md as a symlink to AGENTS.md in [#98](https://github.com/mozilla-ai/otari/pull/98) by [@njbrake](https://github.com/njbrake) ([`156fd4e`](https://github.com/mozilla-ai/otari/commit/156fd4eb28832e755dd5fa2343f235ef325e919c))
+- Refresh README: ecosystem framing + SDK links in [#104](https://github.com/mozilla-ai/otari/pull/104) by [@njbrake](https://github.com/njbrake) ([`c46de4e`](https://github.com/mozilla-ai/otari/commit/c46de4e845e91550a8ed2d18ca7c99466a95cb65))
+- SDK automatic codegen from OpenAPI spec in [#99](https://github.com/mozilla-ai/otari/pull/99) by [@njbrake](https://github.com/njbrake) ([`ac8bb58`](https://github.com/mozilla-ai/otari/commit/ac8bb58f3b1fbb0f21a274c1119d3b2cbf0a4f89))
+- Pin OpenAPI Generator via openapitools.json in SDK codegen workflow in [#109](https://github.com/mozilla-ai/otari/pull/109) by [@njbrake](https://github.com/njbrake) ([`3be3d54`](https://github.com/mozilla-ai/otari/commit/3be3d542235bd812b77b9ec20a01c90cba0d2bb9))
+- Tech-debt cleanup: delete dead src/ shims, ToolBackend Protocol, document narrowing asserts in [#117](https://github.com/mozilla-ai/otari/pull/117) by [@njbrake](https://github.com/njbrake) ([`d87e3fa`](https://github.com/mozilla-ai/otari/commit/d87e3fa5dabe76504e6f68bcf472f333b5fe5fbe))
+- Fix intermittent auth 500s from SQLite lock contention (#106) in [#115](https://github.com/mozilla-ai/otari/pull/115) by [@njbrake](https://github.com/njbrake) ([`bde1b1f`](https://github.com/mozilla-ai/otari/commit/bde1b1f228d01a485144becb646a989b2bc58ef4))
+- Docs/refactor in [#119](https://github.com/mozilla-ai/otari/pull/119) by [@angpt](https://github.com/angpt) ([`1286093`](https://github.com/mozilla-ai/otari/commit/1286093710fa4a63c27c130d9a1c1da2ef6fc7b2))
+- Consolidate the chat/messages/responses request pipelines onto a shared core in [#130](https://github.com/mozilla-ai/otari/pull/130) by [@njbrake](https://github.com/njbrake) ([`172325d`](https://github.com/mozilla-ai/otari/commit/172325db39eaf90f474aa94d9b06fdc221d58a75))
+- Change repository name in gateway-docker.yml by [@njbrake](https://github.com/njbrake) ([`d4b29f7`](https://github.com/mozilla-ai/otari/commit/d4b29f7a7d346bb5764e1aa927f970d51da74c4c))
+- Rename "Otari Gateway" to "Otari" in [#142](https://github.com/mozilla-ai/otari/pull/142) by [@njbrake](https://github.com/njbrake) ([`8cd4f7f`](https://github.com/mozilla-ai/otari/commit/8cd4f7f91a282a81c7be8b508f6038bd55a21977))
+
+
+### Performance
+
+- Optimize rate limiter hot path with deque in [#20](https://github.com/mozilla-ai/otari/pull/20) by [@tbille](https://github.com/tbille) ([`93d3e2e`](https://github.com/mozilla-ai/otari/commit/93d3e2ec95ad4daf4b0a20c832ef213d0636e440))
+- Throttle api key last_used_at commit frequency in [#19](https://github.com/mozilla-ai/otari/pull/19) by [@tbille](https://github.com/tbille) ([`02a41aa`](https://github.com/mozilla-ai/otari/commit/02a41aa3de3428f35ffca256675e7c8329f95083))
+
+
 ### Security
 
-Fixes for four budget/billing vulnerabilities. **Standalone (self-hosted) mode
-only** — platform mode resolves budgets/pricing upstream and is unaffected.
+- Require auth for pricing read endpoints in [#24](https://github.com/mozilla-ai/otari/pull/24) by [@tbille](https://github.com/tbille) ([`60eeb61`](https://github.com/mozilla-ai/otari/commit/60eeb614e9d58f1d43280fb8ba74acc6f67fe2b5))
 
-- **Cross-user budget charging / impersonation via the `user` field (IDOR).** A
-  non-master API key could set `"user"` to another user and charge spend to, and
-  exhaust the budget of, that user. Non-master keys are now bound to their own
-  user (see breaking change below).
-- **Budget overspend race (TOCTOU).** Concurrent requests could all pass the
-  budget check against stale spend and collectively exceed `max_budget`. Budgets
-  are now enforced with atomic pre-debit reservations.
-- **Unpriced models served free and unmetered.** A model with no pricing was
-  served and charged $0, bypassing the budget cap. Now rejected by default (see
-  breaking change below).
-- **Streaming responses without usage data were not billed.** Now metered per a
-  configurable policy.
 
-### Added
 
-- `users.reserved` column (migration `b2f4c6d8e0a1`) holding in-flight budget
-  reservations; spend reconciles to actual cost on completion.
-- Config `require_pricing` (default `true`), `stream_missing_usage_policy`
-  (`estimate` | `fail` | `allow_free`, default `estimate`),
-  `reject_user_mismatch` (default `true`), and
-  `budget_estimate_default_output_tokens`.
-- Startup warning when `require_pricing` is enabled but no pricing is configured.
-- `SECURITY.md`.
+### New Contributors
 
-### Changed
+- [@njbrake](https://github.com/njbrake) made their first contribution in [#142](https://github.com/mozilla-ai/otari/pull/142)
+- [@khaledosman](https://github.com/khaledosman) made their first contribution in [#91](https://github.com/mozilla-ai/otari/pull/91)
+- [@agpituk](https://github.com/agpituk) made their first contribution in [#144](https://github.com/mozilla-ai/otari/pull/144)
+- [@angpt](https://github.com/angpt) made their first contribution in [#119](https://github.com/mozilla-ai/otari/pull/119)
+- [@tbille](https://github.com/tbille) made their first contribution in [#93](https://github.com/mozilla-ai/otari/pull/93)
+- [@macaab26](https://github.com/macaab26) made their first contribution in [#85](https://github.com/mozilla-ai/otari/pull/85)
 
-- **Renamed "Otari Gateway" to "Otari" across the product surface.** The CLI is
-  now `otari` (the `gateway` command stays as a legacy alias). Environment
-  variables use the `OTARI_` prefix; the legacy `GATEWAY_` prefix still works as a
-  fallback, and `OTARI_` wins when both are set. The OpenAPI title, the default
-  SQLite filename (`otari.db`), the Docker Compose service (`otari`), and the CI
-  workflow files (`otari-*.yml`) were renamed to match. The Python import package
-  stays `gateway`: the `otari` distribution name on PyPI belongs to the Otari
-  client SDK. Existing `GATEWAY_*` variables and the `gateway` command keep
-  working, so no configuration change is required.
 
-  Upgrade notes (on-disk state is not auto-migrated):
-  - **SQLite default path renamed `otari-gateway.db` -> `otari.db`.** Standalone
-    deployments that relied on the default `database_url` (no explicit value) must
-    rename the existing `otari-gateway.db` file to `otari.db`, or set
-    `database_url` to the old path. Otherwise the app starts against a new, empty
-    database: previously issued API keys return 401 and existing users, budgets,
-    and usage history are orphaned in the old file. Deployments that set
-    `database_url` explicitly (for example Postgres) are unaffected.
-  - **Docker Compose Postgres credentials renamed `gateway` -> `otari`.** The
-    `postgres` service now initializes user/password/db as `otari`. An existing
-    `postgres_data` volume was created with the old `gateway` credentials and will
-    fail auth, so drop it locally (`docker compose down -v`). If you copied
-    `config.example.yml` to a local `config.yml` before this change, also update
-    its `database_url` to `postgresql://otari:otari@postgres:5432/otari` so it
-    matches the new Postgres credentials.
-
-### Changed (BREAKING — standalone mode)
-
-- **`require_pricing` defaults to `true`:** requests for models with no pricing
-  row are rejected with **HTTP 402**. Operators running genuinely free or
-  self-hosted models must add an explicit `$0` pricing entry, or set
-  `require_pricing=false`. Audio and moderation endpoints are exempt.
-- **The client `user` field is no longer trusted for non-master keys:** a
-  request naming a user other than the key's own is rejected with **HTTP 403**.
-  Set `reject_user_mismatch=false` to instead bind spend to the key's own user
-  while still forwarding `user` to the provider (OpenAI-style end-user tag) — use
-  this if clients send arbitrary `user` values for abuse tracking. The master key
-  may still bill an arbitrary user.
-- **`stream_missing_usage_policy` defaults to `estimate`:** a streamed response
-  that completes without provider usage data is billed an estimated cost rather
-  than served free. Set to `allow_free` for the previous behavior.
-- The usage-log writer no longer updates `users.spend`; reconciliation of the
-  budget reservation is now the sole authority for spend.

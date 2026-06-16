@@ -1,0 +1,87 @@
+name: Otari Release (tag + publish)
+
+# Step 2 of the release flow. Fires when a `release`-labeled PR opened by
+# otari-release.yml is merged. Tags the squash commit `vX.Y.Z` and publishes a
+# GitHub Release whose body is the git-cliff render for that version. Publishing
+# the Release fires otari-docker.yml (`release: published`), which builds and
+# pushes the image with OTARI_VERSION baked to the tag.
+#
+# Uses RELEASE_TOKEN so that `gh release create` triggers otari-docker.yml; a
+# Release created with the default GITHUB_TOKEN would not start downstream
+# workflows. See RELEASE.md.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  tag-and-release:
+    name: Tag and publish
+    if: >-
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: 3.14
+
+      - name: Resolve release version
+        id: ver
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Branch is release/vX.Y.Z.
+          VERSION="${BRANCH#release/v}"
+          # Cross-check against the marker embedded in the PR body, so an edited
+          # branch name or title cannot silently tag the wrong version.
+          MARKER="$(printf '%s' "$BODY" | sed -n 's/.*<!-- release-version: \([0-9][^ ]*\) -->.*/\1/p' | head -1)"
+          if [ -n "$MARKER" ] && [ "$MARKER" != "$VERSION" ]; then
+            echo "::error::Branch version v$VERSION disagrees with PR marker v$MARKER"
+            exit 1
+          fi
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Could not parse a semver version from branch '$BRANCH'"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Render release notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          uvx git-cliff@2.13.1 --config cliff.toml --tag "v$VERSION" --unreleased --strip header > /tmp/notes.md 2> cliff-stderr.log
+          cat cliff-stderr.log
+          if grep -q "skipped due to parse error" cliff-stderr.log; then
+            echo "::error::git-cliff skipped commits due to parse errors."
+            exit 1
+          fi
+          cat /tmp/notes.md
+
+      - name: Create tag and publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Tag v$VERSION already exists"
+            exit 1
+          fi
+          # Creates the tag at the merge commit and publishes in one step.
+          gh release create "v$VERSION" \
+            --target "$SHA" \
+            --title "v$VERSION" \
+            --notes-file /tmp/notes.md

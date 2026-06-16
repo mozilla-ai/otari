@@ -1,4 +1,4 @@
-.PHONY: help dev test test-unit test-integration lint typecheck openapi-check
+.PHONY: help dev test test-unit test-integration lint typecheck openapi-check changelog
 
 help:
 	@printf "Available targets:\n"
@@ -9,6 +9,7 @@ help:
 	@printf "  lint Run Ruff lint checks\n"
 	@printf "  typecheck Run mypy type checks\n"
 	@printf "  openapi-check Verify the OpenAPI spec is up to date\n"
+	@printf "  changelog Preview the generated CHANGELOG.md locally (git-cliff)\n"
 
 dev:
 	@set -a; \
@@ -33,3 +34,10 @@ typecheck:
 
 openapi-check:
 	uv run python scripts/generate_openapi.py --check
+
+# Local preview only. CHANGELOG.md is generated at release time by the
+# otari-release / otari-tag-release workflows; this target is for eyeballing
+# what the next release notes will look like. Set GITHUB_TOKEN to resolve PR
+# and author links. Pin git-cliff so local output matches CI.
+changelog:
+	uvx git-cliff@2.13.1 --config cliff.toml
