@@ -587,7 +587,8 @@ async def _report_platform_usage(
 
     Best-effort — failures are swallowed after ``max_retries`` so they don't
     impact the user's response path. Non-retryable status codes (auth /
-    not-found / conflict / unprocessable) short-circuit the retry loop.
+    payment-required / not-found / conflict / unprocessable) short-circuit the
+    retry loop.
     """
     platform_base_url = config.platform.get("base_url")
     if not platform_base_url:

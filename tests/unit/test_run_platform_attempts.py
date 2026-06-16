@@ -73,3 +73,7 @@ async def test_report_platform_usage_does_not_retry_on_402(monkeypatch: pytest.M
 
     assert post_mock.call_count == 1
     sleep_mock.assert_not_awaited()
+    # Pin the classification itself, not just the (currently equivalent) retry
+    # behaviour: 402 must stay in the non-retryable set even if the >= 500 retry
+    # predicate changes.
+    assert 402 in _platform._USAGE_NON_RETRYABLE_STATUS_CODES
