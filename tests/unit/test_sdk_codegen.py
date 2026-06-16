@@ -204,6 +204,7 @@ def _full_spec_stub() -> dict[str, Any]:
             "/v1/messages": {"post": {"responses": {}}},
             "/v1/rerank": {"post": {"responses": {}}},
             "/v1/embeddings": {"post": {"responses": {}}},
+            "/v1/images/generations": {"post": {"responses": {}}},
         },
         "components": {"schemas": {"ChatCompletionRequest": {"type": "object", "properties": {}}}},
     }
@@ -218,6 +219,7 @@ def test_enrich_types_otari_owned_inference_endpoints() -> None:
         "MessageResponse",
         "RerankResponse",
         "CreateEmbeddingResponse",
+        "ImagesResponse",
         "ChatMessageInput",
     ):
         assert name in schemas, f"{name} schema missing after enrich"
@@ -233,6 +235,10 @@ def test_enrich_types_otari_owned_inference_endpoints() -> None:
     assert ref("/v1/messages").endswith("/MessageResponse")
     assert ref("/v1/rerank").endswith("/RerankResponse")
     assert ref("/v1/embeddings").endswith("/CreateEmbeddingResponse")
+    # Image generation is plain JSON, so it is typed from any-llm's
+    # ImagesResponse. Speech (binary response) and transcription (multipart
+    # request) stay opaque in the codegen enrichment.
+    assert ref("/v1/images/generations").endswith("/ImagesResponse")
 
     messages_field = schemas["ChatCompletionRequest"]["properties"]["messages"]
     assert messages_field["items"]["$ref"].endswith("/ChatMessageInput")

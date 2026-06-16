@@ -249,6 +249,7 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
         ChatCompletionChunk,
         CreateEmbeddingResponse,
     )
+    from any_llm.types.image import ImagesResponse
     from any_llm.types.messages import MessageResponse
     from any_llm.types.rerank import RerankResponse
     from openai.types.chat import ChatCompletionMessageParam
@@ -288,8 +289,11 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     # otari-owned inference endpoints the gateway leaves ``response_model=None``.
     # Their real response shapes live in any-llm (which the gateway depends on);
     # inject them so the generated core returns typed models instead of ``object``.
-    # Audio/images are intentionally left opaque: they return binary/file payloads
-    # that do not map onto a JSON response schema.
+    # Audio stays opaque here. Speech returns binary audio, which has no JSON
+    # response schema. Transcription's response is JSON, but each SDK hand-writes
+    # it over a raw multipart upload (a request-side concern the generated core
+    # can't carry) and its shape varies by response_format, so there is no single
+    # response model to inject. Image generation is plain JSON, so it is typed.
     # Response shapes too: serialization mode keeps the schema aligned with the
     # serialized wire format (see the ChatCompletion note above).
     schemas["MessageResponse"] = absorb(
@@ -306,6 +310,10 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
         ),
         "EMB",
     )
+    schemas["ImagesResponse"] = absorb(
+        ImagesResponse.model_json_schema(mode="serialization", ref_template="#/components/schemas/IMG_{model}"),
+        "IMG",
+    )
 
     def set_json_200(path: str, schema_name: str, description: str) -> None:
         op = spec["paths"][path]["post"]
@@ -318,6 +326,7 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     set_json_200("/v1/messages", "MessageResponse", "Anthropic-style message")
     set_json_200("/v1/rerank", "RerankResponse", "Rerank result")
     set_json_200("/v1/embeddings", "CreateEmbeddingResponse", "Embeddings")
+    set_json_200("/v1/images/generations", "ImagesResponse", "Generated images")
 
     schemas["ChatCompletionRequest"]["properties"]["messages"] = {
         "type": "array",
