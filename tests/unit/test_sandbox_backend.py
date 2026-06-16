@@ -203,3 +203,51 @@ async def test_purpose_hint_is_emitted() -> None:
     hints = backend.purpose_hints()
     assert len(hints) == 1
     assert hints[0][0] == CODE_EXECUTION_TOOL_NAME
+
+
+@pytest.mark.asyncio
+async def test_auth_token_forwarded_as_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When ``auth_token`` is set, every sandbox call carries Authorization: Bearer.
+
+    This lets the platform-hosted /v1/sandbox proxy authenticate the caller's
+    workspace token and derive tenancy + per-workspace code-exec policy from it.
+    """
+    result_block = {"type": "code_execution_tool_result", "content": {"stdout": "ok"}}
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "sbx_abc"}),
+            ("POST", "/sessions/sbx_abc/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("DELETE", "/sessions/sbx_abc"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(
+        sandbox_url="http://sandbox:8080",
+        auth_token="tk_workspace_token",  # noqa: S106 — test fixture, not a real secret
+    ) as backend:
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
+
+    # Every request to the backend (create / exec / delete) carries the header.
+    assert transport.captured, "expected at least one request"
+    for request in transport.captured:
+        assert request.headers["Authorization"] == "Bearer tk_workspace_token"
+
+
+@pytest.mark.asyncio
+async def test_no_auth_header_when_auth_token_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A standalone exec-service backend (no auth_token) sends no Authorization header."""
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "sbx_abc"}),
+            ("DELETE", "/sessions/sbx_abc"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+        pass
+
+    assert transport.captured, "expected at least one request"
+    for request in transport.captured:
+        assert "Authorization" not in request.headers

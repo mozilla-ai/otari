@@ -557,6 +557,7 @@ class ToolContext:
         use_sandbox: bool,
         sandbox_tool_entry: dict[str, Any] | None,
         sandbox_url: str | None,
+        sandbox_auth_token: str | None,
         use_web_search: bool,
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
@@ -569,6 +570,7 @@ class ToolContext:
         self.use_sandbox = use_sandbox
         self.sandbox_tool_entry = sandbox_tool_entry
         self.sandbox_url = sandbox_url
+        self.sandbox_auth_token = sandbox_auth_token
         self.use_web_search = use_web_search
         self.web_search_tool_entry = web_search_tool_entry
         self.web_search_url = web_search_url
@@ -640,6 +642,18 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, SANDBOX_MCP_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
             use_sandbox = True
 
+        # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
+        # platform mode when the backend IS the platform (its URL is under the
+        # platform base URL the gateway already trusts this token with for resolve):
+        # the platform-hosted /v1/sandbox proxy authenticates the caller's workspace
+        # token and derives tenancy + per-workspace code-exec policy from it. Never
+        # leak it to a standalone exec-service an operator pointed the URL at.
+        sandbox_auth_token: str | None = None
+        if use_sandbox and ctx.platform_mode and sandbox_url is not None:
+            assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+            if web_search_url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
+                sandbox_auth_token = ctx.user_token
+
         web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
         web_search_url: str | None = otari_env("WEB_SEARCH_URL") or None
         # Forwarded to the search backend as `X-Gateway-Token`. Only set in
@@ -704,6 +718,7 @@ async def prepare_gateway_tools(
         use_sandbox=use_sandbox,
         sandbox_tool_entry=sandbox_tool_entry,
         sandbox_url=sandbox_url,
+        sandbox_auth_token=sandbox_auth_token,
         use_web_search=use_web_search,
         web_search_tool_entry=web_search_tool_entry,
         web_search_url=web_search_url,
@@ -870,7 +885,9 @@ async def dispatch_non_stream(
     if tool_ctx.use_sandbox:
         assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
         sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry)
-        async with SandboxBackend(sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint) as backend:
+        async with SandboxBackend(
+            sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint, auth_token=tool_ctx.sandbox_auth_token
+        ) as backend:
             kwargs = adapter.inject_hints(call_kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
             return await adapter.run_tool_loop(kwargs, backend, tool_ctx.max_tool_iterations, on_first_response)
 
@@ -942,7 +959,9 @@ async def open_stream(
     if tool_ctx.use_sandbox:
         assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
         sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry)
-        sandbox_backend = SandboxBackend(sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint)
+        sandbox_backend = SandboxBackend(
+            sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint, auth_token=tool_ctx.sandbox_auth_token
+        )
         await sandbox_backend.__aenter__()  # may raise SandboxNotReachableError
         return _eager_backend_stream(adapter, kwargs, sandbox_backend, tool_ctx)
 
@@ -1241,7 +1260,9 @@ async def run_streaming_with_fallback(
             assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
             sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry)
             pool_for_loop = await backend_stack.enter_async_context(
-                SandboxBackend(sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint),
+                SandboxBackend(
+                    sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint, auth_token=tool_ctx.sandbox_auth_token
+                ),
             )
         elif tool_ctx.use_web_search:
             assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400
