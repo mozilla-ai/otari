@@ -1399,6 +1399,14 @@ async def run_platform_non_stream(
             on_first_response=on_first_response,
         )
 
+    # FastAPI BackgroundTasks only run after a *successful* response. When every
+    # attempt fails the runner raises (502/504) and the queued usage reports are
+    # silently dropped — so the platform never records the failed attempts and
+    # can't fire its fallback-exhausted accounting. Keep the background task for
+    # the success-response path (non-blocking), but also stash the error reports
+    # so they can be flushed inline if the request ends in an exception.
+    pending_error_reports: list[tuple[str, str, Any, str | None]] = []
+
     def _report_attempt_outcome(
         attempt: ResolvedAttempt,
         outcome: str,
@@ -1413,6 +1421,8 @@ async def run_platform_non_stream(
             usage,
             error_class,
         )
+        if outcome != "success":
+            pending_error_reports.append((attempt.attempt_id, outcome, usage, error_class))
 
     def _on_attempt_success(attempt: ResolvedAttempt) -> None:
         response.headers["X-Correlation-ID"] = attempt.attempt_id
@@ -1420,17 +1430,31 @@ async def run_platform_non_stream(
             for key, value in rate_limit_headers(rate_limit_info).items():
                 response.headers[key] = value
 
-    return await run_platform_attempts(
-        route=route,
-        attempts=attempts,
-        base_request_fields=base_request_fields,
-        run_attempt=_run_attempt,
-        extract_usage=adapter.extract_usage,
-        classify_error=_classify_upstream_error,
-        report_attempt_outcome=_report_attempt_outcome,
-        on_success=_on_attempt_success,
-        max_tool_iterations=tool_ctx.max_tool_iterations,
-    )
+    try:
+        return await run_platform_attempts(
+            route=route,
+            attempts=attempts,
+            base_request_fields=base_request_fields,
+            run_attempt=_run_attempt,
+            extract_usage=adapter.extract_usage,
+            classify_error=_classify_upstream_error,
+            report_attempt_outcome=_report_attempt_outcome,
+            on_success=_on_attempt_success,
+            max_tool_iterations=tool_ctx.max_tool_iterations,
+        )
+    except HTTPException:
+        # An error response drops the queued BackgroundTasks, so send the
+        # per-attempt error reports inline before propagating. The background
+        # copies never run on this path, so there is no double-report.
+        if pending_error_reports:
+            await asyncio.gather(
+                *(
+                    _report_platform_usage(config, attempt_id, outcome, usage, error_class)
+                    for attempt_id, outcome, usage, error_class in pending_error_reports
+                ),
+                return_exceptions=True,
+            )
+        raise
 
 
 async def run_standalone_non_stream(

@@ -353,6 +353,64 @@ def test_platform_mode_returns_502_when_all_attempts_fail(
     assert response.json() == {"detail": "All upstream providers failed"}
 
 
+def test_platform_mode_reports_every_attempt_when_all_fail(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When every attempt fails, each attempt's error outcome is still reported
+    back to the platform. The terminal 502 response drops the queued
+    BackgroundTasks, so the reports must be sent inline — otherwise total
+    outages leave no per-attempt record and the platform can't account for a
+    fully-exhausted fallback chain.
+    """
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json=_resolve_payload([
+                    _attempt(0, "att-1", "claude-3-5-sonnet-20241022", "sk-1"),
+                    _attempt(1, "att-2", "claude-3-5-sonnet-20241022", "sk-2"),
+                ]),
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        raise httpx.HTTPStatusError(
+            "500",
+            request=httpx.Request("POST", "http://upstream"),
+            response=httpx.Response(500, request=httpx.Request("POST", "http://upstream")),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
+
+    response = platform_client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 502
+    # Both failed attempts were reported as errors, despite the terminal 502.
+    reported = {(r["correlation_id"], r["status"], r.get("error_class")) for r in usage_reports}
+    assert reported == {
+        ("att-1", "error", "http_500"),
+        ("att-2", "error", "http_500"),
+    }
+
+
 def test_platform_mode_non_retryable_error_raises_immediately(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
