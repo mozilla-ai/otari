@@ -247,6 +247,63 @@ def test_platform_mode_falls_through_on_first_attempt_failure(
     assert "success" in outcomes
 
 
+def test_platform_mode_falls_through_on_404_model_unavailable(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 404 from the primary (deprecated/renamed/retired model) is retryable —
+    the runner falls through to the next attempt instead of failing the whole
+    request. Recovering from a retired model is a primary reason users configure
+    fallback, so 404 must not be treated as terminal.
+    """
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json=_resolve_payload([
+                    _attempt(0, "att-retired", "claude-3-5-sonnet-20241022", "sk-retired"),
+                    _attempt(1, "att-fallback", "claude-3-5-sonnet-20241022", "sk-good-key"),
+                ]),
+            )
+        return httpx.Response(204)
+
+    calls: list[dict[str, Any]] = []
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        calls.append(kwargs)
+        if kwargs["api_key"] == "sk-retired":
+            raise httpx.HTTPStatusError(
+                "404",
+                request=httpx.Request("POST", "http://upstream"),
+                response=httpx.Response(404, request=httpx.Request("POST", "http://upstream")),
+            )
+        return _message_response("from-fallback")
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
+
+    response = platform_client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["content"][0]["text"] == "from-fallback"
+    assert response.headers["X-Correlation-ID"] == "att-fallback"
+    assert len(calls) == 2, "404 on the primary must fall through to the next attempt"
+
+
 def test_platform_mode_returns_502_when_all_attempts_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
