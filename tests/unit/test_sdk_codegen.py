@@ -303,6 +303,49 @@ def test_sanitize_freeform_object_arrays_names_union_array_items() -> None:
         }, f"{field} array items should reference the shared free-form object schema"
 
 
+def test_sanitize_freeform_object_collapses_empty_union_member() -> None:
+    # any-llm types ResponsesRequest.text as anyOf: [{}, {"type": "null"}]. The
+    # empty {} member has no name for the static generators to bind to, so point
+    # it at the shared FreeFormObject (the null member is left alone).
+    spec = {
+        "components": {
+            "schemas": {
+                "ResponsesRequest": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"anyOf": [{}, {"type": "null"}], "title": "Text"},
+                    },
+                }
+            }
+        }
+    }
+    out = generate.sanitize_freeform_object_arrays(spec)
+    schemas = out["components"]["schemas"]
+    assert schemas[generate._FREE_FORM_OBJECT] == {"type": "object", "additionalProperties": True}
+    members = schemas["ResponsesRequest"]["properties"]["text"]["anyOf"]
+    assert {"$ref": f"#/components/schemas/{generate._FREE_FORM_OBJECT}"} in members
+    assert {"type": "null"} in members
+
+
+def test_sanitize_freeform_object_leaves_typed_union_members() -> None:
+    # A union of concrete members has nothing to collapse: no FreeFormObject is
+    # introduced and the members are untouched.
+    spec = {
+        "components": {
+            "schemas": {
+                "Typed": {"anyOf": [{"type": "string"}, {"type": "integer"}, {"type": "null"}]}
+            }
+        }
+    }
+    out = generate.sanitize_freeform_object_arrays(spec)
+    assert generate._FREE_FORM_OBJECT not in out["components"]["schemas"]
+    assert out["components"]["schemas"]["Typed"]["anyOf"] == [
+        {"type": "string"},
+        {"type": "integer"},
+        {"type": "null"},
+    ]
+
+
 def test_sanitize_freeform_object_arrays_leaves_closed_object_arrays() -> None:
     # A closed object (additionalProperties: false) is not free-form: collapsing it
     # to the open FreeFormObject would change the contract, so it must be left alone.

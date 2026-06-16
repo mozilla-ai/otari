@@ -362,21 +362,45 @@ def _is_free_form_object(node: Any) -> bool:
     return node.get("additionalProperties", True) is True
 
 
-def sanitize_freeform_object_arrays(spec: dict[str, Any]) -> dict[str, Any]:
-    """Give ``array``-of-free-form-object union members a named item type.
+def _is_empty_schema(node: Any) -> bool:
+    """True for an always-matching schema used as a direct union member.
 
-    any-llm's Anthropic params type fields like ``system`` as
-    ``str | list[dict] | None``, which the spec encodes as an ``anyOf`` whose
-    array variant has inline free-form-object ``items``
-    (``{"type": "object", "additionalProperties": true}``). When such a union
-    has two or more non-null variants the Go generator synthesizes a wrapper
-    struct and names the array field from that inline item type, emitting an
-    invalid identifier (``ArrayOf*mapmapOfStringAny`` — the ``*`` comes from the
-    pointer-typed item). That fails ``gofmt`` and breaks the Go SDK build. The
-    naming is generator-internal and inconsistent (a sibling field with two
-    array variants generates cleanly), so rather than depend on it, point every
-    such array at a shared named schema; the variant name is then deterministic
-    across all SDK languages.
+    An empty ``{}`` (or one carrying only annotation keys such as ``title`` /
+    ``description``) accepts any JSON value. As a direct ``anyOf`` / ``oneOf``
+    member it gives the generator no name to bind to, so the statically typed
+    SDKs emit a dangling placeholder type for it (Rust
+    ``models::AnyOfLessThanGreaterThan``, Go ``AnyOf`` / ``NullableAnyOf``,
+    TypeScript an empty ``| null`` union with bare ``FromJSON`` / ``ToJSON``
+    calls). any-llm produces these for loosely typed passthrough fields such as
+    ``ResponsesRequest.text`` (``anyOf: [{}, {"type": "null"}]``). Point the
+    member at the shared ``FreeFormObject`` so it is a named, generatable type.
+    """
+    return isinstance(node, dict) and not (set(node) - {"title", "description"})
+
+
+def sanitize_freeform_object_arrays(spec: dict[str, Any]) -> dict[str, Any]:
+    """Give free-form-object union members a named, generatable type.
+
+    Two inline free-form shapes break the statically typed generators when they
+    appear in an ``anyOf`` / ``oneOf`` union, so both are pointed at a shared
+    named ``FreeFormObject`` schema:
+
+    - **array-of-free-form-object members.** any-llm's Anthropic params type
+      fields like ``system`` as ``str | list[dict] | None``, whose array variant
+      has inline free-form-object ``items``
+      (``{"type": "object", "additionalProperties": true}``). When such a union
+      has two or more non-null variants the Go generator synthesizes a wrapper
+      struct and names the array field from that inline item type, emitting an
+      invalid identifier (``ArrayOf*mapmapOfStringAny`` — the ``*`` comes from
+      the pointer-typed item). That fails ``gofmt`` and breaks the Go SDK build.
+    - **bare empty-schema members.** A direct ``{}`` member (see
+      :func:`_is_empty_schema`) has no name for the generator to bind to, so the
+      static SDKs emit a dangling placeholder type that never gets generated and
+      fails to compile (e.g. ``ResponsesRequest.text``).
+
+    The generator-internal naming is inconsistent, so rather than depend on it,
+    rewrite every such member to reference the shared schema; the member name is
+    then deterministic across all SDK languages.
     """
     schemas = spec.get("components", {}).get("schemas")
     if not isinstance(schemas, dict):
@@ -390,13 +414,16 @@ def sanitize_freeform_object_arrays(spec: dict[str, Any]) -> dict[str, Any]:
                 members = node.get(key)
                 if not isinstance(members, list):
                     continue
-                for member in members:
+                for index, member in enumerate(members):
                     if (
                         isinstance(member, dict)
                         and member.get("type") == "array"
                         and _is_free_form_object(member.get("items"))
                     ):
                         member["items"] = {"$ref": f"#/components/schemas/{_FREE_FORM_OBJECT}"}
+                        used = True
+                    elif _is_empty_schema(member):
+                        members[index] = {"$ref": f"#/components/schemas/{_FREE_FORM_OBJECT}"}
                         used = True
             for value in node.values():
                 walk(value)
