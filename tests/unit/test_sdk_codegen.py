@@ -235,8 +235,9 @@ def test_enrich_types_otari_owned_inference_endpoints() -> None:
     assert ref("/v1/messages").endswith("/MessageResponse")
     assert ref("/v1/rerank").endswith("/RerankResponse")
     assert ref("/v1/embeddings").endswith("/CreateEmbeddingResponse")
-    # Image generation is JSON-shaped (unlike binary speech / multipart
-    # transcription), so it is typed from any-llm's ImagesResponse.
+    # Image generation is plain JSON, so it is typed from any-llm's
+    # ImagesResponse. Speech (binary response) and transcription (multipart
+    # request) stay opaque in the codegen enrichment.
     assert ref("/v1/images/generations").endswith("/ImagesResponse")
 
     messages_field = schemas["ChatCompletionRequest"]["properties"]["messages"]

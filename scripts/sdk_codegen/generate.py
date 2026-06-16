@@ -289,9 +289,11 @@ def enrich_spec(spec: dict[str, Any]) -> dict[str, Any]:
     # otari-owned inference endpoints the gateway leaves ``response_model=None``.
     # Their real response shapes live in any-llm (which the gateway depends on);
     # inject them so the generated core returns typed models instead of ``object``.
-    # Audio is intentionally left opaque: speech returns binary audio and
-    # transcription takes a multipart file upload, neither of which maps onto a
-    # JSON response schema. Image generation is JSON-shaped, so it is typed here.
+    # Audio stays opaque here. Speech returns binary audio, which has no JSON
+    # response schema. Transcription's response is JSON, but each SDK hand-writes
+    # it over a raw multipart upload (a request-side concern the generated core
+    # can't carry) and its shape varies by response_format, so there is no single
+    # response model to inject. Image generation is plain JSON, so it is typed.
     # Response shapes too: serialization mode keeps the schema aligned with the
     # serialized wire format (see the ChatCompletion note above).
     schemas["MessageResponse"] = absorb(
