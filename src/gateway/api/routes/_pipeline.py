@@ -1294,6 +1294,14 @@ async def run_streaming_with_fallback(
         )
         return adapter.open_tool_loop_stream(kwargs, pool_for_loop, tool_ctx.max_tool_iterations)
 
+    # See run_platform_non_stream: BackgroundTasks only run after a successful
+    # response, so if every attempt fails before its first chunk the queued
+    # reports are dropped with the terminal 502/504. Keep the background task
+    # for the success path (it flushes once the SSE response completes), but
+    # also stash the error reports so they can be flushed inline on the
+    # all-failed path below.
+    pending_error_reports: list[tuple[str, str, Any, str | None]] = []
+
     async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
         background_tasks.add_task(
             _report_platform_usage,
@@ -1303,6 +1311,7 @@ async def run_streaming_with_fallback(
             None,
             failure.error_class,
         )
+        pending_error_reports.append((attempt.attempt_id, "error", None, failure.error_class))
         logger.warning(
             "Streaming attempt failed request_id=%s position=%d provider=%s model=%s error=%s",
             route.request_id,
@@ -1321,8 +1330,18 @@ async def run_streaming_with_fallback(
             first_chunk_timeout_seconds=first_chunk_timeout,
         )
     except BaseException:
-        # No attempt yielded a first chunk: close the tool backend before
-        # propagating the failure. The route handler maps it to HTTP.
+        # No attempt yielded a first chunk: the request ends in an error
+        # response, which drops the queued BackgroundTasks — flush the
+        # per-attempt error reports inline so the platform still records every
+        # failed attempt. Then close the tool backend before propagating.
+        if pending_error_reports:
+            await asyncio.gather(
+                *(
+                    _report_platform_usage(config, attempt_id, outcome, usage, error_class)
+                    for attempt_id, outcome, usage, error_class in pending_error_reports
+                ),
+                return_exceptions=True,
+            )
         await backend_stack.aclose()
         raise
 
