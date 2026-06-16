@@ -30,9 +30,12 @@ from gateway.services.mcp_loop import MaxToolIterationsExceeded
 T = TypeVar("T")
 
 # Status codes returned by the platform's usage-report endpoint that the
-# gateway should NOT retry. Auth / not-found / conflict / unprocessable are
-# all permanent rejection signals — retrying would just hammer the platform.
-_USAGE_NON_RETRYABLE_STATUS_CODES = {401, 404, 409, 422}
+# gateway should NOT retry. Auth / payment-required / not-found / conflict /
+# unprocessable are all permanent rejection signals — retrying would just
+# hammer the platform (an overdrawn or missing wallet won't recover within the
+# retry window). 402 is already excluded by the >= 500 retry predicate below;
+# listing it keeps the intent explicit and robust to changes in that predicate.
+_USAGE_NON_RETRYABLE_STATUS_CODES = {401, 402, 404, 409, 422}
 
 # Status codes that cause the gateway to move on to the next attempt in a
 # multi-attempt route. 401/403 are included because users configure

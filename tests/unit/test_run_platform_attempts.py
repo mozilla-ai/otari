@@ -7,12 +7,18 @@ through a full request, such as the empty-attempts guard.
 
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from fastapi import HTTPException
 
+from gateway.api.routes import _platform
 from gateway.api.routes._platform import ResolvedRoute, run_platform_attempts
+from gateway.core.config import GatewayConfig
 
 
 @pytest.mark.asyncio
@@ -43,3 +49,27 @@ async def test_empty_attempts_raises_500_with_explicit_diagnostic() -> None:
         )
     assert ei.value.status_code == 500
     assert "empty attempts list" in ei.value.detail
+
+
+@pytest.mark.asyncio
+async def test_report_platform_usage_does_not_retry_on_402(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 402 from the usage-report endpoint is a permanent rejection (the org
+    wallet is overdrawn or missing and won't recover within the retry window).
+    The gateway must POST once and give up, never retry."""
+    config = cast(
+        GatewayConfig,
+        SimpleNamespace(
+            platform={"base_url": "http://platform", "usage_max_retries": 3},
+            platform_token="gw-test",
+        ),
+    )
+
+    post_mock = AsyncMock(return_value=httpx.Response(402))
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(asyncio, "sleep", sleep_mock)
+
+    await _platform._report_platform_usage(config, "corr-1", "success", None)
+
+    assert post_mock.call_count == 1
+    sleep_mock.assert_not_awaited()
