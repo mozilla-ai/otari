@@ -1022,7 +1022,7 @@ def test_connected_mode_web_search_merges_workspace_config(
     assert _FakeWebSearchBackend.last_auth_token is None
 
 
-def test_platform_mode_web_search_forwards_token_to_platform_backend(
+def test_connected_mode_web_search_forwards_token_to_platform_backend(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

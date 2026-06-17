@@ -643,21 +643,21 @@ async def prepare_gateway_tools(
             use_sandbox = True
 
         # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
-        # platform mode when the backend IS the platform (its URL is under the
+        # connected mode when the backend IS the platform (its URL is under the
         # platform base URL the gateway already trusts this token with for resolve):
         # the platform-hosted /v1/sandbox proxy authenticates the caller's workspace
         # token and derives tenancy + per-workspace code-exec policy from it. Never
         # leak it to a standalone exec-service an operator pointed the URL at.
         sandbox_auth_token: str | None = None
-        if use_sandbox and ctx.platform_mode and sandbox_url is not None:
-            assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+        if use_sandbox and ctx.connected_mode and sandbox_url is not None:
+            assert ctx.user_token is not None  # guaranteed by the connected-mode preamble
             if web_search_url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
                 sandbox_auth_token = ctx.user_token
 
         web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
         web_search_url: str | None = otari_env("WEB_SEARCH_URL") or None
         # Forwarded to the search backend as `X-Gateway-Token`. Only set in
-        # platform mode, where the backend may be the platform-hosted web-search
+        # connected mode, where the backend may be the platform-hosted web-search
         # endpoint that authenticates the gateway. Standalone backends (SearXNG /
         # self-hosted adapter) get no token and ignore the header.
         web_search_auth_token: str | None = None
