@@ -5,27 +5,42 @@ delegates per-request authorization and provider-credential resolution to a
 peer platform service over HTTP. This document describes the wire contract
 Otari expects from that peer.
 
-The default peer implementation is [otari](https://github.com/mozilla-ai/otari),
-but any service that implements this contract can stand in.
+The reference peer is the [otari.ai](https://otari.ai) platform, but any service
+that implements this contract can stand in.
 
 ## Endpoints
 
-Otari calls two endpoints, both rooted at the configured platform base URL:
+Otari calls these endpoints, all rooted at the configured platform base URL:
 
 | Endpoint | Purpose |
 |---|---|
 | `POST {base}/gateway/provider-keys/resolve` | Authorize a request and return one or more provider credentials to try |
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
+| `POST {base}/gateway/mcp-servers/resolve`   | Swap workspace-scoped MCP server ids for inline server configs (called only when a request references MCP server ids) |
+| `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's web-search policy (called only when a request uses the `otari_web_search` tool) |
 
 `{base}` means Otari platform `base_url` setting. Otari concatenates literally. The peer service is responsible for including any API-version prefix it exposes its own routes under. For the reference otari deployment that prefix is `/api/v1`, so the base URL is `http://backend:8000/api/v1` and Otari ends up POSTing to `http://backend:8000/api/v1/gateway/provider-keys/resolve`.
 
 ## Authentication
 
-Both endpoints require `X-Gateway-Token: <gw_...>` in the request headers. This
-proves the caller is Otari instance configured against this platform
-deployment. The resolve endpoint additionally requires `X-User-Token: <tk_...>`,
-which is the workspace API token forwarded opaquely from the end user's
-`Authorization: Bearer ...` header.
+Every endpoint requires `X-Gateway-Token: <gw_...>` in the request headers. This
+proves the caller is an Otari instance configured against this platform
+deployment. The three resolve endpoints additionally require `X-User-Token:
+<tk_...>`, which is the workspace API token forwarded opaquely from the end
+user's `Authorization: Bearer ...` header. The usage endpoint sends only the
+gateway token.
+
+## Extension policy
+
+This document describes only the fields Otari actually reads. Every response
+shape below is **open for extension**: a peer may return additional fields, and
+Otari ignores any it does not recognise. Consumers of this contract MUST do the
+same (ignore unknown fields) so the platform can add fields without breaking
+older gateways.
+
+For example, the otari.ai resolve response also carries `workspace_id`,
+`organization_id`, `provider_key_id`, and `allowed_models`. Otari does not read
+these today, so they are intentionally absent from the shapes documented here.
 
 When the operator points Otari's web-search backend at the platform
 (`GATEWAY_WEB_SEARCH_URL` under `base_url`), Otari also sends `X-Gateway-Token`
@@ -120,9 +135,114 @@ multi-attempt shape.
 
 | Status | Behaviour |
 |---|---|
-| `401`, `402`, `403`, `404`, `429` | Mapped through to the client as-is. `429`'s `Retry-After` header is preserved. |
+| `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Authorization request rejected"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network/timeout                    | Mapped to `502 Bad Gateway`. |
+
+## MCP server resolution
+
+Called only when a request references one or more workspace-scoped MCP server
+ids (a platform-only feature). Otari swaps those ids for the inline server
+configs it needs to open the connections.
+
+### Request
+
+```http
+POST /gateway/mcp-servers/resolve
+X-Gateway-Token: gw_...
+X-User-Token: tk_...
+Content-Type: application/json
+
+{
+  "mcp_server_ids": ["01HX1...", "01HX2..."]
+}
+```
+
+### Response
+
+```json
+{
+  "servers": [
+    {
+      "name": "github",
+      "url": "https://mcp.example.com/github",
+      "authorization_token": "ghp_...",   // optional
+      "purpose_hint": "Repo and issue lookups",   // optional
+      "allowed_tools": ["list_issues", "get_file"] // optional
+    }
+  ]
+}
+```
+
+Otari reads `name`, `url`, `authorization_token`, `purpose_hint`, and
+`allowed_tools` off each entry in `servers`; a missing `servers` key is treated
+as an empty list. The same URL-safety rules as inline MCP configs apply once the
+configs are resolved (SSRF guard, no bearer token over cleartext `http://`).
+
+### Failure
+
+| Status | Behaviour |
+|---|---|
+| `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"MCP server resolution failed"`. |
+| `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
+| Network/timeout                    | Mapped to `502 Bad Gateway`. |
+
+## Web search resolution
+
+Called only when a request uses the `otari_web_search` tool. The platform owns
+the per-workspace web-search policy: whether it is enabled at all, plus the
+workspace-default limits and filters.
+
+### Request
+
+```http
+POST /gateway/web-search/resolve
+X-Gateway-Token: gw_...
+X-User-Token: tk_...
+Content-Type: application/json
+
+{}
+```
+
+The request body is empty; the workspace is identified by `X-User-Token`.
+
+### Response
+
+```json
+{
+  "enabled": true,
+  "provider": "searxng",
+  "max_results": 5,
+  "purpose_hint": "Background research",
+  "allowed_domains": ["example.com"],
+  "blocked_domains": ["spam.example"],
+  "provider_options": { "engines": "google,bing" }
+}
+```
+
+If `enabled` is falsy, Otari rejects the request with `403`. The remaining
+fields are workspace defaults that apply only where the request did not supply
+its own value: `max_results`, `allowed_domains`, `blocked_domains`, and
+`purpose_hint` fill in when the per-request tool entry omits them (an empty list
+or empty string reads as "no preference" and does not clear the workspace
+value), and `provider_options` is shallow-merged with per-request keys winning.
+`provider` is informational: the active web-search backend is configured on the
+gateway itself via `WEB_SEARCH_URL`, so Otari does not switch backends based on
+this field.
+
+### Failure
+
+| Status | Behaviour |
+|---|---|
+| `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Web search resolution failed"`. |
+| `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
+| Network/timeout                    | Mapped to `502 Bad Gateway`. |
+
+> The resolve endpoints share the timeout (`PLATFORM_RESOLVE_TIMEOUT_MS`) and
+> token headers with `provider-keys/resolve`. Their exact response shapes will
+> become the contract of record once the consumer-side fixtures land
+> ([#146](https://github.com/mozilla-ai/otari/issues/146)); until then this
+> document is authoritative.
 
 ## Usage report
 
