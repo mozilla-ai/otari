@@ -70,7 +70,7 @@ def _chat(client: TestClient, *, model: str, user: str) -> int:
         json={"model": model, "messages": _MESSAGES, "user": user},
         headers=_MASTER_HEADER,
     )
-    return resp.status_code
+    return int(resp.status_code)
 
 
 def test_unpriced_model_rejected_with_402(strict_pricing_client: TestClient) -> None:
