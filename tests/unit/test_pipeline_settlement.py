@@ -48,6 +48,7 @@ def _tool_ctx(**overrides: Any) -> ToolContext:
         "use_sandbox": False,
         "sandbox_tool_entry": None,
         "sandbox_url": None,
+        "sandbox_auth_token": None,
         "use_web_search": False,
         "web_search_tool_entry": None,
         "web_search_url": None,

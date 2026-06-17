@@ -73,17 +73,27 @@ class SandboxBackend:
         sandbox_url: str,
         purpose_hint: str | None = None,
         timeout_s: float = _DEFAULT_TIMEOUT_S,
+        auth_token: str | None = None,
     ) -> None:
         self._sandbox_url = sandbox_url.rstrip("/")
         self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
         self._timeout_s = timeout_s
+        # Optional bearer credential forwarded as `Authorization: Bearer` on every
+        # call to the sandbox backend. Set in platform mode so the platform-hosted
+        # /v1/sandbox proxy (which authenticates the caller's workspace token) admits
+        # the request and derives tenancy from it. Unset (and unsent) when the
+        # backend is a standalone exec-service that needs no auth.
+        self._auth_token = auth_token
         self._client: httpx.AsyncClient | None = None
         self._session_id: str | None = None
         self._stack: AsyncExitStack = AsyncExitStack()
 
     async def __aenter__(self) -> SandboxBackend:
         try:
-            self._client = await self._stack.enter_async_context(httpx.AsyncClient(timeout=self._timeout_s))
+            headers = {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
+            self._client = await self._stack.enter_async_context(
+                httpx.AsyncClient(timeout=self._timeout_s, headers=headers)
+            )
             response = await self._client.post(f"{self._sandbox_url}/sessions", json={})
             response.raise_for_status()
             self._session_id = response.json()["session_id"]
