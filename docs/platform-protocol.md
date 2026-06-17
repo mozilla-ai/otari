@@ -128,7 +128,7 @@ multi-attempt shape.
 
 | Status | Behaviour |
 |---|---|
-| `401`, `402`, `403`, `404`, `429` | Mapped through to the client as-is. `429`'s `Retry-After` header is preserved. |
+| `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Authorization request rejected"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network/timeout                    | Mapped to `502 Bad Gateway`. |
 
@@ -176,7 +176,7 @@ configs are resolved (SSRF guard, no bearer token over cleartext `http://`).
 
 | Status | Behaviour |
 |---|---|
-| `401`, `402`, `403`, `404`, `429` | Mapped through to the client as-is. `429`'s `Retry-After` header is preserved. |
+| `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"MCP server resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network/timeout                    | Mapped to `502 Bad Gateway`. |
 
@@ -227,7 +227,7 @@ this field.
 
 | Status | Behaviour |
 |---|---|
-| `401`, `402`, `403`, `404`, `429` | Mapped through to the client as-is. `429`'s `Retry-After` header is preserved. |
+| `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Web search resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
 | Network/timeout                    | Mapped to `502 Bad Gateway`. |
 
