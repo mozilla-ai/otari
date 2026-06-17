@@ -62,6 +62,7 @@ from gateway.api.routes._platform import (
     _classify_upstream_error,
     _extract_platform_user_token,
     _report_platform_usage,
+    _resolve_platform_code_execution,
     _resolve_platform_credentials,
     _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
@@ -148,6 +149,7 @@ WEB_SEARCH_CONFLICT_DETAIL = (
     "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same request yet; pick one."
 )
 WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
+SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
 SANDBOX_UNREACHABLE_DETAIL = "code_execution sandbox unreachable — check OTARI_SANDBOX_URL"
 WEB_SEARCH_UNREACHABLE_DETAIL = "web_search backend unreachable — check OTARI_WEB_SEARCH_URL"
 
@@ -725,10 +727,27 @@ async def prepare_gateway_tools(
         # token and derives tenancy + per-workspace code-exec policy from it. Never
         # leak it to a standalone exec-service an operator pointed the URL at.
         sandbox_auth_token: str | None = None
-        if use_sandbox and ctx.hybrid_mode and sandbox_url is not None:
+        sandbox_max_iterations: int | None = None
+        if use_sandbox and ctx.hybrid_mode:
             assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-            if web_search_url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
+            assert sandbox_tool_entry is not None  # use_sandbox implies the entry is present
+            if sandbox_url is not None and web_search_url_targets_platform(
+                sandbox_url, ctx.config.platform.get("base_url")
+            ):
                 sandbox_auth_token = ctx.user_token
+
+            # Platform owns the per-workspace code-exec policy: 403 if the workspace
+            # has it off, otherwise apply the workspace defaults (per-request values
+            # win) — the default purpose hint and the loop-iteration ceiling. The
+            # tools allow-list + exec timeout are re-enforced by the /v1/sandbox proxy.
+            policy = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
+            if not policy.get("enabled"):
+                raise adapter.error(403, SANDBOX_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
+            if not sandbox_tool_entry.get("purpose_hint") and policy.get("default_purpose_hint"):
+                sandbox_tool_entry["purpose_hint"] = policy["default_purpose_hint"]
+            resolved_iters = policy.get("max_iterations")
+            if isinstance(resolved_iters, int) and resolved_iters > 0:
+                sandbox_max_iterations = resolved_iters
 
         web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
         web_search_url: str | None = otari_env("WEB_SEARCH_URL") or None
@@ -803,6 +822,8 @@ async def prepare_gateway_tools(
         max_tool_iterations=min(
             max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
             MAX_TOOL_ITERATIONS_CAP,
+            # The workspace's code-exec max_iterations bounds the loop too (no-op when unset).
+            sandbox_max_iterations or MAX_TOOL_ITERATIONS_CAP,
         ),
         tools_header=tools_header,
     )
