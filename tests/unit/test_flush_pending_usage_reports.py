@@ -1,15 +1,17 @@
-"""Unit tests for ``_flush_pending_usage_reports`` — the inline, bounded flush
+"""Unit tests for ``_flush_pending_usage_reports``: the inline, bounded flush
 of per-attempt error reports on the all-failed platform path.
 """
 
 import asyncio
 from typing import Any
 
+import pytest
+
 import gateway.api.routes._pipeline as _pipeline
 from gateway.core.config import GatewayConfig
 
 
-def test_flush_delivers_all_reports_when_fast(monkeypatch: Any) -> None:
+def test_flush_delivers_all_reports_when_fast(monkeypatch: pytest.MonkeyPatch) -> None:
     sent: list[tuple[str, str, str | None]] = []
 
     async def fake_report(config: Any, cid: str, outcome: str, usage: Any, error_class: str | None) -> None:
@@ -29,7 +31,7 @@ def test_flush_delivers_all_reports_when_fast(monkeypatch: Any) -> None:
     assert sorted(sent) == [("att-1", "error", "http_500"), ("att-2", "error", "http_429")]
 
 
-def test_flush_is_bounded_and_does_not_wait_for_a_slow_report(monkeypatch: Any) -> None:
+def test_flush_is_bounded_and_does_not_wait_for_a_slow_report(monkeypatch: pytest.MonkeyPatch) -> None:
     """A degraded usage endpoint must not stall the already-failing response.
 
     The flush is capped at ``usage_timeout_ms``; a report that hangs past that
@@ -57,7 +59,7 @@ def test_flush_is_bounded_and_does_not_wait_for_a_slow_report(monkeypatch: Any) 
     assert completed == []
 
 
-def test_flush_is_noop_when_no_pending_reports(monkeypatch: Any) -> None:
+def test_flush_is_noop_when_no_pending_reports(monkeypatch: pytest.MonkeyPatch) -> None:
     called = False
 
     async def fake_report(*args: Any, **kwargs: Any) -> None:
