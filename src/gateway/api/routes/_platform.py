@@ -50,7 +50,7 @@ _USAGE_NON_RETRYABLE_STATUS_CODES = {401, 402, 404, 409, 422}
 # being retired is one of the main reasons users configure fallback, so these
 # fall through to the next entry rather than failing the whole request. They are
 # distinct from 400/422, which mean the request itself is malformed and would be
-# rejected by every provider — falling through on those just wastes attempts.
+# rejected by every provider, so falling through on those just wastes attempts.
 _FALLBACK_RETRYABLE_STATUS_CODES = {401, 403, 404, 405, 408, 409, 410, 429, 500, 502, 503, 504}
 _FALLBACK_NON_RETRYABLE_STATUS_CODES = {400, 422}
 

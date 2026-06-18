@@ -251,7 +251,7 @@ def test_platform_mode_falls_through_on_404_model_unavailable(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A 404 from the primary (deprecated/renamed/retired model) is retryable —
+    """A 404 from the primary (deprecated/renamed/retired model) is retryable;
     the runner falls through to the next attempt instead of failing the whole
     request. Recovering from a retired model is a primary reason users configure
     fallback, so 404 must not be treated as terminal.
@@ -278,10 +278,11 @@ def test_platform_mode_falls_through_on_404_model_unavailable(
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
         calls.append(kwargs)
         if kwargs["api_key"] == "sk-retired":
+            request = httpx.Request("POST", "http://upstream")
             raise httpx.HTTPStatusError(
                 "404",
-                request=httpx.Request("POST", "http://upstream"),
-                response=httpx.Response(404, request=httpx.Request("POST", "http://upstream")),
+                request=request,
+                response=httpx.Response(404, request=request),
             )
         return _message_response("from-fallback")
 

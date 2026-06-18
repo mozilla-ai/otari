@@ -1,4 +1,4 @@
-"""Unit tests for ``_classify_upstream_error`` — the function that decides
+"""Unit tests for ``_classify_upstream_error``, the function that decides
 whether an upstream failure falls through to the next routing-policy attempt.
 """
 
@@ -67,8 +67,8 @@ def test_classifies_provider_sdk_status_errors(sdk_error: type, status: int, ret
     # any_llm propagates the provider SDK's own ``APIStatusError`` (it does not
     # wrap upstream failures), and that exception exposes ``status_code``
     # directly on itself. The other tests here use ``httpx.HTTPStatusError``,
-    # which only carries the code on ``.response`` — a shape that never reaches
-    # the classifier in production. Pin the classifier against the exception
+    # which only carries the code on ``.response`` (a shape that never reaches
+    # the classifier in production). Pin the classifier against the exception
     # type providers actually raise so the direct-``status_code`` extraction
     # path stays covered.
     request = httpx.Request("POST", "http://upstream")
