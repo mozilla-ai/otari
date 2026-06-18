@@ -247,13 +247,75 @@ def test_connected_mode_falls_through_on_first_attempt_failure(
     assert "success" in outcomes
 
 
-def test_connected_mode_returns_502_when_all_attempts_fail(
+def test_connected_mode_falls_through_on_404_model_unavailable(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 404 from the primary (deprecated/renamed/retired model) is retryable;
+    the runner falls through to the next attempt instead of failing the whole
+    request. Recovering from a retired model is a primary reason users configure
+    fallback, so 404 must not be treated as terminal.
+    """
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json=_resolve_payload([
+                    _attempt(0, "att-retired", "claude-3-5-sonnet-20241022", "sk-retired"),
+                    _attempt(1, "att-fallback", "claude-3-5-sonnet-20241022", "sk-good-key"),
+                ]),
+            )
+        return httpx.Response(204)
+
+    calls: list[dict[str, Any]] = []
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        calls.append(kwargs)
+        if kwargs["api_key"] == "sk-retired":
+            request = httpx.Request("POST", "http://upstream")
+            raise httpx.HTTPStatusError(
+                "404",
+                request=request,
+                response=httpx.Response(404, request=request),
+            )
+        return _message_response("from-fallback")
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
+
+    response = platform_client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["content"][0]["text"] == "from-fallback"
+    assert response.headers["X-Correlation-ID"] == "att-fallback"
+    assert len(calls) == 2, "404 on the primary must fall through to the next attempt"
+
+
+def test_connected_mode_returns_502_and_reports_every_attempt_when_all_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """All attempts failing with retryable errors → 502 with the all-failed
-    detail wording.
+    detail wording, and each attempt's error outcome is still reported back to
+    the platform. The terminal 502 drops the queued BackgroundTasks, so the
+    reports must be sent inline; otherwise a total outage leaves no per-attempt
+    record and the platform can't account for a fully-exhausted fallback chain.
     """
+    usage_reports: list[dict[str, Any]] = []
 
     async def fake_post_platform(
         url: str,
@@ -269,6 +331,7 @@ def test_connected_mode_returns_502_when_all_attempts_fail(
                     _attempt(1, "att-2", "claude-3-5-sonnet-20241022", "sk-2"),
                 ]),
             )
+        usage_reports.append(body)
         return httpx.Response(204)
 
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
@@ -293,6 +356,16 @@ def test_connected_mode_returns_502_when_all_attempts_fail(
 
     assert response.status_code == 502
     assert response.json() == {"detail": "All upstream providers failed"}
+    # Each failed attempt is reported exactly once, despite the terminal 502. A
+    # set would mask a double-report (the dropped-then-also-flushed bug), so pin
+    # the exact count and contents: the inline flush and the dropped background
+    # copies must not both fire.
+    assert len(usage_reports) == 2
+    reported = sorted((r["correlation_id"], r["status"], r.get("error_class")) for r in usage_reports)
+    assert reported == [
+        ("att-1", "error", "http_500"),
+        ("att-2", "error", "http_500"),
+    ]
 
 
 def test_connected_mode_non_retryable_error_raises_immediately(

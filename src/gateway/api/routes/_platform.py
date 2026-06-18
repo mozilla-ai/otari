@@ -44,7 +44,14 @@ _USAGE_NON_RETRYABLE_STATUS_CODES = {401, 402, 404, 409, 422}
 # should fall through to the next, not surface to the client. Single-attempt
 # requests still see auth errors directly because there's nothing to fall
 # back to.
-_FALLBACK_RETRYABLE_STATUS_CODES = {401, 403, 408, 429, 500, 502, 503, 504}
+#
+# 404/405/409/410 mean "this model or endpoint is unavailable at THIS provider"
+# (deprecated, renamed, retired, or never offered). Recovering from a model
+# being retired is one of the main reasons users configure fallback, so these
+# fall through to the next entry rather than failing the whole request. They are
+# distinct from 400/422, which mean the request itself is malformed and would be
+# rejected by every provider, so falling through on those just wastes attempts.
+_FALLBACK_RETRYABLE_STATUS_CODES = {401, 403, 404, 405, 408, 409, 410, 429, 500, 502, 503, 504}
 _FALLBACK_NON_RETRYABLE_STATUS_CODES = {400, 422}
 
 # Streaming first-chunk timeouts (connected-mode fallback). Plain LLM streams

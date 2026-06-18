@@ -567,6 +567,87 @@ def test_connected_mode_streaming_returns_502_when_all_attempts_fail(
     assert response.json() == {"detail": "All upstream providers failed"}
 
 
+def test_connected_mode_streaming_reports_every_attempt_when_all_fail(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When every streaming attempt fails before its first chunk, each attempt's
+    error outcome is still reported back to the platform. The terminal 502 drops
+    the queued BackgroundTasks, so the reports must be sent inline; otherwise a
+    total streaming outage leaves no per-attempt record.
+    """
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "stream-req-fail",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "att-a",
+                            "position": 0,
+                            "provider": "anthropic",
+                            "model": "claude-haiku-4-5",
+                            "api_key": "sk-ant-broken",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "att-b",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-openai-broken",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        raise httpx.HTTPStatusError(
+            "500",
+            request=httpx.Request("POST", "http://upstream"),
+            response=httpx.Response(500, request=httpx.Request("POST", "http://upstream")),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 502
+    # Each failed attempt is reported exactly once, despite the terminal 502. A
+    # set would mask a double-report (the dropped-then-also-flushed bug), so pin
+    # the exact count and contents: the inline flush and the dropped background
+    # copies must not both fire.
+    assert len(usage_reports) == 2
+    reported = sorted((r["correlation_id"], r["status"], r.get("error_class")) for r in usage_reports)
+    assert reported == [
+        ("att-a", "error", "http_500"),
+        ("att-b", "error", "http_500"),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Tool-loop fallback (pre-lock-in)
 # ---------------------------------------------------------------------------

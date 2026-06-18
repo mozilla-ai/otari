@@ -1223,6 +1223,56 @@ async def run_single_attempt_stream(
     )
 
 
+async def _flush_pending_usage_reports(
+    config: GatewayConfig,
+    pending_error_reports: list[tuple[str, str, Any, str | None]],
+    request_id: str,
+) -> None:
+    """Send the per-attempt error reports inline on the all-failed path.
+
+    FastAPI BackgroundTasks are dropped when the request ends in an error
+    response, so on a fully-exhausted fallback chain these reports must be
+    flushed before the terminal 502/504 (the queued background copies never
+    run, so there is no double-report).
+
+    The flush is bounded: this is best-effort telemetry and must not materially
+    delay the already-failing response. Reports run concurrently, and the whole
+    batch is capped at ``usage_timeout_ms`` so a degraded usage endpoint is cut
+    off rather than stacking each report's full retry/backoff budget onto the
+    response. Callers on the streaming path skip this entirely on cancellation.
+    """
+    if not pending_error_reports:
+        return
+
+    timeout_s = int(config.platform.get("usage_timeout_ms", 5000)) / 1000
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(
+                    _report_platform_usage(config, attempt_id, outcome, usage, error_class)
+                    for attempt_id, outcome, usage, error_class in pending_error_reports
+                ),
+                return_exceptions=True,
+            ),
+            timeout=timeout_s,
+        )
+    except (asyncio.TimeoutError, TimeoutError):
+        logger.warning(
+            "Inline usage-report flush timed out after %.1fs on the all-failed path request_id=%s",
+            timeout_s,
+            request_id,
+        )
+        return
+
+    for result in results:
+        if isinstance(result, BaseException):
+            logger.warning(
+                "Inline usage report failed on the all-failed path request_id=%s: %s",
+                request_id,
+                result,
+            )
+
+
 async def run_streaming_with_fallback(
     *,
     adapter: FormatAdapter[Any, ChunkT],
@@ -1294,6 +1344,14 @@ async def run_streaming_with_fallback(
         )
         return adapter.open_tool_loop_stream(kwargs, pool_for_loop, tool_ctx.max_tool_iterations)
 
+    # See run_platform_non_stream: BackgroundTasks only run after a successful
+    # response, so if every attempt fails before its first chunk the queued
+    # reports are dropped with the terminal 502/504. Keep the background task
+    # for the success path (it flushes once the SSE response completes), but
+    # also stash the error reports so they can be flushed inline on the
+    # all-failed path below.
+    pending_error_reports: list[tuple[str, str, Any, str | None]] = []
+
     async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
         background_tasks.add_task(
             _report_platform_usage,
@@ -1303,6 +1361,7 @@ async def run_streaming_with_fallback(
             None,
             failure.error_class,
         )
+        pending_error_reports.append((attempt.attempt_id, "error", None, failure.error_class))
         logger.warning(
             "Streaming attempt failed request_id=%s position=%d provider=%s model=%s error=%s",
             route.request_id,
@@ -1320,10 +1379,18 @@ async def run_streaming_with_fallback(
             on_attempt_failed=_on_attempt_failed,
             first_chunk_timeout_seconds=first_chunk_timeout,
         )
-    except BaseException:
-        # No attempt yielded a first chunk: close the tool backend before
-        # propagating the failure. The route handler maps it to HTTP.
-        await backend_stack.aclose()
+    except BaseException as exc:
+        # No attempt yielded a first chunk: the request ends in an error
+        # response, which drops the queued BackgroundTasks, so flush the
+        # per-attempt error reports inline to keep the platform's per-attempt
+        # record. Skip the flush on cancellation (reporting I/O must not delay
+        # teardown), and always close the tool backend before propagating, even
+        # if the flush raises or is interrupted.
+        try:
+            if not isinstance(exc, asyncio.CancelledError):
+                await _flush_pending_usage_reports(config, pending_error_reports, route.request_id)
+        finally:
+            await backend_stack.aclose()
         raise
 
     if tool_mode:
@@ -1399,6 +1466,14 @@ async def run_platform_non_stream(
             on_first_response=on_first_response,
         )
 
+    # FastAPI BackgroundTasks only run after a *successful* response. When every
+    # attempt fails the runner raises (502/504) and the queued usage reports are
+    # silently dropped, so the platform never records the failed attempts and
+    # can't fire its fallback-exhausted accounting. Keep the background task for
+    # the success-response path (non-blocking), but also stash the error reports
+    # so they can be flushed inline if the request ends in an exception.
+    pending_error_reports: list[tuple[str, str, Any, str | None]] = []
+
     def _report_attempt_outcome(
         attempt: ResolvedAttempt,
         outcome: str,
@@ -1413,6 +1488,8 @@ async def run_platform_non_stream(
             usage,
             error_class,
         )
+        if outcome != "success":
+            pending_error_reports.append((attempt.attempt_id, outcome, usage, error_class))
 
     def _on_attempt_success(attempt: ResolvedAttempt) -> None:
         response.headers["X-Correlation-ID"] = attempt.attempt_id
@@ -1420,17 +1497,27 @@ async def run_platform_non_stream(
             for key, value in rate_limit_headers(rate_limit_info).items():
                 response.headers[key] = value
 
-    return await run_platform_attempts(
-        route=route,
-        attempts=attempts,
-        base_request_fields=base_request_fields,
-        run_attempt=_run_attempt,
-        extract_usage=adapter.extract_usage,
-        classify_error=_classify_upstream_error,
-        report_attempt_outcome=_report_attempt_outcome,
-        on_success=_on_attempt_success,
-        max_tool_iterations=tool_ctx.max_tool_iterations,
-    )
+    try:
+        return await run_platform_attempts(
+            route=route,
+            attempts=attempts,
+            base_request_fields=base_request_fields,
+            run_attempt=_run_attempt,
+            extract_usage=adapter.extract_usage,
+            classify_error=_classify_upstream_error,
+            report_attempt_outcome=_report_attempt_outcome,
+            on_success=_on_attempt_success,
+            max_tool_iterations=tool_ctx.max_tool_iterations,
+        )
+    except HTTPException:
+        # An error response drops the queued BackgroundTasks, so send the
+        # per-attempt error reports inline before propagating. The background
+        # copies never run on this path, so there is no double-report. This
+        # branch only catches HTTPException (what the runner raises on the
+        # all-failed path); a CancelledError propagates without doing reporting
+        # I/O during teardown.
+        await _flush_pending_usage_reports(config, pending_error_reports, route.request_id)
+        raise
 
 
 async def run_standalone_non_stream(
