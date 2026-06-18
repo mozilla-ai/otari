@@ -1223,6 +1223,56 @@ async def run_single_attempt_stream(
     )
 
 
+async def _flush_pending_usage_reports(
+    config: GatewayConfig,
+    pending_error_reports: list[tuple[str, str, Any, str | None]],
+    request_id: str,
+) -> None:
+    """Send the per-attempt error reports inline on the all-failed path.
+
+    FastAPI BackgroundTasks are dropped when the request ends in an error
+    response, so on a fully-exhausted fallback chain these reports must be
+    flushed before the terminal 502/504 (the queued background copies never
+    run, so there is no double-report).
+
+    The flush is bounded: this is best-effort telemetry and must not materially
+    delay the already-failing response. Reports run concurrently, and the whole
+    batch is capped at ``usage_timeout_ms`` so a degraded usage endpoint is cut
+    off rather than stacking each report's full retry/backoff budget onto the
+    response. Callers on the streaming path skip this entirely on cancellation.
+    """
+    if not pending_error_reports:
+        return
+
+    timeout_s = int(config.platform.get("usage_timeout_ms", 5000)) / 1000
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(
+                    _report_platform_usage(config, attempt_id, outcome, usage, error_class)
+                    for attempt_id, outcome, usage, error_class in pending_error_reports
+                ),
+                return_exceptions=True,
+            ),
+            timeout=timeout_s,
+        )
+    except (asyncio.TimeoutError, TimeoutError):
+        logger.warning(
+            "Inline usage-report flush timed out after %.1fs on the all-failed path request_id=%s",
+            timeout_s,
+            request_id,
+        )
+        return
+
+    for result in results:
+        if isinstance(result, BaseException):
+            logger.warning(
+                "Inline usage report failed on the all-failed path request_id=%s: %s",
+                request_id,
+                result,
+            )
+
+
 async def run_streaming_with_fallback(
     *,
     adapter: FormatAdapter[Any, ChunkT],
@@ -1337,21 +1387,8 @@ async def run_streaming_with_fallback(
         # teardown), and always close the tool backend before propagating, even
         # if the flush raises or is interrupted.
         try:
-            if pending_error_reports and not isinstance(exc, asyncio.CancelledError):
-                results = await asyncio.gather(
-                    *(
-                        _report_platform_usage(config, attempt_id, outcome, usage, error_class)
-                        for attempt_id, outcome, usage, error_class in pending_error_reports
-                    ),
-                    return_exceptions=True,
-                )
-                for result in results:
-                    if isinstance(result, BaseException):
-                        logger.warning(
-                            "Inline usage report failed on all-failed streaming path request_id=%s: %s",
-                            route.request_id,
-                            result,
-                        )
+            if not isinstance(exc, asyncio.CancelledError):
+                await _flush_pending_usage_reports(config, pending_error_reports, route.request_id)
         finally:
             await backend_stack.aclose()
         raise
@@ -1479,21 +1516,7 @@ async def run_platform_non_stream(
         # branch only catches HTTPException (what the runner raises on the
         # all-failed path); a CancelledError propagates without doing reporting
         # I/O during teardown.
-        if pending_error_reports:
-            results = await asyncio.gather(
-                *(
-                    _report_platform_usage(config, attempt_id, outcome, usage, error_class)
-                    for attempt_id, outcome, usage, error_class in pending_error_reports
-                ),
-                return_exceptions=True,
-            )
-            for result in results:
-                if isinstance(result, BaseException):
-                    logger.warning(
-                        "Inline usage report failed on all-failed path request_id=%s: %s",
-                        route.request_id,
-                        result,
-                    )
+        await _flush_pending_usage_reports(config, pending_error_reports, route.request_id)
         raise
 
 
