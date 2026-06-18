@@ -1329,20 +1329,31 @@ async def run_streaming_with_fallback(
             on_attempt_failed=_on_attempt_failed,
             first_chunk_timeout_seconds=first_chunk_timeout,
         )
-    except BaseException:
+    except BaseException as exc:
         # No attempt yielded a first chunk: the request ends in an error
-        # response, which drops the queued BackgroundTasks — flush the
-        # per-attempt error reports inline so the platform still records every
-        # failed attempt. Then close the tool backend before propagating.
-        if pending_error_reports:
-            await asyncio.gather(
-                *(
-                    _report_platform_usage(config, attempt_id, outcome, usage, error_class)
-                    for attempt_id, outcome, usage, error_class in pending_error_reports
-                ),
-                return_exceptions=True,
-            )
-        await backend_stack.aclose()
+        # response, which drops the queued BackgroundTasks, so flush the
+        # per-attempt error reports inline to keep the platform's per-attempt
+        # record. Skip the flush on cancellation (reporting I/O must not delay
+        # teardown), and always close the tool backend before propagating, even
+        # if the flush raises or is interrupted.
+        try:
+            if pending_error_reports and not isinstance(exc, asyncio.CancelledError):
+                results = await asyncio.gather(
+                    *(
+                        _report_platform_usage(config, attempt_id, outcome, usage, error_class)
+                        for attempt_id, outcome, usage, error_class in pending_error_reports
+                    ),
+                    return_exceptions=True,
+                )
+                for result in results:
+                    if isinstance(result, BaseException):
+                        logger.warning(
+                            "Inline usage report failed on all-failed streaming path request_id=%s: %s",
+                            route.request_id,
+                            result,
+                        )
+        finally:
+            await backend_stack.aclose()
         raise
 
     if tool_mode:
