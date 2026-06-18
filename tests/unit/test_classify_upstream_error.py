@@ -6,6 +6,8 @@ import asyncio
 
 import httpx
 import pytest
+from anthropic import APIStatusError as AnthropicAPIStatusError
+from openai import APIStatusError as OpenAIAPIStatusError
 
 from gateway.api.routes._platform import _classify_upstream_error
 
@@ -57,3 +59,22 @@ def test_error_without_status_is_unknown_and_terminal() -> None:
     retryable, error_class = _classify_upstream_error(ValueError("no status here"))
     assert retryable is False
     assert error_class == "unknown"
+
+
+@pytest.mark.parametrize("sdk_error", [AnthropicAPIStatusError, OpenAIAPIStatusError])
+@pytest.mark.parametrize("status, retryable", [(404, True), (410, True), (400, False), (422, False)])
+def test_classifies_provider_sdk_status_errors(sdk_error: type, status: int, retryable: bool) -> None:
+    # any_llm propagates the provider SDK's own ``APIStatusError`` (it does not
+    # wrap upstream failures), and that exception exposes ``status_code``
+    # directly on itself. The other tests here use ``httpx.HTTPStatusError``,
+    # which only carries the code on ``.response`` — a shape that never reaches
+    # the classifier in production. Pin the classifier against the exception
+    # type providers actually raise so the direct-``status_code`` extraction
+    # path stays covered.
+    request = httpx.Request("POST", "http://upstream")
+    exc = sdk_error(str(status), response=httpx.Response(status, request=request), body=None)
+    assert getattr(exc, "status_code", None) == status  # guards the production exception shape
+
+    classified_retryable, error_class = _classify_upstream_error(exc)
+    assert classified_retryable is retryable
+    assert error_class == f"http_{status}"
