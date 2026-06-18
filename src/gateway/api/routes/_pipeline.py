@@ -1401,7 +1401,7 @@ async def run_platform_non_stream(
 
     # FastAPI BackgroundTasks only run after a *successful* response. When every
     # attempt fails the runner raises (502/504) and the queued usage reports are
-    # silently dropped — so the platform never records the failed attempts and
+    # silently dropped, so the platform never records the failed attempts and
     # can't fire its fallback-exhausted accounting. Keep the background task for
     # the success-response path (non-blocking), but also stash the error reports
     # so they can be flushed inline if the request ends in an exception.
@@ -1445,15 +1445,25 @@ async def run_platform_non_stream(
     except HTTPException:
         # An error response drops the queued BackgroundTasks, so send the
         # per-attempt error reports inline before propagating. The background
-        # copies never run on this path, so there is no double-report.
+        # copies never run on this path, so there is no double-report. This
+        # branch only catches HTTPException (what the runner raises on the
+        # all-failed path); a CancelledError propagates without doing reporting
+        # I/O during teardown.
         if pending_error_reports:
-            await asyncio.gather(
+            results = await asyncio.gather(
                 *(
                     _report_platform_usage(config, attempt_id, outcome, usage, error_class)
                     for attempt_id, outcome, usage, error_class in pending_error_reports
                 ),
                 return_exceptions=True,
             )
+            for result in results:
+                if isinstance(result, BaseException):
+                    logger.warning(
+                        "Inline usage report failed on all-failed path request_id=%s: %s",
+                        route.request_id,
+                        result,
+                    )
         raise
 
 

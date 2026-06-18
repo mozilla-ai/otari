@@ -359,7 +359,7 @@ def test_platform_mode_reports_every_attempt_when_all_fail(
 ) -> None:
     """When every attempt fails, each attempt's error outcome is still reported
     back to the platform. The terminal 502 response drops the queued
-    BackgroundTasks, so the reports must be sent inline — otherwise total
+    BackgroundTasks, so the reports must be sent inline; otherwise total
     outages leave no per-attempt record and the platform can't account for a
     fully-exhausted fallback chain.
     """
