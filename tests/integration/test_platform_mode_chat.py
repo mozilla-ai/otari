@@ -573,7 +573,7 @@ def test_platform_mode_streaming_reports_every_attempt_when_all_fail(
 ) -> None:
     """When every streaming attempt fails before its first chunk, each attempt's
     error outcome is still reported back to the platform. The terminal 502 drops
-    the queued BackgroundTasks, so the reports must be sent inline — otherwise a
+    the queued BackgroundTasks, so the reports must be sent inline; otherwise a
     total streaming outage leaves no per-attempt record.
     """
     usage_reports: list[dict[str, Any]] = []
