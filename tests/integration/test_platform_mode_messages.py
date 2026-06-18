@@ -403,12 +403,16 @@ def test_platform_mode_reports_every_attempt_when_all_fail(
     )
 
     assert response.status_code == 502
-    # Both failed attempts were reported as errors, despite the terminal 502.
-    reported = {(r["correlation_id"], r["status"], r.get("error_class")) for r in usage_reports}
-    assert reported == {
+    # Each failed attempt is reported exactly once, despite the terminal 502. A
+    # set would mask a double-report (the dropped-then-also-flushed bug), so pin
+    # the exact count and contents: the inline flush and the dropped background
+    # copies must not both fire.
+    assert len(usage_reports) == 2
+    reported = sorted((r["correlation_id"], r["status"], r.get("error_class")) for r in usage_reports)
+    assert reported == [
         ("att-1", "error", "http_500"),
         ("att-2", "error", "http_500"),
-    }
+    ]
 
 
 def test_platform_mode_non_retryable_error_raises_immediately(
