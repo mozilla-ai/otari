@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Coroutine
 from typing import Annotated, Any
 
 import httpx
@@ -17,7 +17,7 @@ from pydantic import Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
-from gateway.api.routes._helpers import latest_user_text
+from gateway.api.routes._helpers import build_remember_messages, inject_memory_facts, latest_user_text
 from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
     ALL_PROVIDERS_FAILED_DETAIL,
@@ -39,7 +39,11 @@ from gateway.api.routes._pipeline import (
     run_standalone_non_stream,
     run_streaming_with_fallback,
 )
-from gateway.api.routes._platform import ResolvedAttempt
+from gateway.api.routes._platform import (
+    ResolvedAttempt,
+    _recall_platform_memory,
+    _remember_platform_memory,
+)
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -233,6 +237,53 @@ _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in 
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
 
+def _schedule_memory_remember(
+    background_tasks: BackgroundTasks,
+    config: GatewayConfig,
+    user_token: str | None,
+    messages: list[dict[str, Any]],
+    completion: ChatCompletion,
+) -> None:
+    """Queue a best-effort, fire-and-forget write of the latest turn to memory.
+
+    A no-op when memory is off (``user_token`` is None) or there is nothing to store.
+    """
+    if not user_token:
+        return
+    try:
+        assistant_text = completion.choices[0].message.content or ""
+    except (AttributeError, IndexError, TypeError):
+        assistant_text = ""
+    remember_messages = build_remember_messages(messages, assistant_text)
+    if remember_messages:
+        background_tasks.add_task(_remember_platform_memory, config, user_token, remember_messages)
+
+
+def _chat_chunk_text(chunk: Any) -> str | None:
+    """Extract the assistant content delta from a streamed chat completion chunk."""
+    try:
+        return chunk.choices[0].delta.content  # type: ignore[no-any-return]
+    except (AttributeError, IndexError, TypeError):
+        return None
+
+
+def _streaming_memory_remember(
+    config: GatewayConfig,
+    user_token: str | None,
+    messages: list[dict[str, Any]],
+) -> Callable[[str], Coroutine[Any, Any, None]] | None:
+    """Build the on-stream-complete memory writer, or None when memory is off."""
+    if not user_token:
+        return None
+
+    async def _remember(assistant_text: str) -> None:
+        remember_messages = build_remember_messages(messages, assistant_text)
+        if remember_messages:
+            await _remember_platform_memory(config, user_token, remember_messages)
+
+    return _remember
+
+
 @router.post("/completions", response_model=None)
 async def chat_completions(
     raw_request: Request,
@@ -310,6 +361,18 @@ async def chat_completions(
         tools_header=request.tools_header,
     )
 
+    # Memory recall (platform mode, best-effort). Inject recalled facts into the system
+    # message before dispatch so every downstream path (stream/non-stream, tool/no-tool)
+    # sees them. A failure or a disabled workspace yields no facts and never blocks chat.
+    memory_user_token = ctx.user_token if (config.memory_enabled and ctx.hybrid_mode) else None
+    if memory_user_token:
+        try:
+            recalled = await _recall_platform_memory(config, memory_user_token, latest_user_text(request.messages))
+            if recalled:
+                request.messages = inject_memory_facts(request.messages, recalled)
+        except Exception:  # noqa: BLE001 - recall is best-effort and must never break dispatch
+            logger.warning("Memory recall failed; proceeding without recalled facts", exc_info=True)
+
     request_fields = _strip_gateway_fields(
         request.model_dump(exclude_unset=True),
         tools_extracted=tool_ctx.tools_extracted,
@@ -346,6 +409,8 @@ async def chat_completions(
                     rate_limit_info=ctx.rate_limit_info,
                     tool_ctx=tool_ctx,
                     session_label=request.session_label,
+                    extract_stream_text=_chat_chunk_text,
+                    on_memory_settled=_streaming_memory_remember(config, memory_user_token, request.messages),
                 )
             except HTTPException:
                 raise
@@ -414,7 +479,7 @@ async def chat_completions(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Internal error: missing route context",
             )
-        return await run_platform_non_stream(
+        completion = await run_platform_non_stream(
             adapter=_ADAPTER,
             route=route,
             base_request_fields=request_fields,
@@ -425,6 +490,8 @@ async def chat_completions(
             rate_limit_info=ctx.rate_limit_info,
             session_label=request.session_label,
         )
+        _schedule_memory_remember(background_tasks, config, memory_user_token, request.messages, completion)
+        return completion
 
     resolved = resolve_dispatch_provider(ctx, config, request.model)
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
