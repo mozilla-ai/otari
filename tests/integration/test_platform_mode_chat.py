@@ -1211,3 +1211,149 @@ def test_platform_mode_web_search_empty_request_list_keeps_workspace_policy(
     assert merged is not None
     # Empty per-request list did not wipe the workspace allow-list.
     assert merged["allowed_domains"] == ["docs.python.org"]
+
+
+def _memory_resolve_response() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "request_id": "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68",
+            "fallback_enabled": False,
+            "attempts": [
+                {
+                    "attempt_id": "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68",
+                    "position": 0,
+                    "provider": "openai",
+                    "model": "gpt-4o-mini",
+                    "api_key": "sk-platform-key",
+                    "api_base": "https://api.openai.com/v1",
+                    "managed": True,
+                }
+            ],
+        },
+    )
+
+
+def _memory_completion(content: str) -> ChatCompletion:
+    return ChatCompletion(
+        id="chatcmpl-platform",
+        object="chat.completion",
+        created=1700000000,
+        model="gpt-4o-mini",
+        choices=[
+            Choice(
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content=content),
+                finish_reason="stop",
+            )
+        ],
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=7, total_tokens=17),
+    )
+
+
+def test_platform_mode_memory_disabled_makes_no_memory_calls(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    memory_calls: list[str] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _memory_resolve_response()
+        if "/gateway/memory/" in url:
+            memory_calls.append(url)
+            return httpx.Response(200, json={"facts": []})
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return _memory_completion("hello")
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    # memory_enabled defaults to False, so neither recall nor remember is called.
+    assert memory_calls == []
+
+
+def test_platform_mode_memory_recall_injects_and_remembers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+    app = create_app(
+        GatewayConfig(
+            mode="platform",
+            platform={"base_url": "http://platform.test/api/v1"},
+            memory_enabled=True,
+        )
+    )
+
+    recall_bodies: list[dict[str, Any]] = []
+    remember_bodies: list[dict[str, Any]] = []
+    dispatched_messages: dict[str, Any] = {}
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _memory_resolve_response()
+        if url.endswith("/gateway/memory/recall"):
+            recall_bodies.append(body)
+            return httpx.Response(200, json={"facts": ["the user prefers concise answers"]})
+        if url.endswith("/gateway/memory/remember"):
+            remember_bodies.append(body)
+            return httpx.Response(204)
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        dispatched_messages["messages"] = kwargs.get("messages")
+        return _memory_completion("ok, noted")
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [{"role": "user", "content": "remember I like short answers"}],
+            },
+            headers={"Authorization": "Bearer user_test_token"},
+        )
+
+    reset_config()
+    reset_db()
+
+    assert response.status_code == 200
+    # Recall is queried with the latest user text before dispatch.
+    assert recall_bodies == [{"query": "remember I like short answers"}]
+    # The recalled fact is injected as a system message the provider sees.
+    system_messages = [
+        m for m in (dispatched_messages["messages"] or []) if isinstance(m, dict) and m.get("role") == "system"
+    ]
+    assert system_messages
+    assert "the user prefers concise answers" in system_messages[0]["content"]
+    # After the completion the new turn is stored fire-and-forget.
+    assert remember_bodies == [
+        {
+            "messages": [
+                {"role": "user", "content": "remember I like short answers"},
+                {"role": "assistant", "content": "ok, noted"},
+            ]
+        }
+    ]
