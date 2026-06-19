@@ -123,6 +123,45 @@ def latest_user_text(messages: Sequence[Any]) -> str:
     return ""
 
 
+MEMORY_FACTS_HEADER = (
+    "Relevant memory about the user (use when helpful; do not mention that you are recalling memory):"
+)
+
+
+def inject_memory_facts(messages: list[dict[str, Any]], facts: list[str]) -> list[dict[str, Any]]:
+    """Prepend or extend the system message with recalled memory facts.
+
+    Mirrors :func:`gateway.services.mcp_loop.inject_purpose_hints`: augments an existing
+    system message, or inserts one when absent. Returns a new list; the input is not
+    mutated. A no-op when ``facts`` is empty.
+    """
+    if not facts:
+        return messages
+    block = "\n".join([MEMORY_FACTS_HEADER, *(f"- {fact}" for fact in facts)])
+    out = list(messages)
+    if out and isinstance(out[0], dict) and out[0].get("role") == "system":
+        existing = out[0].get("content") or ""
+        out[0] = {**out[0], "content": f"{existing}\n\n{block}" if existing else block}
+    else:
+        out.insert(0, {"role": "system", "content": block})
+    return out
+
+
+def build_remember_messages(messages: Sequence[Any], assistant_text: str) -> list[dict[str, str]]:
+    """Build the minimal exchange to store: the latest user turn plus the assistant reply.
+
+    Keeping it to the new turn (rather than the whole history) avoids re-extracting facts
+    the platform has already processed. Returns an empty list when there is nothing to store.
+    """
+    out: list[dict[str, str]] = []
+    user_text = latest_user_text(messages)
+    if user_text:
+        out.append({"role": "user", "content": user_text})
+    if assistant_text:
+        out.append({"role": "assistant", "content": assistant_text})
+    return out
+
+
 async def apply_input_guardrails(
     guardrails: list[GuardrailConfig] | None,
     input_text: str,
