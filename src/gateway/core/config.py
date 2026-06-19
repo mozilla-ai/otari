@@ -192,6 +192,19 @@ class GatewayConfig(BaseSettings):
         default=True,
         description="Enable the /v1/files upload/storage endpoints (standalone mode).",
     )
+    memory_enabled: bool = Field(
+        default=False,
+        description=(
+            "Master switch for persistent memory (platform mode). When on, the gateway "
+            "recalls facts from the platform before a completion and stores facts after. "
+            "Per-workspace enablement is still controlled by the platform; this only gates "
+            "whether the gateway makes the calls at all. Recall runs before dispatch, so a "
+            "slow memory service adds up to its timeout to time-to-first-token; the storing "
+            "call after a completion is fire-and-forget. Both timeouts are tunable via the "
+            "platform settings 'memory_recall_timeout_ms' (default 2000) and "
+            "'memory_remember_timeout_ms' (default 10000), or their PLATFORM_* env aliases."
+        ),
+    )
     files_backend: str = Field(
         default="local",
         description="Blob backend for uploaded file bytes: 'local' (filesystem). Future: 's3', 'gcs'.",
@@ -394,6 +407,12 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
         "PLATFORM_RESOLVE_TIMEOUT_MS": ("resolve_timeout_ms", int),
         "PLATFORM_USAGE_TIMEOUT_MS": ("usage_timeout_ms", int),
         "PLATFORM_USAGE_MAX_RETRIES": ("usage_max_retries", int),
+        # Best-effort memory timeouts (platform mode). Recall is on the hot path
+        # (added to time-to-first-token); remember is fire-and-forget after the
+        # completion. Both fall back to their defaults on a missing or invalid
+        # value (see _coerce_timeout_ms in routes/_platform.py).
+        "PLATFORM_MEMORY_RECALL_TIMEOUT_MS": ("memory_recall_timeout_ms", int),
+        "PLATFORM_MEMORY_REMEMBER_TIMEOUT_MS": ("memory_remember_timeout_ms", int),
         # Per-attempt budget for streaming fallback: how long to wait for the
         # first chunk from each attempt before treating it as hung and moving
         # to the next entry in the routing policy. Tunable per deployment;

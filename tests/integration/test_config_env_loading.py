@@ -162,6 +162,8 @@ def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setenv("PLATFORM_RESOLVE_TIMEOUT_MS", "1234")
     monkeypatch.setenv("PLATFORM_USAGE_TIMEOUT_MS", "2345")
     monkeypatch.setenv("PLATFORM_USAGE_MAX_RETRIES", "7")
+    monkeypatch.setenv("PLATFORM_MEMORY_RECALL_TIMEOUT_MS", "1500")
+    monkeypatch.setenv("PLATFORM_MEMORY_REMEMBER_TIMEOUT_MS", "8000")
 
     config = load_config(str(config_file))
 
@@ -170,6 +172,8 @@ def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.
     assert config.platform["resolve_timeout_ms"] == 1234
     assert config.platform["usage_timeout_ms"] == 2345
     assert config.platform["usage_max_retries"] == 7
+    assert config.platform["memory_recall_timeout_ms"] == 1500
+    assert config.platform["memory_remember_timeout_ms"] == 8000
 
 
 def test_load_config_sets_default_platform_base_url_when_token_is_set(
