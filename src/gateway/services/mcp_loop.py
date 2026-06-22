@@ -246,7 +246,7 @@ async def mcp_tool_loop(
     upstream ``acompletion`` call returns successfully. Callers use it to lock
     in the chosen provider — once the model has produced *any* assistant
     message, the conversation state is provider-specific and subsequent
-    failures must not silently swap providers. See the connected-mode attempt
+    failures must not silently swap providers. See the hybrid-mode attempt
     loop in :mod:`gateway.api.routes.chat` for the consumer.
     """
     messages = list(completion_kwargs.get("messages") or [])

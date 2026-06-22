@@ -148,13 +148,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 def _validate_platform_config(config: GatewayConfig) -> None:
     config.validate_mode_selection()
-    if not config.is_connected_mode:
+    if not config.is_hybrid_mode:
         return
     if not config.platform.get("base_url"):
-        msg = "platform.base_url is required when connected mode is active"
+        msg = "platform.base_url is required when hybrid mode is active"
         raise ValueError(msg)
     if config.providers:
-        msg = "Local provider credentials are not supported in connected mode"
+        msg = "Local provider credentials are not supported in hybrid mode"
         raise ValueError(msg)
 
 
@@ -162,7 +162,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         log_writer: LogWriter
-        if config.is_connected_mode:
+        if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
             init_db(config)

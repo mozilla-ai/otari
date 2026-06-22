@@ -22,7 +22,7 @@ def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
     app = create_app(
         GatewayConfig(
-            mode="connected",
+            mode="hybrid",
             platform={"base_url": "http://platform.test/api/v1"},
         )
     )
@@ -34,7 +34,7 @@ def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     reset_db()
 
 
-def test_connected_mode_requires_authorization_header(platform_client: TestClient) -> None:
+def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) -> None:
     response = platform_client.post(
         "/v1/chat/completions",
         json={"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
@@ -44,7 +44,7 @@ def test_connected_mode_requires_authorization_header(platform_client: TestClien
     assert response.json() == {"detail": "Missing authentication token"}
 
 
-def test_connected_mode_maps_resolve_unauthorized(
+def test_hybrid_mode_maps_resolve_unauthorized(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -68,7 +68,7 @@ def test_connected_mode_maps_resolve_unauthorized(
     assert response.json() == {"detail": "Invalid user token"}
 
 
-def test_connected_mode_sets_correlation_id_and_reports_usage(
+def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -145,7 +145,7 @@ def test_connected_mode_sets_correlation_id_and_reports_usage(
     ]
 
 
-def test_connected_mode_accepts_legacy_resolve_shape(
+def test_hybrid_mode_accepts_legacy_resolve_shape(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -211,7 +211,7 @@ def test_connected_mode_accepts_legacy_resolve_shape(
     assert usage_reports[0]["status"] == "success"
 
 
-def test_connected_mode_maps_provider_timeout(
+def test_hybrid_mode_maps_provider_timeout(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -259,7 +259,7 @@ def test_connected_mode_maps_provider_timeout(
     assert response.json() == {"detail": "LLM provider timeout"}
 
 
-def test_connected_mode_propagates_resolve_rate_limit_retry_after(
+def test_hybrid_mode_propagates_resolve_rate_limit_retry_after(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -284,7 +284,7 @@ def test_connected_mode_propagates_resolve_rate_limit_retry_after(
     assert response.json() == {"detail": "Rate limited"}
 
 
-def test_connected_mode_usage_retries_only_transient_failures(
+def test_hybrid_mode_usage_retries_only_transient_failures(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -349,7 +349,7 @@ def test_connected_mode_usage_retries_only_transient_failures(
     assert len(usage_calls) == 2
 
 
-def test_connected_mode_maps_resolve_validation_error_to_bad_gateway(
+def test_hybrid_mode_maps_resolve_validation_error_to_bad_gateway(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -378,7 +378,7 @@ def test_connected_mode_maps_resolve_validation_error_to_bad_gateway(
 # ---------------------------------------------------------------------------
 
 
-def test_connected_mode_streaming_falls_through_on_first_attempt_failure(
+def test_hybrid_mode_streaming_falls_through_on_first_attempt_failure(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -504,7 +504,7 @@ def test_connected_mode_streaming_falls_through_on_first_attempt_failure(
     assert error_reports[0]["correlation_id"] == "stream-att-anthropic"
 
 
-def test_connected_mode_streaming_returns_502_when_all_attempts_fail(
+def test_hybrid_mode_streaming_returns_502_when_all_attempts_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -567,7 +567,7 @@ def test_connected_mode_streaming_returns_502_when_all_attempts_fail(
     assert response.json() == {"detail": "All upstream providers failed"}
 
 
-def test_connected_mode_streaming_reports_every_attempt_when_all_fail(
+def test_hybrid_mode_streaming_reports_every_attempt_when_all_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -723,7 +723,7 @@ def _two_attempt_resolve_response(*, request_id: str) -> httpx.Response:
     )
 
 
-def test_connected_mode_tool_loop_falls_through_pre_lock_in(
+def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -792,7 +792,7 @@ def test_connected_mode_tool_loop_falls_through_pre_lock_in(
     assert error_reports[0]["correlation_id"] == "tool-att-anthropic"
 
 
-def test_connected_mode_tool_loop_no_fallback_after_lock_in(
+def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -862,7 +862,7 @@ def test_connected_mode_tool_loop_no_fallback_after_lock_in(
     assert calls == ["anthropic:claude-haiku-4-5", "anthropic:claude-haiku-4-5"]
 
 
-def test_connected_mode_tool_loop_streaming_falls_through_pre_lock_in(
+def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -939,7 +939,7 @@ def test_connected_mode_tool_loop_streaming_falls_through_pre_lock_in(
 # Web-search platform policy resolution
 # ---------------------------------------------------------------------------
 #
-# In connected mode an `otari_web_search` request consults the platform's
+# In hybrid mode an `otari_web_search` request consults the platform's
 # `/gateway/web-search/resolve` endpoint: if web search is disabled for the
 # workspace the gateway 403s; otherwise the resolved workspace config is
 # merged into the tool entry (per-request values win) before the backend runs.
@@ -997,7 +997,7 @@ def _single_attempt_resolve_response(*, request_id: str) -> httpx.Response:
     )
 
 
-def test_connected_mode_web_search_403_when_disabled(
+def test_hybrid_mode_web_search_403_when_disabled(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1030,7 +1030,7 @@ def test_connected_mode_web_search_403_when_disabled(
     assert response.json() == {"detail": "web search is not enabled for this workspace"}
 
 
-def test_connected_mode_web_search_merges_workspace_config(
+def test_hybrid_mode_web_search_merges_workspace_config(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1103,7 +1103,7 @@ def test_connected_mode_web_search_merges_workspace_config(
     assert _FakeWebSearchBackend.last_auth_token is None
 
 
-def test_connected_mode_web_search_forwards_token_to_platform_backend(
+def test_hybrid_mode_web_search_forwards_token_to_platform_backend(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1157,7 +1157,7 @@ def test_connected_mode_web_search_forwards_token_to_platform_backend(
     assert _FakeWebSearchBackend.last_auth_token == "gw_test_token"
 
 
-def test_connected_mode_web_search_empty_request_list_keeps_workspace_policy(
+def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

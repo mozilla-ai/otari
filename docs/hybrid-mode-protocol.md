@@ -1,6 +1,6 @@
-# Connected-mode protocol
+# Hybrid-mode protocol
 
-When Otari runs in **connected mode** (`OTARI_AI_TOKEN` is set), it
+When Otari runs in **hybrid mode** (`OTARI_AI_TOKEN` is set), it
 delegates per-request authorization and provider-credential resolution to a
 peer platform service over HTTP. This document describes the wire contract
 Otari expects from that peer.
@@ -142,7 +142,7 @@ multi-attempt shape.
 ## MCP server resolution
 
 Called only when a request references one or more workspace-scoped MCP server
-ids (a connected-only feature). Otari swaps those ids for the inline server
+ids (a hybrid-only feature). Otari swaps those ids for the inline server
 configs it needs to open the connections.
 
 ### Request
@@ -337,7 +337,7 @@ flag.
 
 | Env var | Default | Notes |
 |---|---|---|
-| `OTARI_AI_TOKEN` | — | Setting this enables connected mode. |
+| `OTARI_AI_TOKEN` | — | Setting this enables hybrid mode. |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Per-resolve timeout. |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |

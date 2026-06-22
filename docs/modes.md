@@ -90,4 +90,4 @@ POST {base_url}/gateway/mcp-servers/resolve
 
 The platform returns server configurations (URL, auth token, allowed tools).
 
-For the full wire-level protocol specification, see [connected-mode-protocol.md](connected-mode-protocol.md).
+For the full wire-level protocol specification, see [hybrid-mode-protocol.md](hybrid-mode-protocol.md).

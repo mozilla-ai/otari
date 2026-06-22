@@ -79,7 +79,7 @@ class SandboxBackend:
         self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
         self._timeout_s = timeout_s
         # Optional bearer credential forwarded as `Authorization: Bearer` on every
-        # call to the sandbox backend. Set in connected mode so the platform-hosted
+        # call to the sandbox backend. Set in hybrid mode so the platform-hosted
         # /v1/sandbox proxy (which authenticates the caller's workspace token) admits
         # the request and derives tenancy from it. Unset (and unsent) when the
         # backend is a standalone exec-service that needs no auth.

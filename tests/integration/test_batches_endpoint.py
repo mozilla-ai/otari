@@ -405,15 +405,15 @@ def test_retrieve_batch_results_logs_usage(
 
 
 # ---------------------------------------------------------------------------
-# Connected mode — batch endpoints not registered
+# Hybrid mode — batch endpoints not registered
 # ---------------------------------------------------------------------------
 
 
-def test_batch_endpoints_not_in_connected_mode(
+def test_batch_endpoints_not_in_hybrid_mode(
     postgres_url: str,
     monkeypatch: Any,
 ) -> None:
-    """Batch endpoints return 404 in connected mode."""
+    """Batch endpoints return 404 in hybrid mode."""
     from gateway.core.config import GatewayConfig
     from gateway.main import create_app
 
@@ -435,6 +435,6 @@ def test_batch_endpoints_not_in_connected_mode(
             json=_create_batch_body(),
             headers={"Authorization": "Bearer test-master-key"},
         )
-        # In connected mode, batch routes are not registered, so we get 404
+        # In hybrid mode, batch routes are not registered, so we get 404
         # (chat is always registered but batches are standalone-only)
         assert resp.status_code == 404

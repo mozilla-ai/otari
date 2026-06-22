@@ -1,6 +1,6 @@
 # Deployment
 
-Use this guide after the [Quickstart](quickstart.md). The quickstart gets a standalone Otari running locally and walks through the first authenticated request. This page picks up from there with deployment-specific setup: connected mode, optional services, and environment-based configuration.
+Use this guide after the [Quickstart](quickstart.md). The quickstart gets a standalone Otari running locally and walks through the first authenticated request. This page picks up from there with deployment-specific setup: hybrid mode, optional services, and environment-based configuration.
 
 Otari is distributed as a Docker image on [Docker Hub](https://hub.docker.com/r/mzdotai/otari).
 
@@ -21,7 +21,7 @@ When turning that setup into a longer-lived deployment:
 
 ## Connect to otari.ai
 
-In connected mode, Otari delegates provider routing, authentication, and usage tracking to [otari.ai](https://otari.ai). No local database or provider credentials are needed.
+In hybrid mode, Otari delegates provider routing, authentication, and usage tracking to [otari.ai](https://otari.ai). No local database or provider credentials are needed.
 
 ### 1. Create a minimal config file
 

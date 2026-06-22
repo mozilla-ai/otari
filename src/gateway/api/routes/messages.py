@@ -275,7 +275,7 @@ async def create_message(
     """Anthropic Messages API-compatible endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-    web_search in both standalone mode and connected mode. Connected-mode
+    web_search in both standalone mode and hybrid mode. Hybrid-mode
     requests resolve credentials via the platform service and (for
     non-tool-loop requests) get multi-attempt fallback across the resolved
     route. Tool-loop requests collapse to a single attempt — once
@@ -348,9 +348,9 @@ async def create_message(
         # Tool-loop streaming collapses to a single attempt for this format
         # (chat already runs tool loops through the multi-attempt fallback;
         # wiring the same here is a planned follow-up).
-        if ctx.connected_mode and not tool_ctx.use_tool_loop:
+        if ctx.hybrid_mode and not tool_ctx.use_tool_loop:
             route = ctx.route
-            assert route is not None  # guaranteed by the connected-mode preamble
+            assert route is not None  # guaranteed by the hybrid-mode preamble
             if not route.attempts:
                 logger.error("Platform returned empty attempts list request_id=%s", route.request_id)
                 raise _anthropic_error(
@@ -385,15 +385,15 @@ async def create_message(
                     status.HTTP_502_BAD_GATEWAY,
                 ) from exc
 
-        # Standalone (or connected + tool-loop): single attempt streaming.
+        # Standalone (or hybrid + tool-loop): single attempt streaming.
         platform_correlation_id: str | None = None
         platform_request_id: str | None = None
-        if ctx.connected_mode:
-            # Tool-loop connected path: build call_kwargs from the primary
+        if ctx.hybrid_mode:
+            # Tool-loop hybrid path: build call_kwargs from the primary
             # attempt and keep the platform contract (X-Correlation-ID,
             # X-Otari-Request-ID, usage reported via _report_platform_usage).
             route = ctx.route
-            assert route is not None  # guaranteed by the connected-mode preamble
+            assert route is not None  # guaranteed by the hybrid-mode preamble
             if not route.attempts:
                 raise _anthropic_error(
                     _ERR_API,
@@ -424,9 +424,9 @@ async def create_message(
     # ------------------------------------------------------------------
     # Non-streaming path
     # ------------------------------------------------------------------
-    if ctx.connected_mode:
+    if ctx.hybrid_mode:
         route = ctx.route
-        assert route is not None  # guaranteed by the connected-mode preamble
+        assert route is not None  # guaranteed by the hybrid-mode preamble
         try:
             result = await run_platform_non_stream(
                 adapter=_ADAPTER,
@@ -505,11 +505,11 @@ async def count_message_tokens(
 
     Returns ``{"input_tokens": N}`` without contacting an upstream provider:
     counting is local, so there is no budget reservation, pricing, or usage
-    logging. Authentication mirrors :func:`create_message` — connected mode
+    logging. Authentication mirrors :func:`create_message` — hybrid mode
     resolves the caller's token against the platform, standalone mode validates
     the API key — so the endpoint is not an open token-counting oracle.
     """
-    if config.is_connected_mode:
+    if config.is_hybrid_mode:
         # Resolve against the platform purely to authenticate the caller (same
         # as create_message); the routing plan is discarded since counting is
         # local. Without this, any non-empty bearer string would be accepted.

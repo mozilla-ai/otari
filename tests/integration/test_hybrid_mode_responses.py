@@ -1,6 +1,6 @@
-"""Connected-mode integration tests for /v1/responses.
+"""Hybrid-mode integration tests for /v1/responses.
 
-Mirror of :mod:`tests.integration.test_connected_mode_messages` for the OpenAI
+Mirror of :mod:`tests.integration.test_hybrid_mode_messages` for the OpenAI
 Responses endpoint. Tool-loop platform requests are tested only in the
 single-attempt collapsed form; pre-lock-in fallback for tool-loop is gated on
 ``on_first_response`` landing across the codebase.
@@ -29,7 +29,7 @@ def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "gw_test_token")
     app = create_app(
         GatewayConfig(
-            mode="connected",
+            mode="hybrid",
             platform={"base_url": "http://platform.test/api/v1"},
         )
     )
@@ -92,7 +92,7 @@ def _response_object() -> Response:
     )
 
 
-def test_connected_mode_requires_authorization_header(platform_client: TestClient) -> None:
+def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) -> None:
     response = platform_client.post(
         "/v1/responses",
         json={"model": "openai:gpt-4o-mini", "input": "hi"},
@@ -102,7 +102,7 @@ def test_connected_mode_requires_authorization_header(platform_client: TestClien
     assert response.json() == {"detail": "Missing authentication token"}
 
 
-def test_connected_mode_sets_correlation_id_and_reports_usage(
+def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -147,7 +147,7 @@ def test_connected_mode_sets_correlation_id_and_reports_usage(
     ]
 
 
-def test_connected_mode_falls_through_on_first_attempt_failure(
+def test_hybrid_mode_falls_through_on_first_attempt_failure(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -199,7 +199,7 @@ def test_connected_mode_falls_through_on_first_attempt_failure(
     assert "success" in outcomes
 
 
-def test_connected_mode_returns_502_when_all_attempts_fail(
+def test_hybrid_mode_returns_502_when_all_attempts_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -239,11 +239,11 @@ def test_connected_mode_returns_502_when_all_attempts_fail(
     assert response.json() == {"detail": "All upstream providers failed"}
 
 
-def test_connected_mode_provider_without_responses_support_returns_400(
+def test_hybrid_mode_provider_without_responses_support_returns_400(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ``SUPPORTS_RESPONSES`` provider guard must still fire in connected
+    """The ``SUPPORTS_RESPONSES`` provider guard must still fire in hybrid
     mode — once credentials are resolved, the guard checks the primary
     attempt's provider before any upstream call.
     """
@@ -323,7 +323,7 @@ def _two_attempt_resolve_response_openai_first(*, request_id: str) -> httpx.Resp
     )
 
 
-def test_connected_mode_tool_loop_falls_through_pre_lock_in(
+def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -373,7 +373,7 @@ def test_connected_mode_tool_loop_falls_through_pre_lock_in(
     assert error_reports[0]["correlation_id"] == "tool-att-primary"
 
 
-def test_connected_mode_tool_loop_no_fallback_after_lock_in(
+def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -451,14 +451,14 @@ def test_connected_mode_tool_loop_no_fallback_after_lock_in(
     assert calls == ["sk-openai-broken", "sk-openai-broken"]
 
 
-# ---------- connected-mode tool-loop streaming contract ----------
+# ---------- hybrid-mode tool-loop streaming contract ----------
 
 
-def test_connected_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
+def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Single-attempt tool-loop streaming in connected mode must honor the
+    """Single-attempt tool-loop streaming in hybrid mode must honor the
     platform contract: X-Correlation-ID + X-Otari-Request-ID headers + usage
     report via _report_platform_usage on complete. Regression test for the
     issue where ``_stream_responses`` was the standalone helper and silently
@@ -518,11 +518,11 @@ def test_connected_mode_tool_loop_streaming_sets_correlation_id_and_reports_usag
                 pass
 
     success_reports = [r for r in usage_reports if r.get("status") == "success"]
-    assert success_reports, "expected a success usage report for the connected-mode tool-loop stream"
+    assert success_reports, "expected a success usage report for the hybrid-mode tool-loop stream"
     assert success_reports[0]["correlation_id"] == "stream-att-1"
 
 
-def test_connected_mode_supports_responses_guard_checks_every_attempt(
+def test_hybrid_mode_supports_responses_guard_checks_every_attempt(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

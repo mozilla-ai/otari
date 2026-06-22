@@ -19,15 +19,15 @@ Scope: entire repo.
 Read these together before changing request behavior, the flow spans several files.
 
 ### Two runtime modes
-- Mode is derived, not configured directly: `GatewayConfig.is_connected_mode` / `effective_mode` (`src/gateway/core/config.py`) return `connected` when a platform token (`OTARI_AI_TOKEN`, plus legacy aliases) is set, else `standalone`. Setting `OTARI_MODE=connected` (legacy value `platform`; legacy alias `GATEWAY_MODE`) without a token fails at startup.
+- Mode is derived, not configured directly: `GatewayConfig.is_hybrid_mode` / `effective_mode` (`src/gateway/core/config.py`) return `hybrid` when a platform token (`OTARI_AI_TOKEN`, plus legacy aliases) is set, else `standalone`. Setting `OTARI_MODE=hybrid` (legacy value `platform`; legacy alias `GATEWAY_MODE`) without a token fails at startup.
 - **Standalone**: provider credentials come from the `providers:` block in `config.yml`; users/keys/budgets/usage live in the local DB. All routers are registered.
-- **Connected**: per-request provider credentials are resolved from the platform service (otari.ai); local DB/user/budget management is skipped and usage is reported upstream. `register_routers()` (`src/gateway/api/main.py`) only mounts `chat`, `messages`, `responses`, and `health`; management routers (keys/users/budgets/pricing/usage/etc.) are standalone-only.
+- **Hybrid**: per-request provider credentials are resolved from the platform service (otari.ai); local DB/user/budget management is skipped and usage is reported upstream. `register_routers()` (`src/gateway/api/main.py`) only mounts `chat`, `messages`, `responses`, and `health`; management routers (keys/users/budgets/pricing/usage/etc.) are standalone-only.
 
 ### Request lifecycle (chat completions)
 1. App + middleware: `src/gateway/main.py` builds the FastAPI app, adds CORS + a security-headers middleware, and enforces auth on every path except `_PUBLIC_PREFIXES` (`/health`).
 2. Auth: `src/gateway/api/deps.py` extracts the key from `Otari-Key` (canonical `API_KEY_HEADER` in `core/config.py`), the legacy `AnyLLM-Key`/`X-AnyLLM-Key` aliases, or `Authorization: Bearer`; validates the SHA-256 hash against the `api_keys` table, or matches the master key.
 3. Route handler: `src/gateway/api/routes/chat.py` resolves the billed user, runs budget checks (standalone) or resolves platform credentials, applies input guardrails, and extracts gateway-managed tools.
-4. Dispatch: the provider/model is split with `AnyLLM.split_model_provider(...)` and the call is made via `acompletion(...)` from `any_llm`. Connected mode walks multiple resolved attempts with fallback (`src/gateway/api/routes/_platform.py`, streaming in `src/gateway/streaming.py`).
+4. Dispatch: the provider/model is split with `AnyLLM.split_model_provider(...)` and the call is made via `acompletion(...)` from `any_llm`. Hybrid mode walks multiple resolved attempts with fallback (`src/gateway/api/routes/_platform.py`, streaming in `src/gateway/streaming.py`).
 5. Usage + budget reconciliation: standalone writes a `UsageLog` row via the log writer and reconciles spend; platform reports usage upstream.
 
 ### Budget enforcement

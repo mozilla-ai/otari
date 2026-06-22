@@ -1,4 +1,4 @@
-"""Connected-mode shared infrastructure.
+"""Hybrid-mode shared infrastructure.
 
 Holds the resolved-route Pydantic types, the generic ``run_platform_attempts``
 runner that the chat / messages / responses endpoints all use for multi-attempt
@@ -54,7 +54,7 @@ _USAGE_NON_RETRYABLE_STATUS_CODES = {401, 402, 404, 409, 422}
 _FALLBACK_RETRYABLE_STATUS_CODES = {401, 403, 404, 405, 408, 409, 410, 429, 500, 502, 503, 504}
 _FALLBACK_NON_RETRYABLE_STATUS_CODES = {400, 422}
 
-# Streaming first-chunk timeouts (connected-mode fallback). Plain LLM streams
+# Streaming first-chunk timeouts (hybrid-mode fallback). Plain LLM streams
 # rarely take long to produce a first token, so a tight cap keeps failed-
 # attempt latency low. Tool-loop streams may reason before emitting tokens
 # or a tool_call (especially with extended thinking), so they get more
@@ -256,7 +256,7 @@ async def run_platform_attempts(
 def _extract_platform_user_token(request: Request) -> str:
     """Pull the user's bearer token off the ``Authorization`` header.
 
-    Used in connected mode to forward the caller's identity to the platform's
+    Used in hybrid mode to forward the caller's identity to the platform's
     resolve endpoint. Standalone mode uses ``verify_api_key_or_master_key``
     instead.
     """
@@ -326,7 +326,7 @@ async def _resolve_platform_credentials(
     if not platform_base_url:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Connected mode is misconfigured",
+            detail="Hybrid mode is misconfigured",
         )
 
     provider, model_name = _split_model_selector(model_selector)
@@ -462,7 +462,7 @@ async def _resolve_platform_mcp_servers(
     if not platform_base_url:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Connected mode is misconfigured",
+            detail="Hybrid mode is misconfigured",
         )
 
     timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
@@ -537,7 +537,7 @@ async def _resolve_platform_web_search(
     if not platform_base_url:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Connected mode is misconfigured",
+            detail="Hybrid mode is misconfigured",
         )
 
     timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
