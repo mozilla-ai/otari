@@ -46,11 +46,11 @@ See [Deployment](deployment.md) for the full Docker setup.
 
 ## Managed models vs. your own keys
 
-Connected mode resolves provider credentials in one of two ways, and the difference decides who pays and where the request is allowed to run.
+Hybrid mode resolves provider credentials in one of two ways, and the difference decides who pays and where the request is allowed to run.
 
 ### Your own keys (BYO)
 
-You store provider API keys in the otari.ai vault and assign them to a workspace. When a request arrives, otari.ai hands the matching key back to your Otari instance, which calls the provider directly. The provider bills you; otari.ai does not charge a wallet for these calls. BYO keys work through any Otari gateway, including one you self-host in connected mode.
+You store provider API keys in the otari.ai vault and assign them to a workspace. When a request arrives, otari.ai hands the matching key back to your Otari instance, which calls the provider directly. The provider bills you; otari.ai does not charge a wallet for these calls. BYO keys work through any Otari gateway, including one you self-host in hybrid mode.
 
 In a request, a BYO model uses the `provider/model` form, such as `openai/gpt-4o` or `anthropic/claude-sonnet-4-6`, resolved against the key you configured for that provider. (Standalone mode uses the `provider:model` form instead. See [Use with Claude Code](use-with-claude-code.md) for the model-string conventions per mode.)
 

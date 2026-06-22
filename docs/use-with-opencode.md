@@ -2,7 +2,7 @@
 
 [opencode](https://opencode.ai) lets you register any OpenAI-compatible backend
 as a provider. Otari exposes an OpenAI-compatible endpoint
-(`POST /v1/chat/completions`) in both standalone and connected modes, so you can
+(`POST /v1/chat/completions`) in both standalone and hybrid modes, so you can
 route opencode through Otari to get budgets, usage tracking, and traces without
 changing how you code.
 
