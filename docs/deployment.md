@@ -64,7 +64,7 @@ curl http://localhost:8000/health
 The response includes platform reachability status:
 
 ```json
-{"status": "healthy", "mode": "platform", "platform_reachable": "yes"}
+{"status": "healthy", "mode": "hybrid", "platform_reachable": "yes"}
 ```
 
 Check readiness:
