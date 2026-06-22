@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
@@ -1282,6 +1282,8 @@ async def run_streaming_with_fallback(
     background_tasks: BackgroundTasks,
     rate_limit_info: RateLimitInfo | None,
     tool_ctx: ToolContext,
+    extract_stream_text: Callable[[ChunkT], str | None] | None = None,
+    on_memory_settled: Callable[[str], Coroutine[Any, Any, None]] | None = None,
 ) -> StreamingResponse:
     """Multi-attempt streaming for platform-mode requests.
 
@@ -1406,6 +1408,9 @@ async def run_streaming_with_fallback(
     if pool_for_loop is not None:
         stream_to_return = _stream_with_stack_cleanup(stream, backend_stack)
 
+    if extract_stream_text is not None and on_memory_settled is not None:
+        stream_to_return = _stream_with_memory_capture(stream_to_return, extract_stream_text, on_memory_settled)
+
     return build_streaming_response(
         adapter=adapter,
         stream=stream_to_return,
@@ -1432,6 +1437,43 @@ async def _stream_with_stack_cleanup(
             yield chunk
     finally:
         await backend_stack.aclose()
+
+
+def _swallow_memory_task_exception(task: "asyncio.Task[None]") -> None:
+    """Done-callback that retrieves a detached memory-write task's exception so it
+    is logged rather than leaking as an unretrieved-task-exception warning."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("Background memory write failed: %s", exc)
+
+
+async def _stream_with_memory_capture(
+    stream: AsyncIterator[ChunkT],
+    extract_text: Callable[[ChunkT], str | None],
+    on_settled_text: Callable[[str], Coroutine[Any, Any, None]],
+) -> AsyncIterator[ChunkT]:
+    """Accumulate streamed assistant text and, on normal completion, fire a
+    best-effort memory write. The write is skipped on mid-stream cancellation
+    (client disconnect), and scheduled fire-and-forget so it never delays the
+    final bytes, mirroring the streaming usage-report pattern."""
+    parts: list[str] = []
+    completed = False
+    try:
+        async for chunk in stream:
+            piece = extract_text(chunk)
+            if piece:
+                parts.append(piece)
+            yield chunk
+        completed = True
+    finally:
+        if completed and parts:
+            task = asyncio.create_task(on_settled_text("".join(parts)))
+            # Retrieve the result so a raised memory write surfaces as a log line
+            # instead of an "Task exception was never retrieved" warning, keeping
+            # best-effort persistence silent on the response path.
+            task.add_done_callback(_swallow_memory_task_exception)
 
 
 async def run_platform_non_stream(
