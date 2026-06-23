@@ -7,11 +7,11 @@ from gateway.core.database import reset_db
 from gateway.main import create_app
 
 
-def test_platform_mode_starts_without_database(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hybrid_mode_starts_without_database(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
 
     config = GatewayConfig(
-        mode="platform",
+        mode="hybrid",
         database_url="postgresql://127.0.0.1:1/does-not-exist",
         platform={"base_url": "http://localhost:8100/api/v1"},
     )
@@ -23,18 +23,18 @@ def test_platform_mode_starts_without_database(monkeypatch: pytest.MonkeyPatch) 
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "healthy"
-    assert payload["mode"] == "platform"
+    assert payload["mode"] == "hybrid"
     assert payload["platform_reachable"] in {"yes", "no"}
 
     reset_config()
     reset_db()
 
 
-def test_platform_mode_disables_local_management_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
 
     config = GatewayConfig(
-        mode="platform",
+        mode="hybrid",
         platform={"base_url": "http://localhost:8100/api/v1"},
     )
     app = create_app(config)
@@ -45,7 +45,7 @@ def test_platform_mode_disables_local_management_endpoints(monkeypatch: pytest.M
         budgets_response = client.get("/v1/budgets")
         spend_response = client.get("/v1/spend")
 
-    expected = {"detail": "This endpoint is not available in platform mode. Manage this resource via the platform UI."}
+    expected = {"detail": "This endpoint is not available in hybrid mode. Manage this resource via the platform UI."}
     assert users_response.status_code == 404
     assert users_response.json() == expected
     assert keys_response.status_code == 404
@@ -59,7 +59,7 @@ def test_platform_mode_disables_local_management_endpoints(monkeypatch: pytest.M
     reset_db()
 
 
-def test_platform_mode_health_reports_reachability(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hybrid_mode_health_reports_reachability(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
 
     async def _reachable(_: GatewayConfig) -> bool:
@@ -68,7 +68,7 @@ def test_platform_mode_health_reports_reachability(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("gateway.api.routes.health._check_platform_reachability", _reachable)
 
     config = GatewayConfig(
-        mode="platform",
+        mode="hybrid",
         platform={"base_url": "http://localhost:8100/api/v1"},
     )
     app = create_app(config)
@@ -78,7 +78,7 @@ def test_platform_mode_health_reports_reachability(monkeypatch: pytest.MonkeyPat
         readiness_response = client.get("/health/readiness")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy", "mode": "platform", "platform_reachable": "yes"}
+    assert response.json() == {"status": "healthy", "mode": "hybrid", "platform_reachable": "yes"}
     assert readiness_response.status_code == 200
     assert readiness_response.json()["platform"] == "connected"
 
@@ -86,7 +86,7 @@ def test_platform_mode_health_reports_reachability(monkeypatch: pytest.MonkeyPat
     reset_db()
 
 
-def test_platform_mode_readiness_fails_when_platform_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hybrid_mode_readiness_fails_when_platform_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
 
     async def _unreachable(_: GatewayConfig) -> bool:
@@ -95,7 +95,7 @@ def test_platform_mode_readiness_fails_when_platform_unreachable(monkeypatch: py
     monkeypatch.setattr("gateway.api.routes.health._check_platform_reachability", _unreachable)
 
     config = GatewayConfig(
-        mode="platform",
+        mode="hybrid",
         platform={"base_url": "http://localhost:8100/api/v1"},
     )
     app = create_app(config)

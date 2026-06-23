@@ -1,6 +1,6 @@
-"""Platform-mode integration tests for /v1/messages.
+"""Hybrid-mode integration tests for /v1/messages.
 
-Mirrors :mod:`tests.integration.test_platform_mode_chat`: exercises the
+Mirrors :mod:`tests.integration.test_hybrid_mode_chat`: exercises the
 multi-attempt platform resolve / fallback / usage-reporting flow against the
 Anthropic Messages endpoint.
 
@@ -35,7 +35,7 @@ def platform_client(monkeypatch: pytest.MonkeyPatch) -> Generator[TestClient]:
     monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "gw_test_token")
     app = create_app(
         GatewayConfig(
-            mode="platform",
+            mode="hybrid",
             platform={"base_url": "http://platform.test/api/v1"},
         )
     )
@@ -93,7 +93,7 @@ def _message_response(text: str = "hello") -> MessageResponse:
     )
 
 
-def test_platform_mode_requires_authorization_header(platform_client: TestClient) -> None:
+def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) -> None:
     response = platform_client.post(
         "/v1/messages",
         json={
@@ -107,7 +107,7 @@ def test_platform_mode_requires_authorization_header(platform_client: TestClient
     assert response.json() == {"detail": "Missing authentication token"}
 
 
-def test_platform_mode_maps_resolve_unauthorized(
+def test_hybrid_mode_maps_resolve_unauthorized(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -135,7 +135,7 @@ def test_platform_mode_maps_resolve_unauthorized(
     assert response.json() == {"detail": "Invalid user token"}
 
 
-def test_platform_mode_sets_correlation_id_and_reports_usage(
+def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -185,7 +185,7 @@ def test_platform_mode_sets_correlation_id_and_reports_usage(
     ]
 
 
-def test_platform_mode_falls_through_on_first_attempt_failure(
+def test_hybrid_mode_falls_through_on_first_attempt_failure(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -247,7 +247,7 @@ def test_platform_mode_falls_through_on_first_attempt_failure(
     assert "success" in outcomes
 
 
-def test_platform_mode_falls_through_on_404_model_unavailable(
+def test_hybrid_mode_falls_through_on_404_model_unavailable(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -305,7 +305,7 @@ def test_platform_mode_falls_through_on_404_model_unavailable(
     assert len(calls) == 2, "404 on the primary must fall through to the next attempt"
 
 
-def test_platform_mode_returns_502_and_reports_every_attempt_when_all_fail(
+def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -368,7 +368,7 @@ def test_platform_mode_returns_502_and_reports_every_attempt_when_all_fail(
     ]
 
 
-def test_platform_mode_non_retryable_error_raises_immediately(
+def test_hybrid_mode_non_retryable_error_raises_immediately(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -419,7 +419,7 @@ def test_platform_mode_non_retryable_error_raises_immediately(
     assert len(calls) == 1, "Non-retryable error must short-circuit the attempts loop"
 
 
-def test_platform_mode_resolves_workspace_mcp_server_ids(
+def test_hybrid_mode_resolves_workspace_mcp_server_ids(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -505,7 +505,7 @@ def test_platform_mode_resolves_workspace_mcp_server_ids(
 
 
 class _FakeMcpPool:
-    """Minimal MCPClientPool duck-type — same shape as test_platform_mode_chat's
+    """Minimal MCPClientPool duck-type — same shape as test_hybrid_mode_chat's
     helper, but exposes the Anthropic-flavored hooks the messages.py runner
     threads through.
     """
@@ -552,7 +552,7 @@ def _two_attempt_resolve_response_anthropic_first(*, request_id: str) -> httpx.R
     )
 
 
-def test_platform_mode_tool_loop_falls_through_pre_lock_in(
+def test_hybrid_mode_tool_loop_falls_through_pre_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -613,7 +613,7 @@ def test_platform_mode_tool_loop_falls_through_pre_lock_in(
     assert error_reports[0]["correlation_id"] == "tool-att-primary"
 
 
-def test_platform_mode_tool_loop_no_fallback_after_lock_in(
+def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -684,14 +684,14 @@ def test_platform_mode_tool_loop_no_fallback_after_lock_in(
     assert calls == ["sk-ant-broken", "sk-ant-broken"]
 
 
-# ---------- platform-mode tool-loop streaming contract ----------
+# ---------- hybrid-mode tool-loop streaming contract ----------
 
 
-def test_platform_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
+def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Single-attempt tool-loop streaming in platform mode must still honor
+    """Single-attempt tool-loop streaming in hybrid mode must still honor
     the platform contract: X-Correlation-ID + X-Otari-Request-ID headers,
     and usage reported back via _report_platform_usage on stream complete.
 
@@ -765,11 +765,11 @@ def test_platform_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage
     # a moment to drain. TestClient's lifespan generally runs to completion
     # by the time the with-block exits.
     success_reports = [r for r in usage_reports if r.get("status") == "success"]
-    assert success_reports, "expected a success usage report for the platform-mode tool-loop stream"
+    assert success_reports, "expected a success usage report for the hybrid-mode tool-loop stream"
     assert success_reports[0]["correlation_id"] == "stream-att-1"
 
 
-def test_platform_mode_count_tokens_requires_authorization_header(
+def test_hybrid_mode_count_tokens_requires_authorization_header(
     platform_client: TestClient,
 ) -> None:
     response = platform_client.post(
@@ -784,11 +784,11 @@ def test_platform_mode_count_tokens_requires_authorization_header(
     assert response.json() == {"detail": "Missing authentication token"}
 
 
-def test_platform_mode_count_tokens_validates_token(
+def test_hybrid_mode_count_tokens_validates_token(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A present-but-invalid bearer token is rejected: platform mode resolves
+    """A present-but-invalid bearer token is rejected: hybrid mode resolves
     the token rather than just checking the header exists.
     """
 
@@ -815,7 +815,7 @@ def test_platform_mode_count_tokens_validates_token(
     assert response.json() == {"detail": "Invalid user token"}
 
 
-def test_platform_mode_count_tokens_succeeds_without_provider_call(
+def test_hybrid_mode_count_tokens_succeeds_without_provider_call(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

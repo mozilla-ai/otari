@@ -1,7 +1,7 @@
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,8 +38,8 @@ async def health_check(config: GatewayConfig = Depends(get_config)) -> dict[str,
     use /health/readiness or /health/liveness instead.
     """
     payload: dict[str, str] = {"status": "healthy"}
-    if config.is_platform_mode:
-        payload["mode"] = "platform"
+    if config.is_hybrid_mode:
+        payload["mode"] = "hybrid"
         payload["platform_reachable"] = "yes" if await _check_platform_reachability(config) else "no"
     return payload
 
@@ -79,28 +79,28 @@ async def health_readiness(
         HTTPException: 503 if service is not ready
 
     """
-    if config.is_platform_mode:
+    if config.is_hybrid_mode:
         platform_reachable = await _check_platform_reachability(config)
         if not platform_reachable:
             raise HTTPException(
-                status_code=503,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={
                     "status": "unhealthy",
-                    "mode": "platform",
+                    "mode": "hybrid",
                     "platform": "unavailable",
                     "version": __version__,
                 },
             )
         return {
             "status": "healthy",
-            "mode": "platform",
+            "mode": "hybrid",
             "platform": "connected",
             "version": __version__,
         }
 
     if db is None:
         raise HTTPException(
-            status_code=503,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "unhealthy", "database": "unavailable", "version": __version__},
         )
 
@@ -110,7 +110,7 @@ async def health_readiness(
     except Exception as e:
         logger.error("Database connectivity check failed: %s", e)
         raise HTTPException(
-            status_code=503,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "status": "unhealthy",
                 "database": "unavailable",

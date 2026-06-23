@@ -88,13 +88,13 @@ uncapped usage.
   "missing." Use `is None` for "absent" vs "zero."
 - **Severity**: High
 
-### 0.5 Standalone vs platform mode
-Local enforcement lives in the standalone branch; platform mode resolves credentials and
+### 0.5 Standalone vs hybrid mode
+Local enforcement lives in the standalone branch; hybrid mode resolves credentials and
 reports usage upstream.
 
-- ✅ **Check**: `config.is_platform_mode` is auto-detected from a platform token. New
+- ✅ **Check**: `config.is_hybrid_mode` is auto-detected from a platform token. New
   billable logic that must apply locally belongs in the standalone (`db is not None`)
-  branch; logic that must not double-count belongs out of the platform path. Verify new
+  branch; logic that must not double-count belongs out of the hybrid path. Verify new
   code is correct (or correctly gated) in **both** modes.
 - **Severity**: Medium
 

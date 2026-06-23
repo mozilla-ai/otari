@@ -258,7 +258,7 @@ async def create_response(
     """OpenAI-compatible Responses endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-    web_search in both standalone mode and platform mode. Platform-mode
+    web_search in both standalone mode and hybrid mode. Hybrid-mode
     requests resolve credentials via the platform service and (for
     non-tool-loop requests) get multi-attempt fallback across the resolved
     route. Tool-loop requests collapse to a single attempt — once
@@ -307,14 +307,14 @@ async def create_response(
     )
 
     # Provider-support guard: an unsupported provider would just fail
-    # downstream, so surface a clearer 400 upfront. In platform mode validate
+    # downstream, so surface a clearer 400 upfront. In hybrid mode validate
     # *every* resolved attempt so a fallback that lands on an unsupported
     # provider (e.g. primary OpenAI, fallback Anthropic) fails fast here
     # instead of crashing mid-fallback when the runner calls ``aresponses``
     # on a provider that doesn't speak the Responses API.
-    if ctx.platform_mode:
+    if ctx.hybrid_mode:
         route = ctx.route
-        assert route is not None  # guaranteed by the platform-mode preamble
+        assert route is not None  # guaranteed by the hybrid-mode preamble
         for attempt in route.attempts:
             _ensure_provider_supports_responses(LLMProvider(attempt.provider))
     else:
@@ -355,16 +355,16 @@ async def create_response(
     request_fields.pop("model", None)
     request_fields.pop("user", None)
     # Standalone mode forwards the resolved user_id to the upstream provider
-    # for analytics; platform mode handles attribution server-side via the
+    # for analytics; hybrid mode handles attribution server-side via the
     # correlation id.
-    if not ctx.platform_mode and ctx.user_id:
+    if not ctx.hybrid_mode and ctx.user_id:
         request_fields["user"] = ctx.user_id
 
     # base_request_fields is what gets merged with per-attempt creds; it
     # includes ``provider`` and ``input_data`` so each attempt has the full
     # call shape.
     base_request_fields = {**request_fields}
-    if not ctx.platform_mode:
+    if not ctx.hybrid_mode:
         base_request_fields["provider"] = provider
     base_request_fields["input_data"] = input_payload
 
@@ -372,9 +372,9 @@ async def create_response(
     # Streaming path
     # ------------------------------------------------------------------
     if stream:
-        if ctx.platform_mode and not tool_ctx.use_tool_loop:
+        if ctx.hybrid_mode and not tool_ctx.use_tool_loop:
             route = ctx.route
-            assert route is not None  # guaranteed by the platform-mode preamble
+            assert route is not None  # guaranteed by the hybrid-mode preamble
             if not route.attempts:
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
@@ -405,12 +405,12 @@ async def create_response(
                     detail=(PROVIDER_ERROR_DETAIL if is_single_attempt else ALL_PROVIDERS_FAILED_DETAIL),
                 ) from exc
 
-        # Single-attempt streaming (standalone, or platform + tool-loop).
+        # Single-attempt streaming (standalone, or hybrid + tool-loop).
         platform_correlation_id: str | None = None
         platform_request_id: str | None = None
-        if ctx.platform_mode:
+        if ctx.hybrid_mode:
             route = ctx.route
-            assert route is not None  # guaranteed by the platform-mode preamble
+            assert route is not None  # guaranteed by the hybrid-mode preamble
             if not route.attempts:
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
@@ -439,9 +439,9 @@ async def create_response(
     # ------------------------------------------------------------------
     # Non-streaming path
     # ------------------------------------------------------------------
-    if ctx.platform_mode:
+    if ctx.hybrid_mode:
         route = ctx.route
-        assert route is not None  # guaranteed by the platform-mode preamble
+        assert route is not None  # guaranteed by the hybrid-mode preamble
         try:
             result = await run_platform_non_stream(
                 adapter=_ADAPTER,

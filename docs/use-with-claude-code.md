@@ -3,7 +3,7 @@
 [Claude Code](https://code.claude.com) speaks the Anthropic Messages API and lets
 you redirect it at any compatible endpoint with a couple of environment
 variables. Otari exposes that surface (`POST /v1/messages` and
-`POST /v1/messages/count_tokens`) in both standalone and connected modes, so you
+`POST /v1/messages/count_tokens`) in both standalone and hybrid modes, so you
 can route Claude Code through Otari to get budgets, usage tracking, and traces
 without changing how you use the CLI.
 
@@ -26,7 +26,7 @@ Claude Code attaches its own `metadata.user_id` to every request. In standalone
 mode Otari binds spend to the API key's own user and, by default, rejects a
 request that names a different user (`403 permission_error`). Set
 `reject_user_mismatch: false` in your config so Claude Code's `user_id` is
-ignored and spend is bound to the key. (Connected/platform mode authenticates via
+ignored and spend is bound to the key. (Hybrid mode authenticates via
 the user token and does not compare `metadata.user_id`, so this setting does not
 apply there.)
 
@@ -62,7 +62,7 @@ models, Moonshot, and so on — not just Anthropic's Opus/Sonnet/Haiku.
 
 Set the model strings to whatever your deployment expects:
 
-- **Connected to otari.ai (platform mode):** use `mzai:<catalog-id>` for a
+- **Connected to otari.ai:** use `mzai:<catalog-id>` for a
   managed open-weight model (e.g. `mzai:moonshotai/Kimi-K2.6`), or
   `provider/model` for one of your own provider keys (e.g. `openai/gpt-4o`,
   `anthropic/claude-sonnet-4-6`). An `mzai:` prefix selects the managed catalog,
