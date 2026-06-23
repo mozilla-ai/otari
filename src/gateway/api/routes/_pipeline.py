@@ -117,7 +117,7 @@ ChunkT = TypeVar("ChunkT")
 DB_UNAVAILABLE_DETAIL = "Database session unavailable"
 API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
-MCP_SERVER_IDS_PLATFORM_ONLY_DETAIL = "mcp_server_ids is only available in platform mode"
+MCP_SERVER_IDS_HYBRID_ONLY_DETAIL = "mcp_server_ids is only available in hybrid mode"
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
@@ -366,7 +366,7 @@ class RequestContext:
         config: GatewayConfig,
         db: AsyncSession | None,
         log_writer: LogWriter,
-        platform_mode: bool,
+        hybrid_mode: bool,
         route: ResolvedRoute | None,
         user_token: str | None,
         api_key_id: str | None,
@@ -377,7 +377,7 @@ class RequestContext:
         self.config = config
         self.db = db
         self.log_writer = log_writer
-        self.platform_mode = platform_mode
+        self.hybrid_mode = hybrid_mode
         self.route = route
         self.user_token = user_token
         self.api_key_id = api_key_id
@@ -451,7 +451,7 @@ async def resolve_request_context(
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
 
-    Platform mode: extract the caller's bearer token and resolve the routing
+    Hybrid mode: extract the caller's bearer token and resolve the routing
     plan against the platform; no local DB state is touched.
 
     Standalone mode: validate the API key, resolve the billed user, check the
@@ -465,13 +465,13 @@ async def resolve_request_context(
     the cost estimate. It runs after the billed user is known (file access is
     user-scoped) and after the provider/model split (capability detection needs
     it), and returns the post-normalization prompt-char count so the reservation
-    reflects any text extracted from attachments. It is never called in platform
+    reflects any text extracted from attachments. It is never called in hybrid
     mode, where the files feature is unavailable. It returns
     ``(prompt_chars, vision_usage)``; any vision describe side-call it made is
     metered and billed here as committed spend (the call already happened, so it
     is not gated or refundable).
     """
-    platform_mode = config.is_platform_mode
+    hybrid_mode = config.is_hybrid_mode
     route: ResolvedRoute | None = None
     user_token: str | None = None
     api_key_id: str | None = None
@@ -479,7 +479,7 @@ async def resolve_request_context(
     rate_limit_info: RateLimitInfo | None = None
     reservation: ReservationHandle | None = None
 
-    if platform_mode:
+    if hybrid_mode:
         user_token = _extract_platform_user_token(raw_request)
         start_time = time.perf_counter()
         route = await _resolve_platform_credentials(
@@ -590,7 +590,7 @@ async def resolve_request_context(
         config=config,
         db=db,
         log_writer=log_writer,
-        platform_mode=platform_mode,
+        hybrid_mode=hybrid_mode,
         route=route,
         user_token=user_token,
         api_key_id=api_key_id,
@@ -665,7 +665,7 @@ async def prepare_gateway_tools(
     ``block``-mode flags raise 403 here (provider never called);
     ``monitor``-mode flags annotate the response header and fall through.
 
-    ``mcp_server_ids`` is platform-only: standalone mode has no platform to
+    ``mcp_server_ids`` is hybrid-only: standalone mode has no platform to
     resolve the ids against, so the field is rejected with a 400 rather than
     silently ignored. The sandbox and web_search opt-ins follow the wire shape
     of Anthropic / OpenAI tool entries; their backend URLs are operator
@@ -679,10 +679,10 @@ async def prepare_gateway_tools(
     try:
         await apply_input_guardrails(guardrails, guardrail_text, response=response)
 
-        if mcp_server_ids and not ctx.platform_mode:
-            raise adapter.error(400, MCP_SERVER_IDS_PLATFORM_ONLY_DETAIL, ErrorKind.INVALID_REQUEST)
-        if ctx.platform_mode and mcp_server_ids:
-            assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+        if mcp_server_ids and not ctx.hybrid_mode:
+            raise adapter.error(400, MCP_SERVER_IDS_HYBRID_ONLY_DETAIL, ErrorKind.INVALID_REQUEST)
+        if ctx.hybrid_mode and mcp_server_ids:
+            assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
             resolved_mcp_servers = await _resolve_platform_mcp_servers(
                 config=ctx.config,
                 user_token=ctx.user_token,
@@ -701,21 +701,21 @@ async def prepare_gateway_tools(
             use_sandbox = True
 
         # Forwarded to the sandbox backend as `Authorization: Bearer`. Only set in
-        # platform mode when the backend IS the platform (its URL is under the
+        # hybrid mode when the backend IS the platform (its URL is under the
         # platform base URL the gateway already trusts this token with for resolve):
         # the platform-hosted /v1/sandbox proxy authenticates the caller's workspace
         # token and derives tenancy + per-workspace code-exec policy from it. Never
         # leak it to a standalone exec-service an operator pointed the URL at.
         sandbox_auth_token: str | None = None
-        if use_sandbox and ctx.platform_mode and sandbox_url is not None:
-            assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+        if use_sandbox and ctx.hybrid_mode and sandbox_url is not None:
+            assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
             if web_search_url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
                 sandbox_auth_token = ctx.user_token
 
         web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
         web_search_url: str | None = otari_env("WEB_SEARCH_URL") or None
         # Forwarded to the search backend as `X-Gateway-Token`. Only set in
-        # platform mode, where the backend may be the platform-hosted web-search
+        # hybrid mode, where the backend may be the platform-hosted web-search
         # endpoint that authenticates the gateway. Standalone backends (SearXNG /
         # self-hosted adapter) get no token and ignore the header.
         web_search_auth_token: str | None = None
@@ -727,7 +727,7 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
             use_web_search = True
 
-            # Platform mode owns the per-workspace web-search policy (whether it's
+            # Hybrid mode owns the per-workspace web-search policy (whether it's
             # enabled at all, plus workspace-default max_results / domain filters /
             # purpose hint / provider_options). Mirrors the mcp_server_ids resolve
             # above. Precedence is "per-request overrides workspace default":
@@ -740,8 +740,8 @@ async def prepare_gateway_tools(
             #    keys the request omitted while per-request keys still win (rather
             #    than the request's dict replacing the workspace dict wholesale).
             # Standalone mode has no platform to consult.
-            if ctx.platform_mode:
-                assert ctx.user_token is not None  # guaranteed by the platform-mode preamble
+            if ctx.hybrid_mode:
+                assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
                 # Forward the platform token only when the search backend IS the
                 # platform (its URL is under the platform base URL the gateway
                 # already trusts this token with for resolve). Never leak this
@@ -883,7 +883,7 @@ async def log_usage(
 async def release_reservation(ctx: RequestContext) -> None:
     """Refund the request's budget reservation, if one was taken.
 
-    No-op in platform mode and for requests that reserved nothing. Use this
+    No-op in hybrid mode and for requests that reserved nothing. Use this
     before raising on any path that rejects the request after
     :func:`resolve_request_context` pre-debited the estimate; otherwise the
     held amount shrinks the user's budget until the next reset (or forever,
@@ -1341,7 +1341,7 @@ async def run_streaming_with_fallback(
     rate_limit_info: RateLimitInfo | None,
     tool_ctx: ToolContext,
 ) -> StreamingResponse:
-    """Multi-attempt streaming for platform-mode requests.
+    """Multi-attempt streaming for hybrid-mode requests.
 
     Iterates ``route.attempts`` and falls through on any attempt that fails
     before its first chunk arrives. Once an attempt yields its first chunk,
@@ -1470,7 +1470,7 @@ async def run_streaming_with_fallback(
         provider=LLMProvider(chosen.provider),
         model=chosen.model,
         config=config,
-        db=None,  # platform mode does not use the local DB
+        db=None,  # hybrid mode does not use the local DB
         log_writer=None,  # unused when db is None
         api_key_id=None,
         user_id=None,
@@ -1503,7 +1503,7 @@ async def run_platform_non_stream(
     config: GatewayConfig,
     rate_limit_info: RateLimitInfo | None,
 ) -> ResultT:
-    """Drive the multi-attempt platform-mode non-streaming path via the shared
+    """Drive the multi-attempt hybrid-mode non-streaming path via the shared
     ``run_platform_attempts`` runner, dispatching each attempt through the
     shared backend ladder.
     """

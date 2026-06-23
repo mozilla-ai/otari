@@ -5,7 +5,7 @@ content blocks in place — passthrough for natively-capable providers, extract 
 text for text-only models. Used by the Chat-Completions, Anthropic Messages, and
 OpenAI Responses endpoints so all three get identical handling.
 
-Only the standalone path calls this: platform mode routes to frontier providers
+Only the standalone path calls this: hybrid mode routes to frontier providers
 that natively understand documents/images (passthrough is already correct) and
 has no local DB / file store to resolve ``file_id`` references against.
 """

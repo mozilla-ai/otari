@@ -134,7 +134,7 @@ async def anthropic_tool_loop(
 
     ``on_first_response`` is invoked exactly once, right after the first
     upstream ``amessages`` call returns successfully. Mirrors the contract on
-    :func:`gateway.services.mcp_loop.mcp_tool_loop` so platform-mode callers
+    :func:`gateway.services.mcp_loop.mcp_tool_loop` so hybrid-mode callers
     can lock in to the chosen provider — once the model has produced any
     assistant content, the conversation state is provider-specific and
     subsequent failures must not silently swap providers.

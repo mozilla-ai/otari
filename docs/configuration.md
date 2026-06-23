@@ -75,7 +75,7 @@ pricing:
 | `reject_user_mismatch` | bool | `true` | When `true`, a non-master key whose request names a `user` other than its own is rejected (HTTP 403). When `false`, the client `user` is still forwarded to the provider but spend is always bound to the key's own user. The master key may always bill an arbitrary user. |
 | `stream_missing_usage_policy` | string | `"estimate"` | How to bill a streamed response that completes with no provider usage data: `"estimate"` (charge the up-front estimate), `"fail"` (charge estimate and mark errored), or `"allow_free"` (don't bill). |
 | `budget_estimate_default_output_tokens` | int | `1024` | Output-token count assumed when reserving budget for a request with no declared max output; reconciled to actual usage on completion. |
-| `mode` | string | `"standalone"` | Configured mode (`"standalone"` or `"platform"`). Effective behavior is driven by presence of `OTARI_AI_TOKEN`. |
+| `mode` | string | `"standalone"` | Configured mode (`"standalone"` or `"hybrid"`; the legacy value `"platform"` is still accepted). Effective behavior is driven by presence of `OTARI_AI_TOKEN`. |
 | `platform` | dict | `{}` | otari.ai integration settings (`base_url`, timeouts, retries) |
 
 ## Environment variables
