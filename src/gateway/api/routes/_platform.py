@@ -23,6 +23,7 @@ from fastapi import HTTPException, Request, status
 from pydantic import BaseModel
 
 from gateway.core.config import GatewayConfig
+from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -613,6 +614,8 @@ async def _report_platform_usage(
             "prompt_tokens": token_usage.prompt_tokens,
             "completion_tokens": token_usage.completion_tokens,
             "total_tokens": token_usage.total_tokens,
+            "cache_read_tokens": cache_read_tokens_of(token_usage),
+            "cache_write_tokens": cache_write_tokens_of(token_usage),
         }
     elif error_class is not None:
         payload["error_class"] = error_class

@@ -8,6 +8,7 @@ from any_llm.types.completion import (
     ChatCompletionMessage,
     Choice,
     CompletionUsage,
+    PromptTokensDetails,
 )
 from fastapi.testclient import TestClient
 
@@ -118,7 +119,12 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
                     finish_reason="stop",
                 )
             ],
-            usage=CompletionUsage(prompt_tokens=10, completion_tokens=7, total_tokens=17),
+            usage=CompletionUsage(
+                prompt_tokens=10,
+                completion_tokens=7,
+                total_tokens=17,
+                prompt_tokens_details=PromptTokensDetails(cached_tokens=6),
+            ),
         )
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
@@ -140,6 +146,8 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
                 "prompt_tokens": 10,
                 "completion_tokens": 7,
                 "total_tokens": 17,
+                "cache_read_tokens": 6,
+                "cache_write_tokens": 0,
             },
         }
     ]

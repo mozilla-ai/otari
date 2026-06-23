@@ -257,6 +257,7 @@ async def mcp_tool_loop(
 
     acc_prompt = 0
     acc_completion = 0
+    acc_cache_read = 0
     first_response_signaled = False
 
     for _ in range(max_iterations):
@@ -272,13 +273,16 @@ async def mcp_tool_loop(
         if completion.usage:
             acc_prompt += completion.usage.prompt_tokens or 0
             acc_completion += completion.usage.completion_tokens or 0
+            details = completion.usage.prompt_tokens_details
+            if details is not None:
+                acc_cache_read += details.cached_tokens or 0
 
         if not completion.choices:
             return completion
 
         choice = completion.choices[0]
         if choice.finish_reason != "tool_calls":
-            _fold_usage(completion, acc_prompt, acc_completion)
+            _fold_usage(completion, acc_prompt, acc_completion, acc_cache_read)
             return completion
 
         sdk_calls = choice.message.tool_calls or []
@@ -317,10 +321,10 @@ async def mcp_tool_loop(
                         "MCP-mixed: could not filter tool_calls on response; client will see MCP calls "
                         "the gateway already executed (no-op on the client side).",
                     )
-            _fold_usage(completion, acc_prompt, acc_completion)
+            _fold_usage(completion, acc_prompt, acc_completion, acc_cache_read)
             return completion
         if not mcp_calls:
-            _fold_usage(completion, acc_prompt, acc_completion)
+            _fold_usage(completion, acc_prompt, acc_completion, acc_cache_read)
             return completion
 
         messages.append({"role": "assistant", "tool_calls": mcp_calls})
@@ -329,9 +333,21 @@ async def mcp_tool_loop(
     raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
 
-def _fold_usage(completion: ChatCompletion, prompt_total: int, completion_total: int) -> None:
+def _fold_usage(
+    completion: ChatCompletion,
+    prompt_total: int,
+    completion_total: int,
+    cache_read_total: int = 0,
+) -> None:
     if completion.usage is None:
         return
     completion.usage.prompt_tokens = prompt_total
     completion.usage.completion_tokens = completion_total
     completion.usage.total_tokens = prompt_total + completion_total
+    # OpenAI chat reports cached tokens as a subset of prompt_tokens. Fold the
+    # accumulated read count back into prompt_tokens_details so the downstream
+    # GatewayUsage wrapper forwards the loop-wide total, not just the last
+    # iteration's slice. (Chat has no cache-write concept.)
+    details = completion.usage.prompt_tokens_details
+    if details is not None:
+        details.cached_tokens = cache_read_total
