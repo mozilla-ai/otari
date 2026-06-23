@@ -308,9 +308,10 @@ class RouterPreference(Base):
     """An audit record of a preference-collection scoring.
 
     Each ``/v1/router/preferences/rank`` submission writes one row here for
-    provenance, plus one :class:`RoutingMemory` row per scored model. Keeping the
-    raw per-model scores lets us recompute quality if the mapping changes, and
-    tracks label provenance (human vs. judge).
+    provenance, plus one :class:`RoutingMemory` row per scored example (the prompt
+    with its per-model score map). Keeping the raw per-model scores lets us
+    recompute quality if the mapping changes, and tracks label provenance
+    (human vs. judge).
     """
 
     __tablename__ = "router_preferences"

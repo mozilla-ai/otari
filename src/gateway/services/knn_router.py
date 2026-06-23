@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING
 
 from any_llm import AnyLLM, aembedding
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.database import create_session
@@ -191,7 +192,7 @@ class KnnRoutingMemory:
         try:
             query = await self._embed(signal)
         except Exception as exc:  # embedding is best-effort; never fail the request
-            logger.warning("Router embedding failed; passing through: %s", exc)
+            logger.warning("Router embedding failed (%s); passing through to requested model", type(exc).__name__)
             return self._passthrough(ctx, "embedding error: route requested model")
 
         records, total = await self._load_records(ctx.tenant_id, ctx.task_id)
@@ -243,7 +244,11 @@ class KnnRoutingMemory:
                     label_source=label_source,
                 )
             )
-            await db.commit()
+            try:
+                await db.commit()
+            except SQLAlchemyError:
+                await db.rollback()
+                raise
         await self._evict_if_needed(tenant_id)
         return 1
 
@@ -395,7 +400,11 @@ class KnnRoutingMemory:
                     RoutingMemory.id.notin_(keep_ids),
                 )
             )
-            await db.commit()
+            try:
+                await db.commit()
+            except SQLAlchemyError:
+                await db.rollback()
+                raise
 
     # -- pricing -----------------------------------------------------------
 

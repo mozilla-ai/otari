@@ -85,6 +85,9 @@ def _completion(model: str) -> ChatCompletion:
 
 
 def _build_client(backend: str, *, fake_embeddings: bool = True) -> Generator[TestClient]:
+    # Live mode (fake_embeddings=False) makes real provider calls, so it needs the
+    # real key; the faked path never reaches the provider, so a placeholder is fine.
+    openai_key = "test-key" if fake_embeddings else os.getenv("OPENAI_API_KEY", "test-key")
     cfg = GatewayConfig(
         database_url="sqlite:///./_knn_test.db",
         master_key="test-master-key",
@@ -97,7 +100,7 @@ def _build_client(backend: str, *, fake_embeddings: bool = True) -> Generator[Te
         router_alpha=0.3,
         # The router scores by cost, so every candidate must be priced (and its
         # provider configured, or pricing init rejects it).
-        providers={"openai": {"api_key": "test-key"}},
+        providers={"openai": {"api_key": openai_key}},
         pricing={
             CHEAP: PricingConfig(input_price_per_million=0.5, output_price_per_million=1.5),
             STRONG: PricingConfig(input_price_per_million=2.5, output_price_per_million=10.0),

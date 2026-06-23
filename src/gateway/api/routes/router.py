@@ -5,11 +5,13 @@ These power the onboarding loop for the kNN routing memory:
 * ``POST /v1/router/preferences/compare`` fans a prompt out to several candidate
   models concurrently and returns their responses, so a caller (human or judge)
   can see the answers side by side.
-* ``POST /v1/router/preferences/rank`` records per-model quality scores for those
-  models. Each submission writes one routing-memory record per scored model plus
-  one audit row, which is what the kNN router votes over at request time.
-* ``GET /v1/router/status`` reports how many records a tenant has and whether the
-  store is warm yet, so onboarding can show progress toward the seed count.
+* ``POST /v1/router/preferences/rank`` records per-model quality scores for a
+  prompt. Each submission writes one routing-memory record (the prompt embedding
+  plus the per-model score map) plus one audit row, which is what the kNN router
+  votes over at request time.
+* ``GET /v1/router/status`` reports routing-memory progress per pool, the default
+  pool plus each task partition, so onboarding can show progress toward the seed
+  count.
 
 Routing memory is per-tenant; records are scoped to the authenticated key's
 user, the same identity the chat route bills and routes under.
@@ -38,6 +40,9 @@ from gateway.services.router_backend import get_router_backend
 router = APIRouter(prefix="/v1/router", tags=["router"])
 
 _KNN_REQUIRED = "Routing preferences require OTARI_ROUTER_BACKEND=knn"
+# Cap the compare fan-out so one request cannot launch unbounded concurrent
+# provider calls.
+_MAX_COMPARE_MODELS = 8
 
 
 def _tenant_id(api_key: APIKey) -> str:
@@ -48,7 +53,11 @@ class CompareRequest(BaseModel):
     """Fan a single prompt out to a set of candidate models."""
 
     prompt: str = Field(description="User prompt to send to every candidate model.")
-    models: list[str] = Field(min_length=1, description="provider/model identifiers to compare.")
+    models: list[str] = Field(
+        min_length=1,
+        max_length=_MAX_COMPARE_MODELS,
+        description="provider/model identifiers to compare.",
+    )
     system: str | None = Field(default=None, description="Optional system prompt applied to every model.")
     max_tokens: int | None = Field(default=None, description="Optional max output tokens per model.")
 
@@ -139,8 +148,8 @@ async def compare_models(
             content = choices[0].message.content if choices else None
             return ModelResponse(model=model, content=content)
         except Exception as exc:  # one model failing must not sink the comparison
-            logger.warning("compare: model %s failed: %s", model, exc)
-            return ModelResponse(model=model, content=None, error=str(exc))
+            logger.warning("compare: model %s failed (%s)", model, type(exc).__name__)
+            return ModelResponse(model=model, content=None, error="model invocation failed")
 
     responses = await asyncio.gather(*[_one(m) for m in request.models])
     return CompareResponse(prompt=request.prompt, responses=list(responses))
@@ -153,9 +162,20 @@ async def rank_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> RankResponse:
-    """Persist per-model scores as routing-memory records plus an audit row."""
+    """Persist per-model scores as a routing-memory record plus an audit row."""
     backend = _require_knn(config)
     tenant = _tenant_id(api_key)
+
+    # Write the routing-memory record first: it is the load-bearing record (the
+    # one the router votes over), and embedding it can fail. Writing the audit row
+    # only afterwards means a failure here never leaves an orphan audit row.
+    recorded = await backend.record_preference(
+        tenant_id=tenant,
+        prompt=request.prompt,
+        scores=request.scores,
+        task_id=request.task_id,
+        label_source=request.label_source,
+    )
 
     try:
         db.add(
@@ -171,14 +191,6 @@ async def rank_models(
     except SQLAlchemyError:
         await db.rollback()
         raise
-
-    recorded = await backend.record_preference(
-        tenant_id=tenant,
-        prompt=request.prompt,
-        scores=request.scores,
-        task_id=request.task_id,
-        label_source=request.label_source,
-    )
     # Warmth of the pool this submission contributes to: the named task partition,
     # or (no task) the default pool of every record the tenant has.
     stmt = (

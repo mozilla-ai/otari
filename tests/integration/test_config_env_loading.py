@@ -148,14 +148,12 @@ def test_router_backend_otari_env_override(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_router_knob_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in (
-        "OTARI_ROUTER_ALPHA",
-        "OTARI_ROUTER_K",
-        "OTARI_ROUTER_SEED_COUNT",
-        "OTARI_ROUTER_GRANULARITY",
-        "OTARI_ROUTER_CANDIDATES",
-    ):
-        monkeypatch.delenv(var, raising=False)
+    # Clear both namespaces: config layering honors OTARI_ but still accepts the
+    # legacy GATEWAY_ fallback, so an ambient var in either would skew the defaults.
+    knobs = ("ALPHA", "K", "SEED_COUNT", "GRANULARITY", "CANDIDATES", "EMBEDDING_MODEL")
+    for prefix in ("OTARI_ROUTER_", "GATEWAY_ROUTER_"):
+        for knob in knobs:
+            monkeypatch.delenv(f"{prefix}{knob}", raising=False)
     config = GatewayConfig()
     assert config.router_alpha == 0.3
     assert config.router_k == 5

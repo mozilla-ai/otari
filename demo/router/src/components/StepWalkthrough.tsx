@@ -32,6 +32,12 @@ export function StepWalkthrough({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Let interactive controls (e.g. the score sliders) keep their own arrow-key
+      // behavior instead of flipping steps.
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('input, textarea, [contenteditable="true"], [role="slider"], [role="textbox"]')) {
+        return;
+      }
       if (e.key === "ArrowRight") next();
       else if (e.key === "ArrowLeft") prev();
     };

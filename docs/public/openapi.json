@@ -603,6 +603,7 @@
             "items": {
               "type": "string"
             },
+            "maxItems": 8,
             "minItems": 1,
             "title": "Models",
             "type": "array"
@@ -5053,7 +5054,7 @@
     },
     "/v1/router/preferences/rank": {
       "post": {
-        "description": "Persist per-model scores as routing-memory records plus an audit row.",
+        "description": "Persist per-model scores as a routing-memory record plus an audit row.",
         "operationId": "rank_models_v1_router_preferences_rank_post",
         "requestBody": {
           "content": {
