@@ -3,7 +3,6 @@
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from any_llm.types.messages import (
     MessageResponse,
     MessageUsage,
@@ -27,15 +26,6 @@ def _make_message_response(**overrides: Any) -> MessageResponse:
     }
     defaults.update(overrides)
     return MessageResponse(**defaults)
-
-
-@pytest.fixture
-def messages_request_body() -> dict[str, Any]:
-    return {
-        "model": "anthropic:claude-3-5-sonnet",
-        "messages": [{"role": "user", "content": "Hello"}],
-        "max_tokens": 1024,
-    }
 
 
 def test_messages_endpoint_basic_completion(

@@ -203,10 +203,12 @@ def test_hybrid_mode_falls_through_on_first_attempt_failure(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload([
-                    _attempt(0, "att-primary", "claude-3-5-sonnet-20241022", "sk-bad-key"),
-                    _attempt(1, "att-fallback", "claude-3-5-sonnet-20241022", "sk-good-key"),
-                ]),
+                json=_resolve_payload(
+                    [
+                        _attempt(0, "att-primary", "claude-3-5-sonnet-20241022", "sk-bad-key"),
+                        _attempt(1, "att-fallback", "claude-3-5-sonnet-20241022", "sk-good-key"),
+                    ]
+                ),
             )
         usage_reports.append(body)
         return httpx.Response(204)
@@ -266,10 +268,12 @@ def test_hybrid_mode_falls_through_on_404_model_unavailable(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload([
-                    _attempt(0, "att-retired", "claude-3-5-sonnet-20241022", "sk-retired"),
-                    _attempt(1, "att-fallback", "claude-3-5-sonnet-20241022", "sk-good-key"),
-                ]),
+                json=_resolve_payload(
+                    [
+                        _attempt(0, "att-retired", "claude-3-5-sonnet-20241022", "sk-retired"),
+                        _attempt(1, "att-fallback", "claude-3-5-sonnet-20241022", "sk-good-key"),
+                    ]
+                ),
             )
         return httpx.Response(204)
 
@@ -326,10 +330,12 @@ def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload([
-                    _attempt(0, "att-1", "claude-3-5-sonnet-20241022", "sk-1"),
-                    _attempt(1, "att-2", "claude-3-5-sonnet-20241022", "sk-2"),
-                ]),
+                json=_resolve_payload(
+                    [
+                        _attempt(0, "att-1", "claude-3-5-sonnet-20241022", "sk-1"),
+                        _attempt(1, "att-2", "claude-3-5-sonnet-20241022", "sk-2"),
+                    ]
+                ),
             )
         usage_reports.append(body)
         return httpx.Response(204)
@@ -372,9 +378,10 @@ def test_hybrid_mode_non_retryable_error_raises_immediately(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A 400 from the upstream is non-retryable — runner stops the iteration
-    at the first attempt and returns 502 right away rather than walking the
-    rest of the route.
+    """A 400 from the upstream is non-retryable — the runner stops the
+    iteration at the first attempt rather than walking the rest of the route,
+    and surfaces the classified 400 (a malformed request no provider would
+    accept) rather than a generic 502.
     """
     calls: list[dict[str, Any]] = []
 
@@ -387,10 +394,12 @@ def test_hybrid_mode_non_retryable_error_raises_immediately(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload([
-                    _attempt(0, "att-1", "claude-3-5-sonnet-20241022", "sk-1"),
-                    _attempt(1, "att-2", "claude-3-5-sonnet-20241022", "sk-2"),
-                ]),
+                json=_resolve_payload(
+                    [
+                        _attempt(0, "att-1", "claude-3-5-sonnet-20241022", "sk-1"),
+                        _attempt(1, "att-2", "claude-3-5-sonnet-20241022", "sk-2"),
+                    ]
+                ),
             )
         return httpx.Response(204)
 
@@ -415,7 +424,7 @@ def test_hybrid_mode_non_retryable_error_raises_immediately(
         headers={"Authorization": "Bearer user_test_token"},
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 400
     assert len(calls) == 1, "Non-retryable error must short-circuit the attempts loop"
 
 

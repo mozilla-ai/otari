@@ -18,6 +18,7 @@ from gateway.api.routes._pipeline import (
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
 )
+from gateway.api.routes._platform import _provider_failure_http_exc
 
 _RAW = "raw provider detail SECRET token=abc123"
 
@@ -74,3 +75,18 @@ def test_no_classified_detail_leaks_raw_message() -> None:
         assert mapping is not None
         assert "SECRET" not in mapping.detail
         assert "abc123" not in mapping.detail
+
+
+def test_platform_terminal_exc_uses_classified_status() -> None:
+    """Platform-mode terminal failures get the same classified status as the
+    standalone adapters, so the production path is not stuck on a generic 502."""
+    exc = _provider_failure_http_exc(_StatusError(404), fallback_detail="LLM provider error")
+    assert exc.status_code == 404
+    assert exc.detail == PROVIDER_MODEL_NOT_FOUND_DETAIL
+
+
+def test_platform_terminal_exc_falls_back_to_generic() -> None:
+    exc = _provider_failure_http_exc(Exception(_RAW), fallback_detail="LLM provider error")
+    assert exc.status_code == 502
+    assert exc.detail == "LLM provider error"
+    assert "SECRET" not in str(exc.detail)

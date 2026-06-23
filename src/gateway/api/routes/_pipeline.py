@@ -208,6 +208,11 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     # not the caller's: surface it as a 502, never as a client-facing 401/403.
     if status_code in (401, 403):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_CREDENTIALS_DETAIL)
+    # A provider 429 is surfaced as a client 429. Note this drops the upstream
+    # Retry-After: the (status, detail) pair cannot carry it, so the caller
+    # can't honor the provider's exact backoff window. Acceptable because the
+    # gateway has no single correct value to forward (BYO vs shared keys differ)
+    # and a bare 429 still tells the caller to back off.
     if status_code == 429:
         return ProviderErrorMapping(status.HTTP_429_TOO_MANY_REQUESTS, PROVIDER_RATE_LIMITED_DETAIL)
     return None
