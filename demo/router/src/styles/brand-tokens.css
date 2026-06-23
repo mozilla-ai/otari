@@ -1,0 +1,35 @@
+/*
+ * Brand tokens, ported from otari.ai's color scheme.
+ *
+ * otari.ai is built on the same HeroUI v3 theme variables this app uses, so we
+ * mirror its values directly: a light theme with a muted-teal accent (#4a7d8f)
+ * on white, otari's surfaces/border/muted text, and its status colors.
+ * Overriding HeroUI v3's base theme variables here drives both the HeroUI
+ * components and the Tailwind color utilities (bg-accent, text-foreground, ...),
+ * so this one file is the single source of truth. To rebrand, edit these values;
+ * nothing else hard-codes a color.
+ */
+
+:root {
+  /* Brand accent (otari --color-accent / primary). */
+  --accent: #4a7d8f;
+  --accent-hover: #3f6d7e;
+  --accent-foreground: #ffffff;
+  --accent-soft: #e3edf1; /* otari --color-primary-subtle */
+  --accent-soft-foreground: #4a7d8f;
+
+  /* Neutrals (otari). */
+  --background: #ffffff;
+  --foreground: #1a1a1a;
+  --muted: #545b62;
+  --surface: #ffffff;
+  --surface-secondary: #f1f4f6;
+  --surface-tertiary: #e8ecef;
+  --border: #d6dce1;
+  --default: #e8ecef;
+
+  /* Status (otari). */
+  --success: #1f6648;
+  --warning: #b07d00;
+  --danger: #cf2e3e;
+}
