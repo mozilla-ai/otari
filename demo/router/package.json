@@ -1,0 +1,29 @@
+{
+  "name": "otari-router-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "An offline, illustrated walkthrough of the Otari kNN router.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@heroui/react": "3.2.1",
+    "@heroui/styles": "3.2.1",
+    "motion": "^12.40.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.1",
+    "@types/node": "22.12.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "6.0.2",
+    "tailwindcss": "4.3.1",
+    "typescript": "5.6.3",
+    "vite": "8.0.16"
+  }
+}

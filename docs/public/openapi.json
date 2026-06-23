@@ -583,6 +583,77 @@
         "title": "ChatCompletionRequest",
         "type": "object"
       },
+      "CompareRequest": {
+        "description": "Fan a single prompt out to a set of candidate models.",
+        "properties": {
+          "max_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional max output tokens per model.",
+            "title": "Max Tokens"
+          },
+          "models": {
+            "description": "provider/model identifiers to compare.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "minItems": 1,
+            "title": "Models",
+            "type": "array"
+          },
+          "prompt": {
+            "description": "User prompt to send to every candidate model.",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "system": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional system prompt applied to every model.",
+            "title": "System"
+          }
+        },
+        "required": [
+          "prompt",
+          "models"
+        ],
+        "title": "CompareRequest",
+        "type": "object"
+      },
+      "CompareResponse": {
+        "properties": {
+          "prompt": {
+            "title": "Prompt",
+            "type": "string"
+          },
+          "responses": {
+            "items": {
+              "$ref": "#/components/schemas/ModelResponse"
+            },
+            "title": "Responses",
+            "type": "array"
+          }
+        },
+        "required": [
+          "prompt",
+          "responses"
+        ],
+        "title": "CompareResponse",
+        "type": "object"
+      },
       "CountTokensRequest": {
         "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the input fields that affect the token\ncount, minus ``max_tokens`` and the streaming/sampling controls, since the\nendpoint only counts input tokens. Clients such as Claude Code call this on\nevery turn to keep their prompt within the model's context window.",
         "properties": {
@@ -1610,6 +1681,42 @@
         "title": "ModelPricingInfo",
         "type": "object"
       },
+      "ModelResponse": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "content"
+        ],
+        "title": "ModelResponse",
+        "type": "object"
+      },
       "ModerationRequest": {
         "description": "OpenAI-compatible moderation request.",
         "properties": {
@@ -1742,6 +1849,24 @@
         "title": "ModerationResult",
         "type": "object"
       },
+      "PoolStatus": {
+        "properties": {
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          },
+          "warm": {
+            "title": "Warm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "records",
+          "warm"
+        ],
+        "title": "PoolStatus",
+        "type": "object"
+      },
       "PricingResponse": {
         "description": "Response model for model pricing.",
         "properties": {
@@ -1779,6 +1904,80 @@
           "updated_at"
         ],
         "title": "PricingResponse",
+        "type": "object"
+      },
+      "RankRequest": {
+        "description": "Submit per-model quality scores over models for a prompt.",
+        "properties": {
+          "label_source": {
+            "default": "human",
+            "description": "Provenance of the label: 'human' or 'judge'.",
+            "title": "Label Source",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "The prompt that was compared.",
+            "title": "Prompt",
+            "type": "string"
+          },
+          "scores": {
+            "additionalProperties": {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "description": "Map of provider/model -> quality score in [0.0, 1.0] (1.0 = best). Models may tie.",
+            "minProperties": 1,
+            "title": "Scores",
+            "type": "object"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional task label that scopes retrieval/scoring.",
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "prompt",
+          "scores"
+        ],
+        "title": "RankRequest",
+        "type": "object"
+      },
+      "RankResponse": {
+        "properties": {
+          "recorded": {
+            "title": "Recorded",
+            "type": "integer"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "warm": {
+            "title": "Warm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "recorded",
+          "warm"
+        ],
+        "title": "RankResponse",
         "type": "object"
       },
       "RerankRequest": {
@@ -2256,6 +2455,60 @@
           "input"
         ],
         "title": "ResponsesRequest",
+        "type": "object"
+      },
+      "RouterStatus": {
+        "description": "Routing-memory overview for a tenant.\n\nRouting memory has no single warmth, it is a set of independent pools, so the\nstatus reports each one. ``default_pool`` is what a request with no\n``Otari-Router-Task`` header routes over (every record the tenant has, tagged\nor not); ``tasks`` lists each task partition, which a request carrying that\ntask routes over. Every pool warms on its own once it crosses ``seed_count``.",
+        "properties": {
+          "backend": {
+            "title": "Backend",
+            "type": "string"
+          },
+          "default_pool": {
+            "$ref": "#/components/schemas/PoolStatus"
+          },
+          "seed_count": {
+            "title": "Seed Count",
+            "type": "integer"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/RouterTaskInfo"
+            },
+            "title": "Tasks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "backend",
+          "seed_count",
+          "default_pool",
+          "tasks"
+        ],
+        "title": "RouterStatus",
+        "type": "object"
+      },
+      "RouterTaskInfo": {
+        "properties": {
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "warm": {
+            "title": "Warm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "task_id",
+          "records",
+          "warm"
+        ],
+        "title": "RouterTaskInfo",
         "type": "object"
       },
       "SetPricingRequest": {
@@ -4754,6 +5007,112 @@
         "summary": "Create Response",
         "tags": [
           "responses"
+        ]
+      }
+    },
+    "/v1/router/preferences/compare": {
+      "post": {
+        "description": "Fan the prompt out to every candidate model concurrently.",
+        "operationId": "compare_models_v1_router_preferences_compare_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompareResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compare Models",
+        "tags": [
+          "router"
+        ]
+      }
+    },
+    "/v1/router/preferences/rank": {
+      "post": {
+        "description": "Persist per-model scores as a routing-memory record plus an audit row.",
+        "operationId": "rank_models_v1_router_preferences_rank_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RankRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RankResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rank Models",
+        "tags": [
+          "router"
+        ]
+      }
+    },
+    "/v1/router/status": {
+      "get": {
+        "description": "Report routing-memory progress for the authenticated tenant.\n\nRouting memory is a set of independent pools, so there is no single warmth.\n``default_pool`` covers a request with no ``Otari-Router-Task`` header (every\nrecord the tenant has); ``tasks`` lists each task partition. Each pool warms\non its own once it crosses ``seed_count``.",
+        "operationId": "router_status_v1_router_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Router Status",
+        "tags": [
+          "router"
         ]
       }
     },

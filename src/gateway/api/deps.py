@@ -15,6 +15,7 @@ from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
+from gateway.services.router_backend import clear_router_backend_cache
 
 _config: GatewayConfig | None = None
 _LAST_USED_UPDATE_INTERVAL_SECONDS = 300
@@ -52,6 +53,7 @@ def reset_config() -> None:
     """Reset config state. Intended for testing only."""
     global _config  # noqa: PLW0603
     _config = None
+    clear_router_backend_cache()
 
 
 def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:

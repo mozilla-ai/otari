@@ -1,0 +1,27 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+@import "./styles/brand-tokens.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--foreground);
+  /* Soft teal wash up top, echoing otari.ai's hero gradient, over white. */
+  background:
+    radial-gradient(1200px 560px at 72% -10%, color-mix(in oklab, var(--accent) 14%, transparent) 0%, transparent 55%),
+    var(--background);
+}
+
+/* Clamp/scroll helpers for model answers (used with Tailwind utilities). */
+.answer-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
