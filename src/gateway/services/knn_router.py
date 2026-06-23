@@ -1,8 +1,9 @@
 """kNN routing-memory backend: the default learned router.
 
 Implements the design's central premise: similar prompts behave similarly, so a
-nearest-neighbor vote over per-tenant ``(embedding, model, quality, cost)``
-records can send each request to the cheapest model that is still good enough.
+nearest-neighbor vote over per-tenant ``(embedding, {model: quality})`` records,
+one per scored example, can send each request to the cheapest model that is still
+good enough.
 
 Scoring (per candidate model ``m`` over the ``k`` nearest neighbors):
 
@@ -216,33 +217,30 @@ class KnnRoutingMemory:
         task_id: str | None,
         label_source: str = "human",
     ) -> int:
-        """Persist one routing-memory record per scored model.
+        """Persist one routing-memory record for this example.
 
-        Each model's score is its quality signal in ``[0.0, 1.0]`` (1.0 = great,
-        0.0 = bad). Scores are independent, so models may tie. Returns the number
-        of memory records written.
+        ``scores`` maps each candidate model to its quality in ``[0.0, 1.0]``
+        (1.0 = great, 0.0 = bad). One example is one record, the prompt embedding
+        plus the per-model scores, so the kNN later votes over distinct prompts.
+        Returns the number of records written (1, or 0 for an empty submission).
         """
         if not prompt.strip() or not scores:
             return 0
         embedding = await self._embed(prompt)
         async with create_session() as db:
-            for model, score in scores.items():
-                cost = await self._model_input_price(db, model)
-                db.add(
-                    RoutingMemory(
-                        tenant_id=tenant_id,
-                        embedding_model=self.embedding_model,
-                        embedding=embedding,
-                        model=model,
-                        quality=float(score),
-                        cost=cost,
-                        task_id=task_id,
-                        label_source=label_source,
-                    )
+            db.add(
+                RoutingMemory(
+                    tenant_id=tenant_id,
+                    embedding_model=self.embedding_model,
+                    embedding=embedding,
+                    qualities={model: float(score) for model, score in scores.items()},
+                    task_id=task_id,
+                    label_source=label_source,
                 )
+            )
             await db.commit()
         await self._evict_if_needed(tenant_id)
-        return len(scores)
+        return 1
 
     # -- scoring -----------------------------------------------------------
 
@@ -261,7 +259,7 @@ class KnnRoutingMemory:
 
         scores: dict[str, float] = {}
         for model in pool:
-            qualities = [r.quality for _, r in neighbors if r.model == model]
+            qualities = [r.qualities[model] for _, r in neighbors if model in r.qualities]
             if not qualities:
                 continue
             scores[model] = sum(qualities) / len(qualities) - self.alpha * norm_cost(model)
@@ -272,13 +270,12 @@ class KnnRoutingMemory:
         ordered = sorted(scores, key=lambda m: scores[m], reverse=True)
         best = ordered[0]
 
-        # Confidence = fraction of the k neighbors that are themselves records of
-        # the chosen model. A neighborhood densely populated by the chosen model
-        # reads as a clear local consensus for that pick; a thin presence reads as
-        # weak support. This is monotone in how often the pick was observed nearby
-        # and, unlike a global-argmax proxy, stays meaningful when cost bias picks
-        # a cheaper model than the single highest-quality neighbor.
-        agree = sum(1 for _, r in neighbors if r.model == best)
+        # Confidence = fraction of the k neighbor prompts whose own best-scoring
+        # model is the chosen model. A clear local consensus reads as high
+        # confidence; if the nearby prompts mostly preferred a different model the
+        # pick is weakly supported. Each neighbor is one prompt, so this is a vote
+        # over distinct prompts, not over per-model rows.
+        agree = sum(1 for _, r in neighbors if r.qualities and max(r.qualities, key=lambda m: r.qualities[m]) == best)
         confidence = agree / len(neighbors)
 
         if confidence < self.confidence_floor:

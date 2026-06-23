@@ -115,7 +115,7 @@ only.
 | `OTARI_ROUTER_K` | `5` | Number of nearest neighbors used to vote on a model. |
 | `OTARI_ROUTER_EMBEDDING_MODEL` | `openai:text-embedding-3-small` | provider:model used to embed the prompt. |
 | `OTARI_ROUTER_CONFIDENCE_FLOOR` | `0.0` | Below this confidence (0..1) the request leads with the requested model. |
-| `OTARI_ROUTER_SEED_COUNT` | `20` | Per-tenant records required before routing leaves pass-through. |
+| `OTARI_ROUTER_SEED_COUNT` | `20` | Per-tenant records (one per scored example) required before routing leaves pass-through. |
 | `OTARI_ROUTER_GRANULARITY` | `trace_sticky` | `trace_sticky` (route once per conversation) or `step` (re-route each call). |
 | `OTARI_ROUTER_MAX_VECTORS_PER_TENANT` | `5000` | Hard cap on stored vectors per tenant; oldest are evicted past it. |
 

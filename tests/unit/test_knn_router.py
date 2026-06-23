@@ -6,6 +6,9 @@ embedding provider by patching the backend's async I/O helpers (``_embed``,
 that decides *which* model wins: cost-biased kNN voting, cold-start and
 sparse-neighborhood pass-through, the confidence floor, trace-sticky reuse, the
 tools capability gate, and requested-model fallthrough ordering.
+
+Each routing-memory record is one example: a prompt embedding plus a
+``{model: quality}`` map, so the kNN votes over distinct prompts.
 """
 
 from __future__ import annotations
@@ -22,6 +25,8 @@ from gateway.services.router_backend import RoutingContext
 CHEAP = "openai/gpt-3.5-turbo"
 STRONG = "openai/gpt-4o"
 
+PRICES = {CHEAP: 1.0, STRONG: 10.0}
+
 
 def _backend(**overrides: Any) -> KnnRoutingMemory:
     kwargs: dict[str, Any] = {"router_backend": "knn", "router_k": 2, "router_seed_count": 2}
@@ -29,15 +34,17 @@ def _backend(**overrides: Any) -> KnnRoutingMemory:
     return KnnRoutingMemory(GatewayConfig(**kwargs))
 
 
-def _mem(model: str, quality: float, vec: tuple[float, ...] = (1.0, 0.0)) -> RoutingMemory:
-    return RoutingMemory(
-        tenant_id="t",
-        embedding_model="m",
-        embedding=list(vec),
-        model=model,
-        quality=quality,
-        cost=0.0,
-    )
+def _mem(qualities: dict[str, float], vec: tuple[float, ...] = (1.0, 0.0)) -> RoutingMemory:
+    """One example: a prompt embedding plus each model's quality on it."""
+    return RoutingMemory(tenant_id="t", embedding_model="m", embedding=list(vec), qualities=dict(qualities))
+
+
+def _both_good() -> RoutingMemory:
+    return _mem({CHEAP: 1.0, STRONG: 1.0})
+
+
+def _cheap_fails() -> RoutingMemory:
+    return _mem({CHEAP: 0.0, STRONG: 1.0})
 
 
 def _ctx(
@@ -93,7 +100,7 @@ async def test_single_candidate_pool_passes_through() -> None:
 @pytest.mark.asyncio
 async def test_tools_are_capability_gated_to_requested_model() -> None:
     backend = _backend()
-    _wire(backend, [_mem(CHEAP, 1.0), _mem(CHEAP, 1.0)])
+    _wire(backend, [_both_good(), _both_good()])
     decision = await backend.route(_ctx(has_tools=True))
     assert decision.ordered_models == [STRONG]
     assert "tools" in decision.rationale
@@ -102,7 +109,7 @@ async def test_tools_are_capability_gated_to_requested_model() -> None:
 @pytest.mark.asyncio
 async def test_cold_tenant_below_seed_count_passes_through() -> None:
     backend = _backend(router_seed_count=10)
-    _wire(backend, [_mem(CHEAP, 1.0), _mem(CHEAP, 1.0)], total=2)
+    _wire(backend, [_both_good(), _both_good()], total=2)
     decision = await backend.route(_ctx())
     assert decision.ordered_models == [STRONG]
     assert "cold tenant" in decision.rationale
@@ -110,9 +117,9 @@ async def test_cold_tenant_below_seed_count_passes_through() -> None:
 
 @pytest.mark.asyncio
 async def test_sparse_neighborhood_passes_through() -> None:
-    # seed gate satisfied (total high) but fewer than k usable neighbor rows.
+    # seed gate satisfied (total high) but fewer than k usable neighbor records.
     backend = _backend(router_k=5)
-    _wire(backend, [_mem(CHEAP, 1.0)], total=50)
+    _wire(backend, [_both_good()], total=50)
     decision = await backend.route(_ctx())
     assert decision.ordered_models == [STRONG]
     assert "sparse" in decision.rationale
@@ -121,7 +128,7 @@ async def test_sparse_neighborhood_passes_through() -> None:
 @pytest.mark.asyncio
 async def test_embedding_failure_passes_through() -> None:
     backend = _backend()
-    _wire(backend, [_mem(CHEAP, 1.0), _mem(CHEAP, 1.0)])
+    _wire(backend, [_both_good(), _both_good()])
 
     async def _boom(text: str) -> list[float]:
         raise RuntimeError("embedding down")
@@ -139,11 +146,7 @@ async def test_embedding_failure_passes_through() -> None:
 async def test_easy_region_routes_to_cheap() -> None:
     # Neighbors say cheap is as good as strong here; cost bias picks cheap.
     backend = _backend(router_alpha=0.3)
-    _wire(
-        backend,
-        [_mem(CHEAP, 1.0), _mem(STRONG, 1.0)],
-        prices={CHEAP: 1.0, STRONG: 10.0},
-    )
+    _wire(backend, [_both_good(), _both_good()], prices=PRICES)
     decision = await backend.route(_ctx())
     assert decision.ordered_models[0] == CHEAP
     # requested (strong) is always the final fallthrough.
@@ -154,11 +157,7 @@ async def test_easy_region_routes_to_cheap() -> None:
 async def test_hard_region_routes_to_strong() -> None:
     # Neighbors say cheap fails here (quality 0); strong wins despite cost.
     backend = _backend(router_alpha=0.3)
-    _wire(
-        backend,
-        [_mem(CHEAP, 0.0), _mem(STRONG, 1.0)],
-        prices={CHEAP: 1.0, STRONG: 10.0},
-    )
+    _wire(backend, [_cheap_fails(), _cheap_fails()], prices=PRICES)
     decision = await backend.route(_ctx())
     assert decision.ordered_models[0] == STRONG
 
@@ -167,36 +166,44 @@ async def test_hard_region_routes_to_strong() -> None:
 async def test_higher_alpha_pushes_toward_cheap() -> None:
     # A large enough cost dial overrides a modest quality gap, proving the dial
     # actually moves the operating point.
-    records = [_mem(CHEAP, 0.6), _mem(STRONG, 1.0)]
+    records = [_mem({CHEAP: 0.6, STRONG: 1.0}), _mem({CHEAP: 0.6, STRONG: 1.0})]
     low = _backend(router_alpha=0.0)
     high = _backend(router_alpha=5.0)
-    _wire(low, records, prices={CHEAP: 1.0, STRONG: 10.0})
-    _wire(high, list(records), prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(low, records, prices=PRICES)
+    _wire(high, list(records), prices=PRICES)
     assert (await low.route(_ctx())).ordered_models[0] == STRONG
     assert (await high.route(_ctx())).ordered_models[0] == CHEAP
 
 
+# Neighborhoods where cost bias picks cheap, but the neighbor prompts back it to
+# differing degrees: 3-of-4 prefer cheap (dense) vs 1-of-4 (thin).
+_DENSE = [
+    _mem({CHEAP: 0.9, STRONG: 0.5}),
+    _mem({CHEAP: 0.9, STRONG: 0.5}),
+    _mem({CHEAP: 0.9, STRONG: 0.5}),
+    _mem({CHEAP: 0.5, STRONG: 0.9}),
+]
+_THIN = [
+    _mem({CHEAP: 0.9, STRONG: 0.5}),
+    _mem({CHEAP: 0.7, STRONG: 0.75}),
+    _mem({CHEAP: 0.7, STRONG: 0.75}),
+    _mem({CHEAP: 0.7, STRONG: 0.75}),
+]
+
+
 @pytest.mark.asyncio
 async def test_confidence_is_local_support_for_the_pick() -> None:
-    # Confidence is the share of the k neighbors that are records of the chosen
-    # model, so a densely-supported cheap pick reads high and a thinly-supported
-    # one reads low even though both pick cheap on cost.
+    # Confidence is the share of the k neighbor prompts whose own best-scoring
+    # model is the chosen one, so a densely-supported cheap pick reads high and a
+    # thinly-supported one reads low even though both pick cheap on cost.
     dense = _backend(router_alpha=0.3, router_k=4)
-    _wire(
-        dense,
-        [_mem(CHEAP, 0.9), _mem(CHEAP, 0.9), _mem(CHEAP, 0.9), _mem(STRONG, 1.0)],
-        prices={CHEAP: 1.0, STRONG: 10.0},
-    )
+    _wire(dense, list(_DENSE), prices=PRICES)
     decision = await dense.route(_ctx())
     assert decision.ordered_models[0] == CHEAP
     assert decision.confidence == pytest.approx(0.75)
 
     thin = _backend(router_alpha=0.3, router_k=4)
-    _wire(
-        thin,
-        [_mem(CHEAP, 0.9), _mem(STRONG, 1.0), _mem(STRONG, 1.0), _mem(STRONG, 1.0)],
-        prices={CHEAP: 1.0, STRONG: 10.0},
-    )
+    _wire(thin, list(_THIN), prices=PRICES)
     decision = await thin.route(_ctx())
     assert decision.ordered_models[0] == CHEAP
     assert decision.confidence == pytest.approx(0.25)
@@ -209,19 +216,11 @@ async def test_confidence_floor_vetoes_thinly_supported_pick_only() -> None:
     # behavior the docs promise: the floor gates on real local support, so it does
     # not silently disable routing on every cost-saving downgrade.
     kept = _backend(router_alpha=0.3, router_k=4, router_confidence_floor=0.5)
-    _wire(
-        kept,
-        [_mem(CHEAP, 0.9), _mem(CHEAP, 0.9), _mem(CHEAP, 0.9), _mem(STRONG, 1.0)],
-        prices={CHEAP: 1.0, STRONG: 10.0},
-    )
+    _wire(kept, list(_DENSE), prices=PRICES)
     assert (await kept.route(_ctx())).ordered_models[0] == CHEAP
 
     vetoed = _backend(router_alpha=0.3, router_k=4, router_confidence_floor=0.5)
-    _wire(
-        vetoed,
-        [_mem(CHEAP, 0.9), _mem(STRONG, 1.0), _mem(STRONG, 1.0), _mem(STRONG, 1.0)],
-        prices={CHEAP: 1.0, STRONG: 10.0},
-    )
+    _wire(vetoed, list(_THIN), prices=PRICES)
     decision = await vetoed.route(_ctx())
     assert decision.ordered_models[0] == STRONG
     assert "below floor" in decision.rationale
@@ -233,7 +232,7 @@ async def test_confidence_floor_vetoes_thinly_supported_pick_only() -> None:
 @pytest.mark.asyncio
 async def test_trace_sticky_reuses_first_decision() -> None:
     backend = _backend(router_alpha=0.3, router_granularity="trace_sticky")
-    _wire(backend, [_mem(CHEAP, 1.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(backend, [_both_good(), _both_good()], prices=PRICES)
 
     convo: list[dict[str, Any]] = [{"role": "user", "content": "start the trace"}]
     first = await backend.route(_ctx(messages=convo))
@@ -241,7 +240,7 @@ async def test_trace_sticky_reuses_first_decision() -> None:
 
     # A continuation of the same trace (same first user turn) must reuse the
     # original pick without re-routing, even if neighbors now disagree.
-    _wire(backend, [_mem(STRONG, 1.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(backend, [_cheap_fails(), _cheap_fails()], prices=PRICES)
     cont = convo + [{"role": "assistant", "content": "..."}, {"role": "user", "content": "next step"}]
     second = await backend.route(_ctx(messages=cont, is_trace_continuation=True))
     assert second.ordered_models[0] == CHEAP
@@ -252,16 +251,16 @@ async def test_trace_sticky_reuses_first_decision() -> None:
 async def test_step_granularity_reroutes_each_call() -> None:
     backend = _backend(router_alpha=0.3, router_granularity="step")
     convo: list[dict[str, Any]] = [{"role": "user", "content": "q"}]
-    _wire(backend, [_mem(CHEAP, 1.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(backend, [_both_good(), _both_good()], prices=PRICES)
     assert (await backend.route(_ctx(messages=convo))).ordered_models[0] == CHEAP
     # New neighbor signal flips the decision because step mode does not stick.
-    _wire(backend, [_mem(CHEAP, 0.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(backend, [_cheap_fails(), _cheap_fails()], prices=PRICES)
     cont = convo + [{"role": "assistant", "content": "a"}, {"role": "user", "content": "q2"}]
     assert (await backend.route(_ctx(messages=cont, is_trace_continuation=True))).ordered_models[0] == STRONG
 
 
 def _capture_embed_signal(backend: KnnRoutingMemory, captured: dict[str, str]) -> None:
-    _wire(backend, [_mem(CHEAP, 1.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(backend, [_both_good(), _both_good()], prices=PRICES)
 
     async def _embed(text: str) -> list[float]:
         captured["signal"] = text
@@ -300,11 +299,11 @@ async def test_conversation_id_makes_stickiness_robust_to_content() -> None:
     # even though its message content is completely different (a real conversation
     # id, not a content hash, is the trace identity).
     backend = _backend(router_alpha=0.3, router_granularity="trace_sticky")
-    _wire(backend, [_mem(CHEAP, 1.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(backend, [_both_good(), _both_good()], prices=PRICES)
     first = await backend.route(_ctx(messages=[{"role": "user", "content": "A"}], trace_key="conv-1"))
     assert first.ordered_models[0] == CHEAP
 
-    _wire(backend, [_mem(STRONG, 1.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(backend, [_cheap_fails(), _cheap_fails()], prices=PRICES)
     different: list[dict[str, Any]] = [{"role": "user", "content": "ENTIRELY DIFFERENT"}]
     cont = await backend.route(_ctx(messages=different, trace_key="conv-1", is_trace_continuation=True))
     assert cont.ordered_models[0] == CHEAP
@@ -326,12 +325,12 @@ async def test_conversation_id_is_namespaced_per_tenant() -> None:
             is_trace_continuation=cont,
         )
 
-    _wire(backend, [_mem(CHEAP, 1.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(backend, [_both_good(), _both_good()], prices=PRICES)
     assert (await backend.route(_ctx_for("tenant-a", cont=False))).ordered_models[0] == CHEAP
 
     # Tenant B shares the conversation id but has no decision under its own
-    # namespace, so it routes fresh on its own neighbors (here both STRONG).
-    _wire(backend, [_mem(STRONG, 1.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    # namespace, so it routes fresh on its own neighbors (here cheap fails).
+    _wire(backend, [_cheap_fails(), _cheap_fails()], prices=PRICES)
     decision = await backend.route(_ctx_for("tenant-b", cont=True))
     assert decision.ordered_models[0] == STRONG
     assert "trace-sticky" not in decision.rationale
@@ -343,13 +342,13 @@ async def test_distinct_system_preamble_separates_traces_without_a_conversation_
     # conversations that share a first user message but differ in system preamble
     # are kept apart (first-user-text alone would have collided them).
     backend = _backend(router_alpha=0.3, router_granularity="trace_sticky")
-    _wire(backend, [_mem(CHEAP, 1.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(backend, [_both_good(), _both_good()], prices=PRICES)
     convo_a: list[dict[str, Any]] = [{"role": "system", "content": "agent A"}, {"role": "user", "content": "go"}]
     assert (await backend.route(_ctx(messages=convo_a))).ordered_models[0] == CHEAP
 
     # Different system preamble, same first user turn, marked as a continuation:
     # it must NOT reuse conversation A's decision (no shared trace key).
-    _wire(backend, [_mem(STRONG, 1.0), _mem(STRONG, 1.0)], prices={CHEAP: 1.0, STRONG: 10.0})
+    _wire(backend, [_cheap_fails(), _cheap_fails()], prices=PRICES)
     convo_b: list[dict[str, Any]] = [
         {"role": "system", "content": "agent B"},
         {"role": "user", "content": "go"},

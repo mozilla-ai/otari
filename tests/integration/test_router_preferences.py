@@ -250,8 +250,8 @@ def test_rank_records_and_warms_tenant(knn_client: TestClient) -> None:
     _seed(knn_client, headers)
 
     status = knn_client.get("/v1/router/status", headers=headers).json()
-    # 4 submissions x 2 models = 8 records; seed_count is 4, so the default pool is warm.
-    assert status["default_pool"] == {"records": 8, "warm": True}
+    # 4 examples = 4 records (one per example); seed_count is 4, so the pool is warm.
+    assert status["default_pool"] == {"records": 4, "warm": True}
 
 
 def test_rank_accepts_tied_scores(knn_client: TestClient) -> None:
@@ -263,9 +263,9 @@ def test_rank_accepts_tied_scores(knn_client: TestClient) -> None:
         headers=headers,
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["recorded"] == 2
-    # Both models recorded, neither preferred over the other.
-    assert knn_client.get("/v1/router/status", headers=headers).json()["default_pool"]["records"] == 2
+    # One example -> one record, even though it scored two models (tied here).
+    assert resp.json()["recorded"] == 1
+    assert knn_client.get("/v1/router/status", headers=headers).json()["default_pool"]["records"] == 1
 
 
 def test_rank_rejects_out_of_range_or_empty_scores(knn_client: TestClient) -> None:
@@ -356,19 +356,19 @@ def test_unseeded_task_partition_passes_through(knn_client: TestClient) -> None:
 
 def test_status_reports_pools_with_independent_warmth(knn_client: TestClient) -> None:
     headers = _headers(_make_key(knn_client, "tenant-task-status"))
-    _seed(knn_client, headers, task_id="alpha")  # 8 records -> warm (seed_count 4)
-    _rank(knn_client, headers, "what is 2 plus 2", [CHEAP, STRONG], task_id="beta")  # 2 records -> cold
-    _rank(knn_client, headers, "untagged prompt", [CHEAP, STRONG])  # 2 untagged, not a partition
+    _seed(knn_client, headers, task_id="alpha")  # 4 examples -> warm (seed_count 4)
+    _rank(knn_client, headers, "what is 2 plus 2", [CHEAP, STRONG], task_id="beta")  # 1 example -> cold
+    _rank(knn_client, headers, "untagged prompt", [CHEAP, STRONG])  # 1 untagged, not a partition
 
     body = knn_client.get("/v1/router/status", headers=headers).json()
     assert body["backend"] == "knn"
-    # The default pool is every record the tenant has (8 + 2 + 2); warms on its own.
-    assert body["default_pool"] == {"records": 12, "warm": True}
+    # The default pool is every record the tenant has (4 + 1 + 1); warms on its own.
+    assert body["default_pool"] == {"records": 6, "warm": True}
     tasks = {t["task_id"]: t for t in body["tasks"]}
     # Only tagged partitions are listed; untagged records are not a partition.
     assert set(tasks) == {"alpha", "beta"}
-    assert tasks["alpha"]["records"] == 8 and tasks["alpha"]["warm"] is True
-    assert tasks["beta"]["records"] == 2 and tasks["beta"]["warm"] is False
+    assert tasks["alpha"]["records"] == 4 and tasks["alpha"]["warm"] is True
+    assert tasks["beta"]["records"] == 1 and tasks["beta"]["warm"] is False
 
 
 def test_onboarding_with_a_plain_api_key_no_explicit_user(knn_client: TestClient) -> None:

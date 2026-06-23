@@ -26,7 +26,7 @@ export function TeachWalkthrough({ demo, onSeeItRoute }: { demo: DemoData; onSee
   // Records committed per task partition. The opening example (step 3) is the
   // first submission, filed under its own task; later submissions add to theirs.
   const [recordsByTask, setRecordsByTask] = useState<Record<string, number>>(() => ({
-    [item.task]: item.responses.length,
+    [item.task]: 1,
   }));
 
   const tasks = useMemo(() => Array.from(new Set(demo.items.map((i) => i.task))), [demo]);
@@ -37,8 +37,7 @@ export function TeachWalkthrough({ demo, onSeeItRoute }: { demo: DemoData; onSee
   // instead of one filling first (the bundled prompts are grouped by task).
   const nextTask = tasks.reduce((a, b) => (taskRecords(a) <= taskRecords(b) ? a : b));
   const submitAnother = () => {
-    const example = demo.items.find((it) => it.task === nextTask) ?? demo.items[0];
-    setRecordsByTask((m) => ({ ...m, [nextTask]: (m[nextTask] ?? 0) + example.responses.length }));
+    setRecordsByTask((m) => ({ ...m, [nextTask]: (m[nextTask] ?? 0) + 1 }));
   };
 
   const rankScores = useMemo(
@@ -195,8 +194,9 @@ export function TeachWalkthrough({ demo, onSeeItRoute }: { demo: DemoData; onSee
             <StepGrid
               lede={
                 <>
-                  Send the scores back. The gateway writes one <strong>routing-memory record</strong> per model: the
-                  prompt's embedding paired with that model's score. That is the unit the kNN router later votes over.
+                  Send the scores back. The gateway writes <strong>one routing-memory record for this example</strong>:
+                  the prompt's embedding paired with each model's score. That single record is what the kNN later votes
+                  over, so the router compares <em>distinct prompts</em>, not individual model scores.
                 </>
               }
               aside={
@@ -229,25 +229,22 @@ export function TeachWalkthrough({ demo, onSeeItRoute }: { demo: DemoData; onSee
                     }}
                   />
                   <div className="mt-3 text-muted">→ 200 OK</div>
-                  <JsonBlock
-                    className="mt-1"
-                    value={{ recorded: rankScores.length, warm: totalRecords >= SEED_COUNT }}
-                  />
+                  <JsonBlock className="mt-1" value={{ recorded: 1, warm: totalRecords >= SEED_COUNT }} />
                 </Panel>
                 <Panel>
-                  <span className="text-xs uppercase tracking-wide text-muted">Records written to your pool</span>
-                  <ul className="mt-2 flex flex-col gap-1 font-mono text-xs">
+                  <span className="text-xs uppercase tracking-wide text-muted">The one record written to your pool</span>
+                  <div className="mt-2 font-mono text-xs">
+                    <div>
+                      <span className="text-muted">record:</span> embed(prompt) <span className="text-muted">→</span>{" "}
+                      {"{"}
+                    </div>
                     {rankScores.map((r) => (
-                      <li key={r.model} className="flex items-center gap-2">
-                        <span className="text-muted">record:</span>
-                        <span>embed(prompt)</span>
-                        <span className="text-muted">→</span>
-                        <span>{r.label}</span>
-                        <span className="text-muted">=</span>
-                        <span className={qualClass(r.score)}>{r.score.toFixed(2)}</span>
-                      </li>
+                      <div key={r.model} className="pl-6">
+                        {r.label}: <span className={qualClass(r.score)}>{r.score.toFixed(2)}</span>,
+                      </div>
                     ))}
-                  </ul>
+                    <div>{"}"}</div>
+                  </div>
                 </Panel>
               </div>
             </StepGrid>
@@ -313,7 +310,7 @@ export function TeachWalkthrough({ demo, onSeeItRoute }: { demo: DemoData; onSee
                   </div>
                 </Panel>
                 <p className="text-xs text-muted">
-                  Each submission adds one record per scored model to that prompt's partition. The gateway gates on{" "}
+                  Each submission adds one record (the example) to its partition. The gateway gates on{" "}
                   <code>OTARI_ROUTER_SEED_COUNT</code> (default 20) per partition; a request with no task header routes
                   over the combined <code>default_pool</code>.
                 </p>

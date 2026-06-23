@@ -92,8 +92,9 @@ curl -X POST http://localhost:8000/v1/router/preferences/rank \
 
 Here the cheap model answered fine, so it ranks first: a vote to route
 arithmetic-like prompts to it. For prompts where only the strong model is good
-enough, rank the strong model first. Each ranking writes one memory record per
-model; repeat until `/status` reports `warm: true`.
+enough, rank the strong model first. Each ranking writes one memory record (the
+prompt with each model's score), so the kNN votes over distinct prompts; repeat
+until `/status` reports `warm: true`.
 
 Tip: the ranking does not have to come from a human eyeballing answers. You can
 score the `compare` responses with an LLM judge of your own and submit the

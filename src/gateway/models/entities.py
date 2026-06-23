@@ -252,12 +252,15 @@ class FileObject(Base):
 
 
 class RoutingMemory(Base):
-    """A single (embedding, model, quality, cost) routing-memory record.
+    """One routing-memory record per scored example: a prompt embedding plus the
+    quality each candidate model earned on it.
 
     The kNN router (gateway.services.knn_router) retrieves the nearest neighbors
     of an incoming request's task embedding within a tenant and votes on the
-    cheapest model that is still good enough. Records are written by the
-    preference-collection flow (rank-to-scalar quality).
+    cheapest model that is still good enough. One record is one example (one
+    prompt), so the kNN votes over distinct prompts; ``qualities`` maps each model
+    to its ``[0, 1]`` score for this prompt. Records are written by the
+    preference-collection flow.
 
     Vectors are stored as a JSON list of floats for SQLite/PostgreSQL
     portability; a tenant's vectors are scanned linearly in Python. This is fine
@@ -277,9 +280,7 @@ class RoutingMemory(Base):
     tenant_id: Mapped[str] = mapped_column(index=True)
     embedding_model: Mapped[str] = mapped_column()
     embedding: Mapped[list[float]] = mapped_column(JSON)
-    model: Mapped[str] = mapped_column()
-    quality: Mapped[float] = mapped_column()
-    cost: Mapped[float] = mapped_column(default=0.0)
+    qualities: Mapped[dict[str, float]] = mapped_column(JSON)
     task_id: Mapped[str | None] = mapped_column(default=None, index=True)
     label_source: Mapped[str] = mapped_column(default="human")
     created_at: Mapped[datetime] = mapped_column(
@@ -292,9 +293,7 @@ class RoutingMemory(Base):
             "id": self.id,
             "tenant_id": self.tenant_id,
             "embedding_model": self.embedding_model,
-            "model": self.model,
-            "quality": self.quality,
-            "cost": self.cost,
+            "qualities": self.qualities,
             "task_id": self.task_id,
             "label_source": self.label_source,
             "created_at": self.created_at.isoformat() if self.created_at else None,
