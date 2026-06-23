@@ -43,6 +43,7 @@ from gateway.api.routes._platform import ResolvedAttempt
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
@@ -146,14 +147,19 @@ class _ChatAdapter:
     def extract_stream_usage(self, chunk: ChatCompletionChunk) -> CompletionUsage | None:
         if not chunk.usage:
             return None
-        return CompletionUsage(
+        details = chunk.usage.prompt_tokens_details
+        return GatewayUsage(
             prompt_tokens=chunk.usage.prompt_tokens or 0,
             completion_tokens=chunk.usage.completion_tokens or 0,
             total_tokens=chunk.usage.total_tokens or 0,
+            prompt_tokens_details=details,
+            cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
         )
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:
-        return result.usage
+        if result.usage is None:
+            return None
+        return GatewayUsage.from_completion_usage(result.usage)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> ChatCompletion:
         return await acompletion(**kwargs)  # type: ignore[return-value]

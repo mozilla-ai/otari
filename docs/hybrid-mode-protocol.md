@@ -259,13 +259,33 @@ Content-Type: application/json
   "usage": {                           // present on success only
     "prompt_tokens": 13,
     "completion_tokens": 7,
-    "total_tokens": 20
+    "total_tokens": 20,
+    "cache_read_tokens": 8,            // provider cache-read input tokens
+    "cache_write_tokens": 0           // cache-write (creation) input tokens; Anthropic only
   },
   "error_class": "http_401"            // optional on error; omitted when the
                                        // Otari can't classify the failure
                                        // (e.g. mid-stream errors). See below.
 }
 ```
+
+`cache_read_tokens` and `cache_write_tokens` are additive fields carrying the
+provider cached-token counts (default `0` when a provider reports none). Their
+inclusion convention differs by provider, so the platform must price them with
+that in mind:
+
+- OpenAI (chat and Responses) and Gemini report cached tokens as a **subset** of
+  `prompt_tokens`. `cache_read_tokens` is informational for re-pricing those
+  tokens at the cached rate; there is no cache-write concept, so
+  `cache_write_tokens` is always `0`.
+- Anthropic reports `prompt_tokens` (mapped from `input_tokens`) **excluding**
+  cache. `cache_read_tokens` and `cache_write_tokens` are reported **separately**
+  and are not part of `prompt_tokens`. `cache_write_tokens` is a true cache
+  creation charge billed at a premium.
+
+The platform must accept these additive keys with lenient parsing; a handler that
+rejects unknown fields would 422 the report (a non-retryable status), silently
+dropping it. See companion issue mozilla-ai/otari-ai#1168.
 
 A multi-attempt request that iterates two attempts produces two usage reports —
 one per attempt — sharing the same `request_id` (recoverable via the original

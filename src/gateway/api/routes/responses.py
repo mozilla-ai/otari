@@ -42,6 +42,7 @@ from gateway.api.routes._platform import ResolvedAttempt
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
@@ -115,10 +116,13 @@ def _usage_to_completion_usage(
 ) -> CompletionUsage | None:
     if usage is None:
         return None
-    return CompletionUsage(
+    details = getattr(usage, "input_tokens_details", None)
+    cache_read_tokens = (getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
+    return GatewayUsage(
         prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
         completion_tokens=getattr(usage, "output_tokens", 0) or 0,
         total_tokens=getattr(usage, "total_tokens", 0) or 0,
+        cache_read_tokens=cache_read_tokens,
     )
 
 

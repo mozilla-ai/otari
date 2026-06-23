@@ -50,6 +50,7 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
@@ -157,18 +158,25 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
     if isinstance(event, MessageDeltaEvent):
         input_tokens = event.usage.input_tokens or 0
         output_tokens = event.usage.output_tokens or 0
-        return CompletionUsage(
+        return GatewayUsage(
             prompt_tokens=input_tokens,
             completion_tokens=output_tokens,
             total_tokens=input_tokens + output_tokens,
+            cache_read_tokens=event.usage.cache_read_input_tokens or 0,
+            cache_write_tokens=event.usage.cache_creation_input_tokens or 0,
         )
     if isinstance(event, MessageStartEvent):
-        input_tokens = event.message.usage.input_tokens or 0
-        if input_tokens:
-            return CompletionUsage(
+        usage = event.message.usage
+        input_tokens = usage.input_tokens or 0
+        cache_read = usage.cache_read_input_tokens or 0
+        cache_write = usage.cache_creation_input_tokens or 0
+        if input_tokens or cache_read or cache_write:
+            return GatewayUsage(
                 prompt_tokens=input_tokens,
                 completion_tokens=0,
                 total_tokens=input_tokens,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
             )
     return None
 
@@ -208,10 +216,12 @@ class _MessagesAdapter:
     def extract_usage(self, result: MessageResponse) -> CompletionUsage | None:
         if not result.usage:
             return None
-        return CompletionUsage(
+        return GatewayUsage(
             prompt_tokens=result.usage.input_tokens,
             completion_tokens=result.usage.output_tokens,
             total_tokens=result.usage.input_tokens + result.usage.output_tokens,
+            cache_read_tokens=result.usage.cache_read_input_tokens or 0,
+            cache_write_tokens=result.usage.cache_creation_input_tokens or 0,
         )
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:

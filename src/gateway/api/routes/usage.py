@@ -32,6 +32,8 @@ class UsageEntry(BaseModel):
     prompt_tokens: int | None
     completion_tokens: int | None
     total_tokens: int | None
+    cache_read_tokens: int | None
+    cache_write_tokens: int | None
     cost: float | None
     status: str
     error_message: str | None
@@ -49,6 +51,8 @@ class UsageEntry(BaseModel):
             prompt_tokens=log.prompt_tokens,
             completion_tokens=log.completion_tokens,
             total_tokens=log.total_tokens,
+            cache_read_tokens=log.cache_read_tokens,
+            cache_write_tokens=log.cache_write_tokens,
             cost=log.cost,
             status=log.status,
             error_message=log.error_message,

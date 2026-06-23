@@ -75,6 +75,7 @@ from gateway.api.routes._tools import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
+from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
 from gateway.metrics import record_cost, record_tokens
 from gateway.models.entities import UsageLog
@@ -856,6 +857,8 @@ async def log_usage(
         usage_log.prompt_tokens = usage_data.prompt_tokens
         usage_log.completion_tokens = usage_data.completion_tokens
         usage_log.total_tokens = usage_data.total_tokens
+        usage_log.cache_read_tokens = cache_read_tokens_of(usage_data)
+        usage_log.cache_write_tokens = cache_write_tokens_of(usage_data)
 
         record_tokens(
             str(provider or ""),
