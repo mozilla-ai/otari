@@ -33,7 +33,6 @@ export function TeachWalkthrough({ demo, onSeeItRoute }: { demo: DemoData; onSee
   const taskRecords = (t: string) => recordsByTask[t] ?? 0;
   const totalRecords = Object.values(recordsByTask).reduce((a, b) => a + b, 0);
   const taskWarm = (t: string) => taskRecords(t) >= SEED_COUNT;
-  const warm = taskWarm(item.task);
   // Fill the least-populated partition next, so the three warm in turn on screen
   // instead of one filling first (the bundled prompts are grouped by task).
   const nextTask = tasks.reduce((a, b) => (taskRecords(a) <= taskRecords(b) ? a : b));
@@ -200,6 +199,24 @@ export function TeachWalkthrough({ demo, onSeeItRoute }: { demo: DemoData; onSee
                   prompt's embedding paired with that model's score. That is the unit the kNN router later votes over.
                 </>
               }
+              aside={
+                <Panel className="border-l-2 border-accent">
+                  <p className="text-sm text-foreground/90">
+                    <strong>Optional: split by use case.</strong> Memory is always scoped per tenant (the user behind
+                    the API key), so two users never see each other's records, and that is usually all you need. Within
+                    one tenant you can <em>optionally</em> add a <code>task_id</code> to keep unrelated use-cases apart,
+                    so a support bot and a code reviewer never learn from each other:
+                  </p>
+                  <div className="mt-2 font-mono text-xs text-muted">
+                    POST /v1/router/preferences/rank {"{"} ...,{" "}
+                    <span className="text-accent">"task_id": "support-bot"</span> {"}"}
+                  </div>
+                  <p className="mt-2 text-sm text-foreground/90">
+                    Then send <code>Otari-Router-Task: support-bot</code> on the requests you want routed against that
+                    partition. Leave both off and everything shares one pool.
+                  </p>
+                </Panel>
+              }
             >
               <div className="flex flex-col gap-3">
                 <Panel className="font-mono text-xs">
@@ -208,17 +225,17 @@ export function TeachWalkthrough({ demo, onSeeItRoute }: { demo: DemoData; onSee
                     className="mt-2"
                     value={{
                       prompt: item.prompt,
-                      task_id: item.task,
                       scores: Object.fromEntries(rankScores.map((r) => [r.label, Number(r.score.toFixed(2))])),
                     }}
                   />
                   <div className="mt-3 text-muted">→ 200 OK</div>
-                  <JsonBlock className="mt-1" value={{ recorded: rankScores.length, task_id: item.task, warm }} />
+                  <JsonBlock
+                    className="mt-1"
+                    value={{ recorded: rankScores.length, warm: totalRecords >= SEED_COUNT }}
+                  />
                 </Panel>
                 <Panel>
-                  <span className="text-xs uppercase tracking-wide text-muted">
-                    Records written to the <span className="text-foreground">{item.task}</span> partition
-                  </span>
+                  <span className="text-xs uppercase tracking-wide text-muted">Records written to your pool</span>
                   <ul className="mt-2 flex flex-col gap-1 font-mono text-xs">
                     {rankScores.map((r) => (
                       <li key={r.model} className="flex items-center gap-2">
@@ -232,14 +249,6 @@ export function TeachWalkthrough({ demo, onSeeItRoute }: { demo: DemoData; onSee
                     ))}
                   </ul>
                 </Panel>
-                <Panel className="border-l-2 border-accent">
-                  <p className="text-sm text-foreground/90">
-                    <strong>Isolation.</strong> Memory is scoped per tenant (the user behind the API key), so two
-                    users never see each other's records. The optional <code>task_id</code> splits one tenant's memory
-                    further: a <code>{item.task}</code> record only ever votes on <code>{item.task}</code> requests, so
-                    unrelated use-cases (a support bot, a code reviewer) never blend. Omit it to share one pool.
-                  </p>
-                </Panel>
               </div>
             </StepGrid>
           )}
@@ -248,10 +257,11 @@ export function TeachWalkthrough({ demo, onSeeItRoute }: { demo: DemoData; onSee
             <StepGrid
               lede={
                 <>
-                  One example is not enough. Repeat compare → score → rank for a handful of prompts. The{" "}
-                  <strong>seed count</strong> applies to <strong>each pool on its own</strong>: a partition stays in
-                  pass-through until it alone crosses the threshold, independent of the others. <code>/v1/router/status</code>{" "}
-                  reports every pool and where each stands.
+                  One example is not enough; repeat compare → score → rank for a handful of prompts. The{" "}
+                  <strong>seed count</strong> applies to <strong>each pool on its own</strong>, so a pool stays in
+                  pass-through until it alone crosses the threshold. If you used the optional <code>task_id</code>, each
+                  task partition warms separately from the shared default pool; <code>/v1/router/status</code> reports
+                  them all.
                 </>
               }
             >

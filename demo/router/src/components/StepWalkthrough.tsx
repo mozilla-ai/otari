@@ -97,11 +97,27 @@ export function StepWalkthrough({
   );
 }
 
-/** Two-column step layout: narrative lede on the left, content on the right. */
-export function StepGrid({ lede, children, wide }: { lede: ReactNode; children: ReactNode; wide?: boolean }) {
+/**
+ * Two-column step layout: narrative lede on the left, content on the right.
+ * `aside` renders in the left column beneath the lede.
+ */
+export function StepGrid({
+  lede,
+  aside,
+  children,
+  wide,
+}: {
+  lede: ReactNode;
+  aside?: ReactNode;
+  children: ReactNode;
+  wide?: boolean;
+}) {
   return (
     <div className={`grid gap-5 ${wide ? "" : "lg:grid-cols-[1fr_1.1fr]"} lg:items-start`}>
-      <p className="text-[0.95rem] leading-relaxed text-foreground/90">{lede}</p>
+      <div className="flex flex-col gap-4">
+        <p className="text-[0.95rem] leading-relaxed text-foreground/90">{lede}</p>
+        {aside}
+      </div>
       <div>{children}</div>
     </div>
   );

@@ -92,7 +92,7 @@ export function Walkthrough({ demo }: { demo: DemoData }) {
                 </div>
                 <div>
                   <span className="text-muted">Otari-Router-Task:</span> {exp.item.task}{" "}
-                  <span className="opacity-60"># which memory partition to route against</span>
+                  <span className="opacity-60"># optional; omit to search the whole pool</span>
                 </div>
                 <JsonBlock
                   className="mt-2"

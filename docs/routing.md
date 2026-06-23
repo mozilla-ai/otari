@@ -148,12 +148,13 @@ more than one replica.
 ### Separate routing by use case
 
 Routing memory is always scoped per tenant (the user behind the API key), so two
-users never see each other's records. To split a *single* tenant's memory across
-unrelated use cases, for example a support bot and a code reviewer that should
-not learn from each other, tag preferences with a `task_id` and route requests
+users never see each other's records. That is usually enough, and `task_id` is
+optional. If you want to split a *single* tenant's memory across unrelated use
+cases, for example a support bot and a code reviewer that should not learn from
+each other, optionally tag preferences with a `task_id` and route requests
 against the matching partition.
 
-When you collect preferences, pass `task_id` on the rank call:
+When you collect preferences, add an optional `task_id` on the rank call:
 
 ```bash
 curl .../v1/router/preferences/rank -H "Otari-Key: Bearer $KEY" \
@@ -169,9 +170,9 @@ Otari-Router-Task: support-bot
 Partitions are a **hard** split: a request carrying a task votes only over that
 task's records, and the partition warms independently, it stays in pass-through
 until the task alone crosses the seed count, and records from other tasks never
-influence it. Omitting the header routes over the tenant's whole pool (every
-task combined). `GET /v1/router/status?task_id=support-bot` reports a single
-partition's progress.
+influence it. Omitting `task_id` and the header keeps everything in one shared
+pool, which is the default. `GET /v1/router/status` lists the shared default
+pool and every task partition with each one's progress.
 
 ## Tuning
 
