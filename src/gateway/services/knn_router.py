@@ -49,11 +49,16 @@ from gateway.services.router_backend import RoutingContext, RoutingDecision
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
 
-# Default per-million input price used when a candidate has no pricing row, so an
-# unpriced model is treated as expensive (it will not be preferred on cost) but
-# still routable. Picked well above typical frontier input prices.
-_UNKNOWN_PRICE = 1000.0
 _TRACE_CACHE_MAX = 10_000
+
+
+class RouterPricingError(ValueError):
+    """A model in the kNN router candidate pool has no configured pricing.
+
+    The router scores candidates by cost, so an unpriced candidate has nothing to
+    weigh. Rather than guess a price, the router requires pricing for every model
+    in the pool, validated at startup and enforced again at request time.
+    """
 
 
 def _unit(vec: list[float]) -> list[float]:
@@ -271,11 +276,16 @@ class KnnRoutingMemory:
         best = ordered[0]
 
         # Confidence = fraction of the k neighbor prompts whose own best-scoring
-        # model is the chosen model. A clear local consensus reads as high
-        # confidence; if the nearby prompts mostly preferred a different model the
-        # pick is weakly supported. Each neighbor is one prompt, so this is a vote
-        # over distinct prompts, not over per-model rows.
-        agree = sum(1 for _, r in neighbors if r.qualities and max(r.qualities, key=lambda m: r.qualities[m]) == best)
+        # candidate is the chosen model. A clear local consensus reads as high
+        # confidence; if the nearby prompts mostly preferred a different candidate
+        # the pick is weakly supported. Each neighbor is one prompt, so this is a
+        # vote over distinct prompts. Only pool candidates count: a neighbor's
+        # favorite model that is not in the candidate pool is irrelevant here.
+        def _neighbor_best(qualities: dict[str, float]) -> str | None:
+            among = {m: qualities[m] for m in pool if m in qualities}
+            return max(among, key=lambda m: among[m]) if among else None
+
+        agree = sum(1 for _, r in neighbors if _neighbor_best(r.qualities) == best)
         confidence = agree / len(neighbors)
 
         if confidence < self.confidence_floor:
@@ -398,7 +408,7 @@ class KnnRoutingMemory:
         provider, bare = AnyLLM.split_model_provider(model)
         pricing = await find_model_pricing(db, provider, bare)
         if pricing is None:
-            return _UNKNOWN_PRICE
+            raise RouterPricingError(f"Router candidate '{model}' has no configured pricing.")
         return float(pricing.input_price_per_million)
 
     # -- embedding ---------------------------------------------------------
@@ -434,3 +444,23 @@ class KnnRoutingMemory:
     def _touch_trace(self, trace_key: str) -> None:
         if trace_key in self._trace_decisions:
             self._trace_decisions.move_to_end(trace_key)
+
+
+async def validate_router_pricing(config: GatewayConfig, db: AsyncSession) -> None:
+    """Fail fast at startup if a kNN router candidate has no configured pricing.
+
+    The router scores candidates by cost, so every model in
+    ``OTARI_ROUTER_CANDIDATES`` must have pricing. No-op unless the kNN backend is
+    configured with a candidate pool.
+    """
+    if config.router_backend.strip().lower() != "knn":
+        return
+    candidates = [m.strip() for m in config.router_candidates.split(",") if m.strip()]
+    missing = [
+        model for model in candidates if await find_model_pricing(db, *AnyLLM.split_model_provider(model)) is None
+    ]
+    if missing:
+        raise RouterPricingError(
+            f"Router candidates without configured pricing: {', '.join(missing)}. "
+            "Add pricing for every OTARI_ROUTER_CANDIDATES model; the router scores by cost."
+        )

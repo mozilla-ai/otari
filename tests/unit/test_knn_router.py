@@ -210,6 +210,21 @@ async def test_confidence_is_local_support_for_the_pick() -> None:
 
 
 @pytest.mark.asyncio
+async def test_confidence_ignores_non_candidate_favorites() -> None:
+    # Neighbors prefer a model that is not in the candidate pool. Confidence
+    # should reflect support among CANDIDATES (here every neighbor's best
+    # candidate is the chosen one), not collapse because the global favorite is
+    # unavailable, which would let a confidence floor veto a correct pick.
+    OTHER = "openai/gpt-5.4"
+    backend = _backend(router_alpha=0.3, router_k=3, router_confidence_floor=0.5)
+    recs = [_mem({CHEAP: 0.8, STRONG: 0.6, OTHER: 1.0})] * 3  # OTHER best, but not a candidate
+    _wire(backend, recs, prices=PRICES)
+    decision = await backend.route(_ctx())  # pool is (CHEAP, STRONG)
+    assert decision.ordered_models[0] == CHEAP
+    assert decision.confidence == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
 async def test_confidence_floor_vetoes_thinly_supported_pick_only() -> None:
     # A moderate floor keeps a well-supported cheap pick (0.75 >= 0.5) but vetoes
     # a thinly-supported one (0.25 < 0.5) back to the requested model. This is the

@@ -110,7 +110,7 @@ only.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OTARI_ROUTER_BACKEND` | `none` | Routing backend: `none` (off), `noop` (echoes requested model), `knn` (learned routing memory). |
-| `OTARI_ROUTER_CANDIDATES` | `""` | Comma-separated pool the router may choose among, e.g. `openai:gpt-4o,openai:gpt-3.5-turbo`. Empty disables rerouting. The requested model is always a fallthrough. |
+| `OTARI_ROUTER_CANDIDATES` | `""` | Comma-separated pool the router may choose among, e.g. `openai:gpt-4o,openai:gpt-3.5-turbo`. Every candidate must have configured pricing (the router scores by cost) or the gateway fails at startup. Empty disables rerouting. The requested model is always a fallthrough. |
 | `OTARI_ROUTER_ALPHA` | `0.3` | Cost-vs-quality dial. Higher routes more aggressively to cheaper models. |
 | `OTARI_ROUTER_K` | `5` | Number of nearest neighbors used to vote on a model. |
 | `OTARI_ROUTER_EMBEDDING_MODEL` | `openai:text-embedding-3-small` | provider:model used to embed the prompt. |

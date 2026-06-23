@@ -53,9 +53,9 @@ export OTARI_ROUTER_CANDIDATES="openai:gpt-4o,openai:gpt-3.5-turbo"
 export OTARI_ROUTER_SEED_COUNT=8
 ```
 
-Make sure those models' providers are configured, and (for cost-aware routing)
-that they have [pricing](configuration.md#pricing) set. Without pricing the
-router still works, but the cost dial has nothing to act on.
+Make sure those models' providers are configured **and** that every candidate
+has [pricing](configuration.md#pricing) set. The router scores by cost, so a
+candidate with no configured pricing is rejected at startup.
 
 ### 2. Check status
 

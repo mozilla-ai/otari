@@ -31,9 +31,10 @@ from any_llm.types.completion import (
 from fastapi.testclient import TestClient
 
 from gateway.api.deps import reset_config
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, GatewayConfig, PricingConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
+from gateway.services.knn_router import RouterPricingError
 
 CHEAP = "openai:gpt-3.5-turbo"
 STRONG = "openai:gpt-4o"
@@ -94,6 +95,13 @@ def _build_client(backend: str, *, fake_embeddings: bool = True) -> Generator[Te
         router_k=2,
         router_seed_count=4,
         router_alpha=0.3,
+        # The router scores by cost, so every candidate must be priced (and its
+        # provider configured, or pricing init rejects it).
+        providers={"openai": {"api_key": "test-key"}},
+        pricing={
+            CHEAP: PricingConfig(input_price_per_million=0.5, output_price_per_million=1.5),
+            STRONG: PricingConfig(input_price_per_million=2.5, output_price_per_million=10.0),
+        },
     )
     app = create_app(cfg)
     if fake_embeddings:
@@ -288,6 +296,26 @@ def test_rank_rejected_when_backend_not_knn(noop_client: TestClient) -> None:
     )
     assert resp.status_code == 400
     assert "knn" in resp.json()["detail"].lower()
+
+
+def test_router_startup_fails_for_unpriced_candidate(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The router scores by cost, so configuring an unpriced model in the candidate
+    # pool is a misconfiguration the gateway rejects at startup.
+    monkeypatch.chdir(tmp_path)
+    cfg = GatewayConfig(
+        database_url="sqlite:///./_knn_unpriced.db",
+        master_key="test-master-key",
+        auto_migrate=True,
+        require_pricing=False,
+        router_backend="knn",
+        router_candidates=f"{CHEAP},{STRONG}",  # no pricing configured
+    )
+    app = create_app(cfg)
+    with pytest.raises(RouterPricingError, match="pricing"):
+        with TestClient(app):
+            pass
+    reset_config()
+    reset_db()
 
 
 # ---------------------------------------------------------------------------
