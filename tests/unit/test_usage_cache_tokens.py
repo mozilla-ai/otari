@@ -43,6 +43,18 @@ def test_from_completion_usage_explicit_overrides_fallback() -> None:
     assert usage.cache_write_tokens == 3
 
 
+def test_from_completion_usage_honors_explicit_zero() -> None:
+    """An explicit cache_read_tokens=0 must not be overridden by the fallback."""
+    base = CompletionUsage(
+        prompt_tokens=100,
+        completion_tokens=20,
+        total_tokens=120,
+        prompt_tokens_details=PromptTokensDetails(cached_tokens=42),
+    )
+    usage = GatewayUsage.from_completion_usage(base, cache_read_tokens=0)
+    assert usage.cache_read_tokens == 0
+
+
 def test_cache_helpers_on_plain_completion_usage() -> None:
     plain = CompletionUsage(
         prompt_tokens=100,

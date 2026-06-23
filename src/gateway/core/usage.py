@@ -30,16 +30,17 @@ class GatewayUsage(CompletionUsage):
         cls,
         usage: CompletionUsage,
         *,
-        cache_read_tokens: int = 0,
+        cache_read_tokens: int | None = None,
         cache_write_tokens: int = 0,
     ) -> "GatewayUsage":
         """Build a ``GatewayUsage`` from a base ``CompletionUsage`` plus cache counts.
 
-        When ``cache_read_tokens`` is not supplied, it falls back to the OpenAI-style
+        When ``cache_read_tokens`` is left as ``None`` it falls back to the OpenAI-style
         ``prompt_tokens_details.cached_tokens`` already present on ``usage`` (a subset
-        of ``prompt_tokens``), which is purely informational for re-pricing.
+        of ``prompt_tokens``), which is purely informational for re-pricing. An explicit
+        ``0`` is honored and does not trigger the fallback.
         """
-        if not cache_read_tokens and usage.prompt_tokens_details is not None:
+        if cache_read_tokens is None and usage.prompt_tokens_details is not None:
             cache_read_tokens = usage.prompt_tokens_details.cached_tokens or 0
         return cls(
             prompt_tokens=usage.prompt_tokens,
@@ -47,7 +48,7 @@ class GatewayUsage(CompletionUsage):
             total_tokens=usage.total_tokens,
             completion_tokens_details=usage.completion_tokens_details,
             prompt_tokens_details=usage.prompt_tokens_details,
-            cache_read_tokens=cache_read_tokens,
+            cache_read_tokens=cache_read_tokens or 0,
             cache_write_tokens=cache_write_tokens,
         )
 

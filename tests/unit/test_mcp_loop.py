@@ -299,6 +299,53 @@ async def test_loop_accumulates_cached_tokens_across_iterations(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
+async def test_loop_folds_usage_when_final_completion_has_empty_choices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Accumulated usage must survive a final completion that carries no choices."""
+    empty = ChatCompletion(
+        id="cmpl-empty",
+        choices=[],
+        created=0,
+        model="fake",
+        object="chat.completion",
+        usage=CompletionUsage(
+            prompt_tokens=12,
+            completion_tokens=3,
+            total_tokens=15,
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=6),
+        ),
+    )
+    responses = iter(
+        [
+            _completion(
+                finish="tool_calls",
+                tool_calls=[("c1", "fetch_url", "{}")],
+                prompt=10,
+                completion_tokens=2,
+                cached=4,
+            ),
+            empty,
+        ]
+    )
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return next(responses)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    out = await mcp_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=_FakePool(tool_names=["fetch_url"]),
+        max_iterations=5,
+    )
+    assert out.usage is not None
+    assert out.usage.prompt_tokens == 22
+    assert out.usage.completion_tokens == 5
+    assert out.usage.total_tokens == 27
+    assert out.usage.prompt_tokens_details is not None
+    assert out.usage.prompt_tokens_details.cached_tokens == 10
+
+
+@pytest.mark.asyncio
 async def test_loop_max_iter_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
         return _completion(finish="tool_calls", tool_calls=[("c", "fetch_url", "{}")])

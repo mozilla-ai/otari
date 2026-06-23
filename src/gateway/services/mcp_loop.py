@@ -278,6 +278,7 @@ async def mcp_tool_loop(
                 acc_cache_read += details.cached_tokens or 0
 
         if not completion.choices:
+            _fold_usage(completion, acc_prompt, acc_completion, acc_cache_read)
             return completion
 
         choice = completion.choices[0]
