@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
 from any_llm import acompletion
+from any_llm.types.completion import PromptTokensDetails
 
 from gateway.core.env import otari_env
 from gateway.log_config import logger
@@ -352,3 +353,7 @@ def _fold_usage(
     details = completion.usage.prompt_tokens_details
     if details is not None:
         details.cached_tokens = cache_read_total
+    elif cache_read_total > 0:
+        # The final iteration carried no prompt_tokens_details, but an earlier
+        # one did; create the sub-object so the accumulated count is not lost.
+        completion.usage.prompt_tokens_details = PromptTokensDetails(cached_tokens=cache_read_total)
