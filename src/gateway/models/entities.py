@@ -184,6 +184,8 @@ class UsageLog(Base):
     prompt_tokens: Mapped[int | None] = mapped_column()
     completion_tokens: Mapped[int | None] = mapped_column()
     total_tokens: Mapped[int | None] = mapped_column()
+    cache_read_tokens: Mapped[int | None] = mapped_column()
+    cache_write_tokens: Mapped[int | None] = mapped_column()
     cost: Mapped[float | None] = mapped_column()
 
     status: Mapped[str] = mapped_column()
@@ -204,6 +206,8 @@ class UsageLog(Base):
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
             "cost": self.cost,
             "status": self.status,
             "error_message": self.error_message,

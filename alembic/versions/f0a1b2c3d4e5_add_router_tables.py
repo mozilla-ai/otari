@@ -1,7 +1,7 @@
 """add routing_memory and router_preferences tables
 
-Revision ID: d4e6f8a0b2c4
-Revises: c3d5e7f9a1b3
+Revision ID: f0a1b2c3d4e5
+Revises: d4e6f8a0b2c4
 Create Date: 2026-06-19 12:00:00.000000
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "d4e6f8a0b2c4"
-down_revision: str | Sequence[str] | None = "c3d5e7f9a1b3"
+revision: str = "f0a1b2c3d4e5"
+down_revision: str | Sequence[str] | None = "d4e6f8a0b2c4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

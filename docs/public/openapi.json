@@ -2702,6 +2702,28 @@
             ],
             "title": "Api Key Id"
           },
+          "cache_read_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Tokens"
+          },
+          "cache_write_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Tokens"
+          },
           "completion_tokens": {
             "anyOf": [
               {
@@ -2811,6 +2833,8 @@
           "prompt_tokens",
           "completion_tokens",
           "total_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
           "cost",
           "status",
           "error_message"
@@ -4413,7 +4437,7 @@
     },
     "/v1/messages": {
       "post": {
-        "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and platform mode. Platform-mode\nrequests resolve credentials via the platform service and (for\nnon-tool-loop requests) get multi-attempt fallback across the resolved\nroute. Tool-loop requests collapse to a single attempt \u2014 once\n``on_first_response`` lock-in plumbing lands across the codebase, a\nfollow-up will enable pre-lock-in fallback for tool-loop requests too.",
+        "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode\nrequests resolve credentials via the platform service and (for\nnon-tool-loop requests) get multi-attempt fallback across the resolved\nroute. Tool-loop requests collapse to a single attempt \u2014 once\n``on_first_response`` lock-in plumbing lands across the codebase, a\nfollow-up will enable pre-lock-in fallback for tool-loop requests too.",
         "operationId": "create_message_v1_messages_post",
         "requestBody": {
           "content": {
@@ -4453,7 +4477,7 @@
     },
     "/v1/messages/count_tokens": {
       "post": {
-        "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message` \u2014 platform mode\nresolves the caller's token against the platform, standalone mode validates\nthe API key \u2014 so the endpoint is not an open token-counting oracle.",
+        "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message` \u2014 hybrid mode\nresolves the caller's token against the platform, standalone mode validates\nthe API key \u2014 so the endpoint is not an open token-counting oracle.",
         "operationId": "count_message_tokens_v1_messages_count_tokens_post",
         "requestBody": {
           "content": {
@@ -4947,7 +4971,7 @@
     },
     "/v1/responses": {
       "post": {
-        "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and platform mode. Platform-mode\nrequests resolve credentials via the platform service and (for\nnon-tool-loop requests) get multi-attempt fallback across the resolved\nroute. Tool-loop requests collapse to a single attempt \u2014 once\n``on_first_response`` lock-in plumbing lands across the codebase, a\nfollow-up will enable pre-lock-in fallback for tool-loop requests too.",
+        "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode\nrequests resolve credentials via the platform service and (for\nnon-tool-loop requests) get multi-attempt fallback across the resolved\nroute. Tool-loop requests collapse to a single attempt \u2014 once\n``on_first_response`` lock-in plumbing lands across the codebase, a\nfollow-up will enable pre-lock-in fallback for tool-loop requests too.",
         "operationId": "create_response_v1_responses_post",
         "requestBody": {
           "content": {

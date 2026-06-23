@@ -306,8 +306,8 @@ class GatewayConfig(BaseSettings):
         default=5000,
         description="Hard cap on stored routing-memory vectors per tenant; oldest are evicted past this.",
     )
-    mode: str = Field(default="standalone", description="Otari operating mode: standalone or platform")
-    platform: dict[str, Any] = Field(default_factory=dict, description="Platform integration settings")
+    mode: str = Field(default="standalone", description="Otari operating mode: standalone or hybrid")
+    platform: dict[str, Any] = Field(default_factory=dict, description="otari.ai connection settings")
 
     @property
     def platform_token(self) -> str | None:
@@ -316,12 +316,12 @@ class GatewayConfig(BaseSettings):
     @property
     def effective_mode(self) -> str:
         if self.platform_token:
-            return "platform"
+            return "hybrid"
         return "standalone"
 
     @property
-    def is_platform_mode(self) -> bool:
-        return self.effective_mode == "platform"
+    def is_hybrid_mode(self) -> bool:
+        return self.effective_mode == "hybrid"
 
     @field_validator("stream_missing_usage_policy")
     @classmethod
@@ -368,15 +368,17 @@ class GatewayConfig(BaseSettings):
 
     def validate_mode_selection(self) -> None:
         configured_mode = self.mode.strip().lower()
-        if configured_mode not in {"standalone", "platform"}:
-            msg = "Invalid OTARI_MODE value (legacy: GATEWAY_MODE). Expected 'standalone' or 'platform'."
+        # "platform" is the legacy alias for "hybrid" (the otari.ai-connected
+        # runtime mode); accept it so pre-rename configs keep working.
+        if configured_mode not in {"standalone", "hybrid", "platform"}:
+            msg = "Invalid OTARI_MODE value (legacy: GATEWAY_MODE). Expected 'standalone' or 'hybrid'."
             raise ValueError(msg)
 
         token_present = self.platform_token is not None
-        if configured_mode == "platform" and not token_present:
+        if configured_mode in {"hybrid", "platform"} and not token_present:
             msg = (
-                "OTARI_MODE=platform requires OTARI_AI_TOKEN to be set "
-                "(legacy aliases: OTARI_PLATFORM_TOKEN, ANY_LLM_PLATFORM_TOKEN)."
+                "OTARI_MODE=hybrid (legacy value: platform) requires OTARI_AI_TOKEN to be set "
+                "(legacy token aliases: OTARI_PLATFORM_TOKEN, ANY_LLM_PLATFORM_TOKEN)."
             )
             raise ValueError(msg)
 
@@ -486,7 +488,7 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
         platform[field_name] = caster(value)
 
     configured_mode = str(config.get("mode", "")).strip().lower()
-    platform_requested = configured_mode == "platform" or _get_platform_token_from_env() is not None
+    platform_requested = configured_mode in {"hybrid", "platform"} or _get_platform_token_from_env() is not None
     if platform_requested and not platform.get("base_url"):
         platform["base_url"] = DEFAULT_PLATFORM_BASE_URL
 

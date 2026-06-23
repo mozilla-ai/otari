@@ -17,7 +17,7 @@ per-URL fetch + trafilatura step.
 ## Provider options
 
 The gateway forwards provider-specific knobs (set via `provider_options` on the
-`otari_web_search` tool entry, or as workspace defaults in platform mode) as
+`otari_web_search` tool entry, or as workspace defaults in hybrid mode) as
 extra query params. This adapter whitelists only the Tavily params it knows
 about; anything else is ignored:
 

@@ -49,6 +49,7 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
@@ -145,18 +146,25 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
     if isinstance(event, MessageDeltaEvent):
         input_tokens = event.usage.input_tokens or 0
         output_tokens = event.usage.output_tokens or 0
-        return CompletionUsage(
+        return GatewayUsage(
             prompt_tokens=input_tokens,
             completion_tokens=output_tokens,
             total_tokens=input_tokens + output_tokens,
+            cache_read_tokens=event.usage.cache_read_input_tokens or 0,
+            cache_write_tokens=event.usage.cache_creation_input_tokens or 0,
         )
     if isinstance(event, MessageStartEvent):
-        input_tokens = event.message.usage.input_tokens or 0
-        if input_tokens:
-            return CompletionUsage(
+        usage = event.message.usage
+        input_tokens = usage.input_tokens or 0
+        cache_read = usage.cache_read_input_tokens or 0
+        cache_write = usage.cache_creation_input_tokens or 0
+        if input_tokens or cache_read or cache_write:
+            return GatewayUsage(
                 prompt_tokens=input_tokens,
                 completion_tokens=0,
                 total_tokens=input_tokens,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
             )
     return None
 
@@ -192,10 +200,12 @@ class _MessagesAdapter:
     def extract_usage(self, result: MessageResponse) -> CompletionUsage | None:
         if not result.usage:
             return None
-        return CompletionUsage(
+        return GatewayUsage(
             prompt_tokens=result.usage.input_tokens,
             completion_tokens=result.usage.output_tokens,
             total_tokens=result.usage.input_tokens + result.usage.output_tokens,
+            cache_read_tokens=result.usage.cache_read_input_tokens or 0,
+            cache_write_tokens=result.usage.cache_creation_input_tokens or 0,
         )
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
@@ -275,7 +285,7 @@ async def create_message(
     """Anthropic Messages API-compatible endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-    web_search in both standalone mode and platform mode. Platform-mode
+    web_search in both standalone mode and hybrid mode. Hybrid-mode
     requests resolve credentials via the platform service and (for
     non-tool-loop requests) get multi-attempt fallback across the resolved
     route. Tool-loop requests collapse to a single attempt — once
@@ -348,9 +358,9 @@ async def create_message(
         # Tool-loop streaming collapses to a single attempt for this format
         # (chat already runs tool loops through the multi-attempt fallback;
         # wiring the same here is a planned follow-up).
-        if ctx.platform_mode and not tool_ctx.use_tool_loop:
+        if ctx.hybrid_mode and not tool_ctx.use_tool_loop:
             route = ctx.route
-            assert route is not None  # guaranteed by the platform-mode preamble
+            assert route is not None  # guaranteed by the hybrid-mode preamble
             if not route.attempts:
                 logger.error("Platform returned empty attempts list request_id=%s", route.request_id)
                 raise _anthropic_error(
@@ -385,15 +395,15 @@ async def create_message(
                     status.HTTP_502_BAD_GATEWAY,
                 ) from exc
 
-        # Standalone (or platform + tool-loop): single attempt streaming.
+        # Standalone (or hybrid + tool-loop): single attempt streaming.
         platform_correlation_id: str | None = None
         platform_request_id: str | None = None
-        if ctx.platform_mode:
-            # Tool-loop platform path: build call_kwargs from the primary
+        if ctx.hybrid_mode:
+            # Tool-loop hybrid path: build call_kwargs from the primary
             # attempt and keep the platform contract (X-Correlation-ID,
             # X-Otari-Request-ID, usage reported via _report_platform_usage).
             route = ctx.route
-            assert route is not None  # guaranteed by the platform-mode preamble
+            assert route is not None  # guaranteed by the hybrid-mode preamble
             if not route.attempts:
                 raise _anthropic_error(
                     _ERR_API,
@@ -424,9 +434,9 @@ async def create_message(
     # ------------------------------------------------------------------
     # Non-streaming path
     # ------------------------------------------------------------------
-    if ctx.platform_mode:
+    if ctx.hybrid_mode:
         route = ctx.route
-        assert route is not None  # guaranteed by the platform-mode preamble
+        assert route is not None  # guaranteed by the hybrid-mode preamble
         try:
             result = await run_platform_non_stream(
                 adapter=_ADAPTER,
@@ -505,11 +515,11 @@ async def count_message_tokens(
 
     Returns ``{"input_tokens": N}`` without contacting an upstream provider:
     counting is local, so there is no budget reservation, pricing, or usage
-    logging. Authentication mirrors :func:`create_message` — platform mode
+    logging. Authentication mirrors :func:`create_message` — hybrid mode
     resolves the caller's token against the platform, standalone mode validates
     the API key — so the endpoint is not an open token-counting oracle.
     """
-    if config.is_platform_mode:
+    if config.is_hybrid_mode:
         # Resolve against the platform purely to authenticate the caller (same
         # as create_message); the routing plan is discarded since counting is
         # local. Without this, any non-empty bearer string would be accepted.

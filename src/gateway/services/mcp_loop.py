@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
 from any_llm import acompletion
+from any_llm.types.completion import PromptTokensDetails
 
 from gateway.core.env import otari_env
 from gateway.log_config import logger
@@ -246,7 +247,7 @@ async def mcp_tool_loop(
     upstream ``acompletion`` call returns successfully. Callers use it to lock
     in the chosen provider — once the model has produced *any* assistant
     message, the conversation state is provider-specific and subsequent
-    failures must not silently swap providers. See the platform-mode attempt
+    failures must not silently swap providers. See the hybrid-mode attempt
     loop in :mod:`gateway.api.routes.chat` for the consumer.
     """
     messages = list(completion_kwargs.get("messages") or [])
@@ -257,6 +258,7 @@ async def mcp_tool_loop(
 
     acc_prompt = 0
     acc_completion = 0
+    acc_cache_read = 0
     first_response_signaled = False
 
     for _ in range(max_iterations):
@@ -272,13 +274,17 @@ async def mcp_tool_loop(
         if completion.usage:
             acc_prompt += completion.usage.prompt_tokens or 0
             acc_completion += completion.usage.completion_tokens or 0
+            details = completion.usage.prompt_tokens_details
+            if details is not None:
+                acc_cache_read += details.cached_tokens or 0
 
         if not completion.choices:
+            _fold_usage(completion, acc_prompt, acc_completion, acc_cache_read)
             return completion
 
         choice = completion.choices[0]
         if choice.finish_reason != "tool_calls":
-            _fold_usage(completion, acc_prompt, acc_completion)
+            _fold_usage(completion, acc_prompt, acc_completion, acc_cache_read)
             return completion
 
         sdk_calls = choice.message.tool_calls or []
@@ -317,10 +323,10 @@ async def mcp_tool_loop(
                         "MCP-mixed: could not filter tool_calls on response; client will see MCP calls "
                         "the gateway already executed (no-op on the client side).",
                     )
-            _fold_usage(completion, acc_prompt, acc_completion)
+            _fold_usage(completion, acc_prompt, acc_completion, acc_cache_read)
             return completion
         if not mcp_calls:
-            _fold_usage(completion, acc_prompt, acc_completion)
+            _fold_usage(completion, acc_prompt, acc_completion, acc_cache_read)
             return completion
 
         messages.append({"role": "assistant", "tool_calls": mcp_calls})
@@ -329,9 +335,25 @@ async def mcp_tool_loop(
     raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
 
-def _fold_usage(completion: ChatCompletion, prompt_total: int, completion_total: int) -> None:
+def _fold_usage(
+    completion: ChatCompletion,
+    prompt_total: int,
+    completion_total: int,
+    cache_read_total: int = 0,
+) -> None:
     if completion.usage is None:
         return
     completion.usage.prompt_tokens = prompt_total
     completion.usage.completion_tokens = completion_total
     completion.usage.total_tokens = prompt_total + completion_total
+    # OpenAI chat reports cached tokens as a subset of prompt_tokens. Fold the
+    # accumulated read count back into prompt_tokens_details so the downstream
+    # GatewayUsage wrapper forwards the loop-wide total, not just the last
+    # iteration's slice. (Chat has no cache-write concept.)
+    details = completion.usage.prompt_tokens_details
+    if details is not None:
+        details.cached_tokens = cache_read_total
+    elif cache_read_total > 0:
+        # The final iteration carried no prompt_tokens_details, but an earlier
+        # one did; create the sub-object so the accumulated count is not lost.
+        completion.usage.prompt_tokens_details = PromptTokensDetails(cached_tokens=cache_read_total)

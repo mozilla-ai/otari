@@ -69,7 +69,7 @@ class _RerouteBackend:
 
 
 def _post_chat(client: TestClient, headers: dict[str, str], *, stream: bool = False) -> httpx.Response:
-    return client.post(
+    resp: httpx.Response = client.post(
         "/v1/chat/completions",
         json={
             "model": REQUESTED_MODEL,
@@ -78,6 +78,7 @@ def _post_chat(client: TestClient, headers: dict[str, str], *, stream: bool = Fa
         },
         headers=headers,
     )
+    return resp
 
 
 # ---------------------------------------------------------------------------

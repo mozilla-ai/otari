@@ -9,6 +9,7 @@ from typing import Any, TypeVar
 
 from any_llm.types.completion import CompletionUsage
 
+from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
 
 A = TypeVar("A")  # Attempt-like, opaque to this module
@@ -61,10 +62,12 @@ ANTHROPIC_STREAM_FORMAT = StreamFormat(
 
 def _merge_usage(current: CompletionUsage, update: CompletionUsage) -> CompletionUsage:
     """Merge usage data, keeping the last non-zero value for each field."""
-    return CompletionUsage(
+    return GatewayUsage(
         prompt_tokens=update.prompt_tokens or current.prompt_tokens,
         completion_tokens=update.completion_tokens or current.completion_tokens,
         total_tokens=update.total_tokens or current.total_tokens,
+        cache_read_tokens=cache_read_tokens_of(update) or cache_read_tokens_of(current),
+        cache_write_tokens=cache_write_tokens_of(update) or cache_write_tokens_of(current),
     )
 
 
