@@ -152,14 +152,10 @@ export function Walkthrough({ demo }: { demo: DemoData }) {
               lede={
                 <>
                   A cosine k-nearest-neighbors search finds the <strong>{K}</strong> most similar prompts the store
-                  has already seen scored. The search is confined to <strong>one tenant</strong> and, when the request
-                  names a task, <strong>one partition</strong>, so another user's or another use-case's vectors are
-                  never candidates. The router then assumes the new prompt behaves like its neighbors, here mostly{" "}
-                  <strong>{dominantTask}</strong> work.
-                  <span className="mt-2 block text-xs text-muted">
-                    This offline demo searches one shared store, so the neighbors below span tasks; in production the{" "}
-                    <code>{exp.item.task}</code> partition would be enforced.
-                  </span>
+                  has already seen scored. Because the request named the <strong>{exp.item.task}</strong> partition,
+                  only that partition is searched, another user's or another use-case's vectors are never candidates,
+                  so every neighbor below is <strong>{dominantTask}</strong> work. The router then assumes the new
+                  prompt behaves like those neighbors.
                 </>
               }
             >

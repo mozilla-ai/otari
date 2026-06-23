@@ -61,8 +61,12 @@ export function explainOne(demo: DemoData, index: number, alpha: number, k: numb
   const scoreOf = (it: DemoItem, model: string) => it.responses.find((r) => r.model === model)?.score ?? 0;
 
   const item = demo.items[index];
-  const sims = demo.items.map((_, j) => ({ j, s: j === index ? -Infinity : dot(vecs[index], vecs[j]) }));
-  sims.sort((a, b) => b.s - a.s);
+  // The request routes within one task partition (mirrors Otari-Router-Task), so
+  // only same-task prompts are candidate neighbors; other partitions never vote.
+  const sims = demo.items
+    .map((it, j) => ({ j, s: j === index || it.task !== item.task ? -Infinity : dot(vecs[index], vecs[j]) }))
+    .filter((x) => x.s > -Infinity)
+    .sort((a, b) => b.s - a.s);
   const top = sims.slice(0, k);
   const neighborItems = top.map((x) => demo.items[x.j]);
 

@@ -96,37 +96,44 @@ export function KnnGraph({ demo, exp, k }: { demo: DemoData; exp: RouteExplanati
   const color = (tk: string) => TASK_COLORS[tasks.indexOf(tk) % TASK_COLORS.length];
   const qi = items.findIndex((it) => it.id === exp.item.id);
   const neighborIdx = new Set(exp.neighbors.map((nb) => items.findIndex((it) => it.id === nb.item.id)));
+  // The request routes within one partition: only same-task prompts are searched.
+  const part = exp.item.task;
+  const inPart = (i: number) => items[i].task === part;
   const hotEdge = (i: number, j: number) => (i === qi && neighborIdx.has(j)) || (j === qi && neighborIdx.has(i));
 
   return (
     <div>
       <svg viewBox={`0 0 ${S} ${S}`} className="w-full rounded-xl border border-border bg-surface" role="img" aria-label="kNN network of prompts">
-        {edges.map(([i, j]) => {
-          const hot = hotEdge(i, j);
-          return (
-            <line
-              key={`${i}-${j}`}
-              x1={sx(pos[i].x)}
-              y1={sy(pos[i].y)}
-              x2={sx(pos[j].x)}
-              y2={sy(pos[j].y)}
-              stroke={hot ? "var(--accent)" : "var(--border)"}
-              strokeWidth={hot ? 2 : 1}
-              strokeOpacity={hot ? 0.85 : 0.5}
-            />
-          );
-        })}
+        {/* Only edges within the searched partition are drawn; other tasks are dimmed. */}
+        {edges
+          .filter(([i, j]) => inPart(i) && inPart(j))
+          .map(([i, j]) => {
+            const hot = hotEdge(i, j);
+            return (
+              <line
+                key={`${i}-${j}`}
+                x1={sx(pos[i].x)}
+                y1={sy(pos[i].y)}
+                x2={sx(pos[j].x)}
+                y2={sy(pos[j].y)}
+                stroke={hot ? "var(--accent)" : "var(--border)"}
+                strokeWidth={hot ? 2 : 1}
+                strokeOpacity={hot ? 0.85 : 0.5}
+              />
+            );
+          })}
         {items.map((it, i) => {
           const isQ = i === qi;
           const isN = neighborIdx.has(i);
+          const dim = !inPart(i);
           return (
             <circle
               key={it.id}
               cx={sx(pos[i].x)}
               cy={sy(pos[i].y)}
-              r={isQ ? 7.5 : isN ? 5.5 : 4}
+              r={isQ ? 7.5 : isN ? 5.5 : dim ? 3 : 4}
               fill={color(it.task)}
-              fillOpacity={isQ || isN ? 1 : 0.55}
+              fillOpacity={dim ? 0.12 : isQ || isN ? 1 : 0.55}
               stroke={isQ ? "var(--accent)" : isN ? "var(--foreground)" : "none"}
               strokeWidth={isQ ? 3 : isN ? 1.25 : 0}
             />
@@ -136,8 +143,12 @@ export function KnnGraph({ demo, exp, k }: { demo: DemoData; exp: RouteExplanati
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
         {tasks.map((t) => (
           <span key={t} className="inline-flex items-center gap-1">
-            <span className="inline-block size-2.5 rounded-full" style={{ background: color(t) }} />
+            <span
+              className="inline-block size-2.5 rounded-full"
+              style={{ background: color(t), opacity: t === part ? 1 : 0.25 }}
+            />
             {t}
+            {t === part ? " (searched)" : ""}
           </span>
         ))}
         <span className="inline-flex items-center gap-1">
