@@ -1,7 +1,8 @@
 """Unit tests for streaming token aggregation logic."""
 
-from any_llm.types.completion import CompletionUsage
+from any_llm.types.completion import CompletionUsage, PromptTokensDetails
 
+from gateway.core.usage import GatewayUsage
 from gateway.streaming import _merge_usage
 
 
@@ -41,3 +42,54 @@ def test_merge_usage_preserves_current_on_zero_update() -> None:
     assert result.prompt_tokens == 100
     assert result.completion_tokens == 75
     assert result.total_tokens == 150
+
+
+def test_merge_usage_preserves_cache_tokens() -> None:
+    current = GatewayUsage(prompt_tokens=100, completion_tokens=10, total_tokens=110, cache_read_tokens=40)
+    update = GatewayUsage(
+        prompt_tokens=100,
+        completion_tokens=20,
+        total_tokens=120,
+        cache_read_tokens=60,
+        cache_write_tokens=15,
+    )
+
+    result = _merge_usage(current, update)
+
+    assert isinstance(result, GatewayUsage)
+    assert result.cache_read_tokens == 60
+    assert result.cache_write_tokens == 15
+
+
+def test_merge_usage_keeps_current_cache_on_zero_update() -> None:
+    current = GatewayUsage(
+        prompt_tokens=100,
+        completion_tokens=10,
+        total_tokens=110,
+        cache_read_tokens=40,
+        cache_write_tokens=5,
+    )
+    update = GatewayUsage(prompt_tokens=0, completion_tokens=20, total_tokens=0)
+
+    result = _merge_usage(current, update)
+
+    assert isinstance(result, GatewayUsage)
+    assert result.cache_read_tokens == 40
+    assert result.cache_write_tokens == 5
+
+
+def test_merge_usage_reads_plain_completion_usage_cached_tokens() -> None:
+    """A plain CompletionUsage carries cache reads via prompt_tokens_details."""
+    current = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+    update = CompletionUsage(
+        prompt_tokens=100,
+        completion_tokens=20,
+        total_tokens=120,
+        prompt_tokens_details=PromptTokensDetails(cached_tokens=30),
+    )
+
+    result = _merge_usage(current, update)
+
+    assert isinstance(result, GatewayUsage)
+    assert result.cache_read_tokens == 30
+    assert result.cache_write_tokens == 0

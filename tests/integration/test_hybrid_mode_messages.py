@@ -83,8 +83,8 @@ def _message_response(text: str = "hello") -> MessageResponse:
         usage=MessageUsage(
             input_tokens=10,
             output_tokens=7,
-            cache_creation_input_tokens=None,
-            cache_read_input_tokens=None,
+            cache_creation_input_tokens=4,
+            cache_read_input_tokens=3,
             cache_creation=None,
             server_tool_use=None,
             service_tier=None,
@@ -180,7 +180,13 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
         {
             "correlation_id": "att-1",
             "status": "success",
-            "usage": {"prompt_tokens": 10, "completion_tokens": 7, "total_tokens": 17},
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 7,
+                "total_tokens": 17,
+                "cache_read_tokens": 3,
+                "cache_write_tokens": 4,
+            },
         }
     ]
 

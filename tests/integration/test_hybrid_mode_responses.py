@@ -78,7 +78,7 @@ def _response_object() -> Response:
         tools=[],
         usage=ResponseUsage(
             input_tokens=10,
-            input_tokens_details=InputTokensDetails(cached_tokens=0),
+            input_tokens_details=InputTokensDetails(cached_tokens=5),
             output_tokens=7,
             output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
             total_tokens=17,
@@ -142,7 +142,13 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
         {
             "correlation_id": "att-1",
             "status": "success",
-            "usage": {"prompt_tokens": 10, "completion_tokens": 7, "total_tokens": 17},
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 7,
+                "total_tokens": 17,
+                "cache_read_tokens": 5,
+                "cache_write_tokens": 0,
+            },
         }
     ]
 

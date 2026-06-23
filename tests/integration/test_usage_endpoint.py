@@ -244,6 +244,8 @@ def test_list_usage_response_shape(
         "prompt_tokens": 42,
         "completion_tokens": 7,
         "total_tokens": 49,
+        "cache_read_tokens": None,
+        "cache_write_tokens": None,
         "cost": 1.23,
         "status": "error",
         "error_message": "capacity",
