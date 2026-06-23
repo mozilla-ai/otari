@@ -1,7 +1,7 @@
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,7 +83,7 @@ async def health_readiness(
         platform_reachable = await _check_platform_reachability(config)
         if not platform_reachable:
             raise HTTPException(
-                status_code=503,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={
                     "status": "unhealthy",
                     "mode": "hybrid",
@@ -100,7 +100,7 @@ async def health_readiness(
 
     if db is None:
         raise HTTPException(
-            status_code=503,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={"status": "unhealthy", "database": "unavailable", "version": __version__},
         )
 
@@ -110,7 +110,7 @@ async def health_readiness(
     except Exception as e:
         logger.error("Database connectivity check failed: %s", e)
         raise HTTPException(
-            status_code=503,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "status": "unhealthy",
                 "database": "unavailable",
