@@ -91,6 +91,16 @@ See [Use with Claude Code](use-with-claude-code.md) for a full client setup.
 |--------|------|-------------|------|
 | `POST` | `/v1/rerank` | Reorder documents by relevance to a query. | API key or master key |
 
+### Model routing
+
+Available when `OTARI_ROUTER_BACKEND=knn`. See [Model routing](routing.md).
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `POST` | `/v1/router/preferences/compare` | Fan a prompt out to several candidate models and return their responses side by side. | API key or master key |
+| `POST` | `/v1/router/preferences/rank` | Record a ranking (best first) of models for a prompt; writes rank-to-scalar routing-memory records. Requires the `knn` backend. | API key or master key |
+| `GET` | `/v1/router/status` | Report the tenant's routing-memory record count and whether it is warm. | API key or master key |
+
 ### Images
 
 | Method | Path | Description | Auth |

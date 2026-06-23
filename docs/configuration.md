@@ -101,6 +101,24 @@ master_key: "${MY_SECRET_KEY}"
 | `OTARI_AUTO_MIGRATE` | Auto-run migrations on startup |
 | `OTARI_BOOTSTRAP_API_KEY` | Create first-use API key |
 
+### Model routing
+
+Configuration for the cost-optimizing [model router](routing.md). The router is
+off by default; set `OTARI_ROUTER_BACKEND=knn` to enable it. Standalone mode
+only.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OTARI_ROUTER_BACKEND` | `none` | Routing backend: `none` (off), `noop` (echoes requested model), `knn` (learned routing memory). |
+| `OTARI_ROUTER_CANDIDATES` | `""` | Comma-separated pool the router may choose among, e.g. `openai:gpt-4o,openai:gpt-3.5-turbo`. Empty disables rerouting. The requested model is always a fallthrough. |
+| `OTARI_ROUTER_ALPHA` | `0.3` | Cost-vs-quality dial. Higher routes more aggressively to cheaper models. |
+| `OTARI_ROUTER_K` | `5` | Number of nearest neighbors used to vote on a model. |
+| `OTARI_ROUTER_EMBEDDING_MODEL` | `openai:text-embedding-3-small` | provider:model used to embed the prompt. |
+| `OTARI_ROUTER_CONFIDENCE_FLOOR` | `0.0` | Below this confidence (0..1) the request leads with the requested model. |
+| `OTARI_ROUTER_SEED_COUNT` | `20` | Per-tenant records required before routing leaves pass-through. |
+| `OTARI_ROUTER_GRANULARITY` | `trace_sticky` | `trace_sticky` (route once per conversation) or `step` (re-route each call). |
+| `OTARI_ROUTER_MAX_VECTORS_PER_TENANT` | `5000` | Hard cap on stored vectors per tenant; oldest are evicted past it. |
+
 ### Provider credentials
 
 Provider API keys can be set as environment variables instead of in the config file. These are picked up directly by the underlying SDK.
