@@ -31,24 +31,28 @@ class GatewayUsage(CompletionUsage):
         usage: CompletionUsage,
         *,
         cache_read_tokens: int | None = None,
-        cache_write_tokens: int = 0,
+        cache_write_tokens: int | None = None,
     ) -> "GatewayUsage":
         """Build a ``GatewayUsage`` from a base ``CompletionUsage`` plus cache counts.
 
-        When ``cache_read_tokens`` is left as ``None`` it falls back to the OpenAI-style
-        ``prompt_tokens_details.cached_tokens`` already present on ``usage`` (a subset
-        of ``prompt_tokens``), which is purely informational for re-pricing. An explicit
-        ``0`` is honored and does not trigger the fallback.
+        When ``cache_read_tokens`` / ``cache_write_tokens`` are left as ``None`` they
+        fall back to whatever ``usage`` already carries: the explicit fields when
+        ``usage`` is itself a :class:`GatewayUsage`, otherwise the OpenAI-style
+        ``prompt_tokens_details.cached_tokens`` (a subset of ``prompt_tokens``, purely
+        informational for re-pricing). An explicit ``0`` is honored and does not
+        trigger the fallback.
         """
-        if cache_read_tokens is None and usage.prompt_tokens_details is not None:
-            cache_read_tokens = usage.prompt_tokens_details.cached_tokens or 0
+        if cache_read_tokens is None:
+            cache_read_tokens = cache_read_tokens_of(usage)
+        if cache_write_tokens is None:
+            cache_write_tokens = cache_write_tokens_of(usage)
         return cls(
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
             total_tokens=usage.total_tokens,
             completion_tokens_details=usage.completion_tokens_details,
             prompt_tokens_details=usage.prompt_tokens_details,
-            cache_read_tokens=cache_read_tokens or 0,
+            cache_read_tokens=cache_read_tokens,
             cache_write_tokens=cache_write_tokens,
         )
 

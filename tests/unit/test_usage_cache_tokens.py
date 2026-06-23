@@ -55,6 +55,21 @@ def test_from_completion_usage_honors_explicit_zero() -> None:
     assert usage.cache_read_tokens == 0
 
 
+def test_from_completion_usage_preserves_gateway_usage_cache_fields() -> None:
+    """When the input is already a GatewayUsage, its explicit cache fields are
+    carried over (not silently dropped) without re-supplying them."""
+    source = GatewayUsage(
+        prompt_tokens=100,
+        completion_tokens=20,
+        total_tokens=120,
+        cache_read_tokens=11,
+        cache_write_tokens=9,
+    )
+    usage = GatewayUsage.from_completion_usage(source)
+    assert usage.cache_read_tokens == 11
+    assert usage.cache_write_tokens == 9
+
+
 def test_cache_helpers_on_plain_completion_usage() -> None:
     plain = CompletionUsage(
         prompt_tokens=100,
