@@ -16,17 +16,18 @@ through.
 
 ## How it works
 
-The router keeps a small per-tenant memory of `(prompt embedding, model,
-quality, cost)` records. For each new request it embeds the prompt, finds the
-nearest past prompts, and picks the candidate model with the best blend of
-"neighbors said this model was good here" and "this model is cheaper." One dial,
-`alpha`, sets how hard it leans on cost.
+The router keeps a small per-tenant memory of `(prompt embedding, {model:
+quality})` records, one per scored example. For each new request it embeds the
+prompt, finds the nearest past prompts, and picks the candidate model with the
+best blend of "neighbors said this model was good here" and "this model is
+cheaper." One dial, `alpha`, sets how hard it leans on cost.
 
 It never routes blindly:
 
 - **Cold start.** With too little data for a confident decision, it serves your
   requested model unchanged.
-- **Low confidence.** When neighbors disagree, it leads with your requested
+- **Low confidence.** When a confidence floor is set (off by default) and the
+  neighbors don't clearly support the cheaper pick, it leads with your requested
   (strong) model.
 - **Tools.** Requests carrying tools are left on the requested model.
 - **Conversations.** Once a multi-turn conversation has been routed, later turns
@@ -81,24 +82,24 @@ curl -X POST http://localhost:8000/v1/router/preferences/compare \
 # -> {"prompt":"...","responses":[{"model":"openai:gpt-4o","content":"42"}, ...]}
 ```
 
-Look at the answers and record your ranking, best first:
+Look at the answers and score each one from 0 (bad) to 1 (great):
 
 ```bash
 curl -X POST http://localhost:8000/v1/router/preferences/rank \
   -H "Otari-Key: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"prompt":"what is 18 + 24?","ranking":["openai:gpt-3.5-turbo","openai:gpt-4o"]}'
-# -> {"recorded":2,"tenant_warm":false}
+  -d '{"prompt":"what is 18 + 24?","scores":{"openai:gpt-3.5-turbo":1.0,"openai:gpt-4o":1.0}}'
+# -> {"recorded":1,"task_id":null,"warm":false}
 ```
 
-Here the cheap model answered fine, so it ranks first: a vote to route
-arithmetic-like prompts to it. For prompts where only the strong model is good
-enough, rank the strong model first. Each ranking writes one memory record (the
-prompt with each model's score), so the kNN votes over distinct prompts; repeat
-until `/status` reports `warm: true`.
+Here the cheap model answered fine, so it scores as high as the strong one: a
+vote to route arithmetic-like prompts to it on cost. For prompts where only the
+strong model is good enough, score the cheap model low. Each submission writes
+one memory record (the prompt with each model's score), so the kNN votes over
+distinct prompts; repeat until `/status` reports `warm: true`.
 
-Tip: the ranking does not have to come from a human eyeballing answers. You can
-score the `compare` responses with an LLM judge of your own and submit the
-ranking the same way (`"label_source":"judge"`).
+Tip: the scores do not have to come from a human eyeballing answers. You can
+score the `compare` responses with an LLM judge of your own and submit them the
+same way (`"label_source":"judge"`).
 
 ### 4. Serve traffic
 
