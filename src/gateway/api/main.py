@@ -20,6 +20,9 @@ from gateway.api.routes import (
     usage,
     users,
 )
+from gateway.api.routes import (
+    router as router_routes,
+)
 from gateway.core.config import GatewayConfig
 
 
@@ -48,3 +51,4 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(budgets.router)
     app.include_router(pricing.router)
     app.include_router(usage.router)
+    app.include_router(router_routes.router)

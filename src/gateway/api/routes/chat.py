@@ -28,6 +28,7 @@ from gateway.api.routes._pipeline import (
     SANDBOX_UNREACHABLE_DETAIL,
     WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
+    RequestContext,
     default_attempt_kwargs,
     log_usage,
     prepare_gateway_tools,
@@ -41,7 +42,7 @@ from gateway.api.routes._pipeline import (
 from gateway.api.routes._platform import ResolvedAttempt
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
-from gateway.core.config import GatewayConfig
+from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER, GatewayConfig
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
@@ -54,6 +55,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
+from gateway.services.router_backend import RoutingContext, get_router_backend
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
@@ -227,6 +229,102 @@ _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in 
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
 
+_ROUTER_HEADER_OFF = frozenset({"off", "false", "0", "no", "none", "disabled"})
+_ROUTER_HEADER_ON = frozenset({"on", "true", "1", "yes", "auto", "default"})
+
+
+def _routing_opted_out(raw_request: Request) -> bool:
+    """Whether the client asked to skip routing for this request via ``Otari-Router``.
+
+    Absent header or an "on" value uses the server default (route when a backend
+    is enabled); an "off" value forces pass-through to the requested model. Any
+    other value is a client error.
+    """
+    raw = raw_request.headers.get(ROUTER_HEADER)
+    if raw is None:
+        return False
+    value = raw.strip().lower()
+    if value in _ROUTER_HEADER_OFF:
+        return True
+    if value in _ROUTER_HEADER_ON:
+        return False
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Invalid {ROUTER_HEADER} header '{raw}': expected 'on' or 'off'.",
+    )
+
+
+def _conversation_id(raw_request: Request) -> str | None:
+    """The client-supplied conversation id (``Otari-Conversation-Id``), if any.
+
+    This is the stable identity a trace-sticky router keys its first decision on.
+    A blank header is treated as absent so the router falls back to hashing the
+    conversation's opening messages.
+    """
+    raw = raw_request.headers.get(CONVERSATION_HEADER)
+    if raw is None:
+        return None
+    value = raw.strip()
+    return value or None
+
+
+def _router_task(raw_request: Request) -> str | None:
+    """The client-supplied routing-memory partition (``Otari-Router-Task``), if any.
+
+    Selects which task/use-case partition of the tenant's routing memory this
+    request votes over. A blank header is treated as absent (route over the
+    tenant's whole pool).
+    """
+    raw = raw_request.headers.get(ROUTER_TASK_HEADER)
+    if raw is None:
+        return None
+    value = raw.strip()
+    return value or None
+
+
+async def _resolve_standalone_model(
+    request: ChatCompletionRequest,
+    ctx: RequestContext,
+    config: GatewayConfig,
+    routing_opt_out: bool,
+    conversation_id: str | None,
+    router_task: str | None,
+) -> str:
+    """Pick the model for a standalone request via the routing backend, if any.
+
+    Returns ``request.model`` unchanged when the client opts out for this request
+    (``Otari-Router: off``) or when routing is disabled server-side
+    (``router_backend == "none"`` → backend is ``None``); the ``noop`` backend
+    likewise echoes the requested model, so all three keep current behavior.
+    """
+    requested_model = str(request.model)
+    if routing_opt_out:
+        return requested_model
+    backend = get_router_backend(config)
+    if backend is None:
+        return requested_model
+    candidate_pool = [m.strip() for m in config.router_candidates.split(",") if m.strip()]
+    if requested_model not in candidate_pool:
+        candidate_pool.append(requested_model)
+    # A continuation is any request that already carries an assistant turn. The
+    # backend keys trace-sticky reuse on `trace_key`: the client's conversation id
+    # when supplied, otherwise a per-tenant hash of the conversation's opening
+    # messages (which cannot disambiguate identical openers; see _trace_key).
+    is_continuation = any(m.get("role") == "assistant" for m in request.messages)
+    routing_ctx = RoutingContext(
+        tenant_id=ctx.user_id or "",
+        messages=request.messages,
+        requested_model=requested_model,
+        candidate_pool=candidate_pool,
+        task_id=router_task,
+        has_tools=bool(request.tools),
+        is_trace_continuation=is_continuation,
+        trace_key=conversation_id,
+    )
+    decision = await backend.route(routing_ctx)
+    return decision.ordered_models[0]
+
+
 @router.post("/completions", response_model=None)
 async def chat_completions(
     raw_request: Request,
@@ -252,6 +350,12 @@ async def chat_completions(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid request: model is required",
         )
+
+    # Per-request routing override (Otari-Router); validated up front, before any
+    # budget reservation, so a malformed value fails fast.
+    routing_opt_out = _routing_opted_out(raw_request)
+    conversation_id = _conversation_id(raw_request)
+    router_task = _router_task(raw_request)
 
     async def _normalize(
         user_id: str, provider: LLMProvider | None, model: str
@@ -372,8 +476,13 @@ async def chat_completions(
                 ) from exc
 
         # Standalone path: single attempt, no fallback (no `route.attempts`).
-        provider, model = AnyLLM.split_model_provider(request.model)
-        call_kwargs = {**get_provider_kwargs(config, provider), **request_fields}
+        routed_model = await _resolve_standalone_model(
+            request, ctx, config, routing_opt_out, conversation_id, router_task
+        )
+        provider, model = AnyLLM.split_model_provider(routed_model)
+        # `routed_model` overrides the model the provider actually receives; the
+        # `model` field in `request_fields` is the original requested model.
+        call_kwargs = {**get_provider_kwargs(config, provider), **request_fields, "model": routed_model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
             ctx=ctx,
@@ -407,8 +516,13 @@ async def chat_completions(
             rate_limit_info=ctx.rate_limit_info,
         )
 
-    provider, model = AnyLLM.split_model_provider(request.model)
-    call_kwargs = {**get_provider_kwargs(config, provider), **request_fields}
+    routed_model = await _resolve_standalone_model(
+        request, ctx, config, routing_opt_out, conversation_id, router_task
+    )
+    provider, model = AnyLLM.split_model_provider(routed_model)
+    # `routed_model` overrides the model the provider actually receives; the
+    # `model` field in `request_fields` is the original requested model.
+    call_kwargs = {**get_provider_kwargs(config, provider), **request_fields, "model": routed_model}
     completion = await run_standalone_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,
