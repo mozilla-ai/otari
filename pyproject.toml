@@ -17,6 +17,7 @@ dependencies = [
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
     "click>=8.1.0",
+    "dateparser>=1.2.0",
     "fastapi>=0.115.0",
     "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",
     "mcp>=1.0.0",
@@ -108,6 +109,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["trafilatura.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["dateparser"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

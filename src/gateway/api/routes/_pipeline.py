@@ -63,12 +63,15 @@ from gateway.api.routes._platform import (
     _report_platform_usage,
     _resolve_platform_credentials,
     _resolve_platform_mcp_servers,
+    _resolve_platform_time,
     _resolve_platform_web_search,
     run_platform_attempts,
 )
 from gateway.api.routes._tools import (
+    _build_resolve_time_backend,
     _build_web_search_backend,
     _extract_code_execution_tool,
+    _extract_resolve_time_tool,
     _extract_web_search_tool,
     _resolve_sandbox_purpose_hint,
 )
@@ -139,6 +142,11 @@ WEB_SEARCH_CONFLICT_DETAIL = (
     "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same request yet; pick one."
 )
 WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
+RESOLVE_TIME_CONFLICT_DETAIL = (
+    "otari_resolve_time cannot be combined with otari_code_execution, otari_web_search, "
+    "or mcp_servers in the same request yet; pick one. Multi-backend dispatch is a planned refinement."
+)
+RESOLVE_TIME_NOT_ENABLED_DETAIL = "resolve_time is not enabled for this workspace"
 SANDBOX_UNREACHABLE_DETAIL = "code_execution sandbox unreachable — check OTARI_SANDBOX_URL"
 WEB_SEARCH_UNREACHABLE_DETAIL = "web_search backend unreachable — check OTARI_WEB_SEARCH_URL"
 
@@ -563,6 +571,8 @@ class ToolContext:
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
         web_search_auth_token: str | None,
+        use_resolve_time: bool,
+        resolve_time_tool_entry: dict[str, Any] | None,
         remaining_user_tools: list[dict[str, Any]] | None,
         max_tool_iterations: int,
         tools_header: str | None,
@@ -576,17 +586,23 @@ class ToolContext:
         self.web_search_tool_entry = web_search_tool_entry
         self.web_search_url = web_search_url
         self.web_search_auth_token = web_search_auth_token
+        self.use_resolve_time = use_resolve_time
+        self.resolve_time_tool_entry = resolve_time_tool_entry
         self.remaining_user_tools = remaining_user_tools
         self.max_tool_iterations = max_tool_iterations
         self.tools_header = tools_header
 
     @property
     def tools_extracted(self) -> bool:
-        return self.sandbox_tool_entry is not None or self.web_search_tool_entry is not None
+        return (
+            self.sandbox_tool_entry is not None
+            or self.web_search_tool_entry is not None
+            or self.resolve_time_tool_entry is not None
+        )
 
     @property
     def use_tool_loop(self) -> bool:
-        return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search
+        return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search or self.use_resolve_time
 
 
 async def prepare_gateway_tools(
@@ -655,7 +671,7 @@ async def prepare_gateway_tools(
             if web_search_url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
                 sandbox_auth_token = ctx.user_token
 
-        web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
+        web_search_tool_entry, tools_after_web_search = _extract_web_search_tool(tools_after_sandbox)
         web_search_url: str | None = otari_env("WEB_SEARCH_URL") or None
         # Forwarded to the search backend as `X-Gateway-Token`. Only set in
         # hybrid mode, where the backend may be the platform-hosted web-search
@@ -710,6 +726,50 @@ async def prepare_gateway_tools(
                         if isinstance(request_options, dict)
                         else workspace_options
                     )
+
+        resolve_time_tool_entry, remaining_user_tools = _extract_resolve_time_tool(tools_after_web_search)
+        use_resolve_time = False
+        if resolve_time_tool_entry is not None:
+            # resolve_time is pure-local (no backend URL, no credential), so there
+            # is no "not configured" gate. It still shares the single tool-loop
+            # pool, so for now it cannot combine with the other gateway-run tools.
+            if use_sandbox or use_web_search or mcp_servers:
+                raise adapter.error(400, RESOLVE_TIME_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
+            use_resolve_time = True
+
+            # Hybrid mode owns the per-workspace resolve_time policy (whether it's
+            # enabled at all, plus the parsing knobs). Precedence mirrors
+            # web_search: a meaningful per-request value wins; otherwise the
+            # workspace default fills in. parser_options is shallow-merged.
+            # Standalone mode has no platform to consult.
+            if ctx.hybrid_mode:
+                assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
+                resolve_time_policy = await _resolve_platform_time(
+                    config=ctx.config,
+                    user_token=ctx.user_token,
+                )
+                if not resolve_time_policy.get("enabled"):
+                    raise adapter.error(403, RESOLVE_TIME_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
+                for key in (
+                    "timezone_mode",
+                    "timezone",
+                    "prefer_dates_from",
+                    "date_order",
+                    "week_start",
+                    "languages",
+                    "purpose_hint",
+                ):
+                    resolved_value = resolve_time_policy.get(key)
+                    if not resolve_time_tool_entry.get(key) and resolved_value is not None:
+                        resolve_time_tool_entry[key] = resolved_value
+                workspace_parser_options = resolve_time_policy.get("parser_options")
+                if isinstance(workspace_parser_options, dict):
+                    request_parser_options = resolve_time_tool_entry.get("parser_options")
+                    resolve_time_tool_entry["parser_options"] = (
+                        {**workspace_parser_options, **request_parser_options}
+                        if isinstance(request_parser_options, dict)
+                        else workspace_parser_options
+                    )
     except HTTPException:
         await release_reservation(ctx)
         raise
@@ -724,6 +784,8 @@ async def prepare_gateway_tools(
         web_search_tool_entry=web_search_tool_entry,
         web_search_url=web_search_url,
         web_search_auth_token=web_search_auth_token,
+        use_resolve_time=use_resolve_time,
+        resolve_time_tool_entry=resolve_time_tool_entry,
         remaining_user_tools=remaining_user_tools,
         max_tool_iterations=min(
             max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
@@ -894,16 +956,24 @@ async def dispatch_non_stream(
             kwargs = adapter.inject_hints(call_kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
             return await adapter.run_tool_loop(kwargs, backend, tool_ctx.max_tool_iterations, on_first_response)
 
-    assert tool_ctx.use_web_search
-    assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-    assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
-    async with _build_web_search_backend(
-        base_url=tool_ctx.web_search_url,
-        tool_entry=tool_ctx.web_search_tool_entry,
-        auth_token=tool_ctx.web_search_auth_token,
-    ) as web_backend:
-        kwargs = adapter.inject_hints(call_kwargs, web_backend.purpose_hints(), header=tool_ctx.tools_header)
-        return await adapter.run_tool_loop(kwargs, web_backend, tool_ctx.max_tool_iterations, on_first_response)
+    if tool_ctx.use_web_search:
+        assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
+        assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
+        async with _build_web_search_backend(
+            base_url=tool_ctx.web_search_url,
+            tool_entry=tool_ctx.web_search_tool_entry,
+            auth_token=tool_ctx.web_search_auth_token,
+        ) as web_backend:
+            kwargs = adapter.inject_hints(call_kwargs, web_backend.purpose_hints(), header=tool_ctx.tools_header)
+            return await adapter.run_tool_loop(kwargs, web_backend, tool_ctx.max_tool_iterations, on_first_response)
+
+    assert tool_ctx.use_resolve_time
+    assert tool_ctx.resolve_time_tool_entry is not None  # guaranteed by the resolve_time opt-in
+    async with _build_resolve_time_backend(tool_entry=tool_ctx.resolve_time_tool_entry) as resolve_time_backend:
+        kwargs = adapter.inject_hints(call_kwargs, resolve_time_backend.purpose_hints(), header=tool_ctx.tools_header)
+        return await adapter.run_tool_loop(
+            kwargs, resolve_time_backend, tool_ctx.max_tool_iterations, on_first_response
+        )
 
 
 async def _lazy_mcp_stream(
@@ -968,16 +1038,24 @@ async def open_stream(
         await sandbox_backend.__aenter__()  # may raise SandboxNotReachableError
         return _eager_backend_stream(adapter, kwargs, sandbox_backend, tool_ctx)
 
-    assert tool_ctx.use_web_search
-    assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-    assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
-    web_search_backend = _build_web_search_backend(
-        base_url=tool_ctx.web_search_url,
-        tool_entry=tool_ctx.web_search_tool_entry,
-        auth_token=tool_ctx.web_search_auth_token,
-    )
-    await web_search_backend.__aenter__()  # may raise WebSearchNotReachableError
-    return _eager_backend_stream(adapter, kwargs, web_search_backend, tool_ctx)
+    if tool_ctx.use_web_search:
+        assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
+        assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
+        web_search_backend = _build_web_search_backend(
+            base_url=tool_ctx.web_search_url,
+            tool_entry=tool_ctx.web_search_tool_entry,
+            auth_token=tool_ctx.web_search_auth_token,
+        )
+        await web_search_backend.__aenter__()  # may raise WebSearchNotReachableError
+        return _eager_backend_stream(adapter, kwargs, web_search_backend, tool_ctx)
+
+    assert tool_ctx.use_resolve_time
+    assert tool_ctx.resolve_time_tool_entry is not None  # guaranteed by the resolve_time opt-in
+    # resolve_time is pure-local: its __aenter__ is a no-op and never raises, but
+    # we open it eagerly to stay uniform with the other eager backends.
+    resolve_time_backend = _build_resolve_time_backend(tool_entry=tool_ctx.resolve_time_tool_entry)
+    await resolve_time_backend.__aenter__()
+    return _eager_backend_stream(adapter, kwargs, resolve_time_backend, tool_ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -1326,6 +1404,11 @@ async def run_streaming_with_fallback(
                     tool_entry=tool_ctx.web_search_tool_entry,
                     auth_token=tool_ctx.web_search_auth_token,
                 ),
+            )
+        elif tool_ctx.use_resolve_time:
+            assert tool_ctx.resolve_time_tool_entry is not None  # guaranteed by the resolve_time opt-in
+            pool_for_loop = await backend_stack.enter_async_context(
+                _build_resolve_time_backend(tool_entry=tool_ctx.resolve_time_tool_entry),
             )
     except BaseException:
         # Eager-open failure (e.g. SandboxNotReachableError): propagate so the
