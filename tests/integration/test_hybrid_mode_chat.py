@@ -1500,3 +1500,45 @@ def test_platform_mode_sandbox_per_request_hint_wins(
 
     assert response.status_code == 200
     assert _FakeSandboxBackend.last_purpose_hint == "request hint"
+
+
+def test_platform_mode_sandbox_applies_workspace_max_iterations_cap(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The workspace's resolved code-exec max_iterations caps the tool loop.
+    The request omits max_tool_iterations, so the workspace cap (2) binds over
+    the default (10) and reaches the loop unchanged."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+
+    captured: dict[str, int] = {}
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-max-iters")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": True, "max_iterations": 2})
+        return httpx.Response(204)
+
+    async def fake_mcp_tool_loop(**kwargs: Any) -> ChatCompletion:
+        captured["max_iterations"] = kwargs["max_iterations"]
+        return _sandbox_loop_completion()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
+    monkeypatch.setattr("gateway.api.routes.chat.mcp_tool_loop", fake_mcp_tool_loop)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert captured["max_iterations"] == 2
