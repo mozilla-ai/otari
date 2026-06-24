@@ -61,7 +61,7 @@ def _is_resolve_time_tool_type(type_value: Any) -> bool:
     """Recognise the explicit gateway-managed resolve_time tool type.
 
     Matches only ``"otari_resolve_time"``. There is no provider-named
-    equivalent — time resolution is always gateway-local.
+    equivalent; time resolution is always gateway-local.
     """
     if not isinstance(type_value, str):
         return False
@@ -279,7 +279,7 @@ def _resolve_resolve_time_purpose_hint(tool_entry: dict[str, Any] | None) -> str
 def _build_resolve_time_backend(*, tool_entry: dict[str, Any]) -> ResolveTimeBackend:
     """Construct a ResolveTimeBackend from the (merged) per-tool config entry.
 
-    resolve_time is pure-local — no backend URL, no credential. The entry's
+    resolve_time is pure-local: no backend URL, no credential. The entry's
     fields are the workspace policy (in hybrid mode, merged from the platform's
     resolve response) plus any per-request overrides: ``timezone_mode``,
     ``timezone``, ``prefer_dates_from``, ``date_order``, ``week_start``,

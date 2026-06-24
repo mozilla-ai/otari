@@ -2,8 +2,8 @@
 
 A backend the tool-use loop in :mod:`gateway.services.mcp_loop` dispatches to
 whenever the model emits a ``resolve_time(expression=…)`` call. Unlike the
-sandbox / web_search backends, this one is pure local computation — it shells
-out to no service and holds no HTTP client — so its async-context-manager
+sandbox / web_search backends, this one is pure local computation: it shells
+out to no service and holds no HTTP client, so its async-context-manager
 methods are no-ops; it implements them only so the loop can drive it as a
 ``pool`` uniformly.
 
@@ -16,10 +16,10 @@ its workspace policy: the gateway runs the tool, the platform owns the config.
 ``timezone_mode`` reconciles the workspace ``timezone`` with the ``timezone_name``
 the model may pass per call:
 
-* ``request`` — honour the model's per-call timezone; fall back to UTC.
-* ``default`` — honour the model's per-call timezone, else the workspace
+* ``request``: honour the model's per-call timezone; fall back to UTC.
+* ``default``: honour the model's per-call timezone, else the workspace
   ``timezone``, else UTC.
-* ``forced`` — ignore the model entirely; always use the workspace ``timezone``.
+* ``forced``: ignore the model entirely; always use the workspace ``timezone``.
 
 This satisfies the same duck-typed protocol the MCP loop uses for tool dispatch
 (``openai_tools``, ``owns_tool``, ``purpose_hints``, ``call_tool``).
@@ -30,11 +30,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo
 
 import dateparser
+
+# Case-insensitive " to " range separator, with flexible surrounding whitespace.
+_RANGE_SEPARATOR = re.compile(r"\s+to\s+", re.IGNORECASE)
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -54,7 +58,7 @@ _DEFAULT_DATE_ORDER = "MDY"
 _DEFAULT_WEEK_START = "monday"
 
 # Gateway-controlled dateparser settings that an opaque parser_options bag must
-# never override — these are derived from the typed policy fields instead.
+# never override; these are derived from the typed policy fields instead.
 _RESERVED_PARSER_SETTINGS = frozenset({"RELATIVE_BASE", "RETURN_AS_TIMEZONE_AWARE", "PREFER_DATES_FROM", "DATE_ORDER"})
 
 # Defensive bounds mirroring the platform's stored-config caps. In standalone
@@ -198,11 +202,12 @@ class ResolveTimeBackend:
     def _resolve(self, expression: str, tz: timezone | ZoneInfo) -> str:
         now = datetime.now(tz)
 
-        # Explicit range: "X to Y" -> {start, end}
-        if " to " in expression:
-            start_raw, end_raw = expression.split(" to ", maxsplit=1)
-            start_dt = self._parse_expression(start_raw.strip(), now)
-            end_dt = self._parse_expression(end_raw.strip(), now)
+        # Explicit range: "X to Y" -> {start, end}. Case-insensitive on the
+        # " to " separator so "Jan 1 To Jan 2" is still recognised as a range.
+        range_parts = _RANGE_SEPARATOR.split(expression, maxsplit=1)
+        if len(range_parts) == 2:
+            start_dt = self._parse_expression(range_parts[0].strip(), now)
+            end_dt = self._parse_expression(range_parts[1].strip(), now)
             if start_dt is not None and end_dt is not None:
                 start = _floor(start_dt, tz)
                 end = _floor(end_dt, tz) + timedelta(days=1)
@@ -233,7 +238,7 @@ class ResolveTimeBackend:
         )
         try:
             result: datetime | None = dateparser.parse(expr, languages=self._languages, settings=cast(Any, settings))
-        except Exception as exc:  # noqa: BLE001 — dateparser raises broad on bad settings
+        except Exception as exc:  # noqa: BLE001 (dateparser raises broad on bad settings)
             logger.warning("resolve_time: dateparser failed for %r: %s", expr, exc)
             return None
         if result is None:
@@ -293,7 +298,7 @@ def _bounded_parser_options(options: dict[str, Any] | None) -> dict[str, Any]:
     """Clamp a request-supplied parser_options bag to the backend's caps.
 
     Returns at most ``_MAX_PARSER_OPTION_KEYS`` keys, and drops the bag entirely
-    if it can't be serialised or exceeds ``_MAX_PARSER_OPTIONS_BYTES`` — the
+    if it can't be serialised or exceeds ``_MAX_PARSER_OPTIONS_BYTES``; the
     platform applies the same caps when storing config, so this only bites in
     standalone mode where config comes straight from the request.
     """
@@ -301,7 +306,7 @@ def _bounded_parser_options(options: dict[str, Any] | None) -> dict[str, Any]:
         return {}
     bounded = dict(list(options.items())[:_MAX_PARSER_OPTION_KEYS])
     try:
-        if len(json.dumps(bounded, default=str)) > _MAX_PARSER_OPTIONS_BYTES:
+        if len(json.dumps(bounded, default=str).encode("utf-8")) > _MAX_PARSER_OPTIONS_BYTES:
             logger.warning("resolve_time: parser_options exceeds size cap; ignoring")
             return {}
     except (TypeError, ValueError):
@@ -321,10 +326,12 @@ def _is_utc(tz: timezone | ZoneInfo) -> bool:
 
 
 def _fmt(dt: datetime, tz: timezone | ZoneInfo) -> str:
-    """ISO 8601 string — ``Z`` suffix for UTC, numeric offset otherwise."""
+    """ISO 8601 string at second precision: ``Z`` suffix for UTC, numeric offset otherwise."""
     if _is_utc(tz):
         return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    return dt.isoformat()
+    # Drop microseconds so the non-UTC path matches the UTC path's precision
+    # (datetime.now() carries microseconds; the floored paths do not).
+    return dt.replace(microsecond=0).isoformat()
 
 
 def _range_json(start: datetime, end: datetime, tz: timezone | ZoneInfo) -> str:

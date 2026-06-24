@@ -68,6 +68,12 @@ async def test_explicit_range_inclusive_end() -> None:
 
 
 @pytest.mark.asyncio
+async def test_explicit_range_separator_is_case_insensitive() -> None:
+    out = json.loads(await _call(ResolveTimeBackend(), "9 days ago To today"))
+    assert out == {"start": "2026-02-05T00:00:00Z", "end": "2026-02-15T00:00:00Z"}
+
+
+@pytest.mark.asyncio
 async def test_unparseable_expression_returns_error_string() -> None:
     out = await _call(ResolveTimeBackend(), "zzzz not a date qwerty")
     assert out.startswith("Could not parse time expression")
