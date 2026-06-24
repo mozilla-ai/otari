@@ -46,7 +46,7 @@ Otari sits between your applications and LLM providers so you can control access
 - User and budget controls (`/v1/users`, `/v1/budgets`)
 - Usage and pricing tracking (`/v1/usage`, `/v1/pricing`)
 - Health and metrics endpoints (`/health`, optional `/metrics`)
-- Built-in tools Otari runs itself, `otari_code_execution` (sandboxed Python REPL) and `otari_web_search`. See [Built-in tools](#built-in-tools).
+- Built-in tools Otari runs itself, `otari_code_execution` (sandboxed Python REPL), `otari_web_search`, and `otari_resolve_time` (natural-language date resolution). See [Built-in tools](#built-in-tools).
 - Request-level [guardrails](#guardrails) (e.g. prompt-injection detection) Otari enforces on input before calling the provider.
 
 ## Quickstart
@@ -173,11 +173,12 @@ Otari will be available at `http://localhost:8000`.
 
 ## Built-in tools
 
-Otari can run a couple of tools itself so any model, including
+Otari can run a few tools itself so any model, including
 open-weight ones, gets parity with what frontier APIs expose as managed
-tools. Both are opt-in via the request's `tools` array and run inside
-docker-compose profiles so operators who don't use them don't pull extra
-images.
+tools. They are opt-in via the request's `tools` array. The sandbox and search
+backends run inside docker-compose profiles so operators who don't use them
+don't pull extra images; `otari_resolve_time` is pure local computation and
+needs no extra service.
 
 These use dedicated `otari_*` tool types. The keyword decides who runs the
 code: an `otari_*` type means Otari runs it. Every other tool type, the
@@ -246,6 +247,35 @@ Per-tool overrides (`max_results`, `allowed_domains`, `blocked_domains`,
 (`OTARI_WEB_SEARCH_ENGINES`, `OTARI_WEB_SEARCH_MAX_RESULTS`,
 `OTARI_WEB_SEARCH_EXTRACT`, `OTARI_WEB_SEARCH_PURPOSE_HINT`) live
 alongside `OTARI_WEB_SEARCH_URL`.
+
+### `otari_resolve_time`, natural-language date resolution
+
+```json
+{
+  "model": "anthropic:claude-sonnet-4-6",
+  "messages": [{"role": "user", "content": "Summarize my notes from the last 2 weeks."}],
+  "tools": [{"type": "otari_resolve_time"}]
+}
+```
+
+Unlike the sandbox and search tools, `otari_resolve_time` is pure local
+computation (the `dateparser` library), so it needs no docker-compose profile
+or extra service, no upstream provider, and no credential. The model calls it
+to turn a natural-language or relative date ("last 2 weeks", "yesterday",
+"9 days ago to today") into deterministic ISO 8601 timestamps before passing
+them to other tools, rather than doing brittle date math itself. No argument
+returns the current time; single points return one timestamp; periods and
+ranges return a `{"start", "end"}` object.
+
+Parsing is policy-driven: `timezone_mode` (`request` / `default` / `forced`)
+reconciles the per-call `timezone_name` with a workspace timezone, alongside
+`prefer_dates_from`, `date_order`, `week_start`, `languages`, and an opaque
+`parser_options` bag forwarded to `dateparser`. Per-tool overrides live on the
+tool entry; in platform mode the per-workspace defaults come from the
+platform's `/gateway/resolve-time/resolve` endpoint. `OTARI_RESOLVE_TIME_PURPOSE_HINT`
+sets the operator-level prompt hint. Because it shares the single tool-loop
+pool, it can't be combined with `otari_code_execution`, `otari_web_search`, or
+MCP servers in the same request yet.
 
 ## Guardrails
 
