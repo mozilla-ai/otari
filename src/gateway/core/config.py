@@ -153,6 +153,15 @@ class GatewayConfig(BaseSettings):
             "Audio and moderation endpoints are always exempt — they have no token-based pricing."
         ),
     )
+    default_pricing: bool = Field(
+        default=True,
+        description=(
+            "When a model has no pricing in the database, fall back to community-maintained "
+            "default pricing from the bundled genai-prices dataset (default). Database pricing "
+            "always takes precedence. Set False to rely solely on configured pricing, which keeps "
+            "require_pricing fail-closed for any model you have not priced explicitly."
+        ),
+    )
     reject_user_mismatch: bool = Field(
         default=True,
         description=(

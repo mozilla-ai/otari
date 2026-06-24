@@ -3,10 +3,11 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.db import ModelPricing
-from gateway.services.pricing_service import find_model_pricing
+from gateway.services.pricing_service import configure_default_pricing, find_model_pricing
 
 
 @pytest.mark.asyncio
@@ -128,6 +129,10 @@ async def test_find_pricing_defaults_to_now(async_db: AsyncSession) -> None:
 async def test_find_pricing_future_prices_ignored(async_db: AsyncSession) -> None:
     """Future-effective pricing should not be returned for present lookups."""
 
+    # Disable genai-prices defaults so the DB-only lookup is exercised in
+    # isolation (gpt-4 is a model genai-prices would otherwise price).
+    configure_default_pricing(False)
+
     future_effective = datetime.now(UTC) + timedelta(days=10)
     async_db.add(
         ModelPricing(
@@ -170,3 +175,46 @@ async def test_find_pricing_with_explicit_as_of(async_db: AsyncSession) -> None:
     pricing = await find_model_pricing(async_db, "openai", "gpt-4", as_of=older)
     assert pricing is not None
     assert pricing.input_price_per_million == 5.0
+
+
+@pytest.mark.asyncio
+async def test_find_pricing_falls_back_to_genai_defaults(async_db: AsyncSession) -> None:
+    """With no DB row, a well-known model is priced from genai-prices defaults."""
+    pricing = await find_model_pricing(async_db, "openai", "gpt-4o")
+
+    assert pricing is not None
+    assert pricing.model_key == "openai:gpt-4o"
+    assert pricing.input_price_per_million > 0
+    assert pricing.output_price_per_million > 0
+
+    # The default is a lookup result, not a stored row: nothing is persisted.
+    count = (await async_db.execute(select(func.count()).select_from(ModelPricing))).scalar_one()
+    assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_find_pricing_db_overrides_genai_defaults(async_db: AsyncSession) -> None:
+    """An explicit DB price for a known model wins over the genai-prices default."""
+    async_db.add(
+        ModelPricing(
+            model_key="openai:gpt-4o",
+            effective_at=datetime(2025, 1, 1, tzinfo=UTC),
+            input_price_per_million=0.123,
+            output_price_per_million=0.456,
+        )
+    )
+    await async_db.commit()
+
+    pricing = await find_model_pricing(async_db, "openai", "gpt-4o")
+    assert pricing is not None
+    assert pricing.input_price_per_million == 0.123
+    assert pricing.output_price_per_million == 0.456
+
+
+@pytest.mark.asyncio
+async def test_find_pricing_defaults_can_be_disabled(async_db: AsyncSession) -> None:
+    """default_pricing=False restores the DB-only (fail-closed) behavior."""
+    configure_default_pricing(False)
+
+    pricing = await find_model_pricing(async_db, "openai", "gpt-4o")
+    assert pricing is None

@@ -72,6 +72,7 @@ pricing:
 | `log_writer_strategy` | string | `"single"` | Usage log writing: `"single"` (inline) or `"batch"` (background) |
 | `budget_strategy` | string | `"for_update"` | Budget validation: `"for_update"`, `"cas"`, or `"disabled"` |
 | `require_pricing` | bool | `true` | Reject requests for models with no configured pricing (HTTP 402, fail-closed). When `false`, unpriced models are served and logged without cost. Audio and moderation endpoints are always exempt. |
+| `default_pricing` | bool | `true` | When a model has no pricing in the database, fall back to community-maintained defaults from the bundled genai-prices dataset. Database pricing always wins. Set `false` to use only configured pricing. See [Default pricing](#default-pricing). |
 | `reject_user_mismatch` | bool | `true` | When `true`, a non-master key whose request names a `user` other than its own is rejected (HTTP 403). When `false`, the client `user` is still forwarded to the provider but spend is always bound to the key's own user. The master key may always bill an arbitrary user. |
 | `stream_missing_usage_policy` | string | `"estimate"` | How to bill a streamed response that completes with no provider usage data: `"estimate"` (charge the up-front estimate), `"fail"` (charge estimate and mark errored), or `"allow_free"` (don't bill). |
 | `budget_estimate_default_output_tokens` | int | `1024` | Output-token count assumed when reserving budget for a request with no declared max output; reconciled to actual usage on completion. |
@@ -165,6 +166,22 @@ pricing:
 ```
 
 Config pricing sets initial values. Pricing set via the `/v1/pricing` API takes precedence.
+
+### Default pricing
+
+When a model has no price in the database (neither config nor `/v1/pricing`), Otari falls back to
+community-maintained default pricing from the [genai-prices](https://github.com/pydantic/genai-prices)
+dataset, which bundles per-million rates for hundreds of models across the major providers. This means
+common models (for example `openai:gpt-4o`, `anthropic:claude-sonnet-4-6`) are priced out of the box with
+no configuration, so `require_pricing` does not reject them.
+
+Resolution order is always database first, defaults last, so any price you set in config or via
+`/v1/pricing` overrides the community default. Defaults are used only as a lookup fallback; they are never
+written to the database. Tiered (threshold) prices are flattened to their base rate.
+
+Set `default_pricing: false` in `config.yml` (or `OTARI_DEFAULT_PRICING=false`) to disable the fallback and
+restore strict database-only pricing (a model is then priced only if you have configured it). The defaults
+are bundled with the installed package; no network access is used.
 
 > **Fail-closed by default.** With `require_pricing: true` (the default), a request for a model
 > that has no pricing entry is rejected with HTTP 402 rather than served free and unmetered — an

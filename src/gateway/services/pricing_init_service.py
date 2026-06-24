@@ -18,8 +18,12 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     entry is rejected with HTTP 402 — so a deployment with zero pricing rows
     would reject every billable request. Surface that loudly rather than letting
     operators discover it via failed traffic.
+
+    When community-maintained default pricing is enabled (the default), most
+    common models are priced without any configuration, so the dire "all
+    requests rejected" warning no longer applies and is suppressed.
     """
-    if not config.require_pricing:
+    if not config.require_pricing or config.default_pricing:
         return
     count = (await db.execute(select(func.count()).select_from(ModelPricing))).scalar_one()
     if count == 0:
