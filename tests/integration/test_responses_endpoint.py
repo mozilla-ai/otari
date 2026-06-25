@@ -4,7 +4,6 @@ import json
 from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from gateway.core.config import API_KEY_HEADER
@@ -34,15 +33,6 @@ class _FakeStreamEvent:
 
     def model_dump_json(self, *, exclude_none: bool = False) -> str:
         return json.dumps(self._payload)
-
-
-@pytest.fixture
-def responses_request_body(test_user: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "model": "openai:gpt-4o-mini",
-        "input": {"type": "text", "text": "Hello"},
-        "user": test_user["user_id"],
-    }
 
 
 def _make_stream(events: list[_FakeStreamEvent]) -> AsyncIterator[_FakeStreamEvent]:
