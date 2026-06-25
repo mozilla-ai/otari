@@ -93,6 +93,26 @@ class _AttemptFailure(NamedTuple):
     error_class: str
 
 
+def _provider_failure_http_exc(exc: BaseException, *, fallback_detail: str) -> HTTPException:
+    """Build the terminal HTTPException for a failed platform attempt.
+
+    Reuses the shared provider-error classifier so platform-mode failures get
+    the same specific-but-safe statuses (400/404/429/504) the standalone
+    adapters return, instead of a blanket 502. Falls back to a 502 carrying
+    ``fallback_detail`` when the failure has no signal we can safely surface.
+    The classified detail is always a fixed string, so it cannot leak the raw
+    upstream message.
+    """
+    # Deferred import: _pipeline imports this module, so importing it at module
+    # scope would be circular.
+    from gateway.api.routes._pipeline import classify_provider_error
+
+    mapping = classify_provider_error(exc)
+    if mapping is not None:
+        return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
+    return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=fallback_detail)
+
+
 async def run_platform_attempts(
     *,
     route: ResolvedRoute,
@@ -129,9 +149,12 @@ async def run_platform_attempts(
     an upstream failure — it raises a distinct 422 and does not advance to
     the next attempt.
 
-    If every attempt fails the runner raises 504 (on timeout) or 502
-    (otherwise), with the detail string distinguishing single-attempt from
-    multi-attempt outcomes.
+    If every attempt fails the runner raises 504 on timeout. Otherwise a
+    single-attempt failure is classified into a specific safe status
+    (400/404/429/...) when the upstream error carries one (via
+    ``_provider_failure_http_exc``), falling back to a generic 502; a
+    multi-attempt fallthrough keeps the generic 502 "All upstream providers
+    failed" rather than attributing one provider's status to the whole set.
 
     Callers are expected to hand a non-empty ``attempts`` list — the platform
     resolve endpoint guarantees one. Passing an empty list is a caller
@@ -214,15 +237,9 @@ async def run_platform_attempts(
             # message on this attempt. Subsequent failures cannot be
             # transparently retried on another provider.
             if locked_in:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail="LLM provider error",
-                ) from exc
+                raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
             if not retryable:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail="LLM provider error",
-                ) from exc
+                raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
             failures.append(_AttemptFailure(attempt.position, attempt.provider, attempt.model, error_class))
             continue
 
@@ -244,10 +261,14 @@ async def run_platform_attempts(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=detail,
         ) from last_exc
-    detail = "LLM provider error" if is_single_attempt else "All upstream providers failed"
+    # A single attempt has one identifiable upstream failure we can classify;
+    # a multi-attempt fallthrough aggregates heterogeneous failures, so it keeps
+    # the generic 502 rather than attributing one provider's status to the set.
+    if is_single_attempt and last_exc is not None:
+        raise _provider_failure_http_exc(last_exc, fallback_detail="LLM provider error") from last_exc
     raise HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
-        detail=detail,
+        detail="All upstream providers failed",
     ) from last_exc
 
 
@@ -475,9 +496,7 @@ async def _resolve_platform_mcp_servers(
     body: dict[str, Any] = {"mcp_server_ids": [str(uid) for uid in mcp_server_ids]}
 
     try:
-        response = await _post_platform(
-            url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000
-        )
+        response = await _post_platform(url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000)
     except (httpx.TimeoutException, httpx.NetworkError):
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,

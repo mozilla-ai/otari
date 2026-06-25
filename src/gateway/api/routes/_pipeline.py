@@ -35,9 +35,10 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import Any, Generic, Protocol, TypeVar
+from typing import Any, Generic, NamedTuple, Protocol, TypeVar
 from urllib.parse import ParseResult, urlparse
 
+import httpx
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import (
@@ -45,7 +46,7 @@ from any_llm.types.completion import (
     ChatCompletionChunk,
     CompletionUsage,
 )
-from fastapi import BackgroundTasks, HTTPException, Request, Response
+from fastapi import BackgroundTasks, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -121,6 +122,13 @@ MCP_SERVER_IDS_HYBRID_ONLY_DETAIL = "mcp_server_ids is only available in hybrid 
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
+# Specific-but-safe provider-failure details. Each is a fixed string that never
+# embeds the raw upstream message, so classifying an error cannot leak provider
+# internals (see classify_provider_error and test_error_detail_leakage).
+PROVIDER_BAD_REQUEST_DETAIL = "The provider rejected the request as invalid (check the model name and parameters)"
+PROVIDER_MODEL_NOT_FOUND_DETAIL = "The requested model was not found on the provider"
+PROVIDER_CREDENTIALS_DETAIL = "The provider rejected the gateway's credentials"
+PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 SANDBOX_NOT_CONFIGURED_DETAIL = (
@@ -154,6 +162,61 @@ class ErrorKind(Enum):
     INVALID_REQUEST = auto()
     API = auto()
     PERMISSION = auto()
+
+
+class ProviderErrorMapping(NamedTuple):
+    """A safe, client-facing (status, detail) for a classified provider failure."""
+
+    status_code: int
+    detail: str
+
+
+def _upstream_status_code(exc: BaseException) -> int | None:
+    """Pull an HTTP status off an upstream exception, if it carries one.
+
+    any-llm surfaces provider HTTP errors either as ``exc.status_code`` or via an
+    attached ``exc.response.status_code``; everything else has neither.
+    """
+    status_code = getattr(exc, "status_code", None)
+    if status_code is None:
+        response = getattr(exc, "response", None)
+        if response is not None:
+            status_code = getattr(response, "status_code", None)
+    return status_code if isinstance(status_code, int) else None
+
+
+def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
+    """Map an upstream provider exception to a safe, specific (status, detail).
+
+    Returns ``None`` when the failure carries no signal we can safely act on, so
+    the caller falls back to its existing generic provider-error response. Every
+    detail returned here is a fixed string: the raw provider message is never
+    included, preserving the no-leak guarantee. The mapping is intentionally
+    conservative, classifying only the cases a caller can act on and leaving
+    everything else (including provider 5xx) to the generic 502.
+    """
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+        return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
+
+    status_code = _upstream_status_code(exc)
+    if status_code is None:
+        return None
+    if status_code in (400, 422):
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, PROVIDER_BAD_REQUEST_DETAIL)
+    if status_code == 404:
+        return ProviderErrorMapping(status.HTTP_404_NOT_FOUND, PROVIDER_MODEL_NOT_FOUND_DETAIL)
+    # A provider rejecting the gateway's credentials is a gateway-config fault,
+    # not the caller's: surface it as a 502, never as a client-facing 401/403.
+    if status_code in (401, 403):
+        return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_CREDENTIALS_DETAIL)
+    # A provider 429 is surfaced as a client 429. Note this drops the upstream
+    # Retry-After: the (status, detail) pair cannot carry it, so the caller
+    # can't honor the provider's exact backoff window. Acceptable because the
+    # gateway has no single correct value to forward (BYO vs shared keys differ)
+    # and a bare 429 still tells the caller to back off.
+    if status_code == 429:
+        return ProviderErrorMapping(status.HTTP_429_TOO_MANY_REQUESTS, PROVIDER_RATE_LIMITED_DETAIL)
+    return None
 
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}

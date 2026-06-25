@@ -28,6 +28,7 @@ from gateway.api.routes._pipeline import (
     SANDBOX_UNREACHABLE_DETAIL,
     WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
+    classify_provider_error,
     default_attempt_kwargs,
     log_usage,
     prepare_gateway_tools,
@@ -132,11 +133,9 @@ class _ChatAdapter:
         return HTTPException(status_code=status_code, detail=message)
 
     def provider_error(self, exc: BaseException) -> HTTPException:
-        if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
-            return HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail=PROVIDER_TIMEOUT_DETAIL,
-            )
+        mapping = classify_provider_error(exc)
+        if mapping is not None:
+            return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=PROVIDER_ERROR_DETAIL,
@@ -259,9 +258,7 @@ async def chat_completions(
             detail="Invalid request: model is required",
         )
 
-    async def _normalize(
-        user_id: str, provider: LLMProvider | None, model: str
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(user_id: str, provider: LLMProvider | None, model: str) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
         # the cost estimate. Standalone only; no-op when the files feature is

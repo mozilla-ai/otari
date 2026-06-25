@@ -28,6 +28,7 @@ from gateway.api.routes._pipeline import (
     SANDBOX_UNREACHABLE_DETAIL,
     WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
+    classify_provider_error,
     prepare_gateway_tools,
     rate_limit_headers,
     release_reservation,
@@ -151,6 +152,9 @@ class _ResponsesAdapter:
         return HTTPException(status_code=status_code, detail=message)
 
     def provider_error(self, exc: BaseException) -> HTTPException:
+        mapping = classify_provider_error(exc)
+        if mapping is not None:
+            return HTTPException(status_code=mapping.status_code, detail=mapping.detail)
         return HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=PROVIDER_ERROR_DETAIL,
@@ -274,9 +278,7 @@ async def create_response(
     raw_max_output = getattr(request_body, "max_output_tokens", None)
     max_output_tokens = raw_max_output if isinstance(raw_max_output, int) and raw_max_output >= 0 else None
 
-    async def _normalize(
-        user_id: str, provider: LLMProvider | None, model: str
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(user_id: str, provider: LLMProvider | None, model: str) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
@@ -302,8 +304,7 @@ async def create_response(
         log_writer=log_writer,
         model=request_body.model,
         user_id_from_request=request_body.user,
-        estimate_prompt_chars=len(str(request_body.input))
-        + len(str(getattr(request_body, "instructions", "") or "")),
+        estimate_prompt_chars=len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or "")),
         estimate_max_output_tokens=max_output_tokens,
         master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
         user_forbidden_detail=_USER_FORBIDDEN,

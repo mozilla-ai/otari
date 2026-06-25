@@ -32,6 +32,7 @@ from gateway.api.routes._pipeline import (
     SANDBOX_UNREACHABLE_DETAIL,
     WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
+    classify_provider_error,
     default_attempt_kwargs,
     prepare_gateway_tools,
     rate_limit_headers,
@@ -131,6 +132,17 @@ def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPExc
 _ERR_INVALID_REQUEST = "invalid_request_error"
 _ERR_API = "api_error"
 _ERR_PERMISSION = "permission_error"
+_ERR_NOT_FOUND = "not_found_error"
+_ERR_RATE_LIMIT = "rate_limit_error"
+
+# Anthropic error.type for a classified provider failure, keyed by the safe HTTP
+# status classify_provider_error chose. Unlisted statuses (e.g. the 502 used for
+# a credentials fault) fall back to api_error.
+_PROVIDER_STATUS_TO_ANTHROPIC_TYPE = {
+    400: _ERR_INVALID_REQUEST,
+    404: _ERR_NOT_FOUND,
+    429: _ERR_RATE_LIMIT,
+}
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'metadata.user_id' is required in request body"
 _USER_FORBIDDEN = "'metadata.user_id' does not match the authenticated API key's user"
 _PROVIDER_ERROR = "The request could not be completed by the provider"
@@ -189,6 +201,10 @@ class _MessagesAdapter:
         return _anthropic_error(_ERROR_KIND_TO_ANTHROPIC_TYPE[kind], message, status_code)
 
     def provider_error(self, exc: BaseException) -> HTTPException:
+        mapping = classify_provider_error(exc)
+        if mapping is not None:
+            error_type = _PROVIDER_STATUS_TO_ANTHROPIC_TYPE.get(mapping.status_code, _ERR_API)
+            return _anthropic_error(error_type, mapping.detail, mapping.status_code)
         return _anthropic_error(_ERR_API, _PROVIDER_ERROR, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def format_chunk(self, chunk: MessageStreamEvent) -> str:
@@ -294,9 +310,7 @@ async def create_message(
     """
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
 
-    async def _normalize(
-        user_id: str, provider: LLMProvider | None, model: str
-    ) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(user_id: str, provider: LLMProvider | None, model: str) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
