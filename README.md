@@ -148,6 +148,18 @@ Run a single test file:
 uv run pytest tests/unit/test_gateway_cli.py -v
 ```
 
+## Deploy on Railway
+
+Want a hosted gateway without local setup? Deploy Otari plus a managed Postgres
+on [Railway](https://railway.com) in one click. Bring a provider key (OpenAI,
+Anthropic, Mistral, or Gemini) and you get a running gateway with virtual keys,
+budgets, and usage tracking.
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/REPLACE_ME)
+
+The two-service template, its environment inputs, and how to publish it are
+documented in [`deploy/railway/`](deploy/railway/README.md).
+
 ## Docker
 
 The Otari image is published on [Docker Hub](https://hub.docker.com/r/mzdotai/otari).
