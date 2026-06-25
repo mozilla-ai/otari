@@ -25,9 +25,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SPEC = REPO_ROOT / "docs" / "public" / "openapi.json"
 DEFAULT_OUTPUT = REPO_ROOT / "docs" / "public" / "otari.postman_collection.json"
 
-# The canonical auth header (see API_KEY_HEADER in src/gateway/core/config.py).
 # The OpenAPI spec does not declare a security scheme, so we inject it here.
-API_KEY_HEADER = "Otari-Key"
+# The gateway accepts the key as a Bearer token via the standard Authorization
+# header (it also accepts the legacy Otari-Key header, but only when the value
+# is itself prefixed with "Bearer "; see _extract_bearer_token in
+# src/gateway/api/deps.py). Using standard Bearer auth keeps the collection
+# aligned with the documented curl examples.
 DEFAULT_BASE_URL = "http://localhost:8000"
 
 # Methods that carry a JSON request body worth templating.
@@ -273,8 +276,9 @@ def build_collection(spec: dict[str, Any]) -> dict[str, Any]:
         "spec by scripts/generate_postman.py. Stopgap client for driving a running "
         "Otari server until the web UI lands.\n\n"
         f"Set the `baseUrl` and `otariKey` collection variables (or override them "
-        "with a Postman environment). Auth is sent as the "
-        f"`{API_KEY_HEADER}` header on every request via collection-level auth."
+        "with a Postman environment). Auth is sent as an "
+        "`Authorization: Bearer <otariKey>` header on every request via "
+        "collection-level auth."
     )
 
     return {
@@ -284,11 +288,9 @@ def build_collection(spec: dict[str, Any]) -> dict[str, Any]:
             "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
         },
         "auth": {
-            "type": "apikey",
-            "apikey": [
-                {"key": "key", "value": API_KEY_HEADER, "type": "string"},
-                {"key": "value", "value": "{{otariKey}}", "type": "string"},
-                {"key": "in", "value": "header", "type": "string"},
+            "type": "bearer",
+            "bearer": [
+                {"key": "token", "value": "{{otariKey}}", "type": "string"},
             ],
         },
         "variable": [
