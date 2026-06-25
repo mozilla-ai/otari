@@ -1,0 +1,16 @@
+version: 2
+updates:
+  # Keep the SHA-pinned GitHub Actions current. Without this, pinned SHAs go
+  # stale and miss upstream security patches; Dependabot bumps both the SHA and
+  # the trailing version comment as new releases ship.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      # One PR per week for routine minor/patch bumps to cut review noise;
+      # major bumps still arrive as individual PRs so they get scrutiny.
+      github-actions:
+        update-types:
+          - "minor"
+          - "patch"
