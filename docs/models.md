@@ -19,7 +19,7 @@ The `provider` prefix tells Otari which backend to route to. The `model_name` is
 
 HuggingFace Inference Providers is a router: the same model id (for example `zai-org/GLM-4.6`) can be served by several backends (Together, Novita, and others), and in the default "auto" mode the backend, and therefore the price, is chosen at request time. To route (and price) deterministically, pin a backend with a `:<backend>` suffix on the model id, which the HuggingFace router honors server side:
 
-```
+```text
 huggingface:zai-org/GLM-4.6:together
 huggingface:zai-org/GLM-4.6:novita
 ```
