@@ -38,3 +38,4 @@ def test_favicon_is_served(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/svg+xml")
     assert response.text.lstrip().startswith("<svg")
+    assert response.headers["cache-control"] == "public, max-age=86400"

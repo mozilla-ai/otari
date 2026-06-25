@@ -25,6 +25,9 @@ from gateway.services.pricing_service import configure_default_pricing
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
+# Public, unauthenticated static assets that are safe for shared caches and set
+# their own Cache-Control; the middleware leaves their caching headers alone.
+_CACHEABLE_PATHS = ("/favicon.svg",)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -41,7 +44,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        if not request.url.path.startswith(_PUBLIC_PREFIXES):
+        if not request.url.path.startswith(_PUBLIC_PREFIXES) and request.url.path not in _CACHEABLE_PATHS:
             response.headers["Cache-Control"] = "private, no-store, no-cache"
             vary_values = {part.strip() for part in response.headers.get("Vary", "").split(",") if part.strip()}
             vary_values.add("Authorization")
@@ -110,7 +113,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     @app.get("/favicon.svg", include_in_schema=False)
     async def favicon() -> Response:
-        return Response(content=FAVICON_SVG, media_type="image/svg+xml")
+        return Response(
+            content=FAVICON_SVG,
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
 
     app.add_middleware(SecurityHeadersMiddleware)
 
