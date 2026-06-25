@@ -331,8 +331,8 @@ the OpenAI-compatible surface. See the full schema in
 For poking at a running server (managing keys, users, budgets, and pricing, or
 firing off chat/messages/responses requests) without a separate client, import
 `docs/public/otari.postman_collection.json` into Postman. Set the `baseUrl` and
-`otariKey` collection variables; the `Otari-Key` auth header is sent on every
-request. The collection is generated from the OpenAPI spec
+`otariKey` collection variables; the key is sent as an `Authorization: Bearer`
+header on every request. The collection is generated from the OpenAPI spec
 (`scripts/generate_postman.py`) and kept in sync in CI, so it tracks the API as
 it changes. The built-in Swagger UI at `http://localhost:8000/docs` is the
 zero-install alternative.

@@ -1,26 +1,16 @@
 {
   "auth": {
-    "apikey": [
+    "bearer": [
       {
-        "key": "key",
-        "type": "string",
-        "value": "Otari-Key"
-      },
-      {
-        "key": "value",
+        "key": "token",
         "type": "string",
         "value": "{{otariKey}}"
-      },
-      {
-        "key": "in",
-        "type": "string",
-        "value": "header"
       }
     ],
-    "type": "apikey"
+    "type": "bearer"
   },
   "info": {
-    "description": "otari management + inference collection, generated from the OpenAPI spec by scripts/generate_postman.py. Stopgap client for driving a running Otari server until the web UI lands.\n\nSet the `baseUrl` and `otariKey` collection variables (or override them with a Postman environment). Auth is sent as the `Otari-Key` header on every request via collection-level auth.",
+    "description": "otari management + inference collection, generated from the OpenAPI spec by scripts/generate_postman.py. Stopgap client for driving a running Otari server until the web UI lands.\n\nSet the `baseUrl` and `otariKey` collection variables (or override them with a Postman environment). Auth is sent as an `Authorization: Bearer <otariKey>` header on every request via collection-level auth.",
     "name": "otari API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
