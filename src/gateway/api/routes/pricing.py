@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Annotated
 
 from any_llm import AnyLLM
+from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -12,7 +13,7 @@ from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, v
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
 from gateway.services.pricing_service import normalize_effective_at
-from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.services.provider_kwargs import normalize_pricing_key, split_selector
 
 router = APIRouter(prefix="/v1/pricing", tags=["pricing"])
 
@@ -53,12 +54,27 @@ class PricingResponse(BaseModel):
 
 
 def _candidate_model_keys(raw_key: str) -> list[str]:
-    """Return possible stored keys for a provided selector."""
+    """Return possible stored keys for a provided selector.
+
+    Handles both real-provider selectors and instance-scoped ones. Instance
+    names (e.g. ``home_lab``) are not any-llm providers, so the colon-normalized
+    form is offered directly from the raw selector and the any-llm split is
+    treated as best-effort: ``AnyLLMError`` (unknown provider) is caught like
+    ``ValueError`` so an instance key never bubbles up as a 500.
+    """
 
     candidates = [raw_key]
+    # Normalize a "prefix/remainder" selector to its canonical colon form so the
+    # legacy slash separator resolves for instance-scoped keys too.
+    split = split_selector(raw_key)
+    if split is not None:
+        colon_form = f"{split[0]}:{split[1]}"
+        if colon_form not in candidates:
+            candidates.append(colon_form)
+
     try:
         provider, model_name = AnyLLM.split_model_provider(raw_key)
-    except ValueError:
+    except (ValueError, AnyLLMError):
         return candidates
 
     provider_value = provider.value if provider else None

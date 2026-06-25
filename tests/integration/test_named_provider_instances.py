@@ -134,3 +134,34 @@ async def test_two_instances_of_same_impl_do_not_collide(client: TestClient) -> 
     assert local["api_key"] == "home-lab-token"
     # Same model name on both, but each carries its own instance credentials.
     assert real["model"] == local["model"] == "openai:gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_pricing_round_trip_for_instance_key(client: TestClient) -> None:
+    """Pricing for an instance-scoped key can be set and then read back (no 500).
+
+    Regression: the pricing read path split the key via any-llm, which raises
+    AnyLLMError for an instance name, surfacing as a 500.
+    """
+    headers = {API_KEY_HEADER: "Bearer test-master-key"}
+
+    set_resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "home_lab:deepseek-v4-flash",
+            "input_price_per_million": 0.0,
+            "output_price_per_million": 0.0,
+        },
+        headers=headers,
+    )
+    assert set_resp.status_code == 200
+    assert set_resp.json()["model_key"] == "home_lab:deepseek-v4-flash"
+
+    get_resp = client.get("/v1/pricing/home_lab:deepseek-v4-flash", headers=headers)
+    assert get_resp.status_code == 200
+    assert get_resp.json()["model_key"] == "home_lab:deepseek-v4-flash"
+
+    # The legacy slash form resolves to the same stored colon key.
+    slash_resp = client.get("/v1/pricing/home_lab/deepseek-v4-flash/history", headers=headers)
+    assert slash_resp.status_code == 200
+    assert slash_resp.json()[0]["model_key"] == "home_lab:deepseek-v4-flash"

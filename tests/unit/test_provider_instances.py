@@ -6,6 +6,7 @@ import pytest
 from any_llm import LLMProvider
 from any_llm.exceptions import AnyLLMError
 
+from gateway.api.routes.pricing import _candidate_model_keys
 from gateway.core.config import GatewayConfig, ModelCapabilityConfig
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
@@ -204,3 +205,23 @@ def test_capabilities_match_instance_scoped_key() -> None:
     caps = resolve_capabilities(config, LLMProvider.OPENAI, "qwen2-vl", instance="home_lab")
     assert caps.source == "config"
     assert caps.image is True
+
+
+# ---------------------------------------------------------------------------
+# pricing read endpoints tolerate instance-scoped keys (no 500)
+# ---------------------------------------------------------------------------
+
+
+def test_candidate_model_keys_handles_instance_key_without_raising() -> None:
+    # Regression: an instance name is not an any-llm provider, so the underlying
+    # split raises AnyLLMError (not ValueError). _candidate_model_keys must catch
+    # it and still return the stored key, rather than 500 on pricing reads.
+    assert _candidate_model_keys("home_lab:deepseek") == ["home_lab:deepseek"]
+
+
+def test_candidate_model_keys_normalizes_instance_slash_to_colon() -> None:
+    assert _candidate_model_keys("home_lab/deepseek") == ["home_lab/deepseek", "home_lab:deepseek"]
+
+
+def test_candidate_model_keys_real_provider_unchanged() -> None:
+    assert _candidate_model_keys("openai:gpt-4o") == ["openai:gpt-4o", "openai/gpt-4o"]
