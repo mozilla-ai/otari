@@ -72,6 +72,7 @@ pricing:
 | `log_writer_strategy` | string | `"single"` | Usage log writing: `"single"` (inline) or `"batch"` (background) |
 | `budget_strategy` | string | `"for_update"` | Budget validation: `"for_update"`, `"cas"`, or `"disabled"` |
 | `require_pricing` | bool | `true` | Reject requests for models with no configured pricing (HTTP 402, fail-closed). When `false`, unpriced models are served and logged without cost. Audio and moderation endpoints are always exempt. |
+| `default_pricing` | bool | `false` | When a model has no pricing in the database, fall back to community-maintained defaults from the bundled genai-prices dataset. Off by default (opt-in). Database pricing always wins. See [Default pricing](#default-pricing). |
 | `reject_user_mismatch` | bool | `true` | When `true`, a non-master key whose request names a `user` other than its own is rejected (HTTP 403). When `false`, the client `user` is still forwarded to the provider but spend is always bound to the key's own user. The master key may always bill an arbitrary user. |
 | `stream_missing_usage_policy` | string | `"estimate"` | How to bill a streamed response that completes with no provider usage data: `"estimate"` (charge the up-front estimate), `"fail"` (charge estimate and mark errored), or `"allow_free"` (don't bill). |
 | `budget_estimate_default_output_tokens` | int | `1024` | Output-token count assumed when reserving budget for a request with no declared max output; reconciled to actual usage on completion. |
@@ -192,6 +193,35 @@ pricing:
 ```
 
 Config pricing sets initial values. Pricing set via the `/v1/pricing` API takes precedence.
+
+### Default pricing
+
+Default pricing is **off by default**. When you enable it (`default_pricing: true` in `config.yml`, or
+`OTARI_DEFAULT_PRICING=true`) and a model has no price in the database (neither config nor `/v1/pricing`),
+Otari falls back to community-maintained default pricing from the
+[genai-prices](https://github.com/pydantic/genai-prices) dataset, which bundles per-million rates for
+hundreds of models across the major providers. With it on, common models (for example `openai:gpt-4o`,
+`anthropic:claude-sonnet-4-6`) are priced without any configuration, so `require_pricing` does not reject
+them. The defaults are bundled with the installed package; no network access is used.
+
+It is opt-in because a billing gateway should generally charge on rates you control: community estimates can
+lag or differ from real provider rates, and turning this on changes what `require_pricing: true` guarantees
+(unpriced-but-known models are auto-priced rather than rejected).
+
+Resolution order is always database first, defaults last, so any price you set in config or via
+`/v1/pricing` overrides the community default. Defaults are used only as a lookup fallback; they are never
+written to the database.
+
+Limitations when enabled:
+
+- **Tiered pricing** is flattened to the base rate, so a request that crosses a context tier is billed at
+  the base (a small under or over charge for very large requests).
+- A **provider-agnostic match** is attempted when the exact provider is not in the dataset; an ambiguous
+  model *name* could resolve to a different provider's rate. Prefer configuring such models explicitly.
+- **HuggingFace** is modeled per inference backend, so a model is priced only when you pin a backend with
+  the `huggingface:<model>:<backend>` selector (see the model reference in `models.md`). Auto routing and
+  the policy suffixes (`:cheapest`, `:fastest`, ...) cannot be priced from the id alone and fall through to
+  `require_pricing`.
 
 > **Fail-closed by default.** With `require_pricing: true` (the default), a request for a model
 > that has no pricing entry is rejected with HTTP 402 rather than served free and unmetered — an

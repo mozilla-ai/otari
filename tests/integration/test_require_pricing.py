@@ -27,7 +27,12 @@ _MESSAGES = [{"role": "user", "content": "hi"}]
 
 @pytest.fixture
 def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
-    """TestClient for a gateway with require_pricing=True (fail-closed)."""
+    """TestClient for a gateway with require_pricing=True (fail-closed).
+
+    Default pricing is disabled so these tests exercise the missing-pricing gate
+    in isolation: otherwise genai-prices would price well-known models (gpt-4o)
+    and the 402 branch would never be reached.
+    """
     config = GatewayConfig(
         database_url=postgres_url,
         master_key="test-master-key",
@@ -35,6 +40,7 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
         port=8000,
         auto_migrate=False,
         require_pricing=True,
+        default_pricing=False,
     )
     _run_alembic_migrations(postgres_url)
     engine = create_engine(postgres_url, pool_pre_ping=True)
