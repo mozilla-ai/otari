@@ -326,6 +326,17 @@ Embeddings, moderations, rerank, images, audio, batches, and models round out
 the OpenAI-compatible surface. See the full schema in
 `docs/public/openapi.json`.
 
+### Postman collection
+
+For poking at a running server (managing keys, users, budgets, and pricing, or
+firing off chat/messages/responses requests) without a separate client, import
+`docs/public/otari.postman_collection.json` into Postman. Set the `baseUrl` and
+`otariKey` collection variables; the `Otari-Key` auth header is sent on every
+request. The collection is generated from the OpenAPI spec
+(`scripts/generate_postman.py`) and kept in sync in CI, so it tracks the API as
+it changes. The built-in Swagger UI at `http://localhost:8000/docs` is the
+zero-install alternative.
+
 ## Useful CLI commands
 
 ```bash
@@ -333,6 +344,7 @@ uv run otari init-db --config config.yml
 uv run otari migrate --config config.yml
 uv run otari migrate --config config.yml --revision <rev>
 uv run python scripts/generate_openapi.py --check
+uv run python scripts/generate_postman.py --check
 ```
 
 ## Documentation
