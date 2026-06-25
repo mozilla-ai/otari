@@ -23,10 +23,10 @@ def _capture_gateway_logs(caplog: pytest.LogCaptureFixture) -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_warning_when_default_pricing_enabled(
+async def test_soft_note_when_default_pricing_enabled(
     async_db: AsyncSession, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Default pricing on (the default) prices common models, so no dire warning."""
+    """Default pricing on: no dire warning, but a softer coverage note is logged."""
     _capture_gateway_logs(caplog)
     try:
         await warn_if_require_pricing_without_pricing(_strict_config(default_pricing=True), async_db)
@@ -34,6 +34,7 @@ async def test_no_warning_when_default_pricing_enabled(
         gateway_logger.removeHandler(caplog.handler)
 
     assert _WARNING_MARKER not in caplog.text
+    assert "relying on default_pricing" in caplog.text
 
 
 @pytest.mark.asyncio
