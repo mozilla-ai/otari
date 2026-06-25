@@ -70,7 +70,7 @@ Otari is OpenAI-compatible, so any standard client works. With curl:
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer <your-api-key>" \
+  -H "Otari-Key: Bearer <your-api-key>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai:gpt-4o-mini",
@@ -78,17 +78,17 @@ curl http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-Or with the OpenAI Python SDK, just point `base_url` at Otari:
+Or with the official Otari Python SDK (`pip install otari`, requires Python 3.11+):
 
 ```python
-from openai import OpenAI
+from otari import OtariClient
 
-client = OpenAI(
+client = OtariClient(
+    api_base="http://localhost:8000",
     api_key="<your-api-key>",
-    base_url="http://localhost:8000/v1",
 )
 
-response = client.chat.completions.create(
+response = client.completion(
     model="openai:gpt-4o-mini",
     messages=[{"role": "user", "content": "Say hello in one short sentence."}],
 )
@@ -96,7 +96,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-Either way, you'll get a standard chat completion back. Prefer a typed client? Use one of the Otari SDKs for Python, TypeScript, Rust, or Go.
+Either way, you'll get a standard chat completion back. Otari is also OpenAI-compatible, so any OpenAI client works by pointing its `base_url` at `http://localhost:8000/v1`. Prefer another language? Otari has SDKs for TypeScript, Rust, and Go too.
 
 ## What just happened
 
