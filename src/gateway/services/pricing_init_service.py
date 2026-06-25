@@ -18,15 +18,26 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     entry is rejected with HTTP 402 — so a deployment with zero pricing rows
     would reject every billable request. Surface that loudly rather than letting
     operators discover it via failed traffic.
+
+    When community-maintained default pricing is enabled (opt-in), the dire "all
+    requests rejected" warning no longer applies; a softer note is logged instead,
+    since models outside genai-prices coverage are still rejected.
     """
     if not config.require_pricing:
         return
     count = (await db.execute(select(func.count()).select_from(ModelPricing))).scalar_one()
-    if count == 0:
+    if count > 0:
+        return
+    if not config.default_pricing:
         logger.warning(
             "require_pricing is enabled but no model pricing is configured: ALL billable requests "
             "will be rejected with HTTP 402. Add pricing (config `pricing` section or POST /v1/pricing), "
             "set require_pricing=false, or add explicit $0 pricing for free/self-hosted models."
+        )
+    else:
+        logger.warning(
+            "require_pricing is enabled with no configured pricing; relying on default_pricing "
+            "(genai-prices) for billing. Models outside its coverage are still rejected with HTTP 402."
         )
 
 
