@@ -2,6 +2,9 @@
 
 from datetime import UTC, datetime
 
+import pytest
+
+from gateway.services import pricing_service
 from gateway.services.pricing_service import (
     configure_default_pricing,
     default_model_pricing,
@@ -44,6 +47,17 @@ def test_default_pricing_unknown_model_returns_none() -> None:
     pricing = default_model_pricing("openai", "totally-made-up-model-xyz", datetime.now(UTC))
 
     assert pricing is None
+
+
+def test_default_pricing_fails_safe_on_unexpected_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-LookupError from genai-prices degrades to None, not a request error."""
+
+    def boom(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("genai-prices exploded")
+
+    monkeypatch.setattr(pricing_service, "calc_price", boom)
+
+    assert default_model_pricing("openai", "gpt-4o", datetime.now(UTC)) is None
 
 
 def test_configure_default_pricing_toggles_enabled_flag() -> None:
