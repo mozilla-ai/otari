@@ -19,6 +19,23 @@ When turning that setup into a longer-lived deployment:
 - Add `pricing` entries for every model you want budget enforcement on.
 - Point container health checks at `/health` and `/health/readiness`.
 
+## Deploy on Railway
+
+For a hosted standalone deployment without local setup, use the one-click
+[Railway](https://railway.com) template. It stands up two services: Otari
+(`docker.io/mzdotai/otari:latest`, target port `8000`, healthcheck `/health`)
+and a managed Postgres, wired together with
+`OTARI_DATABASE_URL=${{Postgres.DATABASE_URL}}`.
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
+
+You set at least one provider key (the form prompts for `OPENAI_API_KEY`; add a
+variable like `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, or `GEMINI_API_KEY` to use
+another provider). The master key is auto-generated and `OTARI_REQUIRE_PRICING=false`
+is pre-set so an env-only deploy is usable out of the box. The template
+definition lives in
+[`deploy/railway/`](https://github.com/mozilla-ai/otari/tree/main/deploy/railway).
+
 ## Connect to otari.ai
 
 In hybrid mode, Otari delegates provider routing, authentication, and usage tracking to [otari.ai](https://otari.ai). No local database or provider credentials are needed.
