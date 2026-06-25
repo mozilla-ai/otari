@@ -20,6 +20,7 @@ from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
     warn_if_require_pricing_without_pricing,
 )
+from gateway.services.pricing_service import configure_default_pricing
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
@@ -161,6 +162,7 @@ def _validate_platform_config(config: GatewayConfig) -> None:
 def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        configure_default_pricing(config.default_pricing)
         log_writer: LogWriter
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
