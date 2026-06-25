@@ -251,16 +251,19 @@ def test_load_config_prefers_otari_ai_token_over_legacy_aliases(
     assert config.platform_token == "new-token"
 
 
-def _clear_structured_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_structured_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # Clear any structured-config vars and run from an empty dir so load_config()
+    # cannot pick up a developer's repo-root .env.
     monkeypatch.delenv("OTARI_CONFIG_YAML", raising=False)
     monkeypatch.delenv("OTARI_CONFIG_B64", raising=False)
+    monkeypatch.chdir(tmp_path)
 
 
 def test_load_config_reads_full_provider_pricing_from_env_yaml_without_file(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Env-only deploy: full provider + pricing config, no config.yml present.
-    _clear_structured_env(monkeypatch)
+    _isolate_structured_env(monkeypatch, tmp_path)
     monkeypatch.setenv(
         "OTARI_CONFIG_YAML",
         (
@@ -283,9 +286,8 @@ def test_load_config_reads_full_provider_pricing_from_env_yaml_without_file(
     assert config.pricing["openai:gpt-4o"].output_price_per_million == 10
 
 
-def test_load_config_structured_env_base64(monkeypatch: pytest.MonkeyPatch) -> None:
-
-    _clear_structured_env(monkeypatch)
+def test_load_config_structured_env_base64(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _isolate_structured_env(monkeypatch, tmp_path)
     yaml_text = "providers:\n  mistral:\n    api_key: b64-key\n"
     monkeypatch.setenv("OTARI_CONFIG_B64", base64.b64encode(yaml_text.encode("utf-8")).decode("ascii"))
 
@@ -294,9 +296,11 @@ def test_load_config_structured_env_base64(monkeypatch: pytest.MonkeyPatch) -> N
     assert config.providers["mistral"]["api_key"] == "b64-key"
 
 
-def test_load_config_structured_env_base64_tolerates_newline_wrapping(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_config_structured_env_base64_tolerates_newline_wrapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # The standard `base64` CLI and many env-var UIs wrap output at 76 columns.
-    _clear_structured_env(monkeypatch)
+    _isolate_structured_env(monkeypatch, tmp_path)
     yaml_text = (
         "providers:\n"
         "  openai:\n"
@@ -311,9 +315,10 @@ def test_load_config_structured_env_base64_tolerates_newline_wrapping(monkeypatc
     assert config.providers["openai"]["api_key"].startswith("a-fairly-long-key")
 
 
-def test_load_config_structured_env_prefers_raw_yaml_over_base64(monkeypatch: pytest.MonkeyPatch) -> None:
-
-    _clear_structured_env(monkeypatch)
+def test_load_config_structured_env_prefers_raw_yaml_over_base64(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate_structured_env(monkeypatch, tmp_path)
     monkeypatch.setenv("OTARI_CONFIG_YAML", "providers:\n  openai:\n    api_key: from-raw\n")
     monkeypatch.setenv(
         "OTARI_CONFIG_B64",
@@ -325,11 +330,27 @@ def test_load_config_structured_env_prefers_raw_yaml_over_base64(monkeypatch: py
     assert config.providers["openai"]["api_key"] == "from-raw"
 
 
+def test_load_config_structured_env_whitespace_yaml_falls_back_to_base64(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A whitespace-only OTARI_CONFIG_YAML must not suppress the base64 fallback.
+    _isolate_structured_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("OTARI_CONFIG_YAML", "   \n  ")
+    monkeypatch.setenv(
+        "OTARI_CONFIG_B64",
+        base64.b64encode(b"providers:\n  openai:\n    api_key: from-b64\n").decode("ascii"),
+    )
+
+    config = load_config()
+
+    assert config.providers["openai"]["api_key"] == "from-b64"
+
+
 def test_load_config_precedence_file_then_structured_then_scalar(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # file < env-structured < scalar OTARI_<FIELD>
-    _clear_structured_env(monkeypatch)
+    _isolate_structured_env(monkeypatch, tmp_path)
     config_file = tmp_path / "gateway.yml"
     config_file.write_text(
         "budget_strategy: for_update\nproviders:\n  openai:\n    api_key: file-key\n",
@@ -350,8 +371,10 @@ def test_load_config_precedence_file_then_structured_then_scalar(
     assert config.providers["openai"]["api_key"] == "structured-key"
 
 
-def test_load_config_structured_env_resolves_var_references(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_structured_env(monkeypatch)
+def test_load_config_structured_env_resolves_var_references(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate_structured_env(monkeypatch, tmp_path)
     monkeypatch.setenv("MY_OPENAI_KEY", "resolved-secret")
     monkeypatch.setenv("OTARI_CONFIG_YAML", "providers:\n  openai:\n    api_key: ${MY_OPENAI_KEY}\n")
 
@@ -360,24 +383,30 @@ def test_load_config_structured_env_resolves_var_references(monkeypatch: pytest.
     assert config.providers["openai"]["api_key"] == "resolved-secret"
 
 
-def test_load_config_structured_env_invalid_yaml_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_structured_env(monkeypatch)
+def test_load_config_structured_env_invalid_yaml_fails_fast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate_structured_env(monkeypatch, tmp_path)
     monkeypatch.setenv("OTARI_CONFIG_YAML", "providers: [unclosed\n")
 
     with pytest.raises(ValueError, match="OTARI_CONFIG_YAML is not valid YAML"):
         load_config()
 
 
-def test_load_config_structured_env_invalid_base64_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_structured_env(monkeypatch)
+def test_load_config_structured_env_invalid_base64_fails_fast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate_structured_env(monkeypatch, tmp_path)
     monkeypatch.setenv("OTARI_CONFIG_B64", "not!valid!base64!")
 
     with pytest.raises(ValueError, match="OTARI_CONFIG_B64 is not valid base64"):
         load_config()
 
 
-def test_load_config_structured_env_non_mapping_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear_structured_env(monkeypatch)
+def test_load_config_structured_env_non_mapping_fails_fast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _isolate_structured_env(monkeypatch, tmp_path)
     monkeypatch.setenv("OTARI_CONFIG_YAML", "- just\n- a\n- list\n")
 
     with pytest.raises(ValueError, match="must contain a YAML mapping"):

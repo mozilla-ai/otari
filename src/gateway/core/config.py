@@ -331,9 +331,9 @@ def _load_structured_env_config() -> dict[str, Any] | None:
     """
     raw = os.getenv(OTARI_CONFIG_YAML_ENV)
     source = OTARI_CONFIG_YAML_ENV
-    if not raw:
+    if not (raw and raw.strip()):
         encoded = os.getenv(OTARI_CONFIG_B64_ENV)
-        if not encoded:
+        if not (encoded and encoded.strip()):
             return None
         source = OTARI_CONFIG_B64_ENV
         # Strip whitespace first: the standard `base64` CLI and many env-var UIs
