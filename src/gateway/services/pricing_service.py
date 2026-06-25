@@ -73,27 +73,40 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
     Whether this fallback runs at all is the caller's decision (the
     ``default_pricing`` config field, gating ``find_model_pricing``).
 
-    Caveats: a model with tiered ("cliff") pricing is billed at its base rate; a
-    provider-agnostic match (below) may resolve an ambiguous model *name* to a
-    different provider's rate; and providers genai-prices does not model by bare
-    id (e.g. HuggingFace per-backend) simply fall through to ``require_pricing``.
+    Caveats: a model with tiered ("cliff") pricing is billed at its base rate, and
+    a provider-agnostic match (below) may resolve an ambiguous model *name* to a
+    different provider's rate.
     """
 
-    # Prefer a provider-scoped match; fall back to a provider-agnostic match so a
-    # model served under a provider id genai-prices does not recognize still gets
-    # priced when the model name alone is unambiguous. Skip the redundant second
-    # pass when no provider was supplied.
-    provider_ids: tuple[str | None, ...] = (provider, None) if provider is not None else (None,)
-    for provider_id in provider_ids:
+    # Build the genai-prices lookups to try, most specific first:
+    #   1. HuggingFace pinned-backend selectors (`huggingface:<model>:<backend>`,
+    #      see docs/models.md) map to genai-prices' per-backend provider ids
+    #      (`huggingface_<backend>`), which is where HF rates live; a bare
+    #      `huggingface` provider has no rates. Auto/policy suffixes (`:cheapest`,
+    #      ...) simply fail to match and fall through to require_pricing.
+    #   2. The provider-scoped lookup.
+    #   3. A provider-agnostic match, so a model under a provider id genai-prices
+    #      does not recognize still gets priced when its name is unambiguous.
+    attempts: list[tuple[str | None, str]] = []
+    if provider == "huggingface" and ":" in model:
+        base_model, backend = model.rsplit(":", 1)
+        attempts.append((f"huggingface_{backend}", base_model))
+    attempts.append((provider, model))
+    if provider is not None:
+        attempts.append((None, model))
+
+    for provider_id, model_ref in attempts:
         try:
-            calc = calc_price(_ZERO_USAGE, model_ref=model, provider_id=provider_id, genai_request_timestamp=as_of)
+            calc = calc_price(
+                _ZERO_USAGE, model_ref=model_ref, provider_id=provider_id, genai_request_timestamp=as_of
+            )
         except LookupError:
             continue
         except Exception:
             # genai-prices runs on the per-request hot path; a data/API hiccup
             # must degrade to "unpriced" (require_pricing decides) rather than
             # turn into a request error for that model.
-            logger.warning("genai-prices lookup failed for model_ref=%r provider_id=%r", model, provider_id)
+            logger.warning("genai-prices lookup failed for model_ref=%r provider_id=%r", model_ref, provider_id)
             return None
 
         price = calc.model_price

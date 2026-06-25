@@ -42,6 +42,27 @@ def test_default_pricing_input_only_model_prices_output_at_zero() -> None:
     assert pricing.output_price_per_million == 0.0
 
 
+def test_default_pricing_huggingface_pinned_backend_is_priced() -> None:
+    """A pinned HuggingFace backend maps to genai-prices' per-backend provider."""
+    pricing = default_model_pricing("huggingface", "zai-org/GLM-4.6:together", datetime.now(UTC))
+
+    assert pricing is not None
+    # The key preserves the caller's full pinned selector.
+    assert pricing.model_key == "huggingface:zai-org/GLM-4.6:together"
+    assert pricing.input_price_per_million > 0
+    assert pricing.output_price_per_million > 0
+
+
+def test_default_pricing_huggingface_policy_suffix_not_priced() -> None:
+    """Policy suffixes (auto routing) do not resolve to a single backend, so None."""
+    assert default_model_pricing("huggingface", "zai-org/GLM-4.6:cheapest", datetime.now(UTC)) is None
+
+
+def test_default_pricing_huggingface_bare_model_not_priced() -> None:
+    """A bare HuggingFace model (no pinned backend) cannot be priced from the id."""
+    assert default_model_pricing("huggingface", "meta-llama/Llama-3-70b", datetime.now(UTC)) is None
+
+
 def test_default_pricing_unknown_model_returns_none() -> None:
     """An unknown model yields None so require_pricing can still fail closed."""
     pricing = default_model_pricing("openai", "totally-made-up-model-xyz", datetime.now(UTC))

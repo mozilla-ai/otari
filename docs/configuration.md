@@ -191,8 +191,10 @@ Limitations when enabled:
   the base (a small under or over charge for very large requests).
 - A **provider-agnostic match** is attempted when the exact provider is not in the dataset; an ambiguous
   model *name* could resolve to a different provider's rate. Prefer configuring such models explicitly.
-- Providers genai-prices does not model by bare id (for example HuggingFace, which it splits per inference
-  backend) get no default and fall through to `require_pricing`.
+- **HuggingFace** is modeled per inference backend, so a model is priced only when you pin a backend with
+  the `huggingface:<model>:<backend>` selector (see the model reference in `models.md`). Auto routing and
+  the policy suffixes (`:cheapest`, `:fastest`, ...) cannot be priced from the id alone and fall through to
+  `require_pricing`.
 
 > **Fail-closed by default.** With `require_pricing: true` (the default), a request for a model
 > that has no pricing entry is rejected with HTTP 402 rather than served free and unmetered — an
