@@ -1,6 +1,6 @@
 {
-  "_comment": "Reviewable snapshot of the Otari + Postgres Railway template. A Railway multi-service template is a platform-hosted object that cannot be fully round-tripped from a repo file, so this is the human source of truth for what the published template should contain, not a file Railway imports. When the published template changes, update this snapshot and deploy/railway/README.md in the same PR.",
-  "name": "Otari (LLM gateway) + Postgres",
+  "_comment": "Reviewable snapshot of the Otari + Postgres Railway template. A Railway multi-service template is a platform-hosted object that cannot be fully round-tripped from a repo file, so this is the human source of truth for what the live template contains, not a file Railway imports. The live template lives on the mozilla-ai Railway account; its deploy link is the Deploy on Railway button in README.md. When the live template changes, update this snapshot and deploy/railway/README.md in the same PR.",
+  "name": "Otari",
   "description": "Self-hosted Otari, an OpenAI-compatible LLM gateway, in front of key-only providers (OpenAI, Anthropic, Mistral, Gemini), backed by a managed Postgres database. Bring a provider key, get virtual API keys, budgets, and usage tracking.",
   "services": {
     "otari": {
@@ -34,31 +34,25 @@
         "OPENAI_API_KEY": {
           "defaultValue": "",
           "isOptional": true,
-          "description": "OpenAI API key. At least one provider key (OpenAI, Anthropic, Mistral, or Gemini) is required for the gateway to serve traffic."
-        },
-        "ANTHROPIC_API_KEY": {
-          "defaultValue": "",
-          "isOptional": true,
-          "description": "Anthropic API key. At least one provider key is required."
-        },
-        "MISTRAL_API_KEY": {
-          "defaultValue": "",
-          "isOptional": true,
-          "description": "Mistral API key. At least one provider key is required."
-        },
-        "GEMINI_API_KEY": {
-          "defaultValue": "",
-          "isOptional": true,
-          "description": "Google Gemini API key. At least one provider key is required."
+          "description": "OpenAI API key. Optional: set at least one provider key for the gateway to serve traffic. Any any-llm provider works by adding its native env var (ANTHROPIC_API_KEY, MISTRAL_API_KEY, GEMINI_API_KEY, ...); see https://github.com/mozilla-ai/any-llm and docs/models.md for the provider list."
         }
       }
     },
     "Postgres": {
       "name": "Postgres",
       "source": {
-        "image": "ghcr.io/railwayapp-templates/postgres-ssl:latest"
+        "image": "ghcr.io/railwayapp-templates/postgres-ssl:18"
       },
-      "_comment": "Railway managed Postgres. Exposes DATABASE_URL, referenced by the otari service as ${{Postgres.DATABASE_URL}}."
+      "_comment": "Railway managed Postgres. Exposes DATABASE_URL (a composed reference like postgresql://${{POSTGRES_USER}}:${{POSTGRES_PASSWORD}}@${{RAILWAY_PRIVATE_DOMAIN}}:5432/${{POSTGRES_DB}}), which the otari service reads as ${{Postgres.DATABASE_URL}}. The variables below carry the standard postgres-ssl defaults so a deploying user is never prompted for them.",
+      "variables": {
+        "PGDATA": { "defaultValue": "/var/lib/postgresql/data/pgdata", "isOptional": false },
+        "PGPORT": { "defaultValue": "5432", "isOptional": false },
+        "POSTGRES_DB": { "defaultValue": "railway", "isOptional": false },
+        "POSTGRES_USER": { "defaultValue": "postgres", "isOptional": false },
+        "POSTGRES_PASSWORD": { "defaultValue": "${{secret(32)}}", "isOptional": false },
+        "SSL_CERT_DAYS": { "defaultValue": "820", "isOptional": false },
+        "RAILWAY_DEPLOYMENT_DRAINING_SECONDS": { "defaultValue": "60", "isOptional": false }
+      }
     }
   }
 }

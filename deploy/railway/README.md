@@ -5,10 +5,7 @@ gateway in front of key-only providers (OpenAI, Anthropic, Mistral, Gemini),
 backed by a managed Postgres database. No local setup, bring a provider key and
 go.
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/REPLACE_ME)
-
-> The button URL is a placeholder until the template is published on the
-> mozilla-ai Railway account. See [Publishing the template](#publishing-the-template).
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
 
 ## What you get
 
@@ -30,18 +27,22 @@ The template wires the two services together and asks for a provider key. All of
 Otari's scalar config is reachable through `OTARI_<FIELD>` environment variables;
 the snapshot of what the template sets lives in [`template.json`](template.json).
 
-| Variable | Value | Required |
+| Variable | Value | Notes |
 | --- | --- | --- |
 | `OTARI_DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | Pre-wired; leave as-is. |
 | `OTARI_MASTER_KEY` | auto-generated (`${{secret(48)}}`) | Auto-set; read it from the otari service's Variables tab. |
 | `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so an env-only deploy serves models that have no configured pricing. |
-| `OPENAI_API_KEY` | your key | At least one provider key is required. |
-| `ANTHROPIC_API_KEY` | your key | At least one provider key is required. |
-| `MISTRAL_API_KEY` | your key | At least one provider key is required. |
-| `GEMINI_API_KEY` | your key | At least one provider key is required. |
+| `OPENAI_API_KEY` | your key | Optional input. Set at least one provider key (see below). |
 
 Notes:
 
+- The deploy form prompts for `OPENAI_API_KEY` as a convenience, but it is
+  optional, and you are not limited to OpenAI. Set the key(s) for whichever
+  providers you will use; at least one is needed for the gateway to serve
+  traffic. To use another provider, add a variable with its native env var name
+  (for example `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, or `GEMINI_API_KEY`); the
+  underlying [`any-llm`](https://github.com/mozilla-ai/any-llm) SDK reads these
+  directly. See [`docs/models.md`](../../docs/models.md) for the provider list.
 - Otari normalizes a `postgresql://` URL to the async driver automatically, so
   Railway's `DATABASE_URL` works without edits.
 - `OTARI_REQUIRE_PRICING=false` is deliberate. The image default is `true`
@@ -49,8 +50,6 @@ Notes:
   make an env-only deploy unusable until pricing is added. Configuring per-model
   pricing via env is tracked in
   [#208](https://github.com/mozilla-ai/otari/issues/208).
-- Provider keys use each provider's native variable name (`OPENAI_API_KEY`,
-  etc.), which the underlying `any-llm` SDK reads directly.
 
 ## Deploy
 
@@ -88,19 +87,24 @@ curl "$OTARI_URL/v1/chat/completions" \
 Use the provider that matches the key you supplied (for example `anthropic:...`,
 `mistral:...`, or `gemini:...`).
 
-## Publishing the template
+## Maintaining the template
 
 A Railway multi-service template (the Postgres service, the env-var input form,
 and the `${{Postgres.DATABASE_URL}}` reference wiring) is a Railway-hosted object
 and cannot be fully round-tripped from a file in this repo. This directory is the
-human source of truth plus a reviewable snapshot; publishing is a one-time manual
-step on the mozilla-ai Railway account.
+human source of truth plus a reviewable snapshot; the live template lives on the
+mozilla-ai Railway account and the button above points at its deploy link.
 
-1. Stand up the two services described in [`template.json`](template.json) in a
-   throwaway Railway project and confirm a real `/v1/chat/completions`
-   round-trip plus that the bootstrapped key works.
-2. From that project, create and publish the template on the mozilla-ai account.
-3. Capture the published template URL and replace `REPLACE_ME` in the
-   **Deploy on Railway** button above (and in the project root `README.md`).
-4. If the published config drifts from this snapshot, update
-   [`template.json`](template.json) in the same change so the two stay in sync.
+When changing the template:
+
+1. Edit the template on the mozilla-ai Railway account, then deploy it once to a
+   throwaway project and confirm a real `/v1/chat/completions` round-trip plus
+   that the bootstrapped key works.
+2. Update [`template.json`](template.json) in the same change so the snapshot
+   matches the live config (services, variables, defaults, target port).
+3. If the deploy link changes, update the **Deploy on Railway** button here, in
+   the project root `README.md`, and in `docs/deployment.md`.
+
+Listing the template in Railway's public marketplace is optional: the deploy
+link works without it. Publishing only adds marketplace discoverability and
+usage-kickback eligibility.

@@ -27,12 +27,13 @@ For a hosted standalone deployment without local setup, use the one-click
 and a managed Postgres, wired together with
 `OTARI_DATABASE_URL=${{Postgres.DATABASE_URL}}`.
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/REPLACE_ME)
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
 
-You provide at least one provider key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`MISTRAL_API_KEY`, or `GEMINI_API_KEY`); the master key is auto-generated and
-`OTARI_REQUIRE_PRICING=false` is pre-set so an env-only deploy is usable out of
-the box. The template definition and publishing steps live in
+You set at least one provider key (the form prompts for `OPENAI_API_KEY`; add a
+variable like `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, or `GEMINI_API_KEY` to use
+another provider). The master key is auto-generated and `OTARI_REQUIRE_PRICING=false`
+is pre-set so an env-only deploy is usable out of the box. The template
+definition lives in
 [`deploy/railway/`](https://github.com/mozilla-ai/otari/tree/main/deploy/railway).
 
 ## Connect to otari.ai
