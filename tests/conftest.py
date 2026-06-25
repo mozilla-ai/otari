@@ -17,11 +17,12 @@ def _reset_default_pricing() -> Generator[None, None, None]:
     """Restore the process-wide default-pricing flag to its default before each test.
 
     ``configure_default_pricing`` is set at app startup, so a test that builds an
-    app with ``default_pricing=False`` would otherwise leak that state into later
-    tests that call ``find_model_pricing`` directly.
+    app with a different ``default_pricing`` would otherwise leak that state into
+    later tests that call ``find_model_pricing`` directly. Reset to off, matching
+    the config field's opt-in default; tests that need defaults enable explicitly.
     """
     from gateway.services.pricing_service import configure_default_pricing
 
-    configure_default_pricing(True)
+    configure_default_pricing(False)
     yield
-    configure_default_pricing(True)
+    configure_default_pricing(False)

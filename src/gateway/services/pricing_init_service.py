@@ -19,9 +19,9 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     would reject every billable request. Surface that loudly rather than letting
     operators discover it via failed traffic.
 
-    When community-maintained default pricing is enabled (the default), most
-    common models are priced without any configuration, so the dire "all
-    requests rejected" warning no longer applies and is suppressed.
+    When community-maintained default pricing is enabled (opt-in), most common
+    models are priced without any configuration, so the dire "all requests
+    rejected" warning no longer applies and is suppressed.
     """
     if not config.require_pricing or config.default_pricing:
         return

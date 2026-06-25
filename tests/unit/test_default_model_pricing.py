@@ -30,6 +30,15 @@ def test_default_pricing_without_provider() -> None:
     assert pricing.input_price_per_million > 0
 
 
+def test_default_pricing_input_only_model_prices_output_at_zero() -> None:
+    """Input-only models (embeddings) price with a real input rate and 0 output."""
+    pricing = default_model_pricing("openai", "text-embedding-3-small", datetime.now(UTC))
+
+    assert pricing is not None
+    assert pricing.input_price_per_million > 0
+    assert pricing.output_price_per_million == 0.0
+
+
 def test_default_pricing_unknown_model_returns_none() -> None:
     """An unknown model yields None so require_pricing can still fail closed."""
     pricing = default_model_pricing("openai", "totally-made-up-model-xyz", datetime.now(UTC))

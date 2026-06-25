@@ -21,8 +21,8 @@ _ZERO_USAGE = Usage(input_tokens=0, output_tokens=0)
 # mirrors the module-level engine/session pattern in ``core.database``: pricing
 # lookups happen deep in request/budget code that does not carry the config
 # object, so the resolved flag lives here rather than being threaded through
-# every call site. Defaults to True so direct callers (and tests) get defaults.
-_default_pricing_enabled = True
+# every call site. Defaults to off, matching the config field's opt-in default.
+_default_pricing_enabled = False
 
 
 def configure_default_pricing(enabled: bool) -> None:
@@ -71,21 +71,37 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
     closed for genuinely unknown models.
 
     Whether this fallback runs at all is the caller's decision (the
-    ``default_pricing`` config field, threaded through ``find_model_pricing``).
+    ``default_pricing`` config field, gating ``find_model_pricing``).
+
+    Caveats: a model with tiered ("cliff") pricing is billed at its base rate; a
+    provider-agnostic match (below) may resolve an ambiguous model *name* to a
+    different provider's rate; and providers genai-prices does not model by bare
+    id (e.g. HuggingFace per-backend) simply fall through to ``require_pricing``.
     """
 
     # Prefer a provider-scoped match; fall back to a provider-agnostic match so a
     # model served under a provider id genai-prices does not recognize still gets
-    # priced when the model name alone is unambiguous.
-    for provider_id in (provider, None):
+    # priced when the model name alone is unambiguous. Skip the redundant second
+    # pass when no provider was supplied.
+    provider_ids: tuple[str | None, ...] = (provider, None) if provider is not None else (None,)
+    for provider_id in provider_ids:
         try:
             calc = calc_price(_ZERO_USAGE, model_ref=model, provider_id=provider_id, genai_request_timestamp=as_of)
         except LookupError:
             continue
+        except Exception:
+            # genai-prices runs on the per-request hot path; a data/API hiccup
+            # must degrade to "unpriced" (require_pricing decides) rather than
+            # turn into a request error for that model.
+            logger.warning("genai-prices lookup failed for model_ref=%r provider_id=%r", model, provider_id)
+            return None
 
         price = calc.model_price
-        if price.input_mtok is None or price.output_mtok is None:
+        if price.input_mtok is None:
             return None
+        # Input-only models (embeddings, rerank) legitimately have no output
+        # rate; price output at 0 rather than rejecting the whole model.
+        output_rate = _flat_rate(price.output_mtok) if price.output_mtok is not None else 0.0
 
         model_key = f"{provider}:{model}" if provider else model
         logger.debug(
@@ -98,7 +114,7 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
             model_key=model_key,
             effective_at=as_of,
             input_price_per_million=_flat_rate(price.input_mtok),
-            output_price_per_million=_flat_rate(price.output_mtok),
+            output_price_per_million=output_rate,
         )
 
     return None

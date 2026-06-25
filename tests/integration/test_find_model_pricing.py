@@ -127,11 +127,11 @@ async def test_find_pricing_defaults_to_now(async_db: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_find_pricing_future_prices_ignored(async_db: AsyncSession) -> None:
-    """Future-effective pricing should not be returned for present lookups."""
+    """Future-effective pricing should not be returned for present lookups.
 
-    # Disable genai-prices defaults so the DB-only lookup is exercised in
-    # isolation (gpt-4 is a model genai-prices would otherwise price).
-    configure_default_pricing(False)
+    Default pricing is off by default (see the autouse reset fixture), so the
+    DB-only lookup is exercised in isolation here.
+    """
 
     future_effective = datetime.now(UTC) + timedelta(days=10)
     async_db.add(
@@ -179,7 +179,8 @@ async def test_find_pricing_with_explicit_as_of(async_db: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_find_pricing_falls_back_to_genai_defaults(async_db: AsyncSession) -> None:
-    """With no DB row, a well-known model is priced from genai-prices defaults."""
+    """With no DB row and defaults enabled, a well-known model is priced."""
+    configure_default_pricing(True)
     pricing = await find_model_pricing(async_db, "openai", "gpt-4o")
 
     assert pricing is not None
@@ -195,6 +196,7 @@ async def test_find_pricing_falls_back_to_genai_defaults(async_db: AsyncSession)
 @pytest.mark.asyncio
 async def test_find_pricing_db_overrides_genai_defaults(async_db: AsyncSession) -> None:
     """An explicit DB price for a known model wins over the genai-prices default."""
+    configure_default_pricing(True)
     async_db.add(
         ModelPricing(
             model_key="openai:gpt-4o",
