@@ -336,8 +336,11 @@ def _load_structured_env_config() -> dict[str, Any] | None:
         if not encoded:
             return None
         source = OTARI_CONFIG_B64_ENV
+        # Strip whitespace first: the standard `base64` CLI and many env-var UIs
+        # wrap output at 76 columns, and validate=True would reject those newlines
+        # while still catching genuinely invalid characters.
         try:
-            raw = base64.b64decode(encoded, validate=True).decode("utf-8")
+            raw = base64.b64decode("".join(encoded.split()), validate=True).decode("utf-8")
         except (binascii.Error, ValueError, UnicodeDecodeError) as exc:
             msg = f"{OTARI_CONFIG_B64_ENV} is not valid base64-encoded UTF-8: {exc}"
             raise ValueError(msg) from exc

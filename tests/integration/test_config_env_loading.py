@@ -294,6 +294,23 @@ def test_load_config_structured_env_base64(monkeypatch: pytest.MonkeyPatch) -> N
     assert config.providers["mistral"]["api_key"] == "b64-key"
 
 
+def test_load_config_structured_env_base64_tolerates_newline_wrapping(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The standard `base64` CLI and many env-var UIs wrap output at 76 columns.
+    _clear_structured_env(monkeypatch)
+    yaml_text = (
+        "providers:\n"
+        "  openai:\n"
+        "    api_key: a-fairly-long-key-value-to-force-base64-line-wrapping-aaaaaaaaaaaaaa\n"
+    )
+    wrapped = base64.encodebytes(yaml_text.encode("utf-8")).decode("ascii")
+    assert "\n" in wrapped.strip()
+    monkeypatch.setenv("OTARI_CONFIG_B64", wrapped)
+
+    config = load_config()
+
+    assert config.providers["openai"]["api_key"].startswith("a-fairly-long-key")
+
+
 def test_load_config_structured_env_prefers_raw_yaml_over_base64(monkeypatch: pytest.MonkeyPatch) -> None:
 
     _clear_structured_env(monkeypatch)
