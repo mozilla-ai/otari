@@ -1,3 +1,5 @@
+import base64
+import binascii
 import os
 import re
 import types
@@ -23,6 +25,12 @@ PLATFORM_TOKEN_ENV_VARS = (
 # OTARI_PORT). The GATEWAY_ prefix below is the legacy native pydantic prefix,
 # still honored for backward compatibility; OTARI_ wins when both are set.
 OTARI_ENV_PREFIX = "OTARI_"
+# Full structured config supplied through the environment, for PaaS platforms
+# (Railway, Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
+# These carry the entire YAML schema (providers, pricing, etc.), not just the
+# scalar fields reachable via OTARI_<FIELD>. Raw YAML wins when both are set.
+OTARI_CONFIG_YAML_ENV = "OTARI_CONFIG_YAML"
+OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
 
 
 class _NonScalarField(Exception):
@@ -309,6 +317,49 @@ class GatewayConfig(BaseSettings):
             raise ValueError(msg)
 
 
+def _load_structured_env_config() -> dict[str, Any] | None:
+    """Parse a full YAML config supplied through the environment.
+
+    Reads ``OTARI_CONFIG_YAML`` (raw YAML) or ``OTARI_CONFIG_B64`` (base64-encoded
+    YAML). This lets PaaS deployments reach the entire config schema, including
+    the non-scalar ``providers`` and ``pricing`` fields, without mounting a
+    ``config.yml``. Raw YAML wins when both are set. ``${VAR}`` references are
+    resolved exactly as in a config file. Returns the parsed mapping, or ``None``
+    when neither variable is set or the content is empty. Raises ``ValueError``
+    with a clear message on invalid base64, invalid YAML, or a non-mapping top
+    level, so startup fails fast.
+    """
+    raw = os.getenv(OTARI_CONFIG_YAML_ENV)
+    source = OTARI_CONFIG_YAML_ENV
+    if not (raw and raw.strip()):
+        encoded = os.getenv(OTARI_CONFIG_B64_ENV)
+        if not (encoded and encoded.strip()):
+            return None
+        source = OTARI_CONFIG_B64_ENV
+        # Strip whitespace first: the standard `base64` CLI and many env-var UIs
+        # wrap output at 76 columns, and validate=True would reject those newlines
+        # while still catching genuinely invalid characters.
+        try:
+            raw = base64.b64decode("".join(encoded.split()), validate=True).decode("utf-8")
+        except (binascii.Error, ValueError, UnicodeDecodeError) as exc:
+            msg = f"{OTARI_CONFIG_B64_ENV} is not valid base64-encoded UTF-8: {exc}"
+            raise ValueError(msg) from exc
+
+    try:
+        parsed = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        msg = f"{source} is not valid YAML: {exc}"
+        raise ValueError(msg) from exc
+
+    if parsed is None:
+        return None
+    if not isinstance(parsed, dict):
+        msg = f"{source} must contain a YAML mapping at the top level, got {type(parsed).__name__}."
+        raise ValueError(msg)
+
+    return _resolve_env_vars(parsed)
+
+
 def load_config(config_path: str | None = None) -> GatewayConfig:
     """Load configuration from file and environment variables.
 
@@ -328,6 +379,10 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
             yaml_config = yaml.safe_load(f)
             if yaml_config:
                 config_dict = _resolve_env_vars(yaml_config)
+
+    structured_env_config = _load_structured_env_config()
+    if structured_env_config:
+        config_dict.update(structured_env_config)
 
     _apply_otari_env_overrides(config_dict)
     _apply_platform_env_overrides(config_dict)
