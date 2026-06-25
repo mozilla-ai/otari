@@ -168,10 +168,12 @@ def test_hybrid_mode_falls_through_on_first_attempt_failure(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload([
-                    _attempt(0, "att-primary", "gpt-4o-mini", "sk-bad-key"),
-                    _attempt(1, "att-fallback", "gpt-4o-mini", "sk-good-key"),
-                ]),
+                json=_resolve_payload(
+                    [
+                        _attempt(0, "att-primary", "gpt-4o-mini", "sk-bad-key"),
+                        _attempt(1, "att-fallback", "gpt-4o-mini", "sk-good-key"),
+                    ]
+                ),
             )
         usage_reports.append(body)
         return httpx.Response(204)
@@ -218,10 +220,12 @@ def test_hybrid_mode_returns_502_when_all_attempts_fail(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload([
-                    _attempt(0, "att-1", "gpt-4o-mini", "sk-1"),
-                    _attempt(1, "att-2", "gpt-4o-mini", "sk-2"),
-                ]),
+                json=_resolve_payload(
+                    [
+                        _attempt(0, "att-1", "gpt-4o-mini", "sk-1"),
+                        _attempt(1, "att-2", "gpt-4o-mini", "sk-2"),
+                    ]
+                ),
             )
         return httpx.Response(204)
 
@@ -263,9 +267,9 @@ def test_hybrid_mode_provider_without_responses_support_returns_400(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload([
-                    _attempt(0, "att-1", "claude-3-5-sonnet-20241022", "sk-1", provider="anthropic")
-                ]),
+                json=_resolve_payload(
+                    [_attempt(0, "att-1", "claude-3-5-sonnet-20241022", "sk-1", provider="anthropic")]
+                ),
             )
         return httpx.Response(204)
 
@@ -543,10 +547,12 @@ def test_hybrid_mode_supports_responses_guard_checks_every_attempt(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload([
-                    _attempt(0, "att-1", "gpt-4o-mini", "sk-openai", provider="openai"),
-                    _attempt(1, "att-2", "claude-3-5-sonnet-20241022", "sk-ant", provider="anthropic"),
-                ]),
+                json=_resolve_payload(
+                    [
+                        _attempt(0, "att-1", "gpt-4o-mini", "sk-openai", provider="openai"),
+                        _attempt(1, "att-2", "claude-3-5-sonnet-20241022", "sk-ant", provider="anthropic"),
+                    ]
+                ),
             )
         return httpx.Response(204)
 
@@ -562,3 +568,43 @@ def test_hybrid_mode_supports_responses_guard_checks_every_attempt(
     # Anthropic is the unsupported attempt; the guard must surface it
     # before any upstream call is made.
     assert "anthropic" in response.json()["detail"]
+
+
+def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single-attempt streaming request that fails before its first chunk
+    surfaces the classified status (404), not a generic 502."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json=_resolve_payload([_attempt(0, "att-1", "gpt-4o-mini", "sk-1")]),
+            )
+        return httpx.Response(204)
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        raise httpx.HTTPStatusError(
+            "404",
+            request=httpx.Request("POST", "http://upstream"),
+            response=httpx.Response(404, request=httpx.Request("POST", "http://upstream")),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.responses.aresponses", fake_aresponses)
+
+    response = platform_client.post(
+        "/v1/responses",
+        json={"model": "gpt-4o-mini", "input": "hi", "stream": True},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "The requested model was not found on the provider"}

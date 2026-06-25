@@ -130,17 +130,43 @@ def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPExc
 _ERR_INVALID_REQUEST = "invalid_request_error"
 _ERR_API = "api_error"
 _ERR_PERMISSION = "permission_error"
+_ERR_AUTHENTICATION = "authentication_error"
 _ERR_NOT_FOUND = "not_found_error"
 _ERR_RATE_LIMIT = "rate_limit_error"
 
-# Anthropic error.type for a classified provider failure, keyed by the safe HTTP
-# status classify_provider_error chose. Unlisted statuses (e.g. the 502 used for
-# a credentials fault) fall back to api_error.
-_PROVIDER_STATUS_TO_ANTHROPIC_TYPE = {
+# Anthropic error.type keyed by HTTP status, used when re-wrapping a plain-string
+# HTTPException into the Anthropic envelope: classified provider failures plus
+# preamble auth/permission/resolve rejections. Unlisted statuses (e.g. the 502
+# used for a credentials fault, or a 500) fall back to api_error.
+_STATUS_TO_ANTHROPIC_TYPE = {
     400: _ERR_INVALID_REQUEST,
+    401: _ERR_AUTHENTICATION,
+    403: _ERR_PERMISSION,
     404: _ERR_NOT_FOUND,
     429: _ERR_RATE_LIMIT,
 }
+
+
+def _ensure_anthropic_error(exc: HTTPException) -> HTTPException:
+    """Re-wrap a plain-string ``HTTPException`` in the Anthropic error envelope,
+    preserving the status code and headers (e.g. a 429's ``Retry-After``).
+
+    HTTPExceptions already carrying the Anthropic ``detail`` dict (raised via
+    ``_anthropic_error``) pass through unchanged, so this is safe to apply to any
+    HTTPException on the ``/v1/messages`` path, including format-agnostic ones
+    raised by the hybrid preamble (platform resolve/auth) and the shared
+    execution runners.
+    """
+    if not isinstance(exc.detail, str):
+        return exc
+    error_type = _STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API)
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={"type": "error", "error": {"type": error_type, "message": exc.detail}},
+        headers=exc.headers,
+    )
+
+
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'metadata.user_id' is required in request body"
 _USER_FORBIDDEN = "'metadata.user_id' does not match the authenticated API key's user"
 _PROVIDER_ERROR = "The request could not be completed by the provider"
@@ -201,7 +227,7 @@ class _MessagesAdapter:
     def provider_error(self, exc: BaseException) -> HTTPException:
         mapping = classify_provider_error(exc)
         if mapping is not None:
-            error_type = _PROVIDER_STATUS_TO_ANTHROPIC_TYPE.get(mapping.status_code, _ERR_API)
+            error_type = _STATUS_TO_ANTHROPIC_TYPE.get(mapping.status_code, _ERR_API)
             return _anthropic_error(error_type, mapping.detail, mapping.status_code)
         return _anthropic_error(_ERR_API, _PROVIDER_ERROR, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
@@ -324,21 +350,27 @@ async def create_message(
         )
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
-    ctx = await resolve_request_context(
-        adapter=_ADAPTER,
-        raw_request=raw_request,
-        response=response,
-        db=db,
-        config=config,
-        log_writer=log_writer,
-        model=request.model,
-        user_id_from_request=str(user_from_metadata) if user_from_metadata else None,
-        estimate_prompt_chars=len(str(request.messages)) + len(str(request.system or "")),
-        estimate_max_output_tokens=request.max_tokens,
-        master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
-        user_forbidden_detail=_USER_FORBIDDEN,
-        normalize_messages=_normalize,
-    )
+    try:
+        ctx = await resolve_request_context(
+            adapter=_ADAPTER,
+            raw_request=raw_request,
+            response=response,
+            db=db,
+            config=config,
+            log_writer=log_writer,
+            model=request.model,
+            user_id_from_request=str(user_from_metadata) if user_from_metadata else None,
+            estimate_prompt_chars=len(str(request.messages)) + len(str(request.system or "")),
+            estimate_max_output_tokens=request.max_tokens,
+            master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
+            user_forbidden_detail=_USER_FORBIDDEN,
+            normalize_messages=_normalize,
+        )
+    except HTTPException as exc:
+        # The hybrid preamble (platform resolve / auth) raises format-agnostic
+        # plain-string HTTPExceptions (some with a Retry-After header); re-wrap
+        # them in the Anthropic envelope so /v1/messages errors stay structured.
+        raise _ensure_anthropic_error(exc) from exc
 
     tool_ctx = await prepare_gateway_tools(
         adapter=_ADAPTER,
@@ -391,13 +423,13 @@ async def create_message(
                     tool_ctx=tool_ctx,
                 )
             except HTTPException as exc:
-                # Re-wrap a format-agnostic {"detail": <str>} HTTPException in
-                # the Anthropic error envelope; already-Anthropic dict details
-                # pass through unchanged.
-                if isinstance(exc.detail, str):
-                    error_type = _PROVIDER_STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API)
-                    raise _anthropic_error(error_type, exc.detail, exc.status_code) from exc
-                raise
+                # Hybrid terminal failures arrive as format-agnostic plain-string
+                # HTTPExceptions; ensure the Anthropic envelope (dict details pass
+                # through unchanged).
+                converted = _ensure_anthropic_error(exc)
+                if converted is exc:
+                    raise
+                raise converted from exc
             except Exception as exc:
                 logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
                 if len(route.attempts) <= 1:
@@ -471,14 +503,13 @@ async def create_message(
                 rate_limit_info=ctx.rate_limit_info,
             )
         except HTTPException as exc:
-            # A hybrid terminal provider failure arrives as a format-agnostic
-            # {"detail": <str>} HTTPException; re-wrap it in the Anthropic error
-            # envelope with the matching error.type. Errors already carrying the
-            # Anthropic dict (e.g. preamble auth/budget errors) pass through.
-            if isinstance(exc.detail, str):
-                error_type = _PROVIDER_STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API)
-                raise _anthropic_error(error_type, exc.detail, exc.status_code) from exc
-            raise
+            # Hybrid terminal failures arrive as format-agnostic plain-string
+            # HTTPExceptions; ensure the Anthropic envelope (dict details pass
+            # through unchanged).
+            converted = _ensure_anthropic_error(exc)
+            if converted is exc:
+                raise
+            raise converted from exc
         except SandboxNotReachableError as e:
             logger.error("Sandbox unreachable: %s", e)
             raise _anthropic_error(
@@ -548,19 +579,23 @@ async def count_message_tokens(
     resolves the caller's token against the platform, standalone mode validates
     the API key — so the endpoint is not an open token-counting oracle.
     """
-    if config.is_hybrid_mode:
-        # Resolve against the platform purely to authenticate the caller (same
-        # as create_message); the routing plan is discarded since counting is
-        # local. Without this, any non-empty bearer string would be accepted.
-        user_token = _extract_platform_user_token(raw_request)
-        await _resolve_platform_credentials(
-            config=config,
-            user_token=user_token,
-            model_selector=request.model,
-        )
-    else:
-        if db is None:
-            raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
-        await verify_api_key_or_master_key(raw_request, db, config)
+    try:
+        if config.is_hybrid_mode:
+            # Resolve against the platform purely to authenticate the caller (same
+            # as create_message); the routing plan is discarded since counting is
+            # local. Without this, any non-empty bearer string would be accepted.
+            user_token = _extract_platform_user_token(raw_request)
+            await _resolve_platform_credentials(
+                config=config,
+                user_token=user_token,
+                model_selector=request.model,
+            )
+        else:
+            if db is None:
+                raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
+            await verify_api_key_or_master_key(raw_request, db, config)
+    except HTTPException as exc:
+        # Keep /v1/messages/count_tokens auth errors in the Anthropic envelope too.
+        raise _ensure_anthropic_error(exc) from exc
 
     return CountTokensResponse(input_tokens=_estimate_input_tokens(request))

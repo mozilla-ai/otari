@@ -104,7 +104,13 @@ def test_hybrid_mode_requires_authorization_header(platform_client: TestClient) 
     )
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Missing authentication token"}
+    # /v1/messages errors, including auth, are delivered in the Anthropic envelope.
+    assert response.json() == {
+        "detail": {
+            "type": "error",
+            "error": {"type": "authentication_error", "message": "Missing authentication token"},
+        }
+    }
 
 
 def test_hybrid_mode_maps_resolve_unauthorized(
@@ -132,7 +138,9 @@ def test_hybrid_mode_maps_resolve_unauthorized(
     )
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Invalid user token"}
+    assert response.json() == {
+        "detail": {"type": "error", "error": {"type": "authentication_error", "message": "Invalid user token"}}
+    }
 
 
 def test_hybrid_mode_sets_correlation_id_and_reports_usage(
@@ -367,8 +375,8 @@ def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
     )
 
     assert response.status_code == 502
-    # The aggregate failure is delivered in the Anthropic error envelope; the
-    # /v1/messages endpoint never returns a bare {"detail": <str>}.
+    # The aggregate failure is delivered in the Anthropic error envelope rather
+    # than a bare {"detail": <str>}.
     assert response.json() == {
         "detail": {"type": "error", "error": {"type": "api_error", "message": "All upstream providers failed"}}
     }
@@ -805,7 +813,12 @@ def test_hybrid_mode_count_tokens_requires_authorization_header(
     )
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Missing authentication token"}
+    assert response.json() == {
+        "detail": {
+            "type": "error",
+            "error": {"type": "authentication_error", "message": "Missing authentication token"},
+        }
+    }
 
 
 def test_hybrid_mode_count_tokens_validates_token(
@@ -836,7 +849,9 @@ def test_hybrid_mode_count_tokens_validates_token(
     )
 
     assert response.status_code == 401
-    assert response.json() == {"detail": "Invalid user token"}
+    assert response.json() == {
+        "detail": {"type": "error", "error": {"type": "authentication_error", "message": "Invalid user token"}}
+    }
 
 
 def test_hybrid_mode_count_tokens_succeeds_without_provider_call(
@@ -924,3 +939,41 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
     detail = response.json()["detail"]
     assert detail["type"] == "error"
     assert detail["error"]["type"] == "not_found_error"
+
+
+def test_hybrid_mode_preamble_rejection_uses_anthropic_envelope_and_keeps_retry_after(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A platform-resolve rejection in the hybrid preamble (here a 429) is
+    delivered in the Anthropic error envelope with the matching error.type, and
+    its Retry-After header is preserved (the preamble runs before the execution
+    runners, so it must be enveloped too)."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(429, json={"detail": "rate limited"}, headers={"Retry-After": "30"})
+        return httpx.Response(204)
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    response = platform_client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 429
+    assert response.headers.get("Retry-After") == "30"
+    detail = response.json()["detail"]
+    assert detail["type"] == "error"
+    assert detail["error"]["type"] == "rate_limit_error"
