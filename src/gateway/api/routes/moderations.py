@@ -4,14 +4,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from any_llm import AnyLLM, amoderation
+from any_llm import amoderation
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes.chat import get_provider_kwargs, rate_limit_headers
+from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
@@ -23,6 +23,7 @@ from gateway.services.budget_service import (
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing
+from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.types.moderation import ModerationResponse
 
 # Locked phrasing — cross-SDK error contract. Do not reword.
@@ -87,18 +88,19 @@ async def create_moderation(
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    provider, model = AnyLLM.split_model_provider(request.model)
+    resolved = resolve_provider_selector(config, request.model)
+    provider, model = resolved.provider, resolved.model
 
     # Moderations is exempt from require_pricing: it is free at most providers
     # and is intentionally treated as $0 when unpriced (see below). Pricing, when
     # present, is a flat per-request rate stored in input_price_per_million.
-    pricing = await find_model_pricing(db, provider, model)
+    pricing = await find_model_pricing(db, resolved.instance, model)
     flat_cost = (pricing.input_price_per_million / 1_000_000) if pricing and pricing.input_price_per_million else 0.0
     reservation = await reserve_budget(
         db, user_id, flat_cost, model=request.model, strategy=config.budget_strategy
     )
 
-    provider_kwargs = get_provider_kwargs(config, provider)
+    provider_kwargs = resolved.kwargs
 
     moderation_kwargs: dict[str, Any] = {
         "model": model,
@@ -117,7 +119,7 @@ async def create_moderation(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/moderations",
             status="success",
             prompt_tokens=None,
@@ -142,7 +144,7 @@ async def create_moderation(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/moderations",
             status="error",
             error_message=str(e),
@@ -166,7 +168,7 @@ async def create_moderation(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/moderations",
             status="error",
             error_message=str(e),

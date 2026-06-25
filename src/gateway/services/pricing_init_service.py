@@ -1,6 +1,5 @@
 """Pricing initialization from configuration."""
 
-from any_llm import AnyLLM
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +8,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing
 from gateway.services.pricing_service import normalize_effective_at
+from gateway.services.provider_kwargs import normalize_pricing_key
 
 
 async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: AsyncSession) -> None:
@@ -51,13 +51,13 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
     logger.info("Loading pricing configuration for %s model(s)", len(config.pricing))
 
     for raw_model_key, pricing_config in config.pricing.items():
-        provider, model_name = AnyLLM.split_model_provider(raw_model_key)
-        model_key = f"{provider.value}:{model_name}"
+        model_key = normalize_pricing_key(config, raw_model_key)
+        instance = model_key.split(":", 1)[0] if ":" in model_key else model_key
 
-        if provider.value not in config.providers:
+        if instance not in config.providers:
             msg = (
                 f"Cannot set pricing for model '{model_key}': "
-                f"provider '{provider}' is not configured in the providers section"
+                f"provider '{instance}' is not configured in the providers section"
             )
             raise ValueError(msg)
 

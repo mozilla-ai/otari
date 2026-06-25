@@ -92,25 +92,55 @@ def _supports_list_models(provider_name: str) -> bool:
         return False
 
 
+def _declared_models(config: GatewayConfig, instance: str) -> list[Model]:
+    """Build Model rows from an instance's declared ``models:`` list.
+
+    Used for instances whose backend has no ``/v1/models`` endpoint, so the
+    operator declares the served model ids in config instead. ``owned_by`` is the
+    instance name so the listing key (``instance:model``) matches the request
+    selector.
+    """
+    entry = config.providers.get(instance) or {}
+    declared = entry.get("models") or []
+    return [Model(id=model_id, created=0, object="model", owned_by=instance) for model_id in declared]
+
+
 async def _discover_for_provider(
     provider_name: str,
     config: GatewayConfig,
 ) -> tuple[str, list[Model]]:
-    """Discover models for a single provider. Returns (provider_name, models)."""
-    provider_enum = LLMProvider(provider_name)
-    kwargs = get_provider_kwargs(config, provider_enum)
+    """Discover models for a single instance. Returns (instance_name, models).
+
+    ``provider_name`` is the configured instance; the underlying implementation
+    is resolved from its ``provider_type``. When the live ``list_models`` call
+    fails (e.g. an OpenAI-compatible backend that does not implement
+    ``/v1/models``), fall back to the instance's declared ``models:`` list.
+    """
+    provider_enum = LLMProvider(config.provider_instance_type(provider_name))
+    kwargs = get_provider_kwargs(config, provider_enum, instance=provider_name)
 
     api_key = kwargs.pop("api_key", None)
     api_base = kwargs.pop("api_base", None)
     client_args = kwargs.pop("client_args", None)
 
-    models: Sequence[Model] = await alist_models(
-        provider=provider_enum,
-        api_key=api_key,
-        api_base=api_base,
-        client_args=client_args,
-        **kwargs,
-    )
+    try:
+        models: Sequence[Model] = await alist_models(
+            provider=provider_enum,
+            api_key=api_key,
+            api_base=api_base,
+            client_args=client_args,
+            **kwargs,
+        )
+    except Exception:
+        declared = _declared_models(config, provider_name)
+        if declared:
+            logger.info(
+                "list_models failed for instance '%s'; using declared models: list (%d)",
+                provider_name,
+                len(declared),
+            )
+            return provider_name, declared
+        raise
     return provider_name, list(models)
 
 
@@ -145,11 +175,18 @@ async def discover_all_models(
         cached = cache.get(provider_name, ttl)
         if cached is not None:
             result_models.extend((provider_name, m) for m in cached)
+            continue
+        impl = config.provider_instance_type(provider_name)
+        if _supports_list_models(impl):
+            providers_needing_fetch.append(provider_name)
+            continue
+        # Backend has no /v1/models: serve the operator-declared models: list.
+        declared = _declared_models(config, provider_name)
+        if declared:
+            cache.set(provider_name, declared)
+            result_models.extend((provider_name, m) for m in declared)
         else:
-            if _supports_list_models(provider_name):
-                providers_needing_fetch.append(provider_name)
-            else:
-                logger.debug("Provider '%s' does not support model listing, skipping", provider_name)
+            logger.debug("Provider '%s' does not support model listing, skipping", provider_name)
 
     if not providers_needing_fetch:
         return result_models

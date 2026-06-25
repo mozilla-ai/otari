@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from any_llm import AnyLLM, aembedding
+from any_llm import aembedding
 from any_llm.types.completion import CreateEmbeddingResponse
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes.chat import get_provider_kwargs, rate_limit_headers
+from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
@@ -25,6 +25,7 @@ from gateway.services.budget_service import (
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
+from gateway.services.provider_kwargs import resolve_provider_selector
 
 router = APIRouter(prefix="/v1", tags=["embeddings"])
 
@@ -84,10 +85,11 @@ async def create_embedding(
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    provider, model = AnyLLM.split_model_provider(request.model)
+    resolved = resolve_provider_selector(config, request.model)
+    provider, model = resolved.provider, resolved.model
 
     # Resolve pricing for the reservation estimate and the final cost.
-    pricing = await find_model_pricing(db, provider, model)
+    pricing = await find_model_pricing(db, resolved.instance, model)
 
     # Embeddings have no generated output, so only the prompt contributes cost.
     prompt_chars = sum(len(s) for s in request.input) if isinstance(request.input, list) else len(request.input)
@@ -101,10 +103,10 @@ async def create_embedding(
         await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"No pricing configured for model '{provider}:{model}'",
+            detail=f"No pricing configured for model '{resolved.instance}:{model}'",
         )
 
-    provider_kwargs = get_provider_kwargs(config, provider)
+    provider_kwargs = resolved.kwargs
 
     embedding_kwargs: dict[str, Any] = {
         "model": model,
@@ -126,7 +128,7 @@ async def create_embedding(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/embeddings",
             status="success",
             prompt_tokens=result.usage.prompt_tokens if result.usage else None,
@@ -152,7 +154,7 @@ async def create_embedding(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/embeddings",
             status="error",
             error_message=str(e),

@@ -34,6 +34,7 @@ async def normalize_request_messages(
     db: AsyncSession | None,
     raw_request: Request,
     user_id: str | None,
+    instance: str | None = None,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Normalize ``messages`` for the resolved ``provider/model``.
 
@@ -49,7 +50,7 @@ async def normalize_request_messages(
     if provider is None or not config.file_understanding_enabled:
         return messages, NormalizationStats()
     try:
-        caps = resolve_capabilities(config, provider, model)
+        caps = resolve_capabilities(config, provider, model, instance=instance)
         file_store = getattr(raw_request.app.state, "file_store", None)
         return await normalize_messages(
             messages,

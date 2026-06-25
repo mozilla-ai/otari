@@ -53,7 +53,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
 )
-from gateway.services.provider_kwargs import get_provider_kwargs
+from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -278,7 +278,9 @@ async def create_response(
     raw_max_output = getattr(request_body, "max_output_tokens", None)
     max_output_tokens = raw_max_output if isinstance(raw_max_output, int) and raw_max_output >= 0 else None
 
-    async def _normalize(user_id: str, provider: LLMProvider | None, model: str) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(
+        user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+    ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
@@ -291,6 +293,7 @@ async def create_response(
             db=db,
             raw_request=raw_request,
             user_id=user_id,
+            instance=instance,
         )
         chars = len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
         return chars, stats.vision_usage()
@@ -323,7 +326,12 @@ async def create_response(
         for attempt in route.attempts:
             _ensure_provider_supports_responses(LLMProvider(attempt.provider))
     else:
-        provider, model = AnyLLM.split_model_provider(request_body.model)
+        resolved = resolve_provider_selector(config, request_body.model)
+        # ``provider`` is the underlying implementation handed to any-llm;
+        # ``billing_instance`` is the otari routing key pricing/usage key on.
+        provider, model = resolved.provider, resolved.model
+        provider_kwargs = resolved.kwargs
+        billing_instance = resolved.instance
         try:
             _ensure_provider_supports_responses(provider)
         except HTTPException:
@@ -427,15 +435,17 @@ async def create_response(
             call_kwargs = _ADAPTER.attempt_kwargs(attempt, base_request_fields)
             platform_correlation_id = attempt.attempt_id
             platform_request_id = route.request_id
+            stream_billing: Any = provider
         else:
-            call_kwargs = {**get_provider_kwargs(config, provider), **base_request_fields, "model": model}
+            call_kwargs = {**provider_kwargs, **base_request_fields, "model": model}
+            stream_billing = billing_instance
 
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
             ctx=ctx,
             tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
-            provider=provider,
+            provider=stream_billing,
             model=model,
             platform_correlation_id=platform_correlation_id,
             platform_request_id=platform_request_id,
@@ -475,13 +485,13 @@ async def create_response(
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
-    call_kwargs = {**get_provider_kwargs(config, provider), **base_request_fields, "model": model}
+    call_kwargs = {**provider_kwargs, **base_request_fields, "model": model}
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,
-        provider=provider,
+        provider=billing_instance,
         model=model,
     )
 

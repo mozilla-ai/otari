@@ -8,9 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_db, verify_api_key_or_master_key, verify_master_key
+from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
+from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
 from gateway.services.pricing_service import normalize_effective_at
+from gateway.services.provider_kwargs import normalize_pricing_key
 
 router = APIRouter(prefix="/v1/pricing", tags=["pricing"])
 
@@ -103,10 +105,10 @@ async def _get_pricing_history(db: AsyncSession, model_keys: list[str]) -> list[
 async def set_pricing(
     request: SetPricingRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> PricingResponse:
     """Set or update pricing for a model."""
-    provider, model_name = AnyLLM.split_model_provider(request.model_key)
-    normalized_key = f"{provider.value}:{model_name}"
+    normalized_key = normalize_pricing_key(config, request.model_key)
     effective_at = normalize_effective_at(request.effective_at)
     result = await db.execute(
         select(ModelPricing).where(

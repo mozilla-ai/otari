@@ -348,3 +348,71 @@ class TestDiscoverAllModels:
             result = await discover_all_models(config, provider_filter="nonexistent")
 
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_named_instance_lists_under_instance_name(self) -> None:
+        """A custom instance lists its models keyed on the instance, not the impl."""
+        config = self._make_config(
+            providers={"home_lab": {"provider_type": "openai", "api_base": "http://box/v1", "api_key": "ht"}}
+        )
+        captured: dict[str, Any] = {}
+
+        async def mock_alist(provider: Any, **kwargs: Any) -> list[Model]:
+            captured["provider"] = provider
+            captured["api_base"] = kwargs.get("api_base")
+            return [_make_model("deepseek-v4-flash", owned_by="openai")]
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", side_effect=mock_alist),
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_all_models(config)
+
+        # any-llm is queried as the implementation, against the instance's api_base.
+        assert captured["provider"].value == "openai"
+        assert captured["api_base"] == "http://box/v1"
+        # ...but the result is keyed on the instance name (so model_key is home_lab:...).
+        assert result == [("home_lab", result[0][1])]
+        assert result[0][1].id == "deepseek-v4-flash"
+
+    @pytest.mark.asyncio
+    async def test_declared_models_used_when_listing_unsupported(self) -> None:
+        """An instance whose backend has no /v1/models serves its declared models: list."""
+        config = self._make_config(
+            providers={"edge": {"provider_type": "openai", "api_base": "http://edge/v1", "models": ["m1", "m2"]}}
+        )
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=False),
+            patch("gateway.services.model_discovery_service.alist_models") as mock_alist,
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_all_models(config)
+
+        mock_alist.assert_not_called()
+        assert sorted(model.id for _, model in result) == ["m1", "m2"]
+        assert all(name == "edge" for name, _ in result)
+
+    @pytest.mark.asyncio
+    async def test_declared_models_fallback_on_list_failure(self) -> None:
+        """A list_models failure falls back to the declared models: list when present."""
+        config = self._make_config(
+            providers={"edge": {"provider_type": "openai", "api_base": "http://edge/v1", "models": ["m1"]}}
+        )
+
+        async def mock_alist(provider: Any, **kwargs: Any) -> list[Model]:
+            raise ConnectionError("no /v1/models on this backend")
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", side_effect=mock_alist),
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_all_models(config)
+
+        assert result == [("edge", result[0][1])]
+        assert result[0][1].id == "m1"

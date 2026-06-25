@@ -9,12 +9,12 @@ model for best quality.
 
 from __future__ import annotations
 
-from any_llm import AnyLLM, acompletion
+from any_llm import acompletion
 from any_llm.types.completion import CompletionUsage
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.services.provider_kwargs import get_provider_kwargs
+from gateway.services.provider_kwargs import resolve_provider_selector
 
 _DESCRIBE_PROMPT = (
     "You are assisting a text-only language model that cannot see images. "
@@ -39,8 +39,9 @@ async def describe_image(config: GatewayConfig, image_data_url: str) -> tuple[st
     if not model:
         return None, None
 
-    provider, model_name = AnyLLM.split_model_provider(model)
-    provider_kwargs = get_provider_kwargs(config, provider)
+    resolved = resolve_provider_selector(config, model)
+    provider, model_name = resolved.provider, resolved.model
+    provider_kwargs = resolved.kwargs
 
     try:
         completion = await acompletion(

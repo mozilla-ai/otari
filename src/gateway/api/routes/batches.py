@@ -15,11 +15,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from pydantic import BaseModel, Field
 
 from gateway.api.deps import get_config, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes.chat import get_provider_kwargs
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
 from gateway.services.log_writer import LogWriter
+from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
 
 router = APIRouter(prefix="/v1/batches", tags=["batches"])
 
@@ -86,6 +86,21 @@ def _parse_provider(provider: str) -> LLMProvider:
         ) from e
 
 
+def _resolve_batch_provider(config: GatewayConfig, provider: str) -> tuple[LLMProvider, dict[str, Any]]:
+    """Resolve a batch ``provider`` query param into (implementation, kwargs).
+
+    The value is either a configured instance name (resolved to its
+    ``provider_type`` with the instance's credentials) or a real any-llm
+    provider, mirroring what ``create_batch`` echoes back as the batch's
+    ``provider`` field.
+    """
+    if provider in config.providers:
+        impl = LLMProvider(config.provider_instance_type(provider))
+        return impl, get_provider_kwargs(config, impl, instance=provider)
+    impl = _parse_provider(provider)
+    return impl, get_provider_kwargs(config, impl)
+
+
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
@@ -106,12 +121,13 @@ async def create_batch(
     user_id = api_key.user_id if api_key else None
 
     try:
-        provider, model = AnyLLM.split_model_provider(request.model)
+        resolved = resolve_provider_selector(config, request.model)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid request: {e}",
         ) from e
+    provider, model = resolved.provider, resolved.model
 
     # Validate provider supports batch operations
     provider_class = AnyLLM.get_provider_class(provider)
@@ -121,7 +137,7 @@ async def create_batch(
             detail=f"Provider '{provider.value}' does not support batch operations",
         )
 
-    provider_kwargs = get_provider_kwargs(config, provider)
+    provider_kwargs = resolved.kwargs
 
     # Build JSONL temp file from requests
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as tmp:
@@ -151,7 +167,7 @@ async def create_batch(
             log_writer=log_writer,
             api_key_id=api_key_id,
             model=model,
-            provider=provider.value,
+            provider=resolved.instance,
             endpoint="/v1/batches",
             user_id=user_id,
             error=str(e),
@@ -171,13 +187,13 @@ async def create_batch(
         log_writer=log_writer,
         api_key_id=api_key_id,
         model=model,
-        provider=provider.value,
+        provider=resolved.instance,
         endpoint="/v1/batches",
         user_id=user_id,
     )
 
     response_data = batch.model_dump()
-    response_data["provider"] = provider.value
+    response_data["provider"] = resolved.instance
     return response_data
 
 
@@ -190,8 +206,7 @@ async def retrieve_batch(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> dict[str, Any]:
     """Retrieve the status of a batch."""
-    provider_enum = _parse_provider(provider)
-    provider_kwargs = get_provider_kwargs(config, provider_enum)
+    provider_enum, provider_kwargs = _resolve_batch_provider(config, provider)
 
     try:
         batch: Batch = await aretrieve_batch(
@@ -222,8 +237,7 @@ async def cancel_batch(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> dict[str, Any]:
     """Cancel a batch."""
-    provider_enum = _parse_provider(provider)
-    provider_kwargs = get_provider_kwargs(config, provider_enum)
+    provider_enum, provider_kwargs = _resolve_batch_provider(config, provider)
 
     try:
         batch: Batch = await acancel_batch(
@@ -255,8 +269,7 @@ async def list_batches(
     limit: int | None = None,
 ) -> dict[str, Any]:
     """List batches for a provider."""
-    provider_enum = _parse_provider(provider)
-    provider_kwargs = get_provider_kwargs(config, provider_enum)
+    provider_enum, provider_kwargs = _resolve_batch_provider(config, provider)
 
     list_kwargs: dict[str, Any] = {**provider_kwargs}
     if after is not None:
@@ -302,8 +315,7 @@ async def retrieve_batch_results(
     api_key_id = api_key.id if api_key else None
     user_id = api_key.user_id if api_key else None
 
-    provider_enum = _parse_provider(provider)
-    provider_kwargs = get_provider_kwargs(config, provider_enum)
+    provider_enum, provider_kwargs = _resolve_batch_provider(config, provider)
 
     try:
         result = await aretrieve_batch_results(

@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
 import httpx
-from any_llm import AnyLLM, LLMProvider, acompletion
+from any_llm import LLMProvider, acompletion
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -56,6 +56,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
+from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
@@ -258,7 +259,9 @@ async def chat_completions(
             detail="Invalid request: model is required",
         )
 
-    async def _normalize(user_id: str, provider: LLMProvider | None, model: str) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(
+        user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+    ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
         # the cost estimate. Standalone only; no-op when the files feature is
@@ -272,6 +275,7 @@ async def chat_completions(
             db=db,
             raw_request=raw_request,
             user_id=user_id,
+            instance=instance,
         )
         return len(str(request.messages)), stats.vision_usage()
 
@@ -375,15 +379,17 @@ async def chat_completions(
                 ) from exc
 
         # Standalone path: single attempt, no fallback (no `route.attempts`).
-        provider, model = AnyLLM.split_model_provider(request.model)
-        call_kwargs = {**get_provider_kwargs(config, provider), **request_fields}
+        # Resolve the instance to its implementation; dispatch any-llm against
+        # ``implementation:model`` while billing/logging key on the instance.
+        resolved = resolve_provider_selector(config, request.model)
+        call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
             ctx=ctx,
             tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
-            provider=provider,
-            model=model,
+            provider=resolved.instance,
+            model=resolved.model,
         )
 
     # ------------------------------------------------------------------
@@ -410,15 +416,15 @@ async def chat_completions(
             rate_limit_info=ctx.rate_limit_info,
         )
 
-    provider, model = AnyLLM.split_model_provider(request.model)
-    call_kwargs = {**get_provider_kwargs(config, provider), **request_fields}
+    resolved = resolve_provider_selector(config, request.model)
+    call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     completion = await run_standalone_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,
-        provider=provider,
-        model=model,
+        provider=resolved.instance,
+        model=resolved.model,
     )
 
     if ctx.rate_limit_info:

@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from any_llm import AnyLLM, aspeech, atranscription
+from any_llm import aspeech, atranscription
 from any_llm.types.audio import AudioSpeechParams, Transcription
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -14,7 +14,7 @@ from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
-from gateway.api.routes.chat import get_provider_kwargs, rate_limit_headers
+from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
@@ -25,6 +25,7 @@ from gateway.services.budget_service import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
+from gateway.services.provider_kwargs import resolve_provider_selector
 
 router = APIRouter(prefix="/v1", tags=["audio"])
 
@@ -99,9 +100,10 @@ async def create_transcription(
     # state (user exists, not blocked, not already over budget).
     reservation = await reserve_budget(db, user_id, 0.0, model=model, strategy=config.budget_strategy)
 
-    provider, model_name = AnyLLM.split_model_provider(model)
+    resolved = resolve_provider_selector(config, model)
+    provider, model_name = resolved.provider, resolved.model
 
-    provider_kwargs = get_provider_kwargs(config, provider)
+    provider_kwargs = resolved.kwargs
 
     file_bytes = await file.read()
     if len(file_bytes) > _MAX_AUDIO_UPLOAD_BYTES:
@@ -134,7 +136,7 @@ async def create_transcription(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model_name,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/audio/transcriptions",
             status="success",
             prompt_tokens=0,
@@ -158,7 +160,7 @@ async def create_transcription(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model_name,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/audio/transcriptions",
             status="error",
             error_message=str(e),
@@ -260,9 +262,10 @@ async def create_speech(
     # state (user exists, not blocked, not already over budget).
     reservation = await reserve_budget(db, user_id, 0.0, model=request.model, strategy=config.budget_strategy)
 
-    provider, model_name = AnyLLM.split_model_provider(request.model)
+    resolved = resolve_provider_selector(config, request.model)
+    provider, model_name = resolved.provider, resolved.model
 
-    provider_kwargs = get_provider_kwargs(config, provider)
+    provider_kwargs = resolved.kwargs
 
     # Forward every field the schema accepts (it is derived from
     # AudioSpeechParams), so a new any-llm param is passed through without a code
@@ -286,7 +289,7 @@ async def create_speech(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model_name,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/audio/speech",
             status="success",
             prompt_tokens=0,
@@ -310,7 +313,7 @@ async def create_speech(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model_name,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/audio/speech",
             status="error",
             error_message=str(e),

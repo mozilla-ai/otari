@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
 import httpx
-from any_llm import AnyLLM, LLMProvider, amessages
+from any_llm import LLMProvider, amessages
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
     MessageDeltaEvent,
@@ -61,7 +61,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
-from gateway.services.provider_kwargs import get_provider_kwargs
+from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -310,7 +310,9 @@ async def create_message(
     """
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
 
-    async def _normalize(user_id: str, provider: LLMProvider | None, model: str) -> tuple[int, CompletionUsage | None]:
+    async def _normalize(
+        user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+    ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
         # before the cost estimate. Standalone only; no-op when the files
         # feature is off or the request has no attachments.
@@ -323,6 +325,7 @@ async def create_message(
             db=db,
             raw_request=raw_request,
             user_id=user_id,
+            instance=instance,
         )
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
@@ -425,21 +428,23 @@ async def create_message(
                     status.HTTP_502_BAD_GATEWAY,
                 )
             attempt = route.attempts[0]
-            provider = LLMProvider(attempt.provider)
             model = attempt.model
             call_kwargs = default_attempt_kwargs(attempt, request_fields)
             platform_correlation_id = attempt.attempt_id
             platform_request_id = route.request_id
+            billing_provider: Any = LLMProvider(attempt.provider)
         else:
-            provider, model = AnyLLM.split_model_provider(request.model)
-            call_kwargs = {**get_provider_kwargs(config, provider), **request_fields}
+            resolved = resolve_provider_selector(config, request.model)
+            model = resolved.model
+            call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
+            billing_provider = resolved.instance
 
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
             ctx=ctx,
             tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
-            provider=provider,
+            provider=billing_provider,
             model=model,
             platform_correlation_id=platform_correlation_id,
             platform_request_id=platform_request_id,
@@ -481,15 +486,15 @@ async def create_message(
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
-    provider, model = AnyLLM.split_model_provider(request.model)
-    call_kwargs = {**get_provider_kwargs(config, provider), **request_fields}
+    resolved = resolve_provider_selector(config, request.model)
+    call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,
-        provider=provider,
-        model=model,
+        provider=resolved.instance,
+        model=resolved.model,
     )
 
     if ctx.rate_limit_info:

@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from any_llm import AnyLLM, aimage_generation
+from any_llm import aimage_generation
 from any_llm.types.image import ImageGenerationParams, ImagesResponse
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,7 @@ from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_
 from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
-from gateway.api.routes.chat import get_provider_kwargs, rate_limit_headers
+from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
@@ -25,6 +25,7 @@ from gateway.services.budget_service import (
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
+from gateway.services.provider_kwargs import resolve_provider_selector
 
 router = APIRouter(prefix="/v1", tags=["images"])
 
@@ -87,10 +88,11 @@ async def create_image(
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    provider, model = AnyLLM.split_model_provider(request.model)
+    resolved = resolve_provider_selector(config, request.model)
+    provider, model = resolved.provider, resolved.model
 
     # Image pricing repurposes input_price_per_million as price-per-image.
-    pricing = await find_model_pricing(db, provider, model)
+    pricing = await find_model_pricing(db, resolved.instance, model)
 
     # Reserve for the requested image count; reconciled to the actual count below.
     # `is None` (not `or`) so an explicit n=0 isn't silently treated as 1.
@@ -104,10 +106,10 @@ async def create_image(
         await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"No pricing configured for model '{provider}:{model}'",
+            detail=f"No pricing configured for model '{resolved.instance}:{model}'",
         )
 
-    provider_kwargs = get_provider_kwargs(config, provider)
+    provider_kwargs = resolved.kwargs
 
     # Forward every field the schema accepts (it is derived from
     # ImageGenerationParams), so a new any-llm param is passed through without a
@@ -133,7 +135,7 @@ async def create_image(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/images/generations",
             status="success",
             prompt_tokens=0,
@@ -160,7 +162,7 @@ async def create_image(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/images/generations",
             status="error",
             error_message=str(e),
