@@ -47,9 +47,10 @@ Notes:
   Railway's `DATABASE_URL` works without edits.
 - `OTARI_REQUIRE_PRICING=false` is deliberate. The image default is `true`
   (fail-closed), which rejects any model without configured pricing; that would
-  make an env-only deploy unusable until pricing is added. Configuring per-model
-  pricing via env is tracked in
-  [#208](https://github.com/mozilla-ai/otari/issues/208).
+  make an env-only deploy unusable until pricing is added. To serve priced
+  models instead, supply `pricing` (and any other structured config like custom
+  `api_base` or Vertex settings) through `OTARI_CONFIG_YAML` / `OTARI_CONFIG_B64`;
+  see [Full config via environment](../../docs/configuration.md#full-config-via-environment).
 
 ## Deploy
 
