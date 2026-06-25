@@ -23,6 +23,7 @@ from typing import Any
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.core.env import otari_env
 from gateway.log_config import logger
+from gateway.services.resolve_time_backend import ResolveTimeBackend
 from gateway.services.web_search_backend import WebSearchBackend
 
 
@@ -41,6 +42,7 @@ class Tool(StrEnum):
 
     CODE_EXECUTION = auto()  # -> "otari_code_execution"
     WEB_SEARCH = auto()  # -> "otari_web_search"
+    RESOLVE_TIME = auto()  # -> "otari_resolve_time"
 
 
 def _is_web_search_tool_type(type_value: Any) -> bool:
@@ -53,6 +55,17 @@ def _is_web_search_tool_type(type_value: Any) -> bool:
     if not isinstance(type_value, str):
         return False
     return type_value == Tool.WEB_SEARCH
+
+
+def _is_resolve_time_tool_type(type_value: Any) -> bool:
+    """Recognise the explicit gateway-managed resolve_time tool type.
+
+    Matches only ``"otari_resolve_time"``. There is no provider-named
+    equivalent; time resolution is always gateway-local.
+    """
+    if not isinstance(type_value, str):
+        return False
+    return type_value == Tool.RESOLVE_TIME
 
 
 def _is_code_execution_tool_type(type_value: Any) -> bool:
@@ -245,3 +258,60 @@ def _build_web_search_backend(
         kwargs["auth_token"] = auth_token
 
     return WebSearchBackend(**kwargs)
+
+
+def _extract_resolve_time_tool(
+    tools: list[dict[str, Any]] | None,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
+    """Pull the first ``{"type": "otari_resolve_time"}`` entry out of ``tools``.
+
+    Only the explicit gateway-managed type is extracted (and run against the
+    gateway's resolve_time backend). Everything else passes through unchanged.
+    """
+    return _extract_first_matching_tool(tools, _is_resolve_time_tool_type)
+
+
+def _resolve_resolve_time_purpose_hint(tool_entry: dict[str, Any] | None) -> str | None:
+    """Per-tool entry → ``OTARI_RESOLVE_TIME_PURPOSE_HINT`` → ``None`` (backend default)."""
+    return (tool_entry.get("purpose_hint") if tool_entry else None) or otari_env("RESOLVE_TIME_PURPOSE_HINT") or None
+
+
+def _build_resolve_time_backend(*, tool_entry: dict[str, Any]) -> ResolveTimeBackend:
+    """Construct a ResolveTimeBackend from the (merged) per-tool config entry.
+
+    resolve_time is pure-local: no backend URL, no credential. The entry's
+    fields are the workspace policy (in hybrid mode, merged from the platform's
+    resolve response) plus any per-request overrides: ``timezone_mode``,
+    ``timezone``, ``prefer_dates_from``, ``date_order``, ``week_start``,
+    ``languages``, ``parser_options``, and ``purpose_hint`` (per-tool →
+    ``OTARI_RESOLVE_TIME_PURPOSE_HINT`` → backend default).
+    """
+    kwargs: dict[str, Any] = {}
+
+    timezone_mode = tool_entry.get("timezone_mode")
+    if isinstance(timezone_mode, str) and timezone_mode:
+        kwargs["timezone_mode"] = timezone_mode
+    tz = tool_entry.get("timezone")
+    if isinstance(tz, str) and tz:
+        kwargs["timezone_name"] = tz
+    prefer = tool_entry.get("prefer_dates_from")
+    if isinstance(prefer, str) and prefer:
+        kwargs["prefer_dates_from"] = prefer
+    date_order = tool_entry.get("date_order")
+    if isinstance(date_order, str) and date_order:
+        kwargs["date_order"] = date_order
+    week_start = tool_entry.get("week_start")
+    if isinstance(week_start, str) and week_start:
+        kwargs["week_start"] = week_start
+    languages = tool_entry.get("languages")
+    if isinstance(languages, list) and languages:
+        kwargs["languages"] = [str(lang) for lang in languages]
+    parser_options = tool_entry.get("parser_options")
+    if isinstance(parser_options, dict) and parser_options:
+        kwargs["parser_options"] = parser_options
+
+    purpose_hint = _resolve_resolve_time_purpose_hint(tool_entry)
+    if purpose_hint:
+        kwargs["purpose_hint"] = purpose_hint
+
+    return ResolveTimeBackend(**kwargs)

@@ -53,6 +53,8 @@ def _tool_ctx(**overrides: Any) -> ToolContext:
         "web_search_tool_entry": None,
         "web_search_url": None,
         "web_search_auth_token": None,
+        "use_resolve_time": False,
+        "resolve_time_tool_entry": None,
         "remaining_user_tools": None,
         "max_tool_iterations": 10,
         "tools_header": None,

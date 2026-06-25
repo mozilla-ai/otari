@@ -1219,3 +1219,184 @@ def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
     assert merged is not None
     # Empty per-request list did not wipe the workspace allow-list.
     assert merged["allowed_domains"] == ["docs.python.org"]
+
+
+# ---------------------------------------------------------------------------
+# resolve_time hybrid-mode policy resolution
+# ---------------------------------------------------------------------------
+# In hybrid mode an `otari_resolve_time` request consults the platform's
+# `/gateway/resolve-time/resolve` endpoint: if resolve_time is disabled for the
+# workspace the gateway 403s; otherwise the resolved workspace policy is merged
+# into the tool entry (per-request values win) before the local backend runs.
+
+
+class _FakeResolveTimeBackend:
+    """Minimal ResolveTimeBackend duck-type that records the tool_entry it was
+    built from and resolves the tool loop in a single round (no real parsing)."""
+
+    last_tool_entry: dict[str, Any] | None = None
+
+    def __init__(self, *, tool_entry: dict[str, Any]) -> None:
+        type(self).last_tool_entry = dict(tool_entry)
+
+    async def __aenter__(self) -> "_FakeResolveTimeBackend":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "resolve_time", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "resolve_time"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        return "2026-02-14T15:30:00Z"
+
+
+def test_hybrid_mode_resolve_time_403_when_disabled(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An `otari_resolve_time` request whose workspace has resolve_time disabled
+    is rejected with 403 before any provider call."""
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="rt-req-disabled")
+        if url.endswith("/gateway/resolve-time/resolve"):
+            return httpx.Response(200, json={"enabled": False})
+        return httpx.Response(204)
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_resolve_time"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "resolve_time is not enabled for this workspace"}
+
+
+def test_hybrid_mode_resolve_time_merges_workspace_config(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When enabled, the resolved workspace policy is merged into the tool entry
+    with per-request values winning over workspace defaults."""
+    _FakeResolveTimeBackend.last_tool_entry = None
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="rt-req-enabled")
+        if url.endswith("/gateway/resolve-time/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "enabled": True,
+                    "timezone_mode": "forced",
+                    "timezone": "America/New_York",
+                    "prefer_dates_from": "past",
+                    "date_order": "DMY",
+                    "week_start": "sunday",
+                    "purpose_hint": "workspace hint",
+                    "parser_options": {"STRICT_PARSING": False},
+                },
+            )
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        return ChatCompletion(
+            id="cmpl-rt",
+            object="chat.completion",
+            created=0,
+            model="openai:gpt-4o-mini",
+            choices=[
+                Choice(
+                    finish_reason="stop",
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="answer"),
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_resolve_time_backend", _FakeResolveTimeBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            # Per-request timezone_mode=request must win over workspace "forced".
+            "tools": [{"type": "otari_resolve_time", "timezone_mode": "request"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    merged = _FakeResolveTimeBackend.last_tool_entry
+    assert merged is not None
+    # Per-request value wins.
+    assert merged["timezone_mode"] == "request"
+    # Workspace defaults fill in the unset keys.
+    assert merged["timezone"] == "America/New_York"
+    assert merged["date_order"] == "DMY"
+    assert merged["week_start"] == "sunday"
+    assert merged["purpose_hint"] == "workspace hint"
+    assert merged["parser_options"] == {"STRICT_PARSING": False}
+
+
+def test_hybrid_mode_resolve_time_conflicts_with_web_search(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """resolve_time shares the single tool-loop pool, so it cannot be combined
+    with another gateway-run tool (otari_web_search here) in one request."""
+    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://searxng:8080")
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="rt-req-conflict")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(200, json={"enabled": True})
+        if url.endswith("/gateway/resolve-time/resolve"):
+            return httpx.Response(200, json={"enabled": True})
+        return httpx.Response(204)
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    # Conflict must be detected regardless of tool order in the request.
+    for tools in (
+        [{"type": "otari_web_search"}, {"type": "otari_resolve_time"}],
+        [{"type": "otari_resolve_time"}, {"type": "otari_web_search"}],
+    ):
+        response = platform_client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "anything",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": tools,
+            },
+            headers={"Authorization": "Bearer user_test_token"},
+        )
+        assert response.status_code == 400

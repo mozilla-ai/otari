@@ -603,6 +603,70 @@ async def _resolve_platform_web_search(
     )
 
 
+async def _resolve_platform_time(
+    config: GatewayConfig,
+    user_token: str,
+) -> dict[str, Any]:
+    """Resolve the workspace's resolve_time policy via the platform.
+
+    Mirrors `_resolve_platform_web_search`: same base_url guard, timeout,
+    headers, `_post_platform` call, and status-code handling. POSTs an empty
+    body to `/gateway/resolve-time/resolve` and returns the parsed JSON dict on
+    200 (``{enabled, timezone_mode, timezone, prefer_dates_from, date_order,
+    week_start, languages, purpose_hint, parser_options}``). Client errors
+    (auth/quota/not-found/rate-limit) forward verbatim; the platform's
+    server-side or unexpected responses collapse to 502.
+    """
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Hybrid mode is misconfigured",
+        )
+
+    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
+    resolve_url = _platform_url(platform_base_url, "/gateway/resolve-time/resolve")
+    headers = {
+        "X-Gateway-Token": config.platform_token or "",
+        "X-User-Token": user_token,
+    }
+    body: dict[str, Any] = {}
+
+    try:
+        response = await _post_platform(url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000)
+    except (httpx.TimeoutException, httpx.NetworkError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        ) from None
+
+    if response.status_code == 200:
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    # Mirror the status-code semantics of `_resolve_platform_web_search`:
+    # client errors (auth/quota/not-found/rate-limit) are forwarded so the
+    # caller sees the real status (and can honour Retry-After on 429), while
+    # the platform's server-side or unexpected responses collapse to 502.
+    if response.status_code in {401, 402, 403, 404, 429}:
+        detail = _safe_detail_from_platform(response, "Resolve time resolution failed")
+        response_headers: dict[str, str] | None = None
+        if response.status_code == 429 and response.headers.get("Retry-After"):
+            response_headers = {"Retry-After": response.headers["Retry-After"]}
+        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
+
+    if response.status_code == 422 or response.status_code >= 500:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Authorization service unavailable",
+    )
+
+
 async def _report_platform_usage(
     config: GatewayConfig,
     correlation_id: str,
