@@ -82,13 +82,40 @@ pricing:
 
 The following `OTARI_` variables override config file values for their matching fields. For example, `OTARI_PORT=9000` overrides `port: 8000` in the YAML.
 
-`OTARI_` overrides apply to scalar fields (strings, numbers, booleans). List and dict fields (`cors_allow_origins`, `providers`, `pricing`, and the `platform` block) are not read from `OTARI_` variables; set them in the YAML file instead. The `platform` block also has dedicated `PLATFORM_*` variables (see the otari.ai variables below).
+`OTARI_` overrides apply to scalar fields (strings, numbers, booleans). List and dict fields (`cors_allow_origins`, `providers`, `pricing`, and the `platform` block) are not read from individual `OTARI_` variables; set them in the YAML file, or supply the whole config through the environment with `OTARI_CONFIG_YAML` / `OTARI_CONFIG_B64` (see [Full config via environment](#full-config-via-environment)). The `platform` block also has dedicated `PLATFORM_*` variables (see the otari.ai variables below).
 
 The config file also supports `${ENV_VAR}` interpolation:
 
 ```yaml
 master_key: "${MY_SECRET_KEY}"
 ```
+
+### Full config via environment
+
+On PaaS platforms (Railway, Render, Fly.io, Kubernetes) where mounting a `config.yml` is awkward, you can supply the entire config, including the non-scalar `providers` and `pricing` fields, through the environment. This reaches the full schema with no file mount and no custom image.
+
+| Variable | Description |
+|----------|-------------|
+| `OTARI_CONFIG_YAML` | The full config as raw YAML, parsed exactly like a `config.yml`. |
+| `OTARI_CONFIG_B64` | The same YAML, base64-encoded, for env-var UIs that mangle multiline values. |
+
+The YAML supports the same `${ENV_VAR}` interpolation as a config file, so you can keep secrets in separate variables:
+
+```yaml
+# value of OTARI_CONFIG_YAML
+providers:
+  openai:
+    api_key: ${OPENAI_API_KEY}
+    api_base: https://my-proxy.example/v1
+pricing:
+  openai:gpt-4o:
+    input_price_per_million: 2.5
+    output_price_per_million: 10
+```
+
+Precedence, lowest to highest: the config file, then the env-structured config (`OTARI_CONFIG_YAML` or `OTARI_CONFIG_B64`, with raw YAML winning if both are set), then scalar `OTARI_<FIELD>` overrides. Env-structured keys replace the matching top-level keys from the file. Invalid base64, invalid YAML, or a non-mapping top level fails fast at startup with a clear error.
+
+Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so the gateway rejects any model without configured pricing. An env-only deploy therefore needs either `pricing` entries (as above) or `OTARI_REQUIRE_PRICING=false` to serve unpriced models.
 
 ### Common variables
 
