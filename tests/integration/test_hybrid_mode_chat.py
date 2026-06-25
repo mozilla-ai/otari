@@ -1277,3 +1277,74 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
 
     assert response.status_code == 404
     assert response.json() == {"detail": "The requested model was not found on the provider"}
+
+
+def test_hybrid_mode_streaming_multi_attempt_classifies_non_retryable_invalid_request(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-retryable invalid request (400) short-circuits the streaming
+    fallback and is surfaced as a classified 400 even with multiple attempts,
+    matching the non-streaming path rather than the aggregate 502."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "stream-req-400",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "att-a",
+                            "position": 0,
+                            "provider": "anthropic",
+                            "model": "claude-haiku-4-5",
+                            "api_key": "sk-1",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "att-b",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-2",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        return httpx.Response(204)
+
+    calls: list[dict[str, Any]] = []
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        raise httpx.HTTPStatusError(
+            "400",
+            request=httpx.Request("POST", "http://upstream"),
+            response=httpx.Response(400, request=httpx.Request("POST", "http://upstream")),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={"model": "anything", "messages": [{"role": "user", "content": "hi"}], "stream": True},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "detail": "The provider rejected the request as invalid (check the model name and parameters)"
+    }
+    # Non-retryable: the fallback must short-circuit after the first attempt.
+    assert len(calls) == 1

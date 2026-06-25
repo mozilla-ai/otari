@@ -432,10 +432,14 @@ async def create_message(
                 raise converted from exc
             except Exception as exc:
                 logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
-                if len(route.attempts) <= 1:
-                    # Single attempt: surface the classified status (the same
-                    # mapping the non-streaming path uses), in the Anthropic
-                    # error envelope, instead of a blanket 502/504.
+                # Classify when there is a single attempt, or when the failure is
+                # a non-retryable invalid request (400/422): that short-circuits
+                # the fallback and is definitive regardless of attempt count, so
+                # it matches the non-streaming path. Otherwise surface the
+                # multi-attempt aggregate.
+                mapping = classify_provider_error(exc)
+                invalid_request = mapping is not None and mapping.status_code == status.HTTP_400_BAD_REQUEST
+                if invalid_request or len(route.attempts) <= 1:
                     raise _ADAPTER.provider_error(exc) from exc
                 if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
                     raise _anthropic_error(
