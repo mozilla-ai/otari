@@ -15,6 +15,19 @@ vertexai:gemini-2.0-flash
 
 The `provider` prefix tells Otari which backend to route to. The `model_name` is passed directly to that provider's API.
 
+### Pinning a HuggingFace inference backend
+
+HuggingFace Inference Providers is a router: the same model id (for example `zai-org/GLM-4.6`) can be served by several backends (Together, Novita, and others), and in the default "auto" mode the backend, and therefore the price, is chosen at request time. To route (and price) deterministically, pin a backend with a `:<backend>` suffix on the model id, which the HuggingFace router honors server side:
+
+```text
+huggingface:zai-org/GLM-4.6:together
+huggingface:zai-org/GLM-4.6:novita
+```
+
+The pinned-selector grammar is `huggingface:<model>:<backend>`. Otari splits the provider off the first `:`, so everything after it (`<model>:<backend>`) is forwarded as the model id and the `:<backend>` suffix reaches the router unchanged. The router also accepts policy suffixes such as `:cheapest`, `:fastest`, `:preferred`, and `:auto`.
+
+This grammar is the contract consumers build against. The otari.ai platform's pricing UI, for instance, offers each priceable backend as a pinned `huggingface:<model>:<backend>` selector, because a pinned selector resolves to a single backend, which is what makes a HuggingFace model priceable (auto mode cannot be priced from the model id alone).
+
 ## Supported providers
 
 Otari depends on `any-llm-sdk[all]`. Provider support can change as the SDK evolves.
@@ -36,7 +49,7 @@ Use this list as a quick reference for common providers supported by the current
 | Fireworks | `fireworks` | `fireworks:llama-v3-70b` | |
 | Gemini | `gemini` | `gemini:gemini-2.0-flash` | |
 | Groq | `groq` | `groq:llama3-70b-8192` | |
-| HuggingFace | `huggingface` | `huggingface:meta-llama/Llama-3-70b` | |
+| HuggingFace | `huggingface` | `huggingface:meta-llama/Llama-3-70b` | Pin a backend with `:<backend>` (see [Pinning a HuggingFace inference backend](#pinning-a-huggingface-inference-backend)) |
 | Inception | `inception` | `inception:mercury-coder-small` | |
 | Llama.cpp | `llamacpp` | `llamacpp:default` | Local server |
 | Llamafile | `llamafile` | `llamafile:default` | Local server |
