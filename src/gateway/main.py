@@ -13,6 +13,7 @@ from gateway.api.main import register_routers
 from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.rate_limit import RateLimiter
+from gateway.root_page import ROOT_TUTORIAL_HTML
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
@@ -24,105 +25,6 @@ from gateway.services.pricing_service import configure_default_pricing
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
-
-_ROOT_TUTORIAL_HTML = """<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Otari</title>
-    <style>
-      body {
-        background: #efefef;
-        color: #111827;
-        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
-        margin: 0;
-      }
-      main {
-        margin: 16px auto;
-        max-width: 860px;
-        padding: 0 16px;
-        line-height: 1.5;
-      }
-      h1 {
-        font-size: 32px;
-        margin: 6px 0 10px;
-      }
-      .sub {
-        font-size: 20px;
-        margin-bottom: 16px;
-      }
-      .link {
-        font-size: 20px;
-        font-weight: 700;
-        color: #0f62fe;
-        text-decoration: underline;
-      }
-      .note {
-        font-size: 16px;
-      }
-      .block {
-        background: #e5e7eb;
-        border-radius: 2px;
-        margin: 18px 0;
-        padding: 18px;
-      }
-      pre {
-        margin: 0;
-        white-space: pre-wrap;
-        overflow-wrap: break-word;
-      }
-      code {
-        color: #111827;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 14px;
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>Otari (Proxy Server)</h1>
-      <div class="sub">
-        <a class="link" href="https://mozilla-ai.github.io/otari/gateway/quickstart/">Otari Quickstart</a>
-      </div>
-
-      <p class="note">
-        On first startup, Otari prints a bootstrap API key in logs. Export it as
-        <code>OTARI_API_KEY</code> and use that value in your client.
-      </p>
-
-      <div class="block">
-        <pre><code>export OTARI_API_KEY=YOUR_BOOTSTRAP_OTARI_KEY
-</code></pre>
-      </div>
-
-      <div class="block">
-        <pre><code>pip install openai
-</code></pre>
-      </div>
-
-      <div class="block">
-         <pre><code>import os
-
-from openai import OpenAI
-
-client = OpenAI(
-    api_key=os.environ["OTARI_API_KEY"],
-    base_url="http://localhost:8000/v1",
-)
-
-response = client.chat.completions.create(
-    model="openai:gpt-4o",
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-
-print(response.choices[0].message.content)
-</code></pre>
-      </div>
-    </main>
-  </body>
-</html>
-"""
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -204,7 +106,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def root_tutorial() -> str:
-        return _ROOT_TUTORIAL_HTML
+        return ROOT_TUTORIAL_HTML
 
     app.add_middleware(SecurityHeadersMiddleware)
 
