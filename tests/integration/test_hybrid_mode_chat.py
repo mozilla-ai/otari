@@ -1219,3 +1219,61 @@ def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
     assert merged is not None
     # Empty per-request list did not wipe the workspace allow-list.
     assert merged["allowed_domains"] == ["docs.python.org"]
+
+
+def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single-attempt streaming request that fails before its first chunk
+    surfaces the classified status (404), not a generic 502."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "stream-req-single",
+                    "fallback_enabled": False,
+                    "attempts": [
+                        {
+                            "attempt_id": "att-a",
+                            "position": 0,
+                            "provider": "anthropic",
+                            "model": "claude-haiku-4-5",
+                            "api_key": "sk-broken",
+                            "api_base": None,
+                            "managed": False,
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        raise httpx.HTTPStatusError(
+            "404",
+            request=httpx.Request("POST", "http://upstream"),
+            response=httpx.Response(404, request=httpx.Request("POST", "http://upstream")),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "The requested model was not found on the provider"}

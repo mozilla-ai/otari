@@ -24,7 +24,6 @@ from gateway.api.routes._pipeline import (
     ALL_PROVIDERS_TIMED_OUT_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
-    PROVIDER_TIMEOUT_DETAIL,
     SANDBOX_UNREACHABLE_DETAIL,
     WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
@@ -399,15 +398,19 @@ async def create_response(
                 raise
             except Exception as exc:
                 logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
-                is_single_attempt = len(route.attempts) <= 1
+                if len(route.attempts) <= 1:
+                    # Single attempt: surface the classified status (the same
+                    # mapping the non-streaming path uses), formatted for this
+                    # endpoint, instead of a blanket 502/504.
+                    raise _ADAPTER.provider_error(exc) from exc
                 if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
                     raise HTTPException(
                         status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                        detail=(PROVIDER_TIMEOUT_DETAIL if is_single_attempt else ALL_PROVIDERS_TIMED_OUT_DETAIL),
+                        detail=ALL_PROVIDERS_TIMED_OUT_DETAIL,
                     ) from exc
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=(PROVIDER_ERROR_DETAIL if is_single_attempt else ALL_PROVIDERS_FAILED_DETAIL),
+                    detail=ALL_PROVIDERS_FAILED_DETAIL,
                 ) from exc
 
         # Single-attempt streaming (standalone, or hybrid + tool-loop).

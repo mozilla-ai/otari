@@ -27,8 +27,6 @@ from gateway.api.routes._pipeline import (
     ALL_PROVIDERS_TIMED_OUT_DETAIL,
     DB_UNAVAILABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
-    PROVIDER_ERROR_DETAIL,
-    PROVIDER_TIMEOUT_DETAIL,
     SANDBOX_UNREACHABLE_DETAIL,
     WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
@@ -392,20 +390,30 @@ async def create_message(
                     rate_limit_info=ctx.rate_limit_info,
                     tool_ctx=tool_ctx,
                 )
-            except HTTPException:
+            except HTTPException as exc:
+                # Re-wrap a format-agnostic {"detail": <str>} HTTPException in
+                # the Anthropic error envelope; already-Anthropic dict details
+                # pass through unchanged.
+                if isinstance(exc.detail, str):
+                    error_type = _PROVIDER_STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API)
+                    raise _anthropic_error(error_type, exc.detail, exc.status_code) from exc
                 raise
             except Exception as exc:
                 logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
-                is_single_attempt = len(route.attempts) <= 1
+                if len(route.attempts) <= 1:
+                    # Single attempt: surface the classified status (the same
+                    # mapping the non-streaming path uses), in the Anthropic
+                    # error envelope, instead of a blanket 502/504.
+                    raise _ADAPTER.provider_error(exc) from exc
                 if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
                     raise _anthropic_error(
                         _ERR_API,
-                        PROVIDER_TIMEOUT_DETAIL if is_single_attempt else ALL_PROVIDERS_TIMED_OUT_DETAIL,
+                        ALL_PROVIDERS_TIMED_OUT_DETAIL,
                         status.HTTP_504_GATEWAY_TIMEOUT,
                     ) from exc
                 raise _anthropic_error(
                     _ERR_API,
-                    PROVIDER_ERROR_DETAIL if is_single_attempt else ALL_PROVIDERS_FAILED_DETAIL,
+                    ALL_PROVIDERS_FAILED_DETAIL,
                     status.HTTP_502_BAD_GATEWAY,
                 ) from exc
 
@@ -462,7 +470,14 @@ async def create_message(
                 config=config,
                 rate_limit_info=ctx.rate_limit_info,
             )
-        except HTTPException:
+        except HTTPException as exc:
+            # A hybrid terminal provider failure arrives as a format-agnostic
+            # {"detail": <str>} HTTPException; re-wrap it in the Anthropic error
+            # envelope with the matching error.type. Errors already carrying the
+            # Anthropic dict (e.g. preamble auth/budget errors) pass through.
+            if isinstance(exc.detail, str):
+                error_type = _PROVIDER_STATUS_TO_ANTHROPIC_TYPE.get(exc.status_code, _ERR_API)
+                raise _anthropic_error(error_type, exc.detail, exc.status_code) from exc
             raise
         except SandboxNotReachableError as e:
             logger.error("Sandbox unreachable: %s", e)

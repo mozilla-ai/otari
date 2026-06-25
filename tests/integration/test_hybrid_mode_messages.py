@@ -367,7 +367,11 @@ def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
     )
 
     assert response.status_code == 502
-    assert response.json() == {"detail": "All upstream providers failed"}
+    # The aggregate failure is delivered in the Anthropic error envelope; the
+    # /v1/messages endpoint never returns a bare {"detail": <str>}.
+    assert response.json() == {
+        "detail": {"type": "error", "error": {"type": "api_error", "message": "All upstream providers failed"}}
+    }
     # Each failed attempt is reported exactly once, despite the terminal 502. A
     # set would mask a double-report (the dropped-then-also-flushed bug), so pin
     # the exact count and contents: the inline flush and the dropped background
@@ -431,6 +435,11 @@ def test_hybrid_mode_non_retryable_error_raises_immediately(
     )
 
     assert response.status_code == 400
+    # The classified 400 is delivered in the Anthropic error envelope with the
+    # matching error.type, not a bare {"detail": <str>}.
+    detail = response.json()["detail"]
+    assert detail["type"] == "error"
+    assert detail["error"]["type"] == "invalid_request_error"
     assert len(calls) == 1, "Non-retryable error must short-circuit the attempts loop"
 
 
@@ -867,3 +876,51 @@ def test_hybrid_mode_count_tokens_succeeds_without_provider_call(
 
     assert response.status_code == 200
     assert response.json()["input_tokens"] > 0
+
+
+def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single-attempt streaming request that fails before its first chunk
+    surfaces the classified status (404) in the Anthropic envelope, not a
+    generic 502."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json=_resolve_payload([_attempt(0, "att-1", "claude-3-5-sonnet-20241022", "sk-1")]),
+            )
+        return httpx.Response(204)
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        raise httpx.HTTPStatusError(
+            "404",
+            request=httpx.Request("POST", "http://upstream"),
+            response=httpx.Response(404, request=httpx.Request("POST", "http://upstream")),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.messages.amessages", fake_amessages)
+
+    response = platform_client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "stream": True,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert detail["type"] == "error"
+    assert detail["error"]["type"] == "not_found_error"
