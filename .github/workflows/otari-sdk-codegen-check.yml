@@ -35,7 +35,7 @@ jobs:
         language: [python, typescript, go, rust]
     steps:
       - name: Checkout Otari
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # Read-only job: it generates clients and opens no PRs, so the checkout
           # credential is unused. Drop it rather than leave a token in .git/config
