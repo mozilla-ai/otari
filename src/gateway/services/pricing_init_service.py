@@ -55,11 +55,15 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         model_key = f"{provider.value}:{model_name}"
 
         if provider.value not in config.providers:
-            msg = (
-                f"Cannot set pricing for model '{model_key}': "
-                f"provider '{provider}' is not configured in the providers section"
+            logger.warning(
+                "Skipping pricing for '%s': provider '%s' is not listed in the providers section. "
+                "The provider may still work if its credentials come from the environment, but its "
+                "pricing is ignored. Add '%s' to the providers section, or remove this pricing entry.",
+                model_key,
+                provider.value,
+                provider.value,
             )
-            raise ValueError(msg)
+            continue
 
         input_price = pricing_config.input_price_per_million
         output_price = pricing_config.output_price_per_million
