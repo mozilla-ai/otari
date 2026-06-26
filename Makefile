@@ -1,4 +1,4 @@
-.PHONY: help dev test test-unit test-integration lint typecheck openapi-check changelog
+.PHONY: help dev test test-unit test-integration lint typecheck openapi-check postman postman-check changelog
 
 help:
 	@printf "Available targets:\n"
@@ -9,6 +9,8 @@ help:
 	@printf "  lint Run Ruff lint checks\n"
 	@printf "  typecheck Run mypy type checks\n"
 	@printf "  openapi-check Verify the OpenAPI spec is up to date\n"
+	@printf "  postman Regenerate the Postman collection from the OpenAPI spec\n"
+	@printf "  postman-check Verify the Postman collection is up to date\n"
 	@printf "  changelog Preview the generated CHANGELOG.md locally (git-cliff)\n"
 
 dev:
@@ -34,6 +36,12 @@ typecheck:
 
 openapi-check:
 	uv run python scripts/generate_openapi.py --check
+
+postman:
+	uv run python scripts/generate_postman.py
+
+postman-check:
+	uv run python scripts/generate_postman.py --check
 
 # Local preview only. CHANGELOG.md is generated at release time by the
 # otari-release / otari-tag-release workflows; this target is for eyeballing

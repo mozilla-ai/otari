@@ -1,0 +1,1585 @@
+{
+  "auth": {
+    "bearer": [
+      {
+        "key": "token",
+        "type": "string",
+        "value": "{{otariKey}}"
+      }
+    ],
+    "type": "bearer"
+  },
+  "info": {
+    "description": "otari management + inference collection, generated from the OpenAPI spec by scripts/generate_postman.py. Stopgap client for driving a running Otari server until the web UI lands.\n\nSet the `baseUrl` and `otariKey` collection variables (or override them with a Postman environment). Auth is sent as an `Authorization: Bearer <otariKey>` header on every request via collection-level auth.",
+    "name": "otari API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "description": "General health check endpoint.\n\nReturns basic health status. For infrastructure monitoring,\nuse /health/readiness or /health/liveness instead.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ],
+              "raw": "{{baseUrl}}/health"
+            }
+          }
+        },
+        {
+          "name": "Health Liveness",
+          "request": {
+            "description": "Liveness probe endpoint.\n\nSimple check to verify the process is alive and responding.\nUsed by Kubernetes/container orchestrators for liveness probes.\n\nReturns:\n    Plain text \"I'm alive!\" message",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "liveness"
+              ],
+              "raw": "{{baseUrl}}/health/liveness"
+            }
+          }
+        },
+        {
+          "name": "Health Readiness",
+          "request": {
+            "description": "Readiness probe endpoint.\n\nChecks if the gateway is ready to serve requests by validating:\n- Database connectivity\n- Service availability\n\nUsed by Kubernetes/container orchestrators for readiness probes.\nReturns HTTP 503 if any dependency is unavailable.\n\nReturns:\n    dict: Status object with health details\n\nRaises:\n    HTTPException: 503 if service is not ready",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "readiness"
+              ],
+              "raw": "{{baseUrl}}/health/readiness"
+            }
+          }
+        }
+      ],
+      "name": "health"
+    },
+    {
+      "item": [
+        {
+          "name": "Create Speech",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\",\n  \"input\": \"string\",\n  \"voice\": \"string\"\n}"
+            },
+            "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "audio",
+                "speech"
+              ],
+              "raw": "{{baseUrl}}/v1/audio/speech"
+            }
+          }
+        },
+        {
+          "name": "Create Transcription",
+          "request": {
+            "description": "OpenAI-compatible audio transcription endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "audio",
+                "transcriptions"
+              ],
+              "raw": "{{baseUrl}}/v1/audio/transcriptions"
+            }
+          }
+        }
+      ],
+      "name": "audio"
+    },
+    {
+      "item": [
+        {
+          "name": "List Batches",
+          "request": {
+            "description": "List batches for a provider.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "batches"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "after",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/batches?provider=&after=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Batch",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\",\n  \"requests\": [\n    {\n      \"custom_id\": \"string\",\n      \"body\": {}\n    }\n  ]\n}"
+            },
+            "description": "Create a batch of LLM requests for asynchronous processing.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "batches"
+              ],
+              "raw": "{{baseUrl}}/v1/batches"
+            }
+          }
+        },
+        {
+          "name": "Retrieve Batch",
+          "request": {
+            "description": "Retrieve the status of a batch.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "batches",
+                ":batch_id"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "provider",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/batches/:batch_id?provider=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "batch_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Cancel Batch",
+          "request": {
+            "description": "Cancel a batch.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "batches",
+                ":batch_id",
+                "cancel"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "provider",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/batches/:batch_id/cancel?provider=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "batch_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Retrieve Batch Results",
+          "request": {
+            "description": "Retrieve the results of a completed batch.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "batches",
+                ":batch_id",
+                "results"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": false,
+                  "key": "provider",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/batches/:batch_id/results?provider=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "batch_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "batches"
+    },
+    {
+      "item": [
+        {
+          "name": "List Budgets",
+          "request": {
+            "description": "List all budgets with pagination.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "budgets"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/budgets?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Budget",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0\n}"
+            },
+            "description": "Create a new budget.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "budgets"
+              ],
+              "raw": "{{baseUrl}}/v1/budgets"
+            }
+          }
+        },
+        {
+          "name": "Get Budget",
+          "request": {
+            "description": "Get details of a specific budget.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "budgets",
+                ":budget_id"
+              ],
+              "raw": "{{baseUrl}}/v1/budgets/:budget_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "budget_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Budget",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0\n}"
+            },
+            "description": "Update a budget.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "budgets",
+                ":budget_id"
+              ],
+              "raw": "{{baseUrl}}/v1/budgets/:budget_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "budget_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Budget",
+          "request": {
+            "description": "Delete a budget.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "budgets",
+                ":budget_id"
+              ],
+              "raw": "{{baseUrl}}/v1/budgets/:budget_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "budget_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "budgets"
+    },
+    {
+      "item": [
+        {
+          "name": "Chat Completions",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"openai:gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Hello from Otari!\"\n    }\n  ]\n}"
+            },
+            "description": "OpenAI-compatible chat completions endpoint.\n\nSupports both streaming and non-streaming responses.\nHandles reasoning content from otari providers.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "chat",
+                "completions"
+              ],
+              "raw": "{{baseUrl}}/v1/chat/completions"
+            }
+          }
+        }
+      ],
+      "name": "chat"
+    },
+    {
+      "item": [
+        {
+          "name": "Create Embedding",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\",\n  \"input\": \"string\"\n}"
+            },
+            "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "embeddings"
+              ],
+              "raw": "{{baseUrl}}/v1/embeddings"
+            }
+          }
+        }
+      ],
+      "name": "embeddings"
+    },
+    {
+      "item": [
+        {
+          "name": "List Files",
+          "request": {
+            "description": "List the authenticated user's uploaded files.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "files"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "user",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "purpose",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/files?user=&purpose="
+            }
+          }
+        },
+        {
+          "name": "Create File",
+          "request": {
+            "description": "OpenAI-compatible file upload endpoint.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "files"
+              ],
+              "raw": "{{baseUrl}}/v1/files"
+            }
+          }
+        },
+        {
+          "name": "Get File",
+          "request": {
+            "description": "Retrieve metadata for a single file.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "files",
+                ":file_id"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "user",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/files/:file_id?user=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "file_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete File",
+          "request": {
+            "description": "Soft-delete a file's metadata and remove its bytes from the backend.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "files",
+                ":file_id"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "user",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/files/:file_id?user=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "file_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get File Content",
+          "request": {
+            "description": "Download the raw bytes of a file.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "files",
+                ":file_id",
+                "content"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "user",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/files/:file_id/content?user=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "file_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "files"
+    },
+    {
+      "item": [
+        {
+          "name": "Create Image",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\",\n  \"prompt\": \"string\"\n}"
+            },
+            "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "images",
+                "generations"
+              ],
+              "raw": "{{baseUrl}}/v1/images/generations"
+            }
+          }
+        }
+      ],
+      "name": "images"
+    },
+    {
+      "item": [
+        {
+          "name": "List Keys",
+          "request": {
+            "description": "List all API keys.\n\nRequires master key authentication.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "keys"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/keys?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"user_id\": \"string\"\n}"
+            },
+            "description": "Create a new API key.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, a new user will be created automatically and the key will be associated with it.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "keys"
+              ],
+              "raw": "{{baseUrl}}/v1/keys"
+            }
+          }
+        },
+        {
+          "name": "Get Key",
+          "request": {
+            "description": "Get details of a specific API key.\n\nRequires master key authentication.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/v1/keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {}\n}"
+            },
+            "description": "Update an API key.\n\nRequires master key authentication.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/v1/keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Key",
+          "request": {
+            "description": "Delete (revoke) an API key.\n\nRequires master key authentication.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/v1/keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "keys"
+    },
+    {
+      "item": [
+        {
+          "name": "Create Message",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"anthropic:claude-haiku-4-5\",\n  \"max_tokens\": 1024,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Hello from Otari!\"\n    }\n  ]\n}"
+            },
+            "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode\nrequests resolve credentials via the platform service and (for\nnon-tool-loop requests) get multi-attempt fallback across the resolved\nroute. Tool-loop requests collapse to a single attempt \u2014 once\n``on_first_response`` lock-in plumbing lands across the codebase, a\nfollow-up will enable pre-lock-in fallback for tool-loop requests too.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "messages"
+              ],
+              "raw": "{{baseUrl}}/v1/messages"
+            }
+          }
+        },
+        {
+          "name": "Count Message Tokens",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\",\n  \"messages\": [\n    {}\n  ]\n}"
+            },
+            "description": "Anthropic ``/v1/messages/count_tokens``-compatible endpoint.\n\nReturns ``{\"input_tokens\": N}`` without contacting an upstream provider:\ncounting is local, so there is no budget reservation, pricing, or usage\nlogging. Authentication mirrors :func:`create_message` \u2014 hybrid mode\nresolves the caller's token against the platform, standalone mode validates\nthe API key \u2014 so the endpoint is not an open token-counting oracle.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "messages",
+                "count_tokens"
+              ],
+              "raw": "{{baseUrl}}/v1/messages/count_tokens"
+            }
+          }
+        }
+      ],
+      "name": "messages"
+    },
+    {
+      "item": [
+        {
+          "name": "List Models",
+          "request": {
+            "description": "List all available models.\n\nReturns models auto-discovered from configured providers, enriched with\npricing data from the model_pricing table when available. Models that only\nexist in the pricing table are also included for backward compatibility.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "models"
+              ],
+              "query": [
+                {
+                  "description": "Filter models by provider name",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/models?provider="
+            }
+          }
+        },
+        {
+          "name": "Get Model",
+          "request": {
+            "description": "Get details for a specific model.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "models",
+                ":model_id"
+              ],
+              "raw": "{{baseUrl}}/v1/models/:model_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "model_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "models"
+    },
+    {
+      "item": [
+        {
+          "name": "Create Moderation",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\",\n  \"input\": \"string\"\n}"
+            },
+            "description": "OpenAI-compatible moderations endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "moderations"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "include_raw",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/moderations?include_raw="
+            }
+          }
+        }
+      ],
+      "name": "moderations"
+    },
+    {
+      "item": [
+        {
+          "name": "List Pricing",
+          "request": {
+            "description": "List all model pricing.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "pricing"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/pricing?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Set Pricing",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model_key\": \"string\",\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
+            },
+            "description": "Set or update pricing for a model.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "pricing"
+              ],
+              "raw": "{{baseUrl}}/v1/pricing"
+            }
+          }
+        },
+        {
+          "name": "Get Pricing",
+          "request": {
+            "description": "Get pricing for a specific model as of a timestamp.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "pricing",
+                ":model_key"
+              ],
+              "query": [
+                {
+                  "description": "ISO datetime for effective lookup",
+                  "disabled": true,
+                  "key": "as_of",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/pricing/:model_key?as_of=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "model_key",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Pricing",
+          "request": {
+            "description": "Delete pricing entries for a model.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "pricing",
+                ":model_key"
+              ],
+              "query": [
+                {
+                  "description": "ISO datetime identifying a specific pricing row to delete",
+                  "disabled": true,
+                  "key": "effective_at",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/pricing/:model_key?effective_at=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "model_key",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Pricing History",
+          "request": {
+            "description": "Return the full pricing history for a model.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "pricing",
+                ":model_key",
+                "history"
+              ],
+              "raw": "{{baseUrl}}/v1/pricing/:model_key/history",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "model_key",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "pricing"
+    },
+    {
+      "item": [
+        {
+          "name": "Create Rerank",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\",\n  \"query\": \"string\",\n  \"documents\": [\n    \"string\"\n  ]\n}"
+            },
+            "description": "Rerank documents by relevance to a query.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rerank"
+              ],
+              "raw": "{{baseUrl}}/v1/rerank"
+            }
+          }
+        }
+      ],
+      "name": "rerank"
+    },
+    {
+      "item": [
+        {
+          "name": "Create Response",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"openai:gpt-4o-mini\",\n  \"input\": \"Hello from Otari!\"\n}"
+            },
+            "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode\nrequests resolve credentials via the platform service and (for\nnon-tool-loop requests) get multi-attempt fallback across the resolved\nroute. Tool-loop requests collapse to a single attempt \u2014 once\n``on_first_response`` lock-in plumbing lands across the codebase, a\nfollow-up will enable pre-lock-in fallback for tool-loop requests too.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "responses"
+              ],
+              "raw": "{{baseUrl}}/v1/responses"
+            }
+          }
+        }
+      ],
+      "name": "responses"
+    },
+    {
+      "item": [
+        {
+          "name": "List Usage",
+          "request": {
+            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range and user. Paginated via skip/limit.\nTimestamps accept either ISO 8601 strings or Unix epoch seconds (numeric).",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "usage"
+              ],
+              "query": [
+                {
+                  "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "start_date",
+                  "value": ""
+                },
+                {
+                  "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "end_date",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single user",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&skip=&limit="
+            }
+          }
+        }
+      ],
+      "name": "usage"
+    },
+    {
+      "item": [
+        {
+          "name": "List Users",
+          "request": {
+            "description": "List all users with pagination.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/users?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create User",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"user_id\": \"string\"\n}"
+            },
+            "description": "Create a new user.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users"
+              ],
+              "raw": "{{baseUrl}}/v1/users"
+            }
+          }
+        },
+        {
+          "name": "Get User",
+          "request": {
+            "description": "Get details of a specific user.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                ":user_id"
+              ],
+              "raw": "{{baseUrl}}/v1/users/:user_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "user_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update User",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"alias\": \"string\",\n  \"blocked\": false,\n  \"budget_id\": \"string\",\n  \"metadata\": {}\n}"
+            },
+            "description": "Update a user.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                ":user_id"
+              ],
+              "raw": "{{baseUrl}}/v1/users/:user_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "user_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete User",
+          "request": {
+            "description": "Delete a user.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                ":user_id"
+              ],
+              "raw": "{{baseUrl}}/v1/users/:user_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "user_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get User Usage",
+          "request": {
+            "description": "Get usage history for a specific user.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "users",
+                ":user_id",
+                "usage"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/users/:user_id/usage?skip=&limit=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "user_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "users"
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "type": "string",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "otariKey",
+      "type": "string",
+      "value": ""
+    }
+  ]
+}

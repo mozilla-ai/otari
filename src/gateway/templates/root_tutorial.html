@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Otari</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      :root {
+        --brand: #4e8295;
+        --brand-dark: #3c6678;
+        --brand-tint: #eaf1f3;
+        --ink: #14242c;
+        --muted: #5b6b73;
+        --line: #dbe5e8;
+        --surface: #ffffff;
+        --code-bg: #15242b;
+        --code-fg: #e7eef0;
+        --code-muted: #8fb0ba;
+        --radius: 14px;
+        --shadow: 0 1px 2px rgba(20, 36, 44, 0.04), 0 12px 32px -12px rgba(20, 36, 44, 0.18);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        color: var(--ink);
+        background:
+          radial-gradient(1100px 520px at 50% -8%, rgba(78, 130, 149, 0.16), transparent 60%),
+          linear-gradient(180deg, #f6f9fa 0%, #eef3f5 100%);
+        background-attachment: fixed;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      a {
+        color: var(--brand-dark);
+      }
+      header.nav {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 22px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .brand svg {
+        height: 30px;
+        width: auto;
+        display: block;
+      }
+      .nav-links {
+        display: flex;
+        gap: 8px;
+      }
+      .nav-links a {
+        font-size: 14px;
+        font-weight: 600;
+        text-decoration: none;
+        color: var(--muted);
+        padding: 7px 12px;
+        border-radius: 9px;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      .nav-links a:hover {
+        color: var(--ink);
+        background: rgba(78, 130, 149, 0.1);
+      }
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 8px 24px 72px;
+      }
+      .hero {
+        padding: 28px 0 16px;
+      }
+      .kicker {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--brand-dark);
+        background: var(--brand-tint);
+        border: 1px solid var(--line);
+        padding: 6px 12px;
+        border-radius: 999px;
+      }
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #46b07a;
+        box-shadow: 0 0 0 3px rgba(70, 176, 122, 0.18);
+      }
+      h1 {
+        font-size: clamp(30px, 5vw, 42px);
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+        margin: 18px 0 12px;
+      }
+      .lede {
+        font-size: 18px;
+        color: var(--muted);
+        max-width: 60ch;
+        margin: 0 0 26px;
+      }
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 15px;
+        font-weight: 600;
+        text-decoration: none;
+        padding: 11px 18px;
+        border-radius: 11px;
+        transition: transform 0.06s ease, box-shadow 0.15s ease, background 0.15s ease;
+      }
+      .btn-primary {
+        color: #fff;
+        background: linear-gradient(180deg, var(--brand) 0%, var(--brand-dark) 100%);
+        box-shadow: 0 8px 20px -8px rgba(60, 102, 120, 0.7);
+      }
+      .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 12px 24px -8px rgba(60, 102, 120, 0.75);
+      }
+      .btn-ghost {
+        color: var(--ink);
+        background: var(--surface);
+        border: 1px solid var(--line);
+      }
+      .btn-ghost:hover {
+        border-color: var(--brand);
+        color: var(--brand-dark);
+      }
+      .steps {
+        margin-top: 44px;
+        display: grid;
+        gap: 18px;
+      }
+      .section-label {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 4px;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+      .card-head {
+        display: flex;
+        align-items: flex-start;
+        gap: 14px;
+        padding: 18px 20px 12px;
+      }
+      .step-num {
+        flex: none;
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        display: grid;
+        place-items: center;
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--brand-dark);
+        background: var(--brand-tint);
+        border: 1px solid var(--line);
+      }
+      .card-head h3 {
+        margin: 3px 0 2px;
+        font-size: 17px;
+      }
+      .card-head p {
+        margin: 0;
+        font-size: 14px;
+        color: var(--muted);
+      }
+      .card-head code {
+        background: var(--brand-tint);
+        color: var(--brand-dark);
+        padding: 1px 6px;
+        border-radius: 6px;
+        font-size: 0.86em;
+      }
+      figure.code {
+        margin: 0;
+        background: var(--code-bg);
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      figcaption {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .traffic {
+        display: inline-flex;
+        gap: 6px;
+        margin-right: 4px;
+      }
+      .traffic i {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: block;
+      }
+      .traffic i:nth-child(1) { background: #ff5f57; }
+      .traffic i:nth-child(2) { background: #febc2e; }
+      .traffic i:nth-child(3) { background: #28c840; }
+      .cap-label {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        color: var(--code-muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .copy {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--code-muted);
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        padding: 5px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+      }
+      .copy:hover {
+        color: #fff;
+        background: rgba(255, 255, 255, 0.12);
+      }
+      .copy.ok {
+        color: #7ee2a8;
+        border-color: rgba(126, 226, 168, 0.5);
+      }
+      pre {
+        margin: 0;
+        padding: 16px 18px;
+        overflow-x: auto;
+      }
+      pre code {
+        color: var(--code-fg);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 13.5px;
+        line-height: 1.65;
+      }
+      .note {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        margin-top: 28px;
+        padding: 16px 18px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-left: 3px solid var(--brand);
+        border-radius: 12px;
+        font-size: 15px;
+        color: var(--ink);
+      }
+      .note code {
+        background: var(--brand-tint);
+        color: var(--brand-dark);
+        padding: 1px 6px;
+        border-radius: 6px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.88em;
+      }
+      .note svg {
+        flex: none;
+        margin-top: 2px;
+        color: var(--brand);
+      }
+      footer {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 0 24px 48px;
+        color: var(--muted);
+        font-size: 14px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 16px;
+        align-items: center;
+      }
+      footer a {
+        color: var(--muted);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      footer a:hover {
+        color: var(--brand-dark);
+      }
+      footer .sep {
+        opacity: 0.4;
+      }
+      @media (max-width: 560px) {
+        .nav-links a:not(.gh) { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="nav">
+      <span class="brand" aria-label="Otari">
+        <svg viewBox="0 0 882 250" role="img" aria-hidden="true" fill="#4e8295" xmlns="http://www.w3.org/2000/svg">
+          <path d="M193.598 0.0195312C219.712 -0.0192587 240.934 21.1417 240.935 47.2881V134.572C240.934 142.999
+            239.806 151.163 237.693 158.921C236.494 163.324 234.977 167.597 233.17 171.713C223.865 192.902 206.842
+            209.935 185.658 219.252C181.625 221.026 177.441 222.52 173.131 223.71C167.946 225.141 162.578 226.132
+            157.07 226.641C158.32 224.831 159.506 222.954 160.625 221.016L163.959 215.241C164.018 215.108 164.08
+            214.973 164.142 214.835C164.169 214.774 164.196 214.712 164.224 214.65C164.261 214.567 164.299 214.482
+            164.338 214.396C164.706 213.589 165.069 212.785 165.424 211.989C167.697 206.885 169.694 202.029 171.446
+            197.474C180.615 173.642 183.065 158.027 183.087 157.885L165.645 187.422L164.75 188.922L149.823
+            214.778C149.529 215.288 149.221 215.805 148.915 216.305C148.718 216.627 148.517 216.949 148.315
+            217.268C146.076 220.799 143.563 224.061 140.818 227.041C136.254 231.996 131.052 236.174 125.417
+            239.517C104.732 251.788 78.201 252.828 55.8896 239.947L56.1377 239.517L82.9053 193.153C86.7745 186.452
+            91.6032 180.647 97.1152 175.813C95.9976 175.929 85.3616 177.967 56.6123 213.759L56.5801 213.802L56.4248
+            213.993L56.4385 213.663C25.1498 196.444 3.2838 164.217 0.553711 126.677C0.188854 124.473 3.79607e-05
+            122.209 0 119.901V26.5986C22.7381 26.5986 41.1708 45.0304 41.1709 67.7686C41.171 45.0304 59.5949 26.5986
+            82.333 26.5986V77.7139C82.3328 88.7841 77.9626 98.8355 70.8545 106.234L69.5762 107.505C63.0535 113.728
+            54.4913 117.833 44.9932 118.71H124.948L154.895 66.7432C125.874 59.4372 104.39 33.1686 104.389
+            1.88086V0L193.598 0.0195312ZM241.987 182.229L242.71 183.507L242.704 183.529C243.272 184.418 243.832
+            185.319 244.364 186.241L271.383 233.036C246.73 247.269 216.925 244.503 195.547 228.374C195.685 228.304
+            195.826 228.234 195.964 228.164L195.489 227.837C195.523 227.819 219.193 215.667 229.097 191.177C232.122
+            183.696 233.817 176.917 234.618 173.188L235.064 170.966C235.157 170.462 235.199 170.185 235.201
+            170.173L241.987 182.229ZM402.051 35.9766C419.449 35.9766 434.096 39.5275 445.991 46.6289C457.886 53.5529
+            466.941 64.0281 473.155 78.0537C479.547 91.9017 482.742 109.39 482.742 130.517C482.742 151.466 479.635
+            168.954 473.421 182.979C467.207 197.005 458.064 207.568 445.991 214.67C434.096 221.594 419.449 225.056
+            402.051 225.056C384.652 225.056 369.915 221.594 357.843 214.67C345.948 207.568 336.804 197.005 330.413
+            182.979C324.199 168.954 321.093 151.466 321.093 130.517C321.093 109.39 324.199 91.9017 330.413
+            78.0537C336.804 64.0281 346.037 53.5529 358.109 46.6289C370.182 39.5273 384.829 35.9766 402.051
+            35.9766ZM646.96 77.5205C665.956 77.5206 680.337 82.0481 690.102 91.1025C699.866 100.157 704.749 113.384
+            704.749 130.782V197.626H720.461V222.393H696.759C682.556 222.392 675.454 215.291 675.454
+            201.088V196.028H667.731C664.891 205.97 660.275 213.338 653.884 218.132C647.67 222.748 639.059 225.056
+            628.052 225.056C614.381 225.056 603.64 221.505 595.828 214.403C588.194 207.302 584.377 197.36 584.377
+            184.577C584.377 171.794 588.549 161.763 596.894 154.484C605.238 147.205 617.577 142.678 633.91
+            140.902L670.928 137.174V131.315C670.928 121.728 668.885 114.804 664.802 110.543C660.896 106.282 654.771
+            104.151 646.427 104.151C640.391 104.151 635.509 105.128 631.78 107.081C628.23 108.856 625.566 111.164
+            623.791 114.005C622.193 116.846 621.394 119.953 621.394 123.326V125.456H587.307C589.792 109.3 596.006
+            97.3166 605.948 89.5049C616.068 81.5157 629.739 77.5205 646.96 77.5205ZM880.252
+            222.394H846.431V104.951H829.121V80.1846H880.252V222.394ZM545.966
+            80.1836H574.728V104.95H545.966V197.626H574.728V222.393H533.449C519.246 222.393 512.145 215.202 512.145
+            200.821V104.95H489.774V80.1836H512.145L523.596 51.6885H545.966V80.1836ZM826.381 104.951H795.489C786.612
+            104.951 780.043 107.436 775.782 112.407C771.699 117.378 769.657 125.19 769.657
+            135.843V222.393H735.836V104.951H719.857V80.1836H764.863V107.614H773.119C775.96 97.6721 780.309 90.3033
+            786.168 85.5098C792.027 80.7162 799.839 78.3203 809.604 78.3203H826.381V104.951ZM644.03 161.675C635.153
+            162.385 628.761 164.248 624.855 167.267C620.95 170.107 618.997 174.28 618.997 179.783V182.446C618.997
+            187.95 621.039 192.122 625.122 194.963C629.383 197.804 635.331 199.224 642.965 199.224C652.197 199.224
+            659.121 197.271 663.737 193.365C668.531 189.459 670.928 183.512 670.928 175.522V159.012L644.03
+            161.675ZM402.051 63.4062C386.782 63.4062 375.597 67.6676 368.495 76.1895C361.394 84.5338 357.843 97.6715
+            357.843 115.603V145.43C357.843 163.361 361.394 176.587 368.495 185.109C375.774 193.454 386.96 197.626
+            402.051 197.626C417.142 197.626 428.237 193.454 435.339 185.109C442.44 176.587 445.991 163.361 445.991
+            145.43V115.603C445.991 97.6713 442.44 84.5337 435.339 76.1895C428.237 67.6676 417.141 63.4063 402.051
+            63.4062ZM881.317 67.4014H844.301V38.6396H881.317V67.4014ZM171.211 12.0586C165.466 12.0595 160.811 16.7171
+            160.811 22.4619C160.811 28.2064 165.466 32.8624 171.211 32.8633C176.956 32.8633 181.615 28.207 181.615
+            22.4619C181.615 16.7165 176.956 12.0586 171.211 12.0586Z" />
+        </svg>
+      </span>
+      <nav class="nav-links">
+        <a href="/docs">API docs</a>
+        <a href="https://otari.ai">otari.ai</a>
+        <a class="gh" href="https://github.com/mozilla-ai/otari">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <span class="kicker"><span class="status-dot"></span>Otari</span>
+        <h1>Your gateway is running.</h1>
+        <p class="lede">
+          One OpenAI-compatible endpoint in front of 40+ providers, with API key management,
+          budget enforcement, and usage tracking. Point any OpenAI client at it and make your first request.
+        </p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="QUICKSTART_URL">
+            Otari Quickstart
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+              stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="/docs">Open API reference</a>
+        </div>
+      </section>
+
+      <p class="note">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12
+          8h.01"/></svg>
+        <span>
+          On first startup, Otari prints a <strong>bootstrap API key</strong> in the logs.
+          Export it as <code>OTARI_API_KEY</code> and use that value in your client.
+        </span>
+      </p>
+
+      <section class="steps">
+        <p class="section-label">Make your first request</p>
+
+        <article class="card">
+          <div class="card-head">
+            <span class="step-num">1</span>
+            <div>
+              <h3>Export your key</h3>
+              <p>Copy the bootstrap key from the logs into your environment.</p>
+            </div>
+          </div>
+          <figure class="code">
+            <figcaption>
+              <span class="traffic"><i></i><i></i><i></i></span>
+              <span class="cap-label">bash</span>
+              <button class="copy" type="button">Copy</button>
+            </figcaption>
+            <pre><code>export OTARI_API_KEY=YOUR_BOOTSTRAP_OTARI_KEY</code></pre>
+          </figure>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <span class="step-num">2</span>
+            <div>
+              <h3>Install a client</h3>
+              <p>Any OpenAI-compatible SDK works. Here we use the official Python client.</p>
+            </div>
+          </div>
+          <figure class="code">
+            <figcaption>
+              <span class="traffic"><i></i><i></i><i></i></span>
+              <span class="cap-label">bash</span>
+              <button class="copy" type="button">Copy</button>
+            </figcaption>
+            <pre><code>pip install openai</code></pre>
+          </figure>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <span class="step-num">3</span>
+            <div>
+              <h3>Send a chat completion</h3>
+              <p>Point <code>base_url</code> at Otari and call any model as <code>provider:model</code>.</p>
+            </div>
+          </div>
+          <figure class="code">
+            <figcaption>
+              <span class="traffic"><i></i><i></i><i></i></span>
+              <span class="cap-label">python</span>
+              <button class="copy" type="button">Copy</button>
+            </figcaption>
+            <pre><code>import os
+
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=os.environ["OTARI_API_KEY"],
+    base_url="http://localhost:8000/v1",
+)
+
+response = client.chat.completions.create(
+    model="openai:gpt-4o",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+
+print(response.choices[0].message.content)</code></pre>
+          </figure>
+        </article>
+      </section>
+    </main>
+
+    <footer>
+      <span>Otari, an open-source LLM gateway by mozilla.ai.</span>
+      <span class="sep">&middot;</span>
+      <a href="QUICKSTART_URL">Quickstart</a>
+      <a href="/docs">API docs</a>
+      <a href="https://github.com/mozilla-ai/otari">GitHub</a>
+    </footer>
+
+    <script>
+      document.querySelectorAll(".copy").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          var code = btn.closest(".code").querySelector("code").innerText;
+          navigator.clipboard.writeText(code).then(function () {
+            btn.textContent = "Copied";
+            btn.classList.add("ok");
+            setTimeout(function () {
+              btn.textContent = "Copy";
+              btn.classList.remove("ok");
+            }, 1500);
+          });
+        });
+      });
+    </script>
+  </body>
+</html>

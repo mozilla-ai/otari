@@ -4,7 +4,7 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
-## [Unreleased]
+## [0.1.0](https://github.com/mozilla-ai/otari/releases/tag/v0.1.0) - 2026-06-25
 
 
 
@@ -65,6 +65,16 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 - **sdk-codegen:** Type response schemas in serialization mode so reasoning is a string in [#145](https://github.com/mozilla-ai/otari/pull/145) by [@njbrake](https://github.com/njbrake) ([`55d80f2`](https://github.com/mozilla-ai/otari/commit/55d80f2cdb736e5bd2a9db1867e40e1882ca53a6))
 - **files:** Bill vision side-calls, harden delete + retention docs by [@khaledosman](https://github.com/khaledosman) ([`d849cfe`](https://github.com/mozilla-ai/otari/commit/d849cfe8dd380c9360992855d909214f5c7073af))
 - **files:** Address review (bare-string Responses input, vision token cap, epoch skew) by [@khaledosman](https://github.com/khaledosman) ([`34e642f`](https://github.com/mozilla-ai/otari/commit/34e642fcaf2962d51008308a55f52052e636ffa0))
+- **docker:** Keep python 3.14, bump onnxruntime instead of downgrading in [#159](https://github.com/mozilla-ai/otari/pull/159) by [@njbrake](https://github.com/njbrake) ([`a83442a`](https://github.com/mozilla-ai/otari/commit/a83442ab0c16d0a3c2e341e2b6700d656ee05446))
+- **codegen:** Name free-form-object union arrays so Go generates valid syntax in [#166](https://github.com/mozilla-ai/otari/pull/166) by [@njbrake](https://github.com/njbrake) ([`ea973fe`](https://github.com/mozilla-ai/otari/commit/ea973feec324ae944f98258940debf1abea8931d))
+- **codegen:** Map bare empty-schema union members to FreeFormObject in [#180](https://github.com/mozilla-ai/otari/pull/180) by [@njbrake](https://github.com/njbrake) ([`69af27e`](https://github.com/mozilla-ai/otari/commit/69af27ecce4e3a0b87369e35752ad7bfb4c7152a))
+- **usage:** Treat 402 from the usage-report endpoint as non-retryable by [@khaledosman](https://github.com/khaledosman) ([`3f9c767`](https://github.com/mozilla-ai/otari/commit/3f9c767889d8c1735ee6e37df0631b0c4eea4346))
+- **fallback:** Treat 404/405/409/410 as retryable so model-unavailable falls through by [@agpituk](https://github.com/agpituk) ([`670165d`](https://github.com/mozilla-ai/otari/commit/670165d6bc785d171ca4886f125d774c732ff49d))
+- **fallback:** Report each failed attempt when the whole chain is exhausted by [@agpituk](https://github.com/agpituk) ([`039ce8c`](https://github.com/mozilla-ai/otari/commit/039ce8c7e15bfc09209c13b1d6482382a1c24a28))
+- **fallback:** Log dropped inline usage-report failures; drop em dashes in [#174](https://github.com/mozilla-ai/otari/pull/174) by [@khaledosman](https://github.com/khaledosman) ([`14610be`](https://github.com/mozilla-ai/otari/commit/14610be4a1e985524fb47fd3310ee268ac8f6b6a))
+- **fallback:** Report each failed attempt when a streaming chain is exhausted by [@agpituk](https://github.com/agpituk) ([`98be421`](https://github.com/mozilla-ai/otari/commit/98be42158e93ec8531e92c5e0fa72a6a6d4372c2))
+- **fallback:** Don't block cancellation or leak the backend stack on all-failed stream in [#176](https://github.com/mozilla-ai/otari/pull/176) by [@khaledosman](https://github.com/khaledosman) ([`ed0978b`](https://github.com/mozilla-ai/otari/commit/ed0978bd3a04f8ee33773a1d400b6a8c1587b7e9))
+- **fallback:** Bound the inline usage-report flush; dedupe all-failed test by [@khaledosman](https://github.com/khaledosman) ([`419e19b`](https://github.com/mozilla-ai/otari/commit/419e19b8da444c5c87c5e0cd17b64977ca416d54))
 
 
 ### Features
@@ -107,6 +117,16 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 - **sdk-codegen:** Coordinate SDK releases with stamped spec version and staleness alert in [#137](https://github.com/mozilla-ai/otari/pull/137) by [@njbrake](https://github.com/njbrake) ([`3996758`](https://github.com/mozilla-ai/otari/commit/39967588208d6884f4569511237d9bd2e836df24))
 - **web-search:** Per-workspace web-search policy via platform resolve in [#144](https://github.com/mozilla-ai/otari/pull/144) by [@agpituk](https://github.com/agpituk) ([`a2fc5c8`](https://github.com/mozilla-ai/otari/commit/a2fc5c8bdfe0e196dadbda8d4fd14ee3af3f6428))
 - **files:** File uploads + document understanding for local models by [@khaledosman](https://github.com/khaledosman) ([`56ba31e`](https://github.com/mozilla-ai/otari/commit/56ba31e47b48d515445466ff6d7db7d7ec2f90f3))
+- **api:** Derive request schemas from any-llm Params to stop param drift in [#160](https://github.com/mozilla-ai/otari/pull/160) by [@njbrake](https://github.com/njbrake) ([`d3948a1`](https://github.com/mozilla-ai/otari/commit/d3948a1ddea7140cfb9e2b040cd7b9a7be19becf))
+- **web-search:** Forward X-Gateway-Token to the search backend in [#164](https://github.com/mozilla-ai/otari/pull/164) by [@agpituk](https://github.com/agpituk) ([`2ec9053`](https://github.com/mozilla-ai/otari/commit/2ec9053b5be5a8408a42b6f38a2bb5b88cfa5cdc))
+- Generate the changelog and release notes from commits with git-cliff in [#162](https://github.com/mozilla-ai/otari/pull/162) by [@njbrake](https://github.com/njbrake) ([`c2d3eb2`](https://github.com/mozilla-ai/otari/commit/c2d3eb2142ec68f807834d2087961b154d1a27a3))
+- **codegen:** Type the image-generation response from any-llm ImagesResponse in [#178](https://github.com/mozilla-ai/otari/pull/178) by [@njbrake](https://github.com/njbrake) ([`90f4523`](https://github.com/mozilla-ai/otari/commit/90f4523bd862af267a157a0fc944d938479ad192))
+- **sandbox:** Forward caller token to the sandbox backend as Bearer auth in [#182](https://github.com/mozilla-ai/otari/pull/182) by [@agpituk](https://github.com/agpituk) ([`a74c8bf`](https://github.com/mozilla-ai/otari/commit/a74c8bfafd0d4cc9a85772c684a45befe64a209f))
+- **usage:** Forward provider cached-token counts in usage reports in [#196](https://github.com/mozilla-ai/otari/pull/196) by [@tbille](https://github.com/tbille) ([`1b6a80e`](https://github.com/mozilla-ai/otari/commit/1b6a80e6803d86464b7bde64270e3e644110a95c))
+- **gateway:** Classify upstream provider errors into specific safe responses in [#197](https://github.com/mozilla-ai/otari/pull/197) by [@khaledosman](https://github.com/khaledosman) ([`01df970`](https://github.com/mozilla-ai/otari/commit/01df97061d0f0a37ca8e286f000f52d4a7b4031f))
+- **deploy:** Add Deploy on Railway template scaffold and button in [#210](https://github.com/mozilla-ai/otari/pull/210) by [@njbrake](https://github.com/njbrake) ([`528c9be`](https://github.com/mozilla-ai/otari/commit/528c9bebea0813d3368254ad9bc982070ac05e54))
+- **config:** Support full provider/pricing config via environment in [#211](https://github.com/mozilla-ai/otari/pull/211) by [@njbrake](https://github.com/njbrake) ([`022a8dc`](https://github.com/mozilla-ai/otari/commit/022a8dced6b64ba4bd3d16d31c955626c322c8bb))
+- **pricing:** Add genai-prices default pricing fallback in [#201](https://github.com/mozilla-ai/otari/pull/201) by [@njbrake](https://github.com/njbrake) ([`9880f58`](https://github.com/mozilla-ai/otari/commit/9880f582f87f04d18d361195fbfc1ea8b806f6d1))
 
 
 ### Other
@@ -177,11 +197,11 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### New Contributors
 
-- [@njbrake](https://github.com/njbrake) made their first contribution in [#142](https://github.com/mozilla-ai/otari/pull/142)
-- [@khaledosman](https://github.com/khaledosman) made their first contribution in [#91](https://github.com/mozilla-ai/otari/pull/91)
-- [@agpituk](https://github.com/agpituk) made their first contribution in [#144](https://github.com/mozilla-ai/otari/pull/144)
+- [@khaledosman](https://github.com/khaledosman) made their first contribution in [#212](https://github.com/mozilla-ai/otari/pull/212)
+- [@njbrake](https://github.com/njbrake) made their first contribution in [#201](https://github.com/mozilla-ai/otari/pull/201)
+- [@dependabot[bot]](https://github.com/dependabot[bot]) made their first contribution in [#193](https://github.com/mozilla-ai/otari/pull/193)
+- [@tbille](https://github.com/tbille) made their first contribution in [#196](https://github.com/mozilla-ai/otari/pull/196)
 - [@angpt](https://github.com/angpt) made their first contribution in [#119](https://github.com/mozilla-ai/otari/pull/119)
-- [@tbille](https://github.com/tbille) made their first contribution in [#93](https://github.com/mozilla-ai/otari/pull/93)
 - [@macaab26](https://github.com/macaab26) made their first contribution in [#85](https://github.com/mozilla-ai/otari/pull/85)
 
 
