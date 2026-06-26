@@ -1,0 +1,170 @@
+"""Unit tests for model aliases (display name -> target selector)."""
+
+from __future__ import annotations
+
+import pytest
+from any_llm import LLMProvider
+
+from gateway.core.config import GatewayConfig
+from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.streaming import relabel_model
+
+# ---------------------------------------------------------------------------
+# config.resolve_alias
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_alias_returns_target() -> None:
+    config = GatewayConfig(aliases={"myopusmodel": "anthropic:claude-opus-4"})
+    assert config.resolve_alias("myopusmodel") == "anthropic:claude-opus-4"
+
+
+def test_resolve_alias_unknown_returns_none() -> None:
+    assert GatewayConfig().resolve_alias("nope") is None
+
+
+def test_resolve_alias_empty_target_returns_none() -> None:
+    assert GatewayConfig(aliases={"x": ""}).resolve_alias("x") is None
+
+
+# ---------------------------------------------------------------------------
+# config.validate_aliases
+# ---------------------------------------------------------------------------
+
+
+def test_validate_accepts_provider_target() -> None:
+    GatewayConfig(aliases={"fastmodel": "openai:gpt-5"}).validate_aliases()  # no raise
+
+
+def test_validate_accepts_named_instance_target() -> None:
+    config = GatewayConfig(
+        providers={"home_lab": {"provider_type": "openai", "api_base": "http://x/v1"}},
+        aliases={"housemodel": "home_lab:qwen3"},
+    )
+    config.validate_aliases()  # no raise
+
+
+def test_validate_rejects_empty_target() -> None:
+    with pytest.raises(ValueError, match="non-empty target"):
+        GatewayConfig(aliases={"a": ""}).validate_aliases()
+
+
+def test_validate_rejects_target_without_prefix() -> None:
+    with pytest.raises(ValueError, match="instance:model"):
+        GatewayConfig(aliases={"a": "gpt-5"}).validate_aliases()
+
+
+def test_validate_rejects_unknown_provider_prefix() -> None:
+    with pytest.raises(ValueError, match="neither a configured"):
+        GatewayConfig(aliases={"a": "not_a_provider:model"}).validate_aliases()
+
+
+def test_validate_rejects_collision_with_provider_instance() -> None:
+    config = GatewayConfig(
+        providers={"openai": {"api_key": "sk"}},
+        aliases={"openai": "anthropic:claude-opus-4"},
+    )
+    with pytest.raises(ValueError, match="collides with a configured provider"):
+        config.validate_aliases()
+
+
+def test_validate_rejects_alias_chaining() -> None:
+    config = GatewayConfig(
+        aliases={"a": "anthropic:claude-opus-4", "b": "a:whatever"},
+    )
+    with pytest.raises(ValueError, match="alias chaining is not supported"):
+        config.validate_aliases()
+
+
+# ---------------------------------------------------------------------------
+# resolve_provider_selector with aliases
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_alias_to_provider_model() -> None:
+    config = GatewayConfig(
+        providers={"anthropic": {"api_key": "sk-ant"}},
+        aliases={"myopusmodel": "anthropic:claude-opus-4"},
+    )
+    resolved = resolve_provider_selector(config, "myopusmodel")
+    # Dispatch + billing target the real model...
+    assert resolved.provider == LLMProvider.ANTHROPIC
+    assert resolved.model == "claude-opus-4"
+    assert resolved.instance == "anthropic"
+    assert resolved.dispatch_model == "anthropic:claude-opus-4"
+    assert resolved.kwargs["api_key"] == "sk-ant"
+    # ...but the alias is carried for response relabeling.
+    assert resolved.alias == "myopusmodel"
+
+
+def test_resolve_alias_to_named_instance() -> None:
+    config = GatewayConfig(
+        providers={"home_lab": {"provider_type": "openai", "api_base": "http://x/v1", "api_key": "ht"}},
+        aliases={"housemodel": "home_lab:qwen3"},
+    )
+    resolved = resolve_provider_selector(config, "housemodel")
+    assert resolved.provider == LLMProvider.OPENAI
+    assert resolved.instance == "home_lab"
+    assert resolved.dispatch_model == "openai:qwen3"
+    assert resolved.kwargs["api_base"] == "http://x/v1"
+    assert resolved.alias == "housemodel"
+
+
+def test_resolve_non_alias_has_no_alias() -> None:
+    config = GatewayConfig(
+        providers={"openai": {"api_key": "sk"}},
+        aliases={"fastmodel": "openai:gpt-5"},
+    )
+    resolved = resolve_provider_selector(config, "openai:gpt-4o")
+    assert resolved.alias is None
+
+
+# ---------------------------------------------------------------------------
+# relabel_model
+# ---------------------------------------------------------------------------
+
+
+class _HasModel:
+    def __init__(self, model: str) -> None:
+        self.model = model
+
+
+class _MessageEvent:
+    """Mimics an Anthropic ``message_start`` event (nested ``.message.model``)."""
+
+    def __init__(self, model: str) -> None:
+        self.message = _HasModel(model)
+
+
+class _ResponseEvent:
+    """Mimics a Responses stream event (nested ``.response.model``)."""
+
+    def __init__(self, model: str) -> None:
+        self.response = _HasModel(model)
+
+
+def test_relabel_top_level_model() -> None:
+    obj = _HasModel("anthropic:claude-opus-4")
+    relabel_model(obj, "myopusmodel")
+    assert obj.model == "myopusmodel"
+
+
+def test_relabel_nested_message_model() -> None:
+    chunk = _MessageEvent("claude-opus-4")
+    relabel_model(chunk, "myopusmodel")
+    assert chunk.message.model == "myopusmodel"
+
+
+def test_relabel_nested_response_model() -> None:
+    event = _ResponseEvent("gpt-5")
+    relabel_model(event, "fastmodel")
+    assert event.response.model == "fastmodel"
+
+
+def test_relabel_no_model_field_is_noop() -> None:
+    class _Bare:
+        pass
+
+    obj = _Bare()
+    relabel_model(obj, "fastmodel")  # must not raise
+    assert not hasattr(obj, "model")

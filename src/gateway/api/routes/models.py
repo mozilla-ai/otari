@@ -13,8 +13,14 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing
 from gateway.services.model_discovery_service import discover_all_models, get_model_cache
+from gateway.services.provider_kwargs import normalize_pricing_key
 
 router = APIRouter(prefix="/v1", tags=["models"])
+
+# ``owned_by`` reported for alias entries. Aliases intentionally hide the
+# underlying provider, so the gateway itself is named as the owner rather than
+# the real upstream.
+ALIAS_OWNED_BY = "otari"
 
 
 class ModelPricingInfo(BaseModel):
@@ -57,6 +63,28 @@ def _model_from_pricing(pricing: ModelPricing) -> ModelObject:
     )
 
 
+def _alias_model(config: GatewayConfig, alias: str, pricing_lookup: dict[str, ModelPricing]) -> ModelObject:
+    """Build a ModelObject for a configured alias.
+
+    The alias id is what the caller sees; pricing is looked up from the resolved
+    target's canonical key so an alias shows the real model's price without
+    revealing the provider/model behind it.
+    """
+    target = config.aliases[alias]
+    pricing = pricing_lookup.get(normalize_pricing_key(config, target))
+    return ModelObject(
+        id=alias,
+        created=0,
+        owned_by=ALIAS_OWNED_BY,
+        pricing=ModelPricingInfo(
+            input_price_per_million=pricing.input_price_per_million,
+            output_price_per_million=pricing.output_price_per_million,
+        )
+        if pricing
+        else None,
+    )
+
+
 async def _get_pricing_map(db: AsyncSession, provider_filter: str | None = None) -> dict[str, ModelPricing]:
     """Load latest pricing per model_key, optionally filtered by provider prefix."""
     latest_effective = (
@@ -96,6 +124,9 @@ async def list_models(
     exist in the pricing table are also included for backward compatibility.
     """
     pricing_map = await _get_pricing_map(db, provider_filter=provider)
+    # Snapshot before phase 1 mutates ``pricing_map`` (it pops matched keys), so
+    # alias pricing can still be looked up by the target's canonical key.
+    pricing_lookup = dict(pricing_map)
 
     merged: dict[str, ModelObject] = {}
 
@@ -127,6 +158,13 @@ async def list_models(
         if model_key not in merged:
             merged[model_key] = _model_from_pricing(pricing)
 
+    # Phase 3: configured aliases. An alias is a display name, not a provider, so
+    # it is only listed for the unfiltered listing; a ``?provider=`` filter asks
+    # for one provider's real models and must not leak the alias mapping.
+    if provider is None:
+        for alias in config.aliases:
+            merged[alias] = _alias_model(config, alias, pricing_lookup)
+
     sorted_models = sorted(merged.values(), key=lambda m: m.id)
     return ModelListResponse(data=sorted_models)
 
@@ -138,6 +176,12 @@ async def get_model(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ModelObject:
     """Get details for a specific model."""
+    # A configured alias resolves to its own entry, with pricing read from the
+    # resolved target so the underlying provider/model stays hidden.
+    if model_id in config.aliases:
+        pricing_lookup = await _get_pricing_map(db)
+        return _alias_model(config, model_id, pricing_lookup)
+
     # Check the pricing table first.
     stmt = (
         select(ModelPricing)

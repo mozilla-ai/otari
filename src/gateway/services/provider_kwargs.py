@@ -82,6 +82,13 @@ class ResolvedProvider:
     """Bare model name (no instance/provider prefix)."""
     kwargs: dict[str, Any]
     """Credentials / client args for the any-llm call."""
+    alias: str | None = None
+    """Display name the caller used when the selector was a configured alias.
+
+    ``None`` for an ordinary selector. When set, response ``model`` fields are
+    relabeled to this so the underlying provider/model stays hidden; pricing,
+    budgets, and usage logs still key on the resolved target.
+    """
 
     @property
     def dispatch_model(self) -> str:
@@ -116,11 +123,18 @@ def resolve_provider_selector(config: GatewayConfig, model_selector: str) -> Res
     selector is split by any-llm directly, so unconfigured selectors and the
     legacy ``provider/model`` form keep working exactly as before.
 
+    A selector that names a configured alias is first substituted with the
+    alias target, then resolved as usual; the resulting ``ResolvedProvider``
+    carries ``alias`` so response ``model`` fields can be relabeled.
+
     Raises ``ValueError`` / ``AnyLLMError`` (from any-llm) for a selector that
     names neither a configured instance nor a known provider, mirroring the
     prior ``AnyLLM.split_model_provider`` behavior.
     """
-    split = split_selector(model_selector)
+    alias = config.resolve_alias(model_selector)
+    selector = alias if alias is not None else model_selector
+
+    split = split_selector(selector)
     if split is not None and split[0] in config.providers:
         instance, model = split
         provider = LLMProvider(config.provider_instance_type(instance))
@@ -129,14 +143,16 @@ def resolve_provider_selector(config: GatewayConfig, model_selector: str) -> Res
             provider=provider,
             model=model,
             kwargs=get_provider_kwargs(config, provider, instance=instance),
+            alias=model_selector if alias is not None else None,
         )
 
-    provider, model = AnyLLM.split_model_provider(model_selector)
+    provider, model = AnyLLM.split_model_provider(selector)
     return ResolvedProvider(
         instance=provider.value,
         provider=provider,
         model=model,
         kwargs=get_provider_kwargs(config, provider, instance=provider.value),
+        alias=model_selector if alias is not None else None,
     )
 
 

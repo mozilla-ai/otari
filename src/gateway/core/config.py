@@ -143,6 +143,16 @@ class GatewayConfig(BaseSettings):
             "list declares model ids for instances whose backend has no /v1/models."
         ),
     )
+    aliases: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Model name aliases (display name -> target selector). A request naming an alias "
+            "is routed to its target ('instance:model' or 'provider:model'), and the alias is "
+            "what users see in GET /v1/models and in response 'model' fields, so the underlying "
+            "provider/model can stay hidden. Pricing, budgets, and usage logs key on the resolved "
+            "target. Standalone-mode only (hybrid resolves models against the platform)."
+        ),
+    )
     pricing: dict[str, PricingConfig] = Field(
         default_factory=dict,
         description=(
@@ -324,6 +334,56 @@ class GatewayConfig(BaseSettings):
                 return PROVIDER_TYPE_ALIASES.get(declared, declared)
         return instance
 
+    def resolve_alias(self, name: str) -> str | None:
+        """Return the target selector for a configured alias, or None.
+
+        The alias is a display name (e.g. ``myopusmodel``) that maps to a real
+        selector (``instance:model`` / ``provider:model``). Returns ``None`` when
+        ``name`` is not a configured alias, so callers fall through to ordinary
+        selector resolution.
+        """
+        target = self.aliases.get(name)
+        return target if isinstance(target, str) and target else None
+
+    def validate_aliases(self) -> None:
+        """Validate the ``aliases`` map at startup so misconfig fails fast.
+
+        Each alias must name a non-empty target selector with a usable
+        ``instance``/``provider`` prefix; the prefix must resolve to a configured
+        provider instance or a known any-llm implementation. An alias name must
+        not collide with a configured provider instance (that would be ambiguous)
+        and its target must not itself be an alias (no chaining for now).
+        """
+        for name, target in self.aliases.items():
+            if not name:
+                msg = "alias name must not be empty."
+                raise ValueError(msg)
+            if name in self.providers:
+                msg = f"alias '{name}' collides with a configured provider instance name."
+                raise ValueError(msg)
+            if not isinstance(target, str) or not target:
+                msg = f"aliases.{name} must be a non-empty target selector string."
+                raise ValueError(msg)
+            colon, slash = target.find(":"), target.find("/")
+            cut = colon if colon != -1 and (slash == -1 or colon < slash) else slash
+            if cut <= 0 or cut == len(target) - 1:
+                msg = f"aliases.{name} target '{target}' must be of the form 'instance:model' or 'provider:model'."
+                raise ValueError(msg)
+            prefix = target[:cut]
+            if prefix in self.aliases:
+                msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
+                raise ValueError(msg)
+            if prefix in self.providers:
+                continue
+            try:
+                LLMProvider(PROVIDER_TYPE_ALIASES.get(prefix, prefix))
+            except ValueError as exc:
+                msg = (
+                    f"aliases.{name} target '{target}' prefix '{prefix}' is neither a configured "
+                    "provider instance nor a known provider implementation."
+                )
+                raise ValueError(msg) from exc
+
     def validate_provider_instances(self) -> None:
         """Validate per-instance ``provider_type`` / ``models`` declarations.
 
@@ -489,6 +549,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config = GatewayConfig(**config_dict)
     config.validate_mode_selection()
     config.validate_provider_instances()
+    config.validate_aliases()
     return config
 
 

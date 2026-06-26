@@ -60,6 +60,25 @@ ANTHROPIC_STREAM_FORMAT = StreamFormat(
 )
 
 
+def relabel_model(obj: Any, display_model: str) -> Any:
+    """Rewrite the ``model`` field on a result or stream chunk in place.
+
+    Used to echo a configured alias back to the caller instead of the real
+    upstream model. Handles the top-level ``model`` field (OpenAI chat chunks and
+    every non-streaming result object) plus the nested locations streaming start
+    events carry it in: Anthropic ``message_start`` (``.message.model``) and the
+    Responses events (``.response.model``). Chunks with no model field anywhere
+    are left untouched, so this is safe to call on every chunk of any format.
+    """
+    for holder in (obj, getattr(obj, "message", None), getattr(obj, "response", None)):
+        if holder is not None and hasattr(holder, "model"):
+            try:
+                holder.model = display_model
+            except (AttributeError, ValueError):  # frozen / validated field — leave as-is
+                pass
+    return obj
+
+
 def _merge_usage(current: CompletionUsage, update: CompletionUsage) -> CompletionUsage:
     """Merge usage data, keeping the last non-zero value for each field."""
     return GatewayUsage(
@@ -81,6 +100,7 @@ async def streaming_generator(
     label: str,
     on_no_usage: Callable[[], Awaitable[None]] | None = None,
     on_incomplete: Callable[[], Awaitable[None]] | None = None,
+    display_model: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -89,6 +109,9 @@ async def streaming_generator(
         format_chunk: Formats a chunk into an SSE string
         extract_usage: Extracts usage from a chunk, or returns None if no usage present
         fmt: SSE format configuration (done marker, error payload, etc.)
+        display_model: When set (a configured alias was used), each chunk's
+            ``model`` field is relabeled to this before formatting, so the
+            underlying provider/model never appears on the wire.
         on_complete: Called with aggregated usage after successful streaming that
             included usage data
         on_error: Called with error message on failure
@@ -112,6 +135,8 @@ async def streaming_generator(
             if chunk_usage:
                 usage = _merge_usage(usage, chunk_usage)
                 has_usage = True
+            if display_model is not None:
+                chunk = relabel_model(chunk, display_model)
             yield format_chunk(chunk)
         yield fmt.done_marker
 

@@ -110,6 +110,7 @@ from gateway.streaming import (
     StreamFormat,
     StreamingAttemptFailure,
     iterate_streaming_attempts,
+    relabel_model,
     streaming_generator,
 )
 
@@ -1174,6 +1175,7 @@ def build_streaming_response(
     platform_correlation_id: str | None = None,
     platform_request_id: str | None = None,
     session_label: str | None = None,
+    display_model: str | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -1306,6 +1308,7 @@ def build_streaming_response(
             label=f"{provider}:{model}",
             on_no_usage=_on_no_usage,
             on_incomplete=_on_incomplete,
+            display_model=display_model,
         ),
         media_type="text/event-stream",
         headers=headers,
@@ -1375,6 +1378,7 @@ async def run_single_attempt_stream(
     platform_correlation_id: str | None = None,
     platform_request_id: str | None = None,
     session_label: str | None = None,
+    display_model: str | None = None,
 ) -> StreamingResponse:
     """Open a single-attempt stream and wrap it with settlement callbacks.
 
@@ -1420,6 +1424,7 @@ async def run_single_attempt_stream(
         platform_correlation_id=platform_correlation_id,
         platform_request_id=platform_request_id,
         session_label=session_label,
+        display_model=display_model,
     )
 
 
@@ -1738,12 +1743,17 @@ async def run_standalone_non_stream(
     call_kwargs: dict[str, Any],
     provider: Any,
     model: str,
+    display_model: str | None = None,
 ) -> ResultT:
     """Standalone-mode non-streaming dispatch with reservation settlement.
 
     Success writes the usage log (per the adapter's no-usage policy) and
     reconciles the reservation against actual cost; every failure path refunds
     the reservation before mapping the error to the format's wire envelope.
+
+    ``display_model`` (a configured alias) relabels the result's ``model`` field
+    before returning, so the underlying provider/model stays hidden; billing and
+    logging above still key on the resolved target ``model``/``provider``.
     """
     try:
         result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
@@ -1763,6 +1773,8 @@ async def run_standalone_non_stream(
                 )
             if ctx.reservation is not None:
                 await reconcile_reservation(ctx.db, ctx.reservation, actual_cost or 0.0)
+        if display_model is not None:
+            relabel_model(result, display_model)
         return result
     except HTTPException:
         await release_reservation(ctx)
