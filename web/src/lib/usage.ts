@@ -76,6 +76,19 @@ export function usageByModel(entries: UsageEntry[]): ModelUsage[] {
   return [...buckets.values()].sort((a, b) => b.requests - a.requests);
 }
 
+// Distinct "provider:model" keys seen across usage entries (bare model when no
+// provider was recorded), matching how pricing keys are formed.
+export function usedModelKeys(entries: UsageEntry[]): string[] {
+  const set = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.model) {
+      continue;
+    }
+    set.add(entry.provider ? `${entry.provider}:${entry.model}` : entry.model);
+  }
+  return [...set].sort();
+}
+
 // Distinct provider names seen across usage entries.
 export function providersFromUsage(entries: UsageEntry[]): string[] {
   const set = new Set<string>();

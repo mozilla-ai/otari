@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
-import type { GatewaySettings, PricingResponse } from "@/api/types";
+import type { GatewaySettings, PricingResponse, UsageEntry } from "@/api/types";
 import { PricingPage } from "@/pages/PricingPage";
 
 const ROW: PricingResponse = {
@@ -70,6 +70,62 @@ describe("PricingPage", () => {
     renderWithClient(<PricingPage />);
 
     expect(await screen.findByText(/genai-prices/i)).toBeInTheDocument();
+  });
+
+  it("sets a price for a used model and backfills its past usage", async () => {
+    const usageEntry: UsageEntry = {
+      id: "u1",
+      user_id: "alice",
+      api_key_id: "k1",
+      timestamp: "2026-01-01T00:00:00Z",
+      model: "gpt-4o",
+      provider: "openai",
+      endpoint: "/v1/chat/completions",
+      prompt_tokens: 10,
+      completion_tokens: 5,
+      total_tokens: 15,
+      cache_read_tokens: null,
+      cache_write_tokens: null,
+      cost: null,
+      status: "success",
+      error_message: null,
+    };
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "POST" && url.includes("/v1/usage/backfill")) {
+        return jsonResponse({ model_key: "openai:gpt-4o", rows_updated: 3, cost_added: 0.12, users_updated: 2 });
+      }
+      if (method === "POST") {
+        return jsonResponse({ ...ROW, model_key: "openai:gpt-4o" });
+      }
+      if (url.includes("/v1/settings")) {
+        return jsonResponse(SETTINGS);
+      }
+      if (url.includes("/v1/usage")) {
+        return jsonResponse([usageEntry]);
+      }
+      return jsonResponse([]); // no pricing yet
+    });
+
+    const user = userEvent.setup();
+    renderWithClient(<PricingPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Set pricing" }));
+    await user.selectOptions(screen.getByLabelText("Used model without a price"), "openai:gpt-4o");
+    await user.type(screen.getByLabelText("Input price per million"), "1");
+    await user.type(screen.getByLabelText("Output price per million"), "2");
+    await user.click(screen.getByRole("button", { name: "Save pricing" }));
+
+    await user.click(await screen.findByRole("button", { name: "Backfill past usage" }));
+
+    expect(await screen.findByText(/Backfilled 3 requests/)).toBeInTheDocument();
+    const backfillCall = fetchMock.mock.calls.find(
+      ([u, i]) => String(u).includes("/v1/usage/backfill") && (i?.method ?? "").toUpperCase() === "POST",
+    );
+    expect(backfillCall).toBeDefined();
+    expect(JSON.parse(String(backfillCall?.[1]?.body))).toMatchObject({ model_key: "openai:gpt-4o" });
   });
 
   it("edits a price and posts the new value effective now", async () => {

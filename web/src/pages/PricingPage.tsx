@@ -1,13 +1,21 @@
 import { Button, Card } from "@heroui/react";
 import { useMemo, useState } from "react";
 
-import { useDeletePricing, usePricing, useSetPricing, useSettings } from "@/api/hooks";
+import {
+  useBackfillUsageCost,
+  useDeletePricing,
+  usePricing,
+  useSetPricing,
+  useSettings,
+  useUsage,
+} from "@/api/hooks";
 import type { PricingResponse } from "@/api/types";
 import { Field } from "@/components/Field";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ConfirmButton, ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
-import { formatCost, formatDateTime } from "@/lib/format";
+import { formatCost, formatDateTime, formatNumber } from "@/lib/format";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
+import { usedModelKeys } from "@/lib/usage";
 
 function MoneyInput({
   value,
@@ -37,11 +45,47 @@ function isValidPrice(value: string): boolean {
   return value.trim() !== "" && Number.isFinite(parsed) && parsed >= 0;
 }
 
-function AddPricingForm({ onClose }: { onClose: () => void }) {
+function BackfillPanel({ modelKey, onDone }: { modelKey: string; onDone: () => void }) {
+  const backfill = useBackfillUsageCost();
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] p-4">
+      <p className="text-sm text-[var(--otari-ink)]">
+        Price saved for <code className="rounded bg-white px-1">{modelKey}</code>.
+      </p>
+      {backfill.data ? (
+        <p className="text-sm text-[var(--otari-brand-dark)]">
+          Backfilled {formatNumber(backfill.data.rows_updated)} request
+          {backfill.data.rows_updated === 1 ? "" : "s"}, adding {formatCost(backfill.data.cost_added)} of spend across{" "}
+          {formatNumber(backfill.data.users_updated)} user{backfill.data.users_updated === 1 ? "" : "s"}.
+        </p>
+      ) : (
+        <p className="text-sm text-[var(--otari-muted)]">
+          If this model ran before it was priced, backfill recomputes the cost on those past requests and adds it to
+          each user's spend.
+        </p>
+      )}
+      <ErrorBanner error={backfill.error} />
+      <div className="flex items-center gap-2">
+        {backfill.data ? null : (
+          <Button variant="primary" isDisabled={backfill.isPending} onPress={() => backfill.mutate(modelKey)}>
+            {backfill.isPending ? "Backfilling…" : "Backfill past usage"}
+          </Button>
+        )}
+        <Button variant="ghost" onPress={onDone}>
+          Done
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AddPricingForm({ unpricedUsedModels, onClose }: { unpricedUsedModels: string[]; onClose: () => void }) {
   const setPricing = useSetPricing();
   const [modelKey, setModelKey] = useState("");
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
+  const [savedModelKey, setSavedModelKey] = useState<string | null>(null);
 
   const canSubmit = modelKey.trim() !== "" && isValidPrice(input) && isValidPrice(output);
 
@@ -49,20 +93,14 @@ function AddPricingForm({ onClose }: { onClose: () => void }) {
     if (!canSubmit) {
       return;
     }
+    const key = modelKey.trim();
     setPricing.mutate(
       {
-        model_key: modelKey.trim(),
+        model_key: key,
         input_price_per_million: Number(input),
         output_price_per_million: Number(output),
       },
-      {
-        onSuccess: () => {
-          setModelKey("");
-          setInput("");
-          setOutput("");
-          onClose();
-        },
-      },
+      { onSuccess: () => setSavedModelKey(key) },
     );
   };
 
@@ -75,31 +113,60 @@ function AddPricingForm({ onClose }: { onClose: () => void }) {
             Close
           </Button>
         </div>
-        <ErrorBanner error={setPricing.error} />
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field
-            label="Model key"
-            value={modelKey}
-            onChange={setModelKey}
-            placeholder="provider:model"
-            isRequired
-            autoFocus
-            description="e.g. openai:gpt-4o"
-          />
-          <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-[var(--otari-ink)]">Input $ / 1M</span>
-            <MoneyInput value={input} onChange={setInput} ariaLabel="Input price per million" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-[var(--otari-ink)]">Output $ / 1M</span>
-            <MoneyInput value={output} onChange={setOutput} ariaLabel="Output price per million" />
-          </div>
-        </div>
-        <div>
-          <Button variant="primary" isDisabled={!canSubmit || setPricing.isPending} onPress={submit}>
-            {setPricing.isPending ? "Saving…" : "Save pricing"}
-          </Button>
-        </div>
+
+        {savedModelKey ? (
+          <BackfillPanel modelKey={savedModelKey} onDone={onClose} />
+        ) : (
+          <>
+            <ErrorBanner error={setPricing.error} />
+            {unpricedUsedModels.length > 0 ? (
+              <label className="flex flex-col gap-1">
+                <span className="text-sm font-medium text-[var(--otari-ink)]">Used model without a price</span>
+                <select
+                  aria-label="Used model without a price"
+                  value=""
+                  onChange={(event) => {
+                    if (event.target.value) {
+                      setModelKey(event.target.value);
+                    }
+                  }}
+                  className="w-full rounded-md border border-[var(--otari-line)] bg-white px-2 py-2 text-sm focus:border-[var(--otari-brand)] focus:outline-none"
+                >
+                  <option value="">Pick a model that has been used…</option>
+                  {unpricedUsedModels.map((key) => (
+                    <option key={key} value={key}>
+                      {key}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field
+                label="Model key"
+                value={modelKey}
+                onChange={setModelKey}
+                placeholder="provider:model"
+                isRequired
+                autoFocus
+                description="e.g. openai:gpt-4o"
+              />
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium text-[var(--otari-ink)]">Input $ / 1M</span>
+                <MoneyInput value={input} onChange={setInput} ariaLabel="Input price per million" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium text-[var(--otari-ink)]">Output $ / 1M</span>
+                <MoneyInput value={output} onChange={setOutput} ariaLabel="Output price per million" />
+              </div>
+            </div>
+            <div>
+              <Button variant="primary" isDisabled={!canSubmit || setPricing.isPending} onPress={submit}>
+                {setPricing.isPending ? "Saving…" : "Save pricing"}
+              </Button>
+            </div>
+          </>
+        )}
       </Card.Content>
     </Card>
   );
@@ -210,11 +277,18 @@ function DefaultPricingBanner() {
 
 export function PricingPage() {
   const pricing = usePricing();
+  const usage = useUsage();
   const setPricing = useSetPricing();
   const deletePricing = useDeletePricing();
   const [showForm, setShowForm] = useState(false);
 
   const rows = useMemo(() => currentPricing(pricing.data ?? []), [pricing.data]);
+
+  // Models that have been used but have no price yet, offered as quick picks.
+  const unpricedUsedModels = useMemo(() => {
+    const priced = new Set(rows.map((row) => row.model_key));
+    return usedModelKeys(usage.data ?? []).filter((key) => !priced.has(key));
+  }, [rows, usage.data]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -230,7 +304,9 @@ export function PricingPage() {
 
       <DefaultPricingBanner />
 
-      {showForm ? <AddPricingForm onClose={() => setShowForm(false)} /> : null}
+      {showForm ? (
+        <AddPricingForm unpricedUsedModels={unpricedUsedModels} onClose={() => setShowForm(false)} />
+      ) : null}
 
       <ErrorBanner error={pricing.error ?? setPricing.error ?? deletePricing.error} />
 

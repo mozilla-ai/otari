@@ -69,6 +69,50 @@
         "title": "AudioSpeechRequest",
         "type": "object"
       },
+      "BackfillCostRequest": {
+        "description": "Request to backfill cost on previously-unpriced usage rows.",
+        "properties": {
+          "model_key": {
+            "description": "Model to backfill, as 'provider:model' (or a bare model name when no provider was recorded).",
+            "title": "Model Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_key"
+        ],
+        "title": "BackfillCostRequest",
+        "type": "object"
+      },
+      "BackfillCostResponse": {
+        "description": "Summary of a usage-cost backfill.",
+        "properties": {
+          "cost_added": {
+            "title": "Cost Added",
+            "type": "number"
+          },
+          "model_key": {
+            "title": "Model Key",
+            "type": "string"
+          },
+          "rows_updated": {
+            "title": "Rows Updated",
+            "type": "integer"
+          },
+          "users_updated": {
+            "title": "Users Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "model_key",
+          "rows_updated",
+          "cost_added",
+          "users_updated"
+        ],
+        "title": "BackfillCostResponse",
+        "type": "object"
+      },
       "BatchRequestItem": {
         "properties": {
           "body": {
@@ -4920,6 +4964,48 @@
           }
         },
         "summary": "List Usage",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/usage/backfill": {
+      "post": {
+        "description": "Recompute cost for a model's usage rows that were logged without one.\n\nFor usage rows of ``model_key`` whose ``cost`` is null (they ran while the\nmodel was unpriced), compute cost from the recorded token counts and the\nmodel's current price, then add each user's backfilled total to their spend.\nRows that already have a cost are left untouched, so this is safe to re-run.\nRequires master key authentication.",
+        "operationId": "backfill_usage_cost_v1_usage_backfill_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackfillCostRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackfillCostResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Backfill Usage Cost",
         "tags": [
           "usage"
         ]
