@@ -8,6 +8,8 @@ import type {
   HealthResponse,
   KeyInfo,
   ModelListResponse,
+  PricingResponse,
+  SetPricingRequest,
   UsageEntry,
   UserResponse,
 } from "@/api/types";
@@ -17,6 +19,7 @@ const USERS = "users";
 const USAGE = "usage";
 const HEALTH = "health";
 const MODELS = "models";
+const PRICING = "pricing";
 
 export function useHealth() {
   return useQuery({
@@ -106,5 +109,36 @@ export function useModels() {
     queryKey: [MODELS],
     queryFn: () => apiFetch<ModelListResponse>("/v1/models"),
     staleTime: 60_000,
+  });
+}
+
+export function usePricing() {
+  return useQuery({
+    queryKey: [PRICING],
+    queryFn: () => apiFetch<PricingResponse[]>("/v1/pricing?limit=1000"),
+  });
+}
+
+export function useSetPricing() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SetPricingRequest) =>
+      apiFetch<PricingResponse>("/v1/pricing", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PRICING] });
+      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+    },
+  });
+}
+
+export function useDeletePricing() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (modelKey: string) =>
+      apiFetch<void>(`/v1/pricing/${encodeURIComponent(modelKey)}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PRICING] });
+      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+    },
   });
 }

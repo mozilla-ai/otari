@@ -83,3 +83,19 @@ export interface ModelListResponse {
   object: string;
   data: ModelObject[];
 }
+
+export interface PricingResponse {
+  model_key: string;
+  effective_at: string;
+  input_price_per_million: number;
+  output_price_per_million: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SetPricingRequest {
+  model_key: string;
+  input_price_per_million: number;
+  output_price_per_million: number;
+  effective_at?: string | null;
+}

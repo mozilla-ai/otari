@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { useHealth } from "@/api/hooks";
 
-export type PageKey = "overview" | "usage" | "models" | "keys" | "users";
+export type PageKey = "overview" | "usage" | "models" | "pricing" | "keys" | "users";
 
 interface NavItem {
   key: PageKey;
@@ -43,6 +43,15 @@ const NAV: NavItem[] = [
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
         <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" strokeLinejoin="round" />
         <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    key: "pricing",
+    label: "Pricing",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+        <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     ),
   },
