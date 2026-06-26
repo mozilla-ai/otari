@@ -131,9 +131,13 @@ async def _discover_for_provider(
             client_args=client_args,
             **kwargs,
         )
-    except Exception:
+    except Exception as exc:
         declared = _declared_models(config, provider_name)
         if declared:
+            # Log the underlying error at debug so a real misconfig (bad auth,
+            # wrong api_base) on a backend that *does* support /v1/models is
+            # diagnosable, rather than silently masked by the declared fallback.
+            logger.debug("list_models failed for instance '%s': %s", provider_name, exc)
             logger.info(
                 "list_models failed for instance '%s'; using declared models: list (%d)",
                 provider_name,

@@ -333,6 +333,13 @@ class GatewayConfig(BaseSettings):
         the existing lenient behavior (the key is the implementation).
         """
         for instance, entry in self.providers.items():
+            # The selector splits on the first ``:`` / ``/``, so an instance name
+            # containing either could never be matched and would be silently
+            # unreachable. Reject it here rather than fail confusingly at request
+            # time. (No real any-llm provider name contains these characters.)
+            if ":" in instance or "/" in instance:
+                msg = f"provider instance name '{instance}' must not contain ':' or '/'."
+                raise ValueError(msg)
             if not isinstance(entry, dict):
                 continue
             declared = entry.get("provider_type")

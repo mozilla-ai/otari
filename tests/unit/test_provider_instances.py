@@ -70,6 +70,14 @@ def test_validate_allows_instance_without_provider_type() -> None:
     GatewayConfig(providers={"openai": {"api_key": "sk"}}).validate_provider_instances()
 
 
+def test_validate_rejects_instance_name_with_separator() -> None:
+    # A name containing ':' or '/' could never match the selector split and would
+    # be silently unreachable; reject it at startup instead.
+    for bad in ("my:lab", "my/lab"):
+        with pytest.raises(ValueError, match="must not contain"):
+            GatewayConfig(providers={bad: {"provider_type": "openai"}}).validate_provider_instances()
+
+
 # ---------------------------------------------------------------------------
 # split_selector
 # ---------------------------------------------------------------------------

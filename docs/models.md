@@ -146,6 +146,11 @@ key (or run with `require_pricing: false` for an unpriced self-hosted backend).
 Existing configs are unaffected: a key with no `provider_type` is its own
 implementation, exactly as before.
 
+Named instances are a standalone-mode feature. In hybrid mode the local
+`providers` map is empty (per-request credentials come from otari.ai), so there
+are no instances to resolve and the platform's routing policy decides the
+provider.
+
 ### Declaring models for backends without `/v1/models`
 
 `/v1/models` lists an instance's models by calling the backend's model-listing
