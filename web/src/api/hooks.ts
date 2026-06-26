@@ -5,6 +5,7 @@ import type {
   CreateKeyRequest,
   CreateKeyResponse,
   CreateUserRequest,
+  GatewaySettings,
   HealthResponse,
   KeyInfo,
   ModelListResponse,
@@ -20,6 +21,7 @@ const USAGE = "usage";
 const HEALTH = "health";
 const MODELS = "models";
 const PRICING = "pricing";
+const SETTINGS = "settings";
 
 export function useHealth() {
   return useQuery({
@@ -108,6 +110,14 @@ export function useModels() {
   return useQuery({
     queryKey: [MODELS],
     queryFn: () => apiFetch<ModelListResponse>("/v1/models"),
+    staleTime: 60_000,
+  });
+}
+
+export function useSettings() {
+  return useQuery({
+    queryKey: [SETTINGS],
+    queryFn: () => apiFetch<GatewaySettings>("/v1/settings"),
     staleTime: 60_000,
   });
 }

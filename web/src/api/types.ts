@@ -99,3 +99,10 @@ export interface SetPricingRequest {
   output_price_per_million: number;
   effective_at?: string | null;
 }
+
+export interface GatewaySettings {
+  mode: string;
+  version: string;
+  default_pricing: boolean;
+  require_pricing: boolean;
+}

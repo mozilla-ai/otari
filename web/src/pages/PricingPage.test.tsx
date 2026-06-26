@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
-import type { PricingResponse } from "@/api/types";
+import type { GatewaySettings, PricingResponse } from "@/api/types";
 import { PricingPage } from "@/pages/PricingPage";
 
 const ROW: PricingResponse = {
@@ -17,6 +17,13 @@ const ROW: PricingResponse = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
+const SETTINGS: GatewaySettings = {
+  mode: "standalone",
+  version: "1.0.0",
+  default_pricing: true,
+  require_pricing: true,
+};
+
 function renderWithClient(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
@@ -24,6 +31,21 @@ function renderWithClient(ui: ReactElement) {
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+// Route GETs to the right fixture; callers override the POST behavior.
+function mockApi(post?: () => Response) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    if (method === "POST") {
+      return (post ?? (() => jsonResponse(ROW)))();
+    }
+    if (url.includes("/v1/settings")) {
+      return jsonResponse(SETTINGS);
+    }
+    return jsonResponse([ROW]);
+  });
 }
 
 describe("PricingPage", () => {
@@ -34,7 +56,7 @@ describe("PricingPage", () => {
   });
 
   it("lists the current price per model", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse([ROW]));
+    mockApi();
 
     renderWithClient(<PricingPage />);
 
@@ -42,13 +64,16 @@ describe("PricingPage", () => {
     expect(screen.getByText("openai")).toBeInTheDocument();
   });
 
+  it("surfaces that the genai-prices default fallback is active", async () => {
+    mockApi();
+
+    renderWithClient(<PricingPage />);
+
+    expect(await screen.findByText(/genai-prices/i)).toBeInTheDocument();
+  });
+
   it("edits a price and posts the new value effective now", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-      if ((init?.method ?? "GET").toUpperCase() === "POST") {
-        return jsonResponse({ ...ROW, input_price_per_million: 4 });
-      }
-      return jsonResponse([ROW]);
-    });
+    const fetchMock = mockApi(() => jsonResponse({ ...ROW, input_price_per_million: 4 }));
 
     const user = userEvent.setup();
     renderWithClient(<PricingPage />);

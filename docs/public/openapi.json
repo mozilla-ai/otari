@@ -1012,6 +1012,35 @@
         "title": "EmbeddingRequest",
         "type": "object"
       },
+      "GatewaySettings": {
+        "description": "Operator-facing runtime settings surfaced to the dashboard.",
+        "properties": {
+          "default_pricing": {
+            "title": "Default Pricing",
+            "type": "boolean"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "require_pricing": {
+            "title": "Require Pricing",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "version",
+          "default_pricing",
+          "require_pricing"
+        ],
+        "title": "GatewaySettings",
+        "type": "object"
+      },
       "GuardrailConfig": {
         "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated at parse time with the\nsame SSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
         "properties": {
@@ -4754,6 +4783,28 @@
         "summary": "Create Response",
         "tags": [
           "responses"
+        ]
+      }
+    },
+    "/v1/settings": {
+      "get": {
+        "description": "Return non-secret runtime settings for the admin dashboard.",
+        "operationId": "get_settings_v1_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewaySettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Settings",
+        "tags": [
+          "settings"
         ]
       }
     },

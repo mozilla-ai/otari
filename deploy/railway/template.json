@@ -31,6 +31,11 @@
           "isOptional": false,
           "description": "Set to false so an env-only deploy serves models that have no configured pricing. The image default is true (fail-closed), which would reject every model until pricing is configured."
         },
+        "OTARI_DEFAULT_PRICING": {
+          "defaultValue": "true",
+          "isOptional": false,
+          "description": "Fall back to community-maintained default pricing (the bundled genai-prices dataset) for models you have not priced explicitly. The image default is false; pre-set to true here so an env-only deploy meters common models out of the box. Prices you set in the dashboard or via /v1/pricing always override the fallback."
+        },
         "OPENAI_API_KEY": {
           "defaultValue": "",
           "isOptional": true,

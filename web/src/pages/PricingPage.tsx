@@ -1,11 +1,11 @@
 import { Button, Card } from "@heroui/react";
 import { useMemo, useState } from "react";
 
-import { useDeletePricing, usePricing, useSetPricing } from "@/api/hooks";
+import { useDeletePricing, usePricing, useSetPricing, useSettings } from "@/api/hooks";
 import type { PricingResponse } from "@/api/types";
 import { Field } from "@/components/Field";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
-import { ConfirmButton, ErrorBanner, PageHeader } from "@/components/ui";
+import { ConfirmButton, ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
 import { formatCost, formatDateTime } from "@/lib/format";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
 
@@ -185,6 +185,29 @@ function PricingRow({ row }: { row: PricingResponse }) {
   );
 }
 
+function DefaultPricingBanner() {
+  const settings = useSettings();
+  if (!settings.data) {
+    return null;
+  }
+  if (settings.data.default_pricing) {
+    return (
+      <InfoBanner tone="info">
+        Default pricing is <strong>on</strong>: models without an explicit price below are metered using
+        community-maintained rates (the bundled genai-prices dataset). Set a price to override the fallback.
+      </InfoBanner>
+    );
+  }
+  return (
+    <InfoBanner tone="warning">
+      Default pricing is <strong>off</strong>: only the models priced below are metered.
+      {settings.data.require_pricing
+        ? " Requests for any other model are rejected (HTTP 402) because require_pricing is on."
+        : " Other models are served without cost tracking."}
+    </InfoBanner>
+  );
+}
+
 export function PricingPage() {
   const pricing = usePricing();
   const setPricing = useSetPricing();
@@ -204,6 +227,8 @@ export function PricingPage() {
           </Button>
         }
       />
+
+      <DefaultPricingBanner />
 
       {showForm ? <AddPricingForm onClose={() => setShowForm(false)} /> : null}
 

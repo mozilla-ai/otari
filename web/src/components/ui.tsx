@@ -40,6 +40,14 @@ export function ErrorBanner({ error }: { error: unknown }) {
   );
 }
 
+export function InfoBanner({ tone = "info", children }: { tone?: "info" | "warning"; children: ReactNode }) {
+  const styles =
+    tone === "warning"
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : "border-[var(--otari-brand)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]";
+  return <div className={`rounded-lg border px-4 py-3 text-sm ${styles}`}>{children}</div>;
+}
+
 export function PageHeader({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
