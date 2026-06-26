@@ -6,12 +6,20 @@ routes to the target with the target's credentials, billing keys on the target,
 and the alias is what appears in GET /v1/models and in the response ``model``.
 """
 
-from collections.abc import Generator
+from collections.abc import AsyncIterator, Generator
 from typing import Any
 from unittest.mock import patch
 
 import pytest
-from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
+from any_llm.types.completion import (
+    ChatCompletion,
+    ChatCompletionChunk,
+    ChatCompletionMessage,
+    Choice,
+    ChoiceDelta,
+    ChunkChoice,
+    CompletionUsage,
+)
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
@@ -205,3 +213,40 @@ async def test_response_model_echoes_alias(client: TestClient) -> None:
     assert resp.status_code == 200
     # The caller sees the alias they sent, not the underlying model name.
     assert resp.json()["model"] == "myopusmodel"
+
+
+@pytest.mark.asyncio
+async def test_streaming_response_model_echoes_alias(client: TestClient) -> None:
+    _create_user(client)
+
+    async def chunk_stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield ChatCompletionChunk(
+            id="chatcmpl-alias",
+            object="chat.completion.chunk",
+            created=0,
+            model="claude-opus-4",  # what the provider streams back
+            choices=[
+                ChunkChoice(index=0, delta=ChoiceDelta(role="assistant", content="hi"), finish_reason="stop")
+            ],
+            usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+
+    async def mock_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return chunk_stream()
+
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        resp = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "myopusmodel",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "user": "test-user",
+                "stream": True,
+            },
+            headers=HEADERS,
+        )
+    assert resp.status_code == 200
+    body = resp.text
+    # The streamed chunks carry the alias, never the underlying model name.
+    assert "myopusmodel" in body
+    assert "claude-opus-4" not in body
