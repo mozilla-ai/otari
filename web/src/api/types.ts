@@ -77,6 +77,8 @@ export interface ModelObject {
   created: number;
   owned_by: string;
   pricing: ModelPricingInfo | null;
+  // "configured" (DB price), "default" (genai-prices fallback), or "none".
+  pricing_source: string;
 }
 
 export interface ModelListResponse {

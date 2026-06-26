@@ -1,3 +1,4 @@
+import { Chip } from "@heroui/react";
 import { useMemo } from "react";
 
 import { useModels, useUsage } from "@/api/hooks";
@@ -15,6 +16,7 @@ interface ModelRow {
   provider: string;
   inputPrice: number | null;
   outputPrice: number | null;
+  pricingSource: string;
   requests: number;
   totalTokens: number;
   cost: number;
@@ -40,6 +42,7 @@ export function ModelsPage() {
         provider: model.owned_by || providerFromModelKey(model.id),
         inputPrice: model.pricing?.input_price_per_million ?? null,
         outputPrice: model.pricing?.output_price_per_million ?? null,
+        pricingSource: model.pricing_source,
         requests: used?.requests ?? 0,
         totalTokens: used?.totalTokens ?? 0,
         cost: used?.cost ?? 0,
@@ -57,6 +60,7 @@ export function ModelsPage() {
         provider: used.provider,
         inputPrice: null,
         outputPrice: null,
+        pricingSource: "none",
         requests: used.requests,
         totalTokens: used.totalTokens,
         cost: used.cost,
@@ -95,7 +99,16 @@ export function ModelsPage() {
           ) : rows.length > 0 ? (
             rows.map((row) => (
               <Tr key={row.key}>
-                <Td className="font-medium break-all">{row.model}</Td>
+                <Td className="font-medium break-all">
+                  <span className="inline-flex items-center gap-2">
+                    {row.model}
+                    {row.pricingSource === "default" ? (
+                      <Chip size="sm" color="accent">
+                        default
+                      </Chip>
+                    ) : null}
+                  </span>
+                </Td>
                 <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
                 <Td className="text-right">{row.inputPrice == null ? "—" : formatCost(row.inputPrice)}</Td>
                 <Td className="text-right">{row.outputPrice == null ? "—" : formatCost(row.outputPrice)}</Td>

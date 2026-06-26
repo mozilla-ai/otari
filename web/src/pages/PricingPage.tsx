@@ -1,9 +1,10 @@
-import { Button, Card } from "@heroui/react";
+import { Button, Card, Chip } from "@heroui/react";
 import { useMemo, useState } from "react";
 
 import {
   useBackfillUsageCost,
   useDeletePricing,
+  useModels,
   usePricing,
   useSetPricing,
   useSettings,
@@ -80,11 +81,25 @@ function BackfillPanel({ modelKey, onDone }: { modelKey: string; onDone: () => v
   );
 }
 
-function AddPricingForm({ unpricedUsedModels, onClose }: { unpricedUsedModels: string[]; onClose: () => void }) {
+interface PricePreset {
+  modelKey: string;
+  input: string;
+  output: string;
+}
+
+function AddPricingForm({
+  unpricedUsedModels,
+  preset,
+  onClose,
+}: {
+  unpricedUsedModels: string[];
+  preset?: PricePreset;
+  onClose: () => void;
+}) {
   const setPricing = useSetPricing();
-  const [modelKey, setModelKey] = useState("");
-  const [input, setInput] = useState("");
-  const [output, setOutput] = useState("");
+  const [modelKey, setModelKey] = useState(preset?.modelKey ?? "");
+  const [input, setInput] = useState(preset?.input ?? "");
+  const [output, setOutput] = useState(preset?.output ?? "");
   const [savedModelKey, setSavedModelKey] = useState<string | null>(null);
 
   const canSubmit = modelKey.trim() !== "" && isValidPrice(input) && isValidPrice(output);
@@ -203,6 +218,11 @@ function PricingRow({ row }: { row: PricingResponse }) {
     <Tr>
       <Td className="font-medium break-all">{row.model_key}</Td>
       <Td className="text-[var(--otari-muted)]">{providerFromModelKey(row.model_key)}</Td>
+      <Td>
+        <Chip size="sm" color="default">
+          configured
+        </Chip>
+      </Td>
       <Td className="text-right">
         {editing ? (
           <MoneyInput value={input} onChange={setInput} ariaLabel={`Input price for ${row.model_key}`} />
@@ -278,18 +298,85 @@ function DefaultPricingBanner() {
   );
 }
 
+interface DefaultRow {
+  modelKey: string;
+  provider: string;
+  inputPrice: number;
+  outputPrice: number;
+}
+
+function DefaultPricingRow({ row, onOverride }: { row: DefaultRow; onOverride: (preset: PricePreset) => void }) {
+  return (
+    <Tr>
+      <Td className="font-medium break-all">{row.modelKey}</Td>
+      <Td className="text-[var(--otari-muted)]">{providerFromModelKey(row.modelKey)}</Td>
+      <Td>
+        <Chip size="sm" color="accent">
+          default
+        </Chip>
+      </Td>
+      <Td className="text-right">{formatCost(row.inputPrice)}</Td>
+      <Td className="text-right">{formatCost(row.outputPrice)}</Td>
+      <Td className="text-[var(--otari-muted)]">genai-prices</Td>
+      <Td className="text-right">
+        <Button
+          size="sm"
+          variant="outline"
+          onPress={() =>
+            onOverride({
+              modelKey: row.modelKey,
+              input: String(row.inputPrice),
+              output: String(row.outputPrice),
+            })
+          }
+        >
+          Override
+        </Button>
+      </Td>
+    </Tr>
+  );
+}
+
 export function PricingPage() {
   const pricing = usePricing();
   const usage = useUsage();
+  const models = useModels();
   const [showForm, setShowForm] = useState(false);
+  const [preset, setPreset] = useState<PricePreset | undefined>(undefined);
 
   const rows = useMemo(() => currentPricing(pricing.data ?? []), [pricing.data]);
 
-  // Models that have been used but have no price yet, offered as quick picks.
+  // Models that have been used but have no DB price yet.
   const unpricedUsedModels = useMemo(() => {
     const priced = new Set(rows.map((row) => row.model_key));
     return usedModelKeys(usage.data ?? []).filter((key) => !priced.has(key));
   }, [rows, usage.data]);
+
+  // Of those, the ones the gateway is metering via the genai-prices fallback,
+  // shown read-only so you can see the rate and override it if you want.
+  const defaultRows = useMemo<DefaultRow[]>(() => {
+    const byId = new Map((models.data?.data ?? []).map((model) => [model.id, model]));
+    const result: DefaultRow[] = [];
+    for (const key of unpricedUsedModels) {
+      const model = byId.get(key);
+      if (model?.pricing && model.pricing_source === "default") {
+        result.push({
+          modelKey: key,
+          provider: model.owned_by,
+          inputPrice: model.pricing.input_price_per_million,
+          outputPrice: model.pricing.output_price_per_million,
+        });
+      }
+    }
+    return result;
+  }, [unpricedUsedModels, models.data]);
+
+  const openForm = (next?: PricePreset) => {
+    setPreset(next);
+    setShowForm(true);
+  };
+
+  const isEmpty = rows.length === 0 && defaultRows.length === 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -297,7 +384,10 @@ export function PricingPage() {
         title="Pricing"
         description="View and edit per-model token prices. Saving an edit records a new price effective now."
         action={
-          <Button variant="primary" onPress={() => setShowForm((value) => !value)}>
+          <Button
+            variant="primary"
+            onPress={() => (showForm ? setShowForm(false) : openForm(undefined))}
+          >
             {showForm ? "Hide form" : "Set pricing"}
           </Button>
         }
@@ -306,16 +396,22 @@ export function PricingPage() {
       <DefaultPricingBanner />
 
       {showForm ? (
-        <AddPricingForm unpricedUsedModels={unpricedUsedModels} onClose={() => setShowForm(false)} />
+        <AddPricingForm
+          key={preset?.modelKey ?? "new"}
+          unpricedUsedModels={unpricedUsedModels}
+          preset={preset}
+          onClose={() => setShowForm(false)}
+        />
       ) : null}
 
-      <ErrorBanner error={pricing.error} />
+      <ErrorBanner error={pricing.error ?? models.error} />
 
       <Table>
         <THead>
           <Tr>
             <Th>Model key</Th>
             <Th>Provider</Th>
+            <Th>Source</Th>
             <Th className="text-right">Input $ / 1M</Th>
             <Th className="text-right">Output $ / 1M</Th>
             <Th>Effective</Th>
@@ -324,11 +420,18 @@ export function PricingPage() {
         </THead>
         <tbody>
           {pricing.isLoading ? (
-            <LoadingRow colSpan={6} />
-          ) : rows.length > 0 ? (
-            rows.map((row) => <PricingRow key={row.model_key} row={row} />)
+            <LoadingRow colSpan={7} />
+          ) : isEmpty ? (
+            <TableMessage colSpan={7}>No pricing yet. Use “Set pricing” to add a model.</TableMessage>
           ) : (
-            <TableMessage colSpan={6}>No pricing set yet. Use “Set pricing” to add a model.</TableMessage>
+            <>
+              {rows.map((row) => (
+                <PricingRow key={row.model_key} row={row} />
+              ))}
+              {defaultRows.map((row) => (
+                <DefaultPricingRow key={row.modelKey} row={row} onOverride={openForm} />
+              ))}
+            </>
           )}
         </tbody>
       </Table>

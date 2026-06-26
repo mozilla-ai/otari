@@ -44,6 +44,9 @@ function mockApi(post?: () => Response) {
     if (url.includes("/v1/settings")) {
       return jsonResponse(SETTINGS);
     }
+    if (url.includes("/v1/models")) {
+      return jsonResponse({ object: "list", data: [] });
+    }
     return jsonResponse([ROW]);
   });
 }
@@ -62,6 +65,64 @@ describe("PricingPage", () => {
 
     expect(await screen.findByText("openai:gpt-4o")).toBeInTheDocument();
     expect(screen.getByText("openai")).toBeInTheDocument();
+  });
+
+  it("shows a default-priced used model and lets you override it", async () => {
+    const usageEntry: UsageEntry = {
+      id: "u1",
+      user_id: "alice",
+      api_key_id: "k1",
+      timestamp: "2026-01-01T00:00:00Z",
+      model: "gpt-4o",
+      provider: "openai",
+      endpoint: "/v1/chat/completions",
+      prompt_tokens: 10,
+      completion_tokens: 5,
+      total_tokens: 15,
+      cache_read_tokens: null,
+      cache_write_tokens: null,
+      cost: 0.001,
+      status: "success",
+      error_message: null,
+    };
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/settings")) {
+        return jsonResponse(SETTINGS);
+      }
+      if (url.includes("/v1/models")) {
+        return jsonResponse({
+          object: "list",
+          data: [
+            {
+              id: "openai:gpt-4o",
+              object: "model",
+              created: 0,
+              owned_by: "openai",
+              pricing: { input_price_per_million: 2.5, output_price_per_million: 10 },
+              pricing_source: "default",
+            },
+          ],
+        });
+      }
+      if (url.includes("/v1/usage")) {
+        return jsonResponse([usageEntry]);
+      }
+      return jsonResponse([]); // no DB pricing
+    });
+
+    const user = userEvent.setup();
+    renderWithClient(<PricingPage />);
+
+    // The used-but-unpriced model appears as a read-only "default" row.
+    expect(await screen.findByText("openai:gpt-4o")).toBeInTheDocument();
+    expect(screen.getByText("default")).toBeInTheDocument();
+
+    // Override pre-fills the form with the default rate.
+    await user.click(screen.getByRole("button", { name: "Override" }));
+    expect((screen.getByLabelText("Input price per million") as HTMLInputElement).value).toBe("2.5");
+    expect((screen.getByLabelText("Output price per million") as HTMLInputElement).value).toBe("10");
   });
 
   it("surfaces that the genai-prices default fallback is active", async () => {
@@ -102,6 +163,9 @@ describe("PricingPage", () => {
       }
       if (url.includes("/v1/settings")) {
         return jsonResponse(SETTINGS);
+      }
+      if (url.includes("/v1/models")) {
+        return jsonResponse({ object: "list", data: [] });
       }
       if (url.includes("/v1/usage")) {
         return jsonResponse([usageEntry]);
