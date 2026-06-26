@@ -12,7 +12,7 @@ import {
 import type { PricingResponse } from "@/api/types";
 import { Field } from "@/components/Field";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
-import { ConfirmButton, ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
+import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/components/ui";
 import { formatCost, formatDateTime, formatNumber } from "@/lib/format";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
 import { usedModelKeys } from "@/lib/usage";
@@ -245,6 +245,9 @@ function PricingRow({ row }: { row: PricingResponse }) {
             >
               Delete
             </ConfirmButton>
+            {setPricing.error || deletePricing.error ? (
+              <span className="text-xs text-red-700">{errorMessage(setPricing.error ?? deletePricing.error)}</span>
+            ) : null}
           </span>
         )}
       </Td>
@@ -278,8 +281,6 @@ function DefaultPricingBanner() {
 export function PricingPage() {
   const pricing = usePricing();
   const usage = useUsage();
-  const setPricing = useSetPricing();
-  const deletePricing = useDeletePricing();
   const [showForm, setShowForm] = useState(false);
 
   const rows = useMemo(() => currentPricing(pricing.data ?? []), [pricing.data]);
@@ -308,7 +309,7 @@ export function PricingPage() {
         <AddPricingForm unpricedUsedModels={unpricedUsedModels} onClose={() => setShowForm(false)} />
       ) : null}
 
-      <ErrorBanner error={pricing.error ?? setPricing.error ?? deletePricing.error} />
+      <ErrorBanner error={pricing.error} />
 
       <Table>
         <THead>

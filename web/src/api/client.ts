@@ -53,7 +53,8 @@ export async function validateMasterKey(key: string): Promise<boolean> {
   } catch {
     throw new ApiError(0, "Network error: could not reach the gateway.");
   }
-  if (response.status === 401) {
+  // Both 401 and 403 mean "not an admin key" for the management endpoints.
+  if (response.status === 401 || response.status === 403) {
     return false;
   }
   if (!response.ok) {

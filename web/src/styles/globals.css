@@ -21,6 +21,7 @@ body,
 }
 
 body {
+  margin: 0;
   background-color: var(--otari-bg);
   color: var(--otari-ink);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;

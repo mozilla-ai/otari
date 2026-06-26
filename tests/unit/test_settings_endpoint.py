@@ -21,6 +21,13 @@ def test_settings_requires_auth(tmp_path: Path) -> None:
         assert client.get("/v1/settings").status_code == 401
 
 
+def test_settings_rejects_non_master_key(tmp_path: Path) -> None:
+    # The settings route is admin-only: a token that is not the master key is rejected.
+    with _client(tmp_path) as client:
+        response = client.get("/v1/settings", headers={"Authorization": "Bearer not-the-master-key"})
+    assert response.status_code == 401
+
+
 def test_settings_reports_pricing_flags(tmp_path: Path) -> None:
     with _client(tmp_path, default_pricing=True, require_pricing=False) as client:
         response = client.get("/v1/settings", headers={"Authorization": "Bearer sk-test-master"})

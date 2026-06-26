@@ -55,13 +55,24 @@ describe("usageByModel", () => {
     ]);
 
     expect(rows[0]).toMatchObject({
+      key: "anthropic:claude-opus-4-8",
       model: "claude-opus-4-8",
       provider: "anthropic",
       requests: 2,
       promptTokens: 10,
       completionTokens: 3,
     });
-    expect(rows[1]).toMatchObject({ model: "gpt-4o", requests: 1, promptTokens: 10 });
+    expect(rows[1]).toMatchObject({ key: "openai:gpt-4o", model: "gpt-4o", requests: 1, promptTokens: 10 });
+  });
+
+  it("keeps the same model name from different providers in separate buckets", () => {
+    const rows = usageByModel([
+      entry({ model: "llama-3", provider: "openrouter", cost: 0.01 }),
+      entry({ model: "llama-3", provider: "together", cost: 0.02 }),
+    ]);
+
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.key).sort()).toEqual(["openrouter:llama-3", "together:llama-3"]);
   });
 });
 

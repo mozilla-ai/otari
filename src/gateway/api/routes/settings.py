@@ -10,7 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from gateway.api.deps import get_config, verify_api_key_or_master_key
+from gateway.api.deps import get_config, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.version import __version__
 
@@ -26,7 +26,7 @@ class GatewaySettings(BaseModel):
     require_pricing: bool
 
 
-@router.get("", dependencies=[Depends(verify_api_key_or_master_key)])
+@router.get("", dependencies=[Depends(verify_master_key)])
 async def get_settings(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> GatewaySettings:

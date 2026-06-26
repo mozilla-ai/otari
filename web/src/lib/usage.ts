@@ -36,6 +36,9 @@ export function summarizeUsage(entries: UsageEntry[]): UsageTotals {
 }
 
 export interface ModelUsage {
+  // Stable "provider:model" identity (bare model when no provider). Matches the
+  // /v1/models catalog id, so callers can join on it and use it as a React key.
+  key: string;
   model: string;
   provider: string;
   requests: number;
@@ -45,17 +48,22 @@ export interface ModelUsage {
   cost: number;
 }
 
-// Summarizes usage grouped by model, ordered by request count (busiest first).
+// Summarizes usage grouped by (provider, model), ordered by request count
+// (busiest first). Keying on provider too keeps the same model name from two
+// providers from collapsing into one misattributed bucket.
 export function usageByModel(entries: UsageEntry[]): ModelUsage[] {
   const buckets = new Map<string, ModelUsage>();
 
   for (const entry of entries) {
     const model = entry.model || "unknown";
+    const provider = entry.provider || "—";
+    const key = entry.provider ? `${entry.provider}:${model}` : model;
     const row =
-      buckets.get(model) ??
+      buckets.get(key) ??
       ({
+        key,
         model,
-        provider: entry.provider || "—",
+        provider,
         requests: 0,
         promptTokens: 0,
         completionTokens: 0,
@@ -67,10 +75,7 @@ export function usageByModel(entries: UsageEntry[]): ModelUsage[] {
     row.completionTokens += entry.completion_tokens ?? 0;
     row.totalTokens += entry.total_tokens ?? 0;
     row.cost += entry.cost ?? 0;
-    if (row.provider === "—" && entry.provider) {
-      row.provider = entry.provider;
-    }
-    buckets.set(model, row);
+    buckets.set(key, row);
   }
 
   return [...buckets.values()].sort((a, b) => b.requests - a.requests);

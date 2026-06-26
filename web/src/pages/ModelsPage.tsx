@@ -10,6 +10,7 @@ import { usageByModel } from "@/lib/usage";
 const USAGE_LIMIT = 500;
 
 interface ModelRow {
+  key: string;
   model: string;
   provider: string;
   inputPrice: number | null;
@@ -24,7 +25,7 @@ export function ModelsPage() {
   const usage = useUsage(USAGE_LIMIT);
 
   const rows = useMemo<ModelRow[]>(() => {
-    const usageByKey = new Map(usageByModel(usage.data ?? []).map((row) => [row.model, row]));
+    const usageByKey = new Map(usageByModel(usage.data ?? []).map((row) => [row.key, row]));
     const seen = new Set<string>();
     const result: ModelRow[] = [];
 
@@ -34,6 +35,7 @@ export function ModelsPage() {
       const used = usageByKey.get(model.id);
       seen.add(model.id);
       result.push({
+        key: model.id,
         model: model.id,
         provider: model.owned_by || providerFromModelKey(model.id),
         inputPrice: model.pricing?.input_price_per_million ?? null,
@@ -46,10 +48,11 @@ export function ModelsPage() {
 
     // Include anything seen in usage that the catalog doesn't list.
     for (const used of usageByKey.values()) {
-      if (seen.has(used.model)) {
+      if (seen.has(used.key)) {
         continue;
       }
       result.push({
+        key: used.key,
         model: used.model,
         provider: used.provider,
         inputPrice: null,
@@ -91,7 +94,7 @@ export function ModelsPage() {
             <LoadingRow colSpan={7} />
           ) : rows.length > 0 ? (
             rows.map((row) => (
-              <Tr key={row.model}>
+              <Tr key={row.key}>
                 <Td className="font-medium break-all">{row.model}</Td>
                 <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
                 <Td className="text-right">{row.inputPrice == null ? "—" : formatCost(row.inputPrice)}</Td>

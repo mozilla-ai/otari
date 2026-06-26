@@ -40,7 +40,7 @@ export function OverviewPage() {
 
       <div className="flex flex-wrap gap-4">
         <StatCard label="Users" value={dash(users.data?.length ?? 0, users.isLoading)} />
-        <StatCard label="Providers" value={dash(providerCount, models.isLoading && usage.isLoading)} />
+        <StatCard label="Providers" value={dash(providerCount, models.isLoading || usage.isLoading)} />
         <StatCard label="Models" value={dash(models.data?.data.length ?? 0, models.isLoading)} />
         <StatCard
           label="API keys"
@@ -81,7 +81,7 @@ export function OverviewPage() {
               <LoadingRow colSpan={5} />
             ) : topModels.length > 0 ? (
               topModels.map((row) => (
-                <Tr key={row.model}>
+                <Tr key={row.key}>
                   <Td className="font-medium break-all">{row.model}</Td>
                   <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
                   <Td className="text-right">{formatNumber(row.requests)}</Td>
