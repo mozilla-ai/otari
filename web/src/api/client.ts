@@ -41,6 +41,27 @@ async function extractErrorMessage(response: Response): Promise<string> {
   return response.statusText || `Request failed (${response.status})`;
 }
 
+// Validate a candidate master key against a cheap master-key-gated endpoint
+// before we treat the operator as signed in. Returns false on 401 (wrong key)
+// and throws ApiError for network/other failures so the UI can explain them.
+export async function validateMasterKey(key: string): Promise<boolean> {
+  let response: Response;
+  try {
+    response = await fetch("/v1/usage?limit=1", {
+      headers: { Accept: "application/json", Authorization: `Bearer ${key}` },
+    });
+  } catch {
+    throw new ApiError(0, "Network error: could not reach the gateway.");
+  }
+  if (response.status === 401) {
+    return false;
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+  return true;
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");

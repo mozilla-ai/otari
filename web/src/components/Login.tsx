@@ -1,15 +1,34 @@
 import { Button, Card, Input, Label, TextField } from "@heroui/react";
 import { useState } from "react";
 
+import { validateMasterKey } from "@/api/client";
 import { useAuth } from "@/auth/AuthContext";
+import { ErrorBanner } from "@/components/ui";
 
 export function Login() {
   const { login } = useAuth();
   const [value, setValue] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const submit = () => {
-    if (value.trim()) {
-      login(value);
+  const submit = async () => {
+    const trimmed = value.trim();
+    if (!trimmed || isSubmitting) {
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const valid = await validateMasterKey(trimmed);
+      if (valid) {
+        login(trimmed);
+      } else {
+        setError(new Error("Invalid master key."));
+      }
+    } catch (caught) {
+      setError(caught);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -31,12 +50,17 @@ export function Login() {
             className="flex flex-col gap-4"
             onSubmit={(event) => {
               event.preventDefault();
-              submit();
+              void submit();
             }}
           >
             <TextField
               value={value}
-              onChange={setValue}
+              onChange={(next) => {
+                setValue(next);
+                if (error) {
+                  setError(null);
+                }
+              }}
               type="password"
               isRequired
               className="flex flex-col gap-1"
@@ -44,8 +68,9 @@ export function Login() {
               <Label className="text-sm font-medium text-[var(--otari-ink)]">Master key</Label>
               <Input placeholder="sk-…" autoFocus autoComplete="off" />
             </TextField>
-            <Button type="submit" variant="primary" fullWidth isDisabled={!value.trim()}>
-              Sign in
+            <ErrorBanner error={error} />
+            <Button type="submit" variant="primary" fullWidth isDisabled={!value.trim() || isSubmitting}>
+              {isSubmitting ? "Signing in…" : "Sign in"}
             </Button>
           </form>
 

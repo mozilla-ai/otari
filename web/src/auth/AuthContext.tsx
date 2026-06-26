@@ -23,14 +23,18 @@ function readStoredKey(): string | null {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [masterKey, setKey] = useState<string | null>(() => readStoredKey());
-
-  // Keep the api client's in-memory key in sync with React state.
-  useEffect(() => {
-    setMasterKey(masterKey);
-  }, [masterKey]);
+  // Seed the api client synchronously during the first render so a restored
+  // session key is in place before any child query fires. Doing this in an
+  // effect would let the first request go out unauthenticated (effects run
+  // child-first, so React Query's fetch would race ahead of the sync).
+  const [masterKey, setKey] = useState<string | null>(() => {
+    const stored = readStoredKey();
+    setMasterKey(stored);
+    return stored;
+  });
 
   const logout = useCallback(() => {
+    setMasterKey(null);
     setKey(null);
     try {
       window.sessionStorage.removeItem(STORAGE_KEY);
@@ -41,6 +45,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback((key: string) => {
     const trimmed = key.trim();
+    // Set the client key synchronously (before the re-render that mounts the
+    // dashboard) so the first authenticated request carries the header.
+    setMasterKey(trimmed);
     setKey(trimmed);
     try {
       window.sessionStorage.setItem(STORAGE_KEY, trimmed);
