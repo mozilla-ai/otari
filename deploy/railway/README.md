@@ -32,6 +32,7 @@ the snapshot of what the template sets lives in [`template.json`](template.json)
 | `OTARI_DATABASE_URL` | `${{Postgres.DATABASE_URL}}` | Pre-wired; leave as-is. |
 | `OTARI_MASTER_KEY` | auto-generated (`${{secret(48)}}`) | Auto-set; read it from the otari service's Variables tab. |
 | `OTARI_REQUIRE_PRICING` | `false` | Pre-set, so an env-only deploy serves models that have no configured pricing. |
+| `OTARI_DEFAULT_PRICING` | `true` | Pre-set, so common models are metered from the bundled genai-prices dataset without configuring each one. Prices you set in the dashboard or via `/v1/pricing` always override it. |
 | `OPENAI_API_KEY` | your key | Optional input. Set at least one provider key (see below). |
 
 Notes:
@@ -51,6 +52,13 @@ Notes:
   models instead, supply `pricing` (and any other structured config like custom
   `api_base` or Vertex settings) through `OTARI_CONFIG_YAML` / `OTARI_CONFIG_B64`;
   see [Full config via environment](../../docs/configuration.md#full-config-via-environment).
+- `OTARI_DEFAULT_PRICING=true` is also pre-set so that, paired with the above,
+  common models are metered using community-maintained rates (the bundled
+  genai-prices dataset) instead of being served unpriced. These are estimates
+  and can lag real provider rates, so set explicit prices in the dashboard
+  (Pricing page) or via `/v1/pricing` for anything you bill on; database prices
+  always win over the fallback. The dashboard's Pricing page shows whether this
+  fallback is active.
 
 ## Deploy
 

@@ -13,6 +13,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing
 from gateway.services.model_discovery_service import discover_all_models, get_model_cache
+from gateway.services.pricing_service import default_model_pricing, default_pricing_enabled, normalize_effective_at
 
 router = APIRouter(prefix="/v1", tags=["models"])
 
@@ -32,6 +33,9 @@ class ModelObject(BaseModel):
     created: int
     owned_by: str
     pricing: ModelPricingInfo | None = None
+    # Where ``pricing`` came from: "configured" (DB), "default" (genai-prices
+    # fallback, only when default_pricing is enabled), or "none".
+    pricing_source: str = "none"
 
 
 class ModelListResponse(BaseModel):
@@ -54,7 +58,28 @@ def _model_from_pricing(pricing: ModelPricing) -> ModelObject:
             input_price_per_million=pricing.input_price_per_million,
             output_price_per_million=pricing.output_price_per_million,
         ),
+        pricing_source="configured",
     )
+
+
+def _apply_default_pricing(obj: ModelObject) -> None:
+    """Fill the genai-prices default rate for a model that has no DB price.
+
+    No-op when the fallback is disabled or the model already carries a price, so
+    database pricing always takes precedence. Marks the source as "default".
+    """
+    if obj.pricing is not None or not default_pricing_enabled():
+        return
+    provider_part, separator, model_part = obj.id.partition(":")
+    provider = provider_part if separator else None
+    model_name = model_part if separator else obj.id
+    default = default_model_pricing(provider, model_name, normalize_effective_at(None))
+    if default is not None:
+        obj.pricing = ModelPricingInfo(
+            input_price_per_million=default.input_price_per_million,
+            output_price_per_million=default.output_price_per_million,
+        )
+        obj.pricing_source = "default"
 
 
 async def _get_pricing_map(db: AsyncSession, provider_filter: str | None = None) -> dict[str, ModelPricing]:
@@ -120,12 +145,19 @@ async def list_models(
                 )
                 if pricing
                 else None,
+                pricing_source="configured" if pricing else "none",
             )
 
     # Phase 2: pricing-only models (not discovered but have pricing entries).
     for model_key, pricing in pricing_map.items():
         if model_key not in merged:
             merged[model_key] = _model_from_pricing(pricing)
+
+    # Phase 3: fill the genai-prices default for unpriced models, so the catalog
+    # shows the effective rate when the fallback is active. Database pricing
+    # (phases 1-2) always wins; this only touches models still without a price.
+    for obj in merged.values():
+        _apply_default_pricing(obj)
 
     sorted_models = sorted(merged.values(), key=lambda m: m.id)
     return ModelListResponse(data=sorted_models)
@@ -174,7 +206,7 @@ async def get_model(
     if discovered_model:
         assert discovered_provider is not None
         model_key = f"{discovered_provider}:{discovered_model.id}"
-        return ModelObject(
+        obj = ModelObject(
             id=model_key,
             created=discovered_model.created,
             owned_by=discovered_provider,
@@ -184,7 +216,10 @@ async def get_model(
             )
             if pricing
             else None,
+            pricing_source="configured" if pricing else "none",
         )
+        _apply_default_pricing(obj)
+        return obj
 
     # Pricing-only model (no discovery data).
     assert pricing is not None

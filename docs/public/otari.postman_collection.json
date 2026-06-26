@@ -1315,6 +1315,29 @@
     {
       "item": [
         {
+          "name": "Get Settings",
+          "request": {
+            "description": "Return non-secret runtime settings for the admin dashboard.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "settings"
+              ],
+              "raw": "{{baseUrl}}/v1/settings"
+            }
+          }
+        }
+      ],
+      "name": "settings"
+    },
+    {
+      "item": [
+        {
           "name": "List Usage",
           "request": {
             "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range and user. Paginated via skip/limit.\nTimestamps accept either ISO 8601 strings or Unix epoch seconds (numeric).",
@@ -1361,6 +1384,39 @@
                 }
               ],
               "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Backfill Usage Cost",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model_key\": \"string\"\n}"
+            },
+            "description": "Recompute cost for a model's usage rows that were logged without one.\n\nFor usage rows of ``model_key`` whose ``cost`` is null (they ran while the\nmodel was unpriced), compute cost from the recorded token counts and the\nmodel's current price, then add each user's backfilled total to their spend.\nRows that already have a cost are left untouched, so this is safe to re-run.\nRequires master key authentication.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "usage",
+                "backfill"
+              ],
+              "raw": "{{baseUrl}}/v1/usage/backfill"
             }
           }
         }
