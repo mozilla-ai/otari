@@ -172,6 +172,47 @@ providers:
 The declared `models` are listed as `edge_box:<model>`. Direct requests work
 with or without this list; it only affects discovery.
 
+## Model aliases
+
+An alias is a display name that maps to a real selector, so you can expose a
+friendly, stable model name and keep the underlying provider/model hidden.
+Aliases are configured in a top-level `aliases` map (display name to target):
+
+```yaml
+aliases:
+  myopusmodel: anthropic:claude-opus-4
+  fastmodel: openai:gpt-5
+  housemodel: home_lab:qwen3     # target may be a named instance
+```
+
+A request whose `model` is an alias routes to its target. The alias is what
+callers see:
+
+- `GET /v1/models` lists the alias id (and `GET /v1/models/{alias}` resolves it),
+  with pricing read from the target so the real price shows without revealing the
+  model. Aliased entries report `owned_by: otari`.
+- The response `model` field (streaming and non-streaming) is relabeled to the
+  alias, so the underlying model name never appears on the wire.
+
+Pricing, budgets, and usage logs key on the resolved target, not the alias:
+configure pricing once for `anthropic:claude-opus-4` and every alias pointing at
+it inherits that price. An alias with no pricing on its target fails closed under
+`require_pricing`, exactly as the real model would.
+
+To expose only your curated alias names, set `model_discovery: false` so the full
+provider catalog is not listed; the listing then shows just the aliases (plus any
+models you priced explicitly). With discovery on, aliases appear alongside the
+discovered models.
+
+Constraints, checked at startup: a target must be of the form `instance:model` or
+`provider:model` whose prefix is a configured instance or a known provider; an
+alias name must not collide with a provider instance name; and an alias target
+must not be another alias (no chaining).
+
+Like named instances, aliases are a standalone-mode feature. In hybrid mode model
+resolution and routing are owned by the otari.ai platform, so the local `aliases`
+map does not apply.
+
 ## Listing available models
 
 Query Otari to see which models are available:

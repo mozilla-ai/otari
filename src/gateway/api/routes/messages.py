@@ -477,11 +477,13 @@ async def create_message(
             platform_correlation_id = attempt.attempt_id
             platform_request_id = route.request_id
             billing_provider: Any = LLMProvider(attempt.provider)
+            display_model: str | None = None
         else:
             resolved = resolve_provider_selector(config, request.model)
             model = resolved.model
             call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
             billing_provider = resolved.instance
+            display_model = resolved.alias
 
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
@@ -492,6 +494,7 @@ async def create_message(
             model=model,
             platform_correlation_id=platform_correlation_id,
             platform_request_id=platform_request_id,
+            display_model=display_model,
         )
 
     # ------------------------------------------------------------------
@@ -545,6 +548,7 @@ async def create_message(
         call_kwargs=call_kwargs,
         provider=resolved.instance,
         model=resolved.model,
+        display_model=resolved.alias,
     )
 
     if ctx.rate_limit_info:

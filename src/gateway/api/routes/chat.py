@@ -397,6 +397,7 @@ async def chat_completions(
             call_kwargs=call_kwargs,
             provider=resolved.instance,
             model=resolved.model,
+            display_model=resolved.alias,
         )
 
     # ------------------------------------------------------------------
@@ -432,6 +433,7 @@ async def chat_completions(
         call_kwargs=call_kwargs,
         provider=resolved.instance,
         model=resolved.model,
+        display_model=resolved.alias,
     )
 
     if ctx.rate_limit_info:
