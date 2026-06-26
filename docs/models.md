@@ -141,7 +141,8 @@ never sees the name `home_lab`; it is an Otari-level routing key.
 instance name (`home_lab:deepseek-v4-flash`), so configure pricing under that
 key (or run with `require_pricing: false` for an unpriced self-hosted backend).
 
-`provider_type: openai-compatible` is accepted as an alias for `openai`.
+`provider_type: openai-compatible` and `provider_type: openai_compatible` are
+both accepted as aliases for `openai`.
 
 Existing configs are unaffected: a key with no `provider_type` is its own
 implementation, exactly as before.

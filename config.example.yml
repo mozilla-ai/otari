@@ -71,7 +71,8 @@ providers:
 
   # Named instances: run multiple backends that share an implementation by
   # giving each a custom key and a `provider_type`. Route with
-  # `home_lab:<model>`. `provider_type: openai-compatible` aliases `openai`.
+  # `home_lab:<model>`. `provider_type: openai-compatible` and
+  # `provider_type: openai_compatible` both alias `openai`.
   # An optional `models:` list backs /v1/models for backends without /v1/models.
   # home_lab:
   #   provider_type: openai
