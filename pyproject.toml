@@ -79,6 +79,9 @@ package-dir = {"" = "src"}
 where = ["src"]
 include = ["gateway*"]
 
+[tool.setuptools.package-data]
+gateway = ["templates/*.html", "templates/*.svg"]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 120

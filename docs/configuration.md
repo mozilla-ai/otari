@@ -194,6 +194,8 @@ pricing:
 
 Config pricing sets initial values. Pricing set via the `/v1/pricing` API takes precedence.
 
+A pricing entry whose provider is not listed in the `providers` section is skipped at startup with a warning, not treated as a fatal error: the provider may still be reachable through environment credentials (any-llm reads keys like `OPENAI_API_KEY`), so a pricing/provider mismatch should not abort the gateway. To have such an entry take effect, add the provider to the `providers` section.
+
 ### Default pricing
 
 Default pricing is **off by default**. When you enable it (`default_pricing: true` in `config.yml`, or

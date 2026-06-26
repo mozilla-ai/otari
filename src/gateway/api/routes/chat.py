@@ -24,7 +24,6 @@ from gateway.api.routes._pipeline import (
     ALL_PROVIDERS_TIMED_OUT_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
-    PROVIDER_TIMEOUT_DETAIL,
     SANDBOX_UNREACHABLE_DETAIL,
     WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
@@ -367,15 +366,23 @@ async def chat_completions(
                     route.request_id,
                     exc,
                 )
-                is_single_attempt = len(route.attempts) <= 1
+                # Classify when there is a single attempt, or when the failure is
+                # a non-retryable invalid request (400/422): that short-circuits
+                # the fallback and is definitive regardless of attempt count, so
+                # it matches the non-streaming path. Otherwise surface the
+                # multi-attempt aggregate.
+                mapping = classify_provider_error(exc)
+                invalid_request = mapping is not None and mapping.status_code == status.HTTP_400_BAD_REQUEST
+                if invalid_request or len(route.attempts) <= 1:
+                    raise _ADAPTER.provider_error(exc) from exc
                 if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
                     raise HTTPException(
                         status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                        detail=(PROVIDER_TIMEOUT_DETAIL if is_single_attempt else ALL_PROVIDERS_TIMED_OUT_DETAIL),
+                        detail=ALL_PROVIDERS_TIMED_OUT_DETAIL,
                     ) from exc
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=(PROVIDER_ERROR_DETAIL if is_single_attempt else ALL_PROVIDERS_FAILED_DETAIL),
+                    detail=ALL_PROVIDERS_FAILED_DETAIL,
                 ) from exc
 
         # Standalone path: single attempt, no fallback (no `route.attempts`).
