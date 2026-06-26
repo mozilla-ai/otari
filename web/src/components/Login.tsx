@@ -1,4 +1,4 @@
-import { Button, Card, Input, Label, TextField } from "@heroui/react";
+import { Button, Card, Input, Label, Link, TextField } from "@heroui/react";
 import { useState } from "react";
 
 import { validateMasterKey } from "@/api/client";
@@ -77,6 +77,12 @@ export function Login() {
           <p className="text-center text-xs text-[var(--otari-muted)]">
             The key is held only in this browser tab (session storage) and sent directly to this gateway.
           </p>
+
+          <div className="border-t border-[var(--otari-line)] pt-4 text-center">
+            <Link href="/welcome" className="text-sm font-medium text-[var(--otari-brand-dark)]">
+              New to Otari? Open the welcome guide
+            </Link>
+          </div>
         </Card.Content>
       </Card>
     </div>

@@ -43,6 +43,17 @@ describe("Login", () => {
     expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer sk-correct");
   });
 
+  it("links to the auth-free welcome page", () => {
+    render(
+      <Provider>
+        <Harness />
+      </Provider>,
+    );
+
+    const link = screen.getByRole("link", { name: /welcome/i });
+    expect(link).toHaveAttribute("href", "/welcome");
+  });
+
   it("shows an error and stays on the form when the key is rejected", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ detail: "Invalid master key" }, 401));
     const user = userEvent.setup();
