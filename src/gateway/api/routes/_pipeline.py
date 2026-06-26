@@ -39,7 +39,7 @@ from typing import Any, Generic, NamedTuple, Protocol, TypeVar
 from urllib.parse import ParseResult, urlparse
 
 import httpx
-from any_llm import AnyLLM, LLMProvider
+from any_llm import LLMProvider
 from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import (
     ChatCompletion,
@@ -99,6 +99,7 @@ from gateway.services.mcp_loop import (
     ToolBackend,
 )
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
+from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import (
@@ -415,16 +416,18 @@ async def _bill_vision_side_call(
     if not model_selector:
         return
     try:
-        provider, model = AnyLLM.split_model_provider(model_selector)
+        resolved = resolve_provider_selector(config, model_selector)
     except (ValueError, AnyLLMError):
         logger.warning("vision billing: cannot parse vision_describe_model %r", model_selector)
         return
+    # Key the side-call's usage/pricing on the instance, matching how the main
+    # request is billed (the vision call itself routes via the same resolver).
     cost = await log_usage(
         db=db,
         log_writer=log_writer,
         api_key_id=api_key_id,
-        model=model,
-        provider=provider.value if provider else None,
+        model=resolved.model,
+        provider=resolved.instance,
         endpoint=endpoint,
         user_id=user_id,
         usage_override=usage,
@@ -452,7 +455,9 @@ async def resolve_request_context(
     estimate_max_output_tokens: int | None,
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
-    normalize_messages: Callable[[str, LLMProvider | None, str], Awaitable[tuple[int, CompletionUsage | None]]]
+    normalize_messages: Callable[
+        [str, LLMProvider | None, str, str | None], Awaitable[tuple[int, CompletionUsage | None]]
+    ]
     | None = None,
 ) -> RequestContext:
     """Run the shared handler preamble up to (and including) budget pre-debit.
@@ -522,12 +527,17 @@ async def resolve_request_context(
         # Tolerate an unparseable / unknown-provider selector here: the budget
         # check below and the downstream provider call surface those with
         # their own status codes. A model we can't parse simply has no pricing.
+        # Pricing/budget keys on the *instance* name (``instance:model``) while
+        # capability detection needs the underlying implementation, so keep both.
+        gate_instance: str | None
+        gate_impl: LLMProvider | None
         try:
-            gate_provider, gate_model = AnyLLM.split_model_provider(model)
+            resolved = resolve_provider_selector(config, model)
+            gate_instance, gate_impl, gate_model = resolved.instance, resolved.provider, resolved.model
         except (ValueError, AnyLLMError):
-            gate_provider, gate_model = None, model
+            gate_instance, gate_impl, gate_model = None, None, model
 
-        gate_pricing = await find_model_pricing(db, gate_provider, gate_model)
+        gate_pricing = await find_model_pricing(db, gate_instance, gate_model)
         estimate = estimate_cost(
             gate_pricing,
             prompt_chars=estimate_prompt_chars,
@@ -556,7 +566,9 @@ async def resolve_request_context(
         # provider-call settlement does not cover.
         if normalize_messages is not None:
             try:
-                post_chars, vision_usage = await normalize_messages(user_id, gate_provider, gate_model)
+                post_chars, vision_usage = await normalize_messages(
+                    user_id, gate_impl, gate_model, gate_instance
+                )
                 post_estimate = estimate_cost(
                     gate_pricing,
                     prompt_chars=post_chars,

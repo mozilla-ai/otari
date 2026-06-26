@@ -111,6 +111,67 @@ Both approaches work. Config file values take precedence over environment variab
 
 For the full configuration reference, see [Configuration](configuration.md).
 
+## Multiple named instances of one implementation
+
+The `providers` map is keyed by an **instance name**. Normally that name is the
+any-llm implementation itself (`openai`, `anthropic`, ...), so a key like
+`openai` both names the instance and selects the implementation. To run two
+backends that share an implementation, for example real OpenAI alongside a
+self-hosted OpenAI-compatible server (vLLM, llama.cpp, LM Studio), give each a
+distinct instance name and set `provider_type` to the underlying
+implementation:
+
+```yaml
+providers:
+  openai:                       # key is a real provider, no provider_type needed
+    api_key: ${OPENAI_API_KEY}
+
+  home_lab:                     # custom instance name
+    provider_type: openai       # underlying any-llm implementation
+    api_base: "https://nathans-mac-studio.example.ts.net/v1"
+    api_key: ${HOME_LAB_TOKEN}
+```
+
+Route to an instance with `instance_name:model`. A request for
+`home_lab:deepseek-v4-flash` resolves instance `home_lab` to
+`provider_type: openai` and dispatches to any-llm with `provider=openai`,
+`model=deepseek-v4-flash`, and the instance's `api_base` / `api_key`. any-llm
+never sees the name `home_lab`; it is an Otari-level routing key.
+`openai:gpt-4o` continues to hit real OpenAI. Pricing and usage are keyed on the
+instance name (`home_lab:deepseek-v4-flash`), so configure pricing under that
+key (or run with `require_pricing: false` for an unpriced self-hosted backend).
+
+`provider_type: openai-compatible` and `provider_type: openai_compatible` are
+both accepted as aliases for `openai`.
+
+Existing configs are unaffected: a key with no `provider_type` is its own
+implementation, exactly as before.
+
+Named instances are a standalone-mode feature. In hybrid mode the local
+`providers` map is empty (per-request credentials come from otari.ai), so there
+are no instances to resolve and the platform's routing policy decides the
+provider.
+
+### Declaring models for backends without `/v1/models`
+
+`/v1/models` lists an instance's models by calling the backend's model-listing
+endpoint. When a backend does not expose `/v1/models`, declare the served model
+ids so they still appear in the listing:
+
+```yaml
+providers:
+  edge_box:
+    provider_type: openai
+    api_base: "https://edge.example.ts.net/v1"
+    api_key: ${EDGE_TOKEN}
+    models:
+      - llama-3.3-70b
+      - qwen3-32b
+```
+
+The declared `models` are listed as `edge_box:<model>`. Direct requests work
+with or without this list; it only affects discovery.
+
 ## Listing available models
 
 Query Otari to see which models are available:

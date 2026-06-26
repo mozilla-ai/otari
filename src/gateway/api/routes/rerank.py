@@ -4,14 +4,14 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from any_llm import AnyLLM, arerank
+from any_llm import arerank
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes.chat import get_provider_kwargs, rate_limit_headers
+from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
@@ -24,6 +24,7 @@ from gateway.services.budget_service import (
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
+from gateway.services.provider_kwargs import resolve_provider_selector
 
 router = APIRouter(prefix="/v1", tags=["rerank"])
 
@@ -84,9 +85,10 @@ async def create_rerank(
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    provider, model = AnyLLM.split_model_provider(request.model)
+    resolved = resolve_provider_selector(config, request.model)
+    provider, model = resolved.provider, resolved.model
 
-    pricing = await find_model_pricing(db, provider, model)
+    pricing = await find_model_pricing(db, resolved.instance, model)
 
     # Rerank bills on total tokens (input only). Estimate from query + documents.
     prompt_chars = len(request.query) + sum(len(doc) for doc in request.documents)
@@ -99,10 +101,10 @@ async def create_rerank(
         await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"No pricing configured for model '{provider}:{model}'",
+            detail=f"No pricing configured for model '{resolved.instance}:{model}'",
         )
 
-    provider_kwargs = get_provider_kwargs(config, provider)
+    provider_kwargs = resolved.kwargs
 
     rerank_kwargs: dict[str, Any] = {
         "model": model,
@@ -127,7 +129,7 @@ async def create_rerank(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/rerank",
             status="success",
             prompt_tokens=total_tokens,
@@ -153,7 +155,7 @@ async def create_rerank(
             user_id=user_id,
             timestamp=datetime.now(UTC),
             model=model,
-            provider=provider,
+            provider=resolved.instance,
             endpoint="/v1/rerank",
             status="error",
             error_message=str(e),

@@ -54,12 +54,25 @@ def resolve_capabilities(
     config: GatewayConfig,
     provider: LLMProvider,
     model: str,
+    instance: str | None = None,
 ) -> Capabilities:
-    """Resolve native image/pdf support for ``provider/model``."""
+    """Resolve native image/pdf support for a target model.
+
+    ``provider`` is the underlying any-llm implementation (drives the
+    ``_LOCAL_PROVIDERS`` / metadata fallback); ``instance`` is the configured
+    provider-instance name when it differs from the implementation, so an
+    operator can key overrides on the same ``instance:model`` selector they make
+    requests with (e.g. a self-hosted ``home_lab:`` OpenAI-compatible box).
+    """
     # Accept both separators: model selectors and the pricing config use
     # ``provider:model`` (colon), while ``provider/model`` (slash) is also common.
-    # The bare model key is the final fallback.
-    for key in (f"{provider.value}:{model}", f"{provider.value}/{model}", model):
+    # The instance-scoped key is most specific; the bare model key is the final
+    # fallback.
+    keys: list[str] = []
+    if instance is not None and instance != provider.value:
+        keys.extend((f"{instance}:{model}", f"{instance}/{model}"))
+    keys.extend((f"{provider.value}:{model}", f"{provider.value}/{model}", model))
+    for key in keys:
         override = config.model_capabilities.get(key)
         if override is not None:
             return Capabilities(override.supports_image, override.supports_pdf, "config")

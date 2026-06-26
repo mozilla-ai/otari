@@ -69,6 +69,18 @@ providers:
   mistral:
     api_key: YOUR_MISTRAL_API_KEY_HERE
 
+  # Named instances: run multiple backends that share an implementation by
+  # giving each a custom key and a `provider_type`. Route with
+  # `home_lab:<model>`. `provider_type: openai-compatible` and
+  # `provider_type: openai_compatible` both alias `openai`.
+  # An optional `models:` list backs /v1/models for backends without /v1/models.
+  # home_lab:
+  #   provider_type: openai
+  #   api_base: "https://my-box.example.ts.net/v1"
+  #   api_key: ${HOME_LAB_TOKEN}
+  #   models:
+  #     - deepseek-v4-flash
+
   # Add more providers as needed...
 
 # Model pricing configuration (optional but necessary for price tracking)

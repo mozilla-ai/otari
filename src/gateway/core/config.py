@@ -9,11 +9,19 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from any_llm import LLMProvider
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 API_KEY_HEADER = "Otari-Key"
+# Aliases accepted for a provider instance's ``provider_type`` that map onto a
+# real any-llm implementation. The "openai-compatible" spelling mirrors the
+# naming opencode / pi use for self-hosted OpenAI-compatible backends.
+PROVIDER_TYPE_ALIASES = {
+    "openai-compatible": "openai",
+    "openai_compatible": "openai",
+}
 LEGACY_API_KEY_HEADERS = ("AnyLLM-Key", "X-AnyLLM-Key")  # Back-compat aliases; prefer API_KEY_HEADER.
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
 PLATFORM_TOKEN_ENV_VARS = (
@@ -125,7 +133,15 @@ class GatewayConfig(BaseSettings):
         default_factory=list, description="Allowed CORS origins (empty list disables CORS)"
     )
     providers: dict[str, dict[str, Any]] = Field(
-        default_factory=dict, description="Pre-configured provider credentials"
+        default_factory=dict,
+        description=(
+            "Pre-configured provider credentials, keyed by instance name. The key is "
+            "normally the any-llm implementation (e.g. 'openai'); to run multiple "
+            "instances of one implementation (e.g. real OpenAI plus a self-hosted "
+            "OpenAI-compatible backend), give each a distinct instance name and set "
+            "'provider_type' to the underlying implementation. An optional 'models' "
+            "list declares model ids for instances whose backend has no /v1/models."
+        ),
     )
     pricing: dict[str, PricingConfig] = Field(
         default_factory=dict,
@@ -291,6 +307,57 @@ class GatewayConfig(BaseSettings):
     def is_hybrid_mode(self) -> bool:
         return self.effective_mode == "hybrid"
 
+    def provider_instance_type(self, instance: str) -> str:
+        """Return the any-llm implementation backing a provider instance.
+
+        When the instance declares a ``provider_type`` (optionally an alias like
+        ``openai-compatible``) that is returned, normalized to the real
+        implementation name; otherwise the instance name itself is the
+        implementation (the fully backward-compatible default). Unknown instance
+        names are returned unchanged so the caller's own resolution surfaces the
+        error.
+        """
+        entry = self.providers.get(instance)
+        if isinstance(entry, dict):
+            declared = entry.get("provider_type")
+            if isinstance(declared, str) and declared:
+                return PROVIDER_TYPE_ALIASES.get(declared, declared)
+        return instance
+
+    def validate_provider_instances(self) -> None:
+        """Validate per-instance ``provider_type`` / ``models`` declarations.
+
+        Fails fast at startup so a typo in ``provider_type`` (or a non-list
+        ``models``) surfaces immediately rather than as a per-request error.
+        Instances without a ``provider_type`` are left unvalidated to preserve
+        the existing lenient behavior (the key is the implementation).
+        """
+        for instance, entry in self.providers.items():
+            # The selector splits on the first ``:`` / ``/``, so an instance name
+            # containing either could never be matched and would be silently
+            # unreachable. Reject it here rather than fail confusingly at request
+            # time. (No real any-llm provider name contains these characters.)
+            if ":" in instance or "/" in instance:
+                msg = f"provider instance name '{instance}' must not contain ':' or '/'."
+                raise ValueError(msg)
+            if not isinstance(entry, dict):
+                continue
+            declared = entry.get("provider_type")
+            if isinstance(declared, str) and declared:
+                impl = PROVIDER_TYPE_ALIASES.get(declared, declared)
+                try:
+                    LLMProvider(impl)
+                except ValueError as exc:
+                    msg = (
+                        f"providers.{instance}.provider_type '{declared}' is not a known provider "
+                        "implementation."
+                    )
+                    raise ValueError(msg) from exc
+            models = entry.get("models")
+            if models is not None and not (isinstance(models, list) and all(isinstance(m, str) for m in models)):
+                msg = f"providers.{instance}.models must be a list of model id strings."
+                raise ValueError(msg)
+
     @field_validator("stream_missing_usage_policy")
     @classmethod
     def _validate_stream_missing_usage_policy(cls, value: str) -> str:
@@ -400,6 +467,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
 
     config = GatewayConfig(**config_dict)
     config.validate_mode_selection()
+    config.validate_provider_instances()
     return config
 
 
