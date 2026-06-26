@@ -1,0 +1,39 @@
+{
+  "name": "@mozilla-ai/otari-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Otari admin web dashboard (React + HeroUI v3). Builds into src/gateway/static/dashboard so the gateway can serve it.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@heroui/react": "3.2.1",
+    "@heroui/styles": "3.2.1",
+    "@tanstack/react-query": "^5.62.7",
+    "clsx": "2.1.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^3.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.1",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "tailwindcss": "4.3.1",
+    "typescript": "5.6.3",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  }
+}

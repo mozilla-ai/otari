@@ -4,7 +4,8 @@ from typing import Any, Callable
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from typing_extensions import override
 
@@ -12,6 +13,7 @@ from gateway.api.deps import set_config
 from gateway.api.main import register_routers
 from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
 from gateway.core.database import create_session, init_db
+from gateway.dashboard import get_dashboard_dir
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.bootstrap_service import bootstrap_first_api_key
@@ -28,6 +30,8 @@ _PUBLIC_PREFIXES = ("/health",)
 # Public, unauthenticated static assets that are safe for shared caches and set
 # their own Cache-Control; the middleware leaves their caching headers alone.
 _CACHEABLE_PATHS = ("/favicon.svg",)
+# Hashed dashboard bundles under /assets are immutable; let them be cached too.
+_CACHEABLE_PREFIXES = ("/assets/",)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -44,7 +48,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        if not request.url.path.startswith(_PUBLIC_PREFIXES) and request.url.path not in _CACHEABLE_PATHS:
+        path = request.url.path
+        is_cacheable = path in _CACHEABLE_PATHS or path.startswith(_CACHEABLE_PREFIXES)
+        if not path.startswith(_PUBLIC_PREFIXES) and not is_cacheable:
             response.headers["Cache-Control"] = "private, no-store, no-cache"
             vary_values = {part.strip() for part in response.headers.get("Vary", "").split(",") if part.strip()}
             vary_values.add("Authorization")
@@ -107,7 +113,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         lifespan=_create_lifespan(config),
     )
 
-    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    @app.get("/welcome", response_class=HTMLResponse, include_in_schema=False)
     async def root_tutorial() -> str:
         return ROOT_TUTORIAL_HTML
 
@@ -118,6 +124,28 @@ def create_app(config: GatewayConfig) -> FastAPI:
             media_type="image/svg+xml",
             headers={"Cache-Control": "public, max-age=86400"},
         )
+
+    # The admin dashboard manages local keys/users/usage, which only exist in
+    # standalone mode; in hybrid mode the root keeps serving the tutorial. The
+    # dashboard is a single-page app, so a static mount for /assets plus an
+    # index.html at / is all it needs (navigation is client-side).
+    dashboard_dir = get_dashboard_dir() if not config.is_hybrid_mode else None
+    if dashboard_dir is not None:
+        index_file = dashboard_dir / "index.html"
+        app.mount(
+            "/assets",
+            StaticFiles(directory=dashboard_dir / "assets"),
+            name="dashboard-assets",
+        )
+
+        @app.get("/", include_in_schema=False)
+        async def dashboard_index() -> FileResponse:
+            return FileResponse(index_file, media_type="text/html")
+    else:
+
+        @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+        async def root_index() -> str:
+            return ROOT_TUTORIAL_HTML
 
     app.add_middleware(SecurityHeadersMiddleware)
 

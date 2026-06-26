@@ -78,6 +78,16 @@ uv run otari serve --config config.yml
 
 Open API docs at `http://localhost:8000/docs`.
 
+### Admin dashboard
+
+In standalone mode the gateway serves a web admin dashboard at the root URL
+(`http://localhost:8000`). Sign in with your master key (`OTARI_MASTER_KEY`) to
+create and revoke virtual API keys, manage users, and watch usage and traffic.
+The get-started tutorial page moved to `/welcome`. The dashboard is a React +
+HeroUI app that lives in `web/`; its built bundle is committed under
+`src/gateway/static/dashboard`, so the published package and Docker image serve
+it with no extra build step. See [`web/README.md`](web/README.md) to work on it.
+
 ## Start in hybrid mode
 
 Hybrid mode connects Otari to [otari.ai](https://otari.ai). It is enabled automatically when `OTARI_AI_TOKEN` is set.
