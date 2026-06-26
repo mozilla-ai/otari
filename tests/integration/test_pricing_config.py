@@ -1,5 +1,6 @@
 """Tests for pricing configuration from config file."""
 
+import logging
 from datetime import UTC, datetime
 
 import pytest
@@ -132,9 +133,16 @@ def test_database_pricing_takes_precedence(postgres_url: str, test_db: Session) 
         dispose_override()
 
 
-def test_pricing_validation_requires_configured_provider(postgres_url: str) -> None:
-    """Test that pricing initialization fails if provider is not configured."""
-    # Config with pricing for a provider that's not in providers list
+def test_pricing_for_unlisted_provider_is_skipped_not_fatal(
+    postgres_url: str,
+    test_db: Session,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Pricing for a provider absent from `providers:` is skipped with a warning, not a crash.
+
+    The provider may still be reachable via environment credentials, so a pricing/provider
+    mismatch must not abort startup (see issue #191).
+    """
     config = GatewayConfig(
         database_url=postgres_url,
         master_key="test-master-key",
@@ -142,19 +150,47 @@ def test_pricing_validation_requires_configured_provider(postgres_url: str) -> N
         port=8000,
         providers={"openai": {"api_key": "test-key"}},
         pricing={
+            # Unlisted provider: should be skipped.
             "anthropic:claude-3-opus": PricingConfig(
                 input_price_per_million=15.0,
                 output_price_per_million=75.0,
             ),
+            # Listed provider: should still be loaded.
+            "openai:gpt-4": PricingConfig(
+                input_price_per_million=30.0,
+                output_price_per_million=60.0,
+            ),
         },
     )
 
-    # Should raise ValueError when trying to initialize pricing
     app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(postgres_url)
+    app.dependency_overrides[get_db] = override_get_db
 
-    with pytest.raises(ValueError, match="provider 'anthropic' is not configured"):
-        with TestClient(app):
-            pass
+    # The gateway logger does not propagate to the root logger, so caplog's
+    # root handler never sees its records; attach caplog's handler directly.
+    gateway_logger = logging.getLogger("gateway")
+    gateway_logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.WARNING, logger="gateway"):
+            with TestClient(app):
+                # Startup succeeded: the unlisted provider's pricing was skipped, not fatal.
+                skipped = test_db.query(ModelPricing).filter(
+                    ModelPricing.model_key == "anthropic:claude-3-opus"
+                ).first()
+                assert skipped is None, "Pricing for an unlisted provider should be skipped"
+
+                # The listed provider's pricing is still loaded.
+                loaded = test_db.query(ModelPricing).filter(ModelPricing.model_key == "openai:gpt-4").first()
+                assert loaded is not None, "Pricing for a listed provider should still be loaded"
+                assert loaded.input_price_per_million == 30.0
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+        dispose_override()
+
+    assert any(
+        "Skipping pricing" in record.message and "anthropic" in record.message for record in caplog.records
+    ), "Expected a warning that anthropic pricing was skipped"
 
 
 def test_pricing_loaded_from_config_normalizes_legacy_slash_format(postgres_url: str, test_db: Session) -> None:
