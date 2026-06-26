@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { useAuth } from "@/auth/AuthContext";
 import { useHealth } from "@/api/hooks";
 
-export type PageKey = "usage" | "keys" | "users";
+export type PageKey = "overview" | "usage" | "models" | "keys" | "users";
 
 interface NavItem {
   key: PageKey;
@@ -15,12 +15,34 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   {
+    key: "overview",
+    label: "Overview",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+        <rect x="3" y="3" width="7" height="7" rx="1.5" />
+        <rect x="14" y="3" width="7" height="7" rx="1.5" />
+        <rect x="3" y="14" width="7" height="7" rx="1.5" />
+        <rect x="14" y="14" width="7" height="7" rx="1.5" />
+      </svg>
+    ),
+  },
+  {
     key: "usage",
     label: "Usage",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
         <path d="M3 3v18h18" strokeLinecap="round" />
         <path d="M7 14l3-4 4 3 4-6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    key: "models",
+    label: "Models",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+        <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" strokeLinejoin="round" />
+        <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" strokeLinejoin="round" />
       </svg>
     ),
   },

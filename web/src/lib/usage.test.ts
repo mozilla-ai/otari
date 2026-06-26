@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { UsageEntry } from "@/api/types";
-import { summarizeUsage, usageByDay, usageByModel } from "@/lib/usage";
+import { providersFromUsage, summarizeUsage, usageByModel } from "@/lib/usage";
 
 function entry(overrides: Partial<UsageEntry>): UsageEntry {
   return {
@@ -46,29 +46,34 @@ describe("summarizeUsage", () => {
   });
 });
 
-describe("usageByDay", () => {
-  it("buckets entries by calendar day in chronological order", () => {
-    const points = usageByDay([
-      entry({ timestamp: "2026-01-02T08:00:00Z", cost: 0.02 }),
-      entry({ timestamp: "2026-01-01T23:00:00Z", cost: 0.01 }),
-      entry({ timestamp: "2026-01-02T09:00:00Z", cost: 0.03 }),
+describe("usageByModel", () => {
+  it("groups by model with token breakdowns, sorted by request count descending", () => {
+    const rows = usageByModel([
+      entry({ model: "gpt-4o", provider: "openai", prompt_tokens: 10, completion_tokens: 5 }),
+      entry({ model: "claude-opus-4-8", provider: "anthropic", prompt_tokens: 3, completion_tokens: 2 }),
+      entry({ model: "claude-opus-4-8", provider: "anthropic", prompt_tokens: 7, completion_tokens: 1 }),
     ]);
 
-    expect(points.map((p) => p.date)).toEqual(["2026-01-01", "2026-01-02"]);
-    expect(points[1].requests).toBe(2);
-    expect(points[1].cost).toBeCloseTo(0.05, 6);
+    expect(rows[0]).toMatchObject({
+      model: "claude-opus-4-8",
+      provider: "anthropic",
+      requests: 2,
+      promptTokens: 10,
+      completionTokens: 3,
+    });
+    expect(rows[1]).toMatchObject({ model: "gpt-4o", requests: 1, promptTokens: 10 });
   });
 });
 
-describe("usageByModel", () => {
-  it("groups by model and sorts by request count descending", () => {
-    const rows = usageByModel([
-      entry({ model: "gpt-4o" }),
-      entry({ model: "claude-opus-4-8" }),
-      entry({ model: "claude-opus-4-8" }),
+describe("providersFromUsage", () => {
+  it("returns the distinct, sorted set of providers", () => {
+    const providers = providersFromUsage([
+      entry({ provider: "openai" }),
+      entry({ provider: "anthropic" }),
+      entry({ provider: "openai" }),
+      entry({ provider: null }),
     ]);
 
-    expect(rows[0]).toMatchObject({ model: "claude-opus-4-8", requests: 2 });
-    expect(rows[1]).toMatchObject({ model: "gpt-4o", requests: 1 });
+    expect(providers).toEqual(["anthropic", "openai"]);
   });
 });

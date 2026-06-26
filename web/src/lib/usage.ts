@@ -35,49 +35,54 @@ export function summarizeUsage(entries: UsageEntry[]): UsageTotals {
   return totals;
 }
 
-export interface DailyPoint {
-  date: string;
-  requests: number;
-  cost: number;
-}
-
-// Buckets entries by calendar day (local time), returning chronological points.
-export function usageByDay(entries: UsageEntry[]): DailyPoint[] {
-  const buckets = new Map<string, DailyPoint>();
-
-  for (const entry of entries) {
-    const date = new Date(entry.timestamp);
-    if (Number.isNaN(date.getTime())) {
-      continue;
-    }
-    const key = date.toISOString().slice(0, 10);
-    const point = buckets.get(key) ?? { date: key, requests: 0, cost: 0 };
-    point.requests += 1;
-    point.cost += entry.cost ?? 0;
-    buckets.set(key, point);
-  }
-
-  return [...buckets.values()].sort((a, b) => a.date.localeCompare(b.date));
-}
-
 export interface ModelUsage {
   model: string;
+  provider: string;
   requests: number;
+  promptTokens: number;
+  completionTokens: number;
   totalTokens: number;
   cost: number;
 }
 
+// Summarizes usage grouped by model, ordered by request count (busiest first).
 export function usageByModel(entries: UsageEntry[]): ModelUsage[] {
   const buckets = new Map<string, ModelUsage>();
 
   for (const entry of entries) {
     const model = entry.model || "unknown";
-    const row = buckets.get(model) ?? { model, requests: 0, totalTokens: 0, cost: 0 };
+    const row =
+      buckets.get(model) ??
+      ({
+        model,
+        provider: entry.provider || "—",
+        requests: 0,
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        cost: 0,
+      } satisfies ModelUsage);
     row.requests += 1;
+    row.promptTokens += entry.prompt_tokens ?? 0;
+    row.completionTokens += entry.completion_tokens ?? 0;
     row.totalTokens += entry.total_tokens ?? 0;
     row.cost += entry.cost ?? 0;
+    if (row.provider === "—" && entry.provider) {
+      row.provider = entry.provider;
+    }
     buckets.set(model, row);
   }
 
   return [...buckets.values()].sort((a, b) => b.requests - a.requests);
+}
+
+// Distinct provider names seen across usage entries.
+export function providersFromUsage(entries: UsageEntry[]): string[] {
+  const set = new Set<string>();
+  for (const entry of entries) {
+    if (entry.provider) {
+      set.add(entry.provider);
+    }
+  }
+  return [...set].sort();
 }

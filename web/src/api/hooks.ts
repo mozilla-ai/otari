@@ -7,6 +7,7 @@ import type {
   CreateUserRequest,
   HealthResponse,
   KeyInfo,
+  ModelListResponse,
   UsageEntry,
   UserResponse,
 } from "@/api/types";
@@ -15,6 +16,7 @@ const KEYS = "keys";
 const USERS = "users";
 const USAGE = "usage";
 const HEALTH = "health";
+const MODELS = "models";
 
 export function useHealth() {
   return useQuery({
@@ -96,5 +98,13 @@ export function useUsage(limit = 500) {
   return useQuery({
     queryKey: [USAGE, limit],
     queryFn: () => apiFetch<UsageEntry[]>(`/v1/usage?limit=${limit}`),
+  });
+}
+
+export function useModels() {
+  return useQuery({
+    queryKey: [MODELS],
+    queryFn: () => apiFetch<ModelListResponse>("/v1/models"),
+    staleTime: 60_000,
   });
 }

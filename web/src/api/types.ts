@@ -65,3 +65,21 @@ export interface HealthResponse {
   version?: string;
   [key: string]: unknown;
 }
+
+export interface ModelPricingInfo {
+  input_price_per_million: number;
+  output_price_per_million: number;
+}
+
+export interface ModelObject {
+  id: string;
+  object: string;
+  created: number;
+  owned_by: string;
+  pricing: ModelPricingInfo | null;
+}
+
+export interface ModelListResponse {
+  object: string;
+  data: ModelObject[];
+}
