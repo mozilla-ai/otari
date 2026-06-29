@@ -97,7 +97,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer <your-otari-user-token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "openai:gpt-4o",
+    "model": "openai/gpt-4o",
     "messages": [{"role": "user", "content": "Say hello in one short sentence."}]
   }'
 ```

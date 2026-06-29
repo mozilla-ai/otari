@@ -12,7 +12,8 @@ For full request/response schemas, see the [OpenAPI spec](public/openapi.json) o
 | Chat completions (`/v1/chat/completions`) | Yes | Yes |
 | Messages (`/v1/messages`, `/v1/messages/count_tokens`) | Yes | Yes |
 | Responses (`/v1/responses`) | Yes | Yes |
-| All other `/v1/*` endpoints in this doc | Yes | No |
+| Management (keys, users, budgets, pricing, usage) | Yes | No |
+| OpenAI-compatible (embeddings, models, files, batches, images, audio, moderations, rerank) | Yes | No |
 
 ## Authentication
 
@@ -26,8 +27,7 @@ Regular API endpoints use an API key. Management endpoints use the master key.
 
 ### Connected to otari.ai
 
-- `POST /v1/chat/completions` expects `Authorization: Bearer <user-token>`
-- `Otari-Key` and local API keys are not used for this path
+The three generation endpoints (`/v1/chat/completions`, `/v1/messages`, `/v1/responses`) expect `Authorization: Bearer <user-token>`. `Otari-Key` and local API keys are not used in this mode.
 
 ## Available in both deployment types
 
@@ -40,6 +40,7 @@ No authentication required.
 | `GET` | `/health` | General health check. Includes otari.ai reachability fields when connected. |
 | `GET` | `/health/liveness` | Kubernetes liveness probe. |
 | `GET` | `/health/readiness` | Kubernetes readiness probe. Checks DB (standalone) or otari.ai reachability. Returns 503 on failure. |
+| `GET` | `/metrics` | Prometheus metrics. Disabled by default; enable with `enable_metrics: true` in config. |
 
 ### Chat completions
 
@@ -47,7 +48,7 @@ No authentication required.
 |--------|------|-------------|------|
 | `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions. Supports streaming and tool use (`otari_code_execution`, `otari_web_search`, MCP). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 
-See [Use with opencode](use-with-opencode.md) for a full client setup.
+For a full client setup example, see [Use with opencode](use-with-opencode.md).
 
 ### Messages
 
@@ -56,7 +57,7 @@ See [Use with opencode](use-with-opencode.md) for a full client setup.
 | `POST` | `/v1/messages` | Anthropic Messages API-compatible endpoint. Supports streaming, tool use, and extended thinking. Routes to any provider in the catalog (non-Anthropic models are translated to/from the Messages format automatically). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 | `POST` | `/v1/messages/count_tokens` | Anthropic-compatible input-token count for a Messages request. Returns `{"input_tokens": N}`. Counts locally (no provider call, no budget debit); the count is an approximation. Used by clients such as Claude Code for context-window management. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 
-See [Use with Claude Code](use-with-claude-code.md) for a full client setup.
+For a full client setup example, see [Use with Claude Code](use-with-claude-code.md).
 
 ### Responses
 
