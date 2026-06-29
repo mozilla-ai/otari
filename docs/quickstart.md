@@ -38,6 +38,7 @@ The `pricing` entry matters: by default Otari rejects requests for any model it 
 ## 2. Start your Otari
 
 ```bash
+docker compose pull
 docker compose up -d
 ```
 

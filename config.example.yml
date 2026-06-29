@@ -1,6 +1,9 @@
 # Configuration for Otari
 
-# Database connection URL
+# Database connection URL.
+# PostgreSQL is used by the full docker compose stack (postgres service is defined in docker-compose.yml).
+# For local development without Docker, switch to SQLite:
+#   database_url: "sqlite+aiosqlite:///./otari.db"
 database_url: "postgresql://otari:otari@postgres:5432/otari"
 
 # Server configuration - if you want to use a different port, change it here and in the docker-compose.yml file.
