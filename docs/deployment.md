@@ -51,9 +51,12 @@ No `providers` block, no `database_url`, no `master_key`.
 
 ### 2. Set your otari.ai credentials
 
-You need your Otari token from your otari.ai account.
+You need the gateway token (`gw_...`) for this Otari instance from otari.ai.
+In otari.ai, go to `Organisation > Gateways`, create or open a gateway, then
+click `Create token`. This is not the per-request user token (`tk_...`) that
+clients send in `Authorization: Bearer ...`.
 
-Pass them as environment variables. Create a `.env` file:
+Pass it as an environment variable. Create a `.env` file:
 
 ```bash
 OTARI_AI_TOKEN=gw_your_token_here

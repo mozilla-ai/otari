@@ -57,6 +57,8 @@ For a full client setup example, see [Use with opencode](use-with-opencode.md).
 | `POST` | `/v1/messages` | Anthropic Messages API-compatible endpoint. Supports streaming, tool use, and extended thinking. Routes to any provider in the catalog (non-Anthropic models are translated to/from the Messages format automatically). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 | `POST` | `/v1/messages/count_tokens` | Anthropic-compatible input-token count for a Messages request. Returns `{"input_tokens": N}`. Counts locally (no provider call, no budget debit); the count is an approximation. Used by clients such as Claude Code for context-window management. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 
+> `/v1/messages` uses the Anthropic Messages request shape regardless of which upstream provider serves the model. For example, `max_tokens` is still required even when `model` is `openai:...`.
+
 For a full client setup example, see [Use with Claude Code](use-with-claude-code.md).
 
 ### Responses

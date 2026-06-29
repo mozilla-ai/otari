@@ -137,7 +137,7 @@ To mint a named key yourself instead of using the bootstrap key, call the manage
 curl -X POST http://localhost:8000/v1/keys \
   -H "Authorization: Bearer SET_A_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"name": "quickstart"}'
+  -d '{"key_name": "quickstart"}'
 ```
  
 The returned `gw-` key is shown in full only once.
@@ -192,7 +192,11 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 ## Modes
 
 - **Standalone** (default): Otari manages everything locally, its own database, your provider credentials, virtual keys, budgets, and usage. The Quickstart above runs this mode.
-- **Hybrid**: set `OTARI_AI_TOKEN` to connect Otari to otari.ai, which then handles provider routing, auth, and usage tracking and adds multi-provider fallback. Local `providers` config is unused in this mode.
+- **Hybrid**: set `OTARI_AI_TOKEN` to the gateway token (`gw_...`) you create
+  in otari.ai for this Otari instance. In otari.ai, go to `Organisation >
+  Gateways`, create or open a gateway, then click `Create token`. otari.ai then
+  handles provider routing, auth, and usage tracking and adds multi-provider
+  fallback. Local `providers` config is unused in this mode.
 
 ```bash
 export OTARI_AI_TOKEN=gw_xxx

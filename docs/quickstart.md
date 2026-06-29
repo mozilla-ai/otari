@@ -2,6 +2,8 @@
 
 Get Otari running locally and make your first request in about five minutes. This guide uses **standalone mode**: Otari runs entirely on your own machine, manages its own database, and talks to providers using credentials you supply. Nothing leaves your environment, and you don't need an otari.ai account.
 
+This guide assumes you want to run the full local Docker Compose stack from a cloned checkout. If you want the fastest no-clone path, use the Quickstart in the project [README](../README.md).
+
 ## Prerequisites
 
 - Docker and Docker Compose
@@ -9,9 +11,11 @@ Get Otari running locally and make your first request in about five minutes. Thi
 
 ## 1. Configure
 
-Copy the example config and open it:
+Clone the repo, then copy the example config and open it:
 
 ```bash
+git clone https://github.com/mozilla-ai/otari
+cd otari
 cp config.example.yml config.yml
 ```
 
@@ -33,7 +37,7 @@ pricing:
     output_price_per_million: 0.60
 ```
 
-The `pricing` entry matters: by default Otari rejects requests for any model it can't price, so it can enforce budgets. Add an entry for the model you plan to call.
+The `pricing` entry matters because `require_pricing` is on by default: Otari rejects requests for any model it can't resolve a price for, so it can enforce budgets. Add a pricing entry for the model you plan to call, or enable `default_pricing: true` to use the bundled fallback pricing for common models.
 
 ## 2. Start your Otari
 
@@ -58,7 +62,7 @@ Use your master key (the one you set in `config.yml`) to create an API key for m
 curl -X POST http://localhost:8000/v1/keys \
   -H "Otari-Key: Bearer your-secret-master-key" \
   -H "Content-Type: application/json" \
-  -d '{"name": "quickstart"}'
+  -d '{"key_name": "quickstart"}'
 ```
  
 The response includes your new key. Copy it, this is the only time it's shown in full. You'll use it in the next step.
