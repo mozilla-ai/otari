@@ -90,7 +90,7 @@ in order:
 
 ## Configuration
 
-See `[config.example.yml](../config.example.yml)` for the full list. Key knobs:
+See [config.example.yml](../config.example.yml) for the full list. Key knobs:
 
 - `files_enabled`, `files_backend`, `files_local_dir`, `files_max_bytes`,
 `files_retention_hours`: upload storage.
@@ -104,8 +104,8 @@ vision model (e.g. `ollama:qwen2-vl`) to keep captioning free.
 
 ## Dependencies
 
-Text/office/PDF extraction uses `[markitdown](https://github.com/microsoft/markitdown)`
-(MIT); scanned-PDF rasterization uses `[pypdfium2](https://github.com/pypdfium2-team/pypdfium2)`
+Text/office/PDF extraction uses [markitdown](https://github.com/microsoft/markitdown)
+(MIT); scanned-PDF rasterization uses [pypdfium2](https://github.com/pypdfium2-team/pypdfium2)
 (Apache-2.0). Both are permissively licensed, deliberately avoiding AGPL PDF
 libraries since Otari is a network service. OCR is optional; install the
 `ocr` extra (`pip install gateway[ocr]`) to enable it.
