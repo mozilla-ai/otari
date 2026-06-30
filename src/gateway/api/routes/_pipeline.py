@@ -1101,6 +1101,7 @@ def build_streaming_response(
     reservation: ReservationHandle | None,
     platform_correlation_id: str | None = None,
     platform_request_id: str | None = None,
+    session_label: str | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -1127,6 +1128,7 @@ def build_streaming_response(
                     correlation_id=platform_correlation_id,
                     outcome="success",
                     usage=usage_data,
+                    session_label=session_label,
                 )
             )
             return
@@ -1187,6 +1189,7 @@ def build_streaming_response(
                     correlation_id=platform_correlation_id,
                     outcome="error",
                     usage=None,
+                    session_label=session_label,
                 )
             )
             return
@@ -1280,6 +1283,7 @@ async def run_single_attempt_stream(
     model: str,
     platform_correlation_id: str | None = None,
     platform_request_id: str | None = None,
+    session_label: str | None = None,
 ) -> StreamingResponse:
     """Open a single-attempt stream and wrap it with settlement callbacks.
 
@@ -1324,6 +1328,7 @@ async def run_single_attempt_stream(
         reservation=ctx.reservation,
         platform_correlation_id=platform_correlation_id,
         platform_request_id=platform_request_id,
+        session_label=session_label,
     )
 
 
@@ -1331,6 +1336,7 @@ async def _flush_pending_usage_reports(
     config: GatewayConfig,
     pending_error_reports: list[tuple[str, str, Any, str | None]],
     request_id: str,
+    session_label: str | None = None,
 ) -> None:
     """Send the per-attempt error reports inline on the all-failed path.
 
@@ -1353,7 +1359,7 @@ async def _flush_pending_usage_reports(
         results = await asyncio.wait_for(
             asyncio.gather(
                 *(
-                    _report_platform_usage(config, attempt_id, outcome, usage, error_class)
+                    _report_platform_usage(config, attempt_id, outcome, usage, error_class, session_label)
                     for attempt_id, outcome, usage, error_class in pending_error_reports
                 ),
                 return_exceptions=True,
@@ -1386,6 +1392,7 @@ async def run_streaming_with_fallback(
     background_tasks: BackgroundTasks,
     rate_limit_info: RateLimitInfo | None,
     tool_ctx: ToolContext,
+    session_label: str | None = None,
 ) -> StreamingResponse:
     """Multi-attempt streaming for hybrid-mode requests.
 
@@ -1464,6 +1471,7 @@ async def run_streaming_with_fallback(
             "error",
             None,
             failure.error_class,
+            session_label,
         )
         pending_error_reports.append((attempt.attempt_id, "error", None, failure.error_class))
         logger.warning(
@@ -1492,7 +1500,9 @@ async def run_streaming_with_fallback(
         # if the flush raises or is interrupted.
         try:
             if not isinstance(exc, asyncio.CancelledError):
-                await _flush_pending_usage_reports(config, pending_error_reports, route.request_id)
+                await _flush_pending_usage_reports(
+                    config, pending_error_reports, route.request_id, session_label
+                )
         finally:
             await backend_stack.aclose()
         raise
@@ -1524,6 +1534,7 @@ async def run_streaming_with_fallback(
         reservation=None,
         platform_correlation_id=chosen.attempt_id,
         platform_request_id=route.request_id,
+        session_label=session_label,
     )
 
 
@@ -1548,6 +1559,7 @@ async def run_platform_non_stream(
     background_tasks: BackgroundTasks,
     config: GatewayConfig,
     rate_limit_info: RateLimitInfo | None,
+    session_label: str | None = None,
 ) -> ResultT:
     """Drive the multi-attempt hybrid-mode non-streaming path via the shared
     ``run_platform_attempts`` runner, dispatching each attempt through the
@@ -1591,6 +1603,7 @@ async def run_platform_non_stream(
             outcome,
             usage,
             error_class,
+            session_label,
         )
         if outcome != "success":
             pending_error_reports.append((attempt.attempt_id, outcome, usage, error_class))
@@ -1620,7 +1633,7 @@ async def run_platform_non_stream(
         # branch only catches HTTPException (what the runner raises on the
         # all-failed path); a CancelledError propagates without doing reporting
         # I/O during teardown.
-        await _flush_pending_usage_reports(config, pending_error_reports, route.request_id)
+        await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
         raise
 
 

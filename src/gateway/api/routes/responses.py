@@ -38,7 +38,7 @@ from gateway.api.routes._pipeline import (
     run_streaming_with_fallback,
 )
 from gateway.api.routes._platform import ResolvedAttempt
-from gateway.api.routes._schema_derive import derive_request_base
+from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
@@ -94,6 +94,7 @@ class ResponsesRequest(derive_request_base(ResponsesParams)):  # type: ignore[mi
     guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
+    session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
 
 
 def _responses_input_text(value: Any) -> str:
@@ -401,6 +402,7 @@ async def create_response(
                     background_tasks=background_tasks,
                     rate_limit_info=ctx.rate_limit_info,
                     tool_ctx=tool_ctx,
+                    session_label=request_body.session_label,
                 )
             except HTTPException:
                 raise
@@ -456,6 +458,7 @@ async def create_response(
             model=model,
             platform_correlation_id=platform_correlation_id,
             platform_request_id=platform_request_id,
+            session_label=request_body.session_label,
         )
 
     # ------------------------------------------------------------------
@@ -474,6 +477,7 @@ async def create_response(
                 background_tasks=background_tasks,
                 config=config,
                 rate_limit_info=ctx.rate_limit_info,
+                session_label=request_body.session_label,
             )
         except HTTPException:
             raise

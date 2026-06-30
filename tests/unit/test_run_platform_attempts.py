@@ -77,3 +77,40 @@ async def test_report_platform_usage_does_not_retry_on_402(monkeypatch: pytest.M
     # behaviour: 402 must stay in the non-retryable set even if the >= 500 retry
     # predicate changes.
     assert 402 in _platform._USAGE_NON_RETRYABLE_STATUS_CODES
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("session_label", "expected"),
+    [
+        ("my-run-personas", "my-run-personas"),
+        ("  spaced-out  ", "spaced-out"),  # trimmed
+        (None, None),  # omitted
+        ("   ", None),  # blank treated as absent
+    ],
+)
+async def test_report_platform_usage_forwards_session_label(
+    monkeypatch: pytest.MonkeyPatch,
+    session_label: str | None,
+    expected: str | None,
+) -> None:
+    """The caller's session label rides the usage report so the platform can
+    attribute spend; blank/absent labels are omitted from the payload."""
+    config = cast(
+        GatewayConfig,
+        SimpleNamespace(
+            platform={"base_url": "http://platform", "usage_max_retries": 3},
+            platform_token="gw-test",
+        ),
+    )
+
+    post_mock = AsyncMock(return_value=httpx.Response(204))
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+
+    await _platform._report_platform_usage(config, "corr-1", "success", None, session_label=session_label)
+
+    body = post_mock.call_args.kwargs["body"]
+    if expected is None:
+        assert "session_label" not in body
+    else:
+        assert body["session_label"] == expected

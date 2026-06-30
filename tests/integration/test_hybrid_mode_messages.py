@@ -801,6 +801,77 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     assert success_reports[0]["correlation_id"] == "stream-att-1"
 
 
+def test_hybrid_mode_tool_loop_streaming_forwards_session_label(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The streaming success closure (``build_streaming_response._on_complete``)
+    on the ``run_single_attempt_stream`` hybrid path (used by messages/responses
+    for tool-loop streaming, which chat does not take) must carry the caller's
+    session_label onto the usage report."""
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json=_resolve_payload([_attempt(0, "stream-att-1", "claude-3-5-sonnet-20241022", "sk-platform")]),
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    from unittest.mock import AsyncMock, patch
+
+    from any_llm.types.messages import MessageDelta, MessageDeltaEvent, MessageDeltaUsage
+
+    async def fake_loop_stream(**_kwargs: Any) -> Any:
+        yield MessageDeltaEvent(
+            type="message_delta",
+            delta=MessageDelta(stop_reason=cast(Any, "end_turn"), stop_sequence=None),
+            usage=MessageDeltaUsage(
+                input_tokens=3,
+                output_tokens=5,
+                cache_creation_input_tokens=None,
+                cache_read_input_tokens=None,
+                server_tool_use=None,
+            ),
+        )
+
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_loop_stream),
+        patch(
+            "gateway.services.mcp_client.MCPClientPool.__aenter__",
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+        ),
+        patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
+    ):
+        with platform_client.stream(
+            "POST",
+            "/v1/messages",
+            json={
+                "model": "claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 100,
+                "stream": True,
+                "session_label": "my-run-personas",
+                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:18080/mcp"}],
+            },
+            headers={"Authorization": "Bearer user_test_token"},
+        ) as response:
+            assert response.status_code == 200, response.read().decode()
+            # Consume the stream so on_complete fires.
+            for _ in response.iter_bytes():
+                pass
+
+    success_reports = [r for r in usage_reports if r.get("status") == "success"]
+    assert success_reports, "expected a success usage report for the hybrid-mode tool-loop stream"
+    assert success_reports[0]["session_label"] == "my-run-personas"
+
+
 def test_hybrid_mode_count_tokens_requires_authorization_header(
     platform_client: TestClient,
 ) -> None:

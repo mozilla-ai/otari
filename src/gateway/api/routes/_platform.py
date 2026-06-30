@@ -668,6 +668,7 @@ async def _report_platform_usage(
     outcome: str,
     usage: CompletionUsage | None,
     error_class: str | None = None,
+    session_label: str | None = None,
 ) -> None:
     """POST a usage record back to the platform with bounded retries.
 
@@ -686,6 +687,12 @@ async def _report_platform_usage(
     headers = {"X-Gateway-Token": config.platform_token or ""}
 
     payload: dict[str, Any] = {"correlation_id": correlation_id, "status": outcome}
+    # Forward the caller's session label so the platform can attribute this
+    # attempt's spend. Blank is treated as absent; the body field already caps
+    # length, so the platform never has to truncate.
+    normalized_label = (session_label or "").strip()
+    if normalized_label:
+        payload["session_label"] = normalized_label
     if outcome == "success":
         token_usage = usage or CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
         payload["usage"] = {

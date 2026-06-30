@@ -263,11 +263,27 @@ Content-Type: application/json
     "cache_read_tokens": 8,            // provider cache-read input tokens
     "cache_write_tokens": 0           // cache-write (creation) input tokens; Anthropic only
   },
-  "error_class": "http_401"            // optional on error; omitted when the
+  "error_class": "http_401",           // optional on error; omitted when the
                                        // Otari can't classify the failure
                                        // (e.g. mid-stream errors). See below.
+  "session_label": "my-run-personas"   // optional; the caller's cost-attribution
+                                       // label (see below). Omitted when absent.
 }
 ```
+
+`session_label` is an optional caller-supplied label for cost attribution (per
+run, experiment, or conversation). A caller sets it on the request body
+(`session_label` on the chat/messages/responses request); Otari strips it before
+the upstream provider call and forwards it here so the platform can attribute the
+attempt's spend to that session without the caller standing up OpenTelemetry. It
+is trimmed and omitted when blank; Otari caps it at 255 characters at the request
+boundary so the platform never has to truncate. All attempts of one request carry
+the same label.
+
+> **`user` is not used for cost attribution in hybrid mode.** The OpenAI-standard
+> `user` field is stripped before the upstream call and is not forwarded on the
+> usage report, so it does not segment spend here. Callers who want per-run cost
+> breakdown must use `session_label`.
 
 `cache_read_tokens` and `cache_write_tokens` are additive fields carrying the
 provider cached-token counts (default `0` when a provider reports none). Their
