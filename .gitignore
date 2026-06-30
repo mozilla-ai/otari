@@ -13,6 +13,7 @@ build/
 
 .env
 config.yml
+!.github/ISSUE_TEMPLATE/config.yml
 config.yaml
 service_account.json
 gateway.db
