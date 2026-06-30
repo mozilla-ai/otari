@@ -1,4 +1,4 @@
-"""Unit tests for `web_search_url_targets_platform`.
+"""Unit tests for `url_targets_platform`.
 
 Guards the decision to forward the platform token to the web-search backend:
 the token may only go to the platform itself, never to a confusable foreign
@@ -7,7 +7,7 @@ host. See the [major] review note on raw-prefix matching.
 
 import pytest
 
-from gateway.api.routes._pipeline import web_search_url_targets_platform
+from gateway.api.routes._pipeline import url_targets_platform
 
 
 @pytest.mark.parametrize(
@@ -27,7 +27,7 @@ from gateway.api.routes._pipeline import web_search_url_targets_platform
     ],
 )
 def test_accepts_platform_targets(web_search_url: str, platform_base: str) -> None:
-    assert web_search_url_targets_platform(web_search_url, platform_base) is True
+    assert url_targets_platform(web_search_url, platform_base) is True
 
 
 @pytest.mark.parametrize(
@@ -51,4 +51,4 @@ def test_accepts_platform_targets(web_search_url: str, platform_base: str) -> No
     ],
 )
 def test_rejects_non_platform_targets(web_search_url: str, platform_base: str | None) -> None:
-    assert web_search_url_targets_platform(web_search_url, platform_base) is False
+    assert url_targets_platform(web_search_url, platform_base) is False
