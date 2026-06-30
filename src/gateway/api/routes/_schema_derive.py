@@ -62,7 +62,8 @@ SESSION_LABEL_DESC = (
     "Optional caller-supplied label for cost attribution (per run, experiment, "
     "or conversation). In hybrid mode it is forwarded onto the platform usage "
     "report so spend can be sliced by session without standing up OpenTelemetry. "
-    "Stripped before the request is forwarded upstream to the provider."
+    "Stripped before the request is forwarded upstream to the provider. Has no "
+    "effect in standalone mode, where there is no platform to report it to."
 )
 
 
