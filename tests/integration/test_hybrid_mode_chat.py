@@ -222,6 +222,11 @@ def test_hybrid_mode_forwards_session_label_and_strips_it_upstream(
     )
 
     assert response.status_code == 200
+    # Exactly one provider call and one usage report — pin the counts so a
+    # regression that double-reports or double-dispatches this single-attempt
+    # request is caught rather than masked by indexing the first entry.
+    assert len(upstream_kwargs) == 1
+    assert len(usage_reports) == 1
     # The label rides the usage report ...
     assert usage_reports[0]["session_label"] == "my-run-personas"
     # ... but never leaks to the upstream provider call.
