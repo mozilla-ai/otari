@@ -18,7 +18,7 @@ Add a `guardrails` field to your request:
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
-  -H "Otari-Key: Bearer <your-api-key>" \
+  -H "Authorization: Bearer <your-api-key>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "anthropic:claude-sonnet-4-6",

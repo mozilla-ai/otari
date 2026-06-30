@@ -61,13 +61,13 @@ A few names you'll run into, and how they fit together:
 
 
 ## Quickstart
- 
+
 Get a metered gateway running and make a request in about a minute. No clone, no config file, no database. This is **standalone mode**: Otari runs on your machine and talks to providers with credentials you supply, and you don't need an otari.ai account.
- 
+
 **Prerequisites:** Docker, plus an API key for at least one provider (this guide uses OpenAI).
- 
+
 ### 1. Start the gateway
- 
+
 ```bash
 docker run --rm -p 8000:8000 \
   -e OTARI_MASTER_KEY=SET_A_MASTER_KEY \
@@ -76,27 +76,27 @@ docker run --rm -p 8000:8000 \
   mzdotai/otari:latest \
   otari serve
 ```
- 
+
 This pulls the published image and starts Otari on port 8000 with a SQLite database inside the container. `default_pricing: true` prices models from the bundled [genai-prices](https://github.com/pydantic/genai-prices) dataset, so cost tracking works without you writing a pricing table. `--rm` makes this run ephemeral; for a durable setup see [Run the full stack](#run-the-full-stack).
- 
+
 On first run with an empty database, Otari mints an API key and prints it to the logs:
- 
+
 ```
 WARNING  No API keys found. Created bootstrap key for first run. Save this key now:
 gw-...
 ```
- 
+
 Copy that `gw-` key. It's what your client sends to Otari. Confirm the gateway is healthy:
- 
+
 ```bash
 curl http://localhost:8000/health
 # {"status": "healthy"}
 ```
- 
+
 ### 2. Make your first request
- 
+
 Use the `gw-` bootstrap key from the logs as the bearer token:
- 
+
 ```bash
 curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer gw-..." \
@@ -106,46 +106,46 @@ curl http://localhost:8000/v1/chat/completions \
     "messages": [{"role": "user", "content": "Say hello in one short sentence."}]
   }'
 ```
- 
+
 The response includes a `usage` block, and the request is now queryable through `/v1/usage`, so it was metered the moment it ran. Otari is OpenAI-compatible, so any OpenAI client works by pointing `base_url` at `http://localhost:8000/v1`:
- 
+
 ```python
 from openai import OpenAI
- 
+
 client = OpenAI(api_key="gw-...", base_url="http://localhost:8000/v1")
- 
+
 response = client.chat.completions.create(
     model="openai:gpt-4o-mini",
     messages=[{"role": "user", "content": "Hello from Otari"}],
 )
 print(response.choices[0].message.content)
 ```
- 
+
 Prefer a typed client? Use one of the [Otari SDKs](#the-otari-ecosystem) for Python, TypeScript, Rust, or Go.
- 
+
 ### Three keys, and which is which
- 
+
 The Quickstart touches three different keys. Keeping them straight saves the most common first-run error:
- 
+
 - **Provider key** (`OPENAI_API_KEY`): your real OpenAI secret. It goes in as an environment variable and stays inside Otari. Your apps never see it.
 - **Master key** (`OTARI_MASTER_KEY`): manages Otari. Use it to create and revoke API keys, not to make requests.
 - **API key** (`gw-...`): what clients send to Otari in the `Authorization` header. The bootstrap key is one of these.
 
 To mint a named key yourself instead of using the bootstrap key, call the management endpoint with your master key:
- 
+
 ```bash
 curl -X POST http://localhost:8000/v1/keys \
   -H "Authorization: Bearer SET_A_MASTER_KEY" \
   -H "Content-Type: application/json" \
   -d '{"key_name": "quickstart"}'
 ```
- 
+
 The returned `gw-` key is shown in full only once.
- 
+
 ## Run the full stack
- 
+
 The Quickstart runs the gateway alone on SQLite. To get a durable database plus the built-in tools and guardrails, run the full stack with Docker Compose.
- 
+
 ```bash
 git clone https://github.com/mozilla-ai/otari
 cd otari
@@ -153,23 +153,23 @@ cp config.example.yml config.yml   # set master_key, a provider, and default_pri
 docker compose pull
 docker compose up -d
 ```
- 
+
 This starts Otari on port 8000 backed by a Postgres container, so keys, budgets, and usage persist across restarts. The `pull` step matters because `latest` is a moving tag, so it keeps you from running a stale cached image. The compose file also defines the tool and guardrail services, brought up with profiles: see [Built-in tools](#built-in-tools) and [Guardrails](#guardrails).
- 
+
 ## Other ways to run
- 
+
 ### Railway
- 
+
 Want a hosted gateway with no local setup? Deploy Otari plus a managed Postgres on [Railway](https://railway.com) in one click. Bring a provider key (OpenAI, Anthropic, Mistral, or Gemini) and you get a running gateway with virtual keys, budgets, and usage tracking.
- 
+
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
- 
+
 The two-service template, its environment inputs, and how to publish it are documented in [`deploy/railway/`](deploy/railway/README.md).
- 
+
 ### From source (development)
- 
+
 For working on Otari itself:
- 
+
 ```bash
 git clone https://github.com/mozilla-ai/otari
 cd otari
