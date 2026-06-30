@@ -153,6 +153,81 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     ]
 
 
+def test_hybrid_mode_forwards_session_label_and_strips_it_upstream(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A request-body ``session_label`` reaches the platform usage report (for
+    cost attribution) but is stripped before the provider call."""
+    usage_reports: list[dict[str, Any]] = []
+    upstream_kwargs: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68",
+                    "fallback_enabled": False,
+                    "attempts": [
+                        {
+                            "attempt_id": "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68",
+                            "position": 0,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-platform-key",
+                            "api_base": "https://api.openai.com/v1",
+                            "managed": True,
+                        }
+                    ],
+                },
+            )
+
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        upstream_kwargs.append(kwargs)
+        return ChatCompletion(
+            id="chatcmpl-platform",
+            object="chat.completion",
+            created=1700000000,
+            model="gpt-4o-mini",
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="hello"),
+                    finish_reason="stop",
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=10, completion_tokens=7, total_tokens=17),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "session_label": "my-run-personas",
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    # The label rides the usage report ...
+    assert usage_reports[0]["session_label"] == "my-run-personas"
+    # ... but never leaks to the upstream provider call.
+    assert "session_label" not in upstream_kwargs[0]
+
+
 def test_hybrid_mode_accepts_legacy_resolve_shape(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

@@ -78,6 +78,7 @@ _GATEWAY_INTERNAL_FIELDS = (
     "guardrails",
     "tools_header",
     "max_tool_iterations",
+    "session_label",
     "user",
 )
 

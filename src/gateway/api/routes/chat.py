@@ -39,7 +39,7 @@ from gateway.api.routes._pipeline import (
     run_streaming_with_fallback,
 )
 from gateway.api.routes._platform import ResolvedAttempt
-from gateway.api.routes._schema_derive import derive_request_base
+from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
@@ -114,6 +114,7 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
         ),
     )
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
+    session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
 
 
 class _ChatAdapter:
@@ -344,6 +345,7 @@ async def chat_completions(
                     background_tasks=background_tasks,
                     rate_limit_info=ctx.rate_limit_info,
                     tool_ctx=tool_ctx,
+                    session_label=request.session_label,
                 )
             except HTTPException:
                 raise
@@ -421,6 +423,7 @@ async def chat_completions(
             background_tasks=background_tasks,
             config=config,
             rate_limit_info=ctx.rate_limit_info,
+            session_label=request.session_label,
         )
 
     resolved = resolve_provider_selector(config, request.model)
