@@ -43,7 +43,7 @@ For example, the otari.ai resolve response also carries `workspace_id`,
 these today, so they are intentionally absent from the shapes documented here.
 
 When the operator points Otari's web-search backend at the platform
-(`GATEWAY_WEB_SEARCH_URL` under `base_url`), Otari also sends `X-Gateway-Token`
+(`OTARI_WEB_SEARCH_URL` under `base_url`), Otari also sends `X-Gateway-Token`
 on its search queries (`GET {base}/gateway/web-search/search`) so a
 platform-hosted search endpoint can authenticate the gateway. The token is sent
 only when that URL shares the platform origin (scheme/host/port, under the base
@@ -227,7 +227,7 @@ its own value: `max_results`, `allowed_domains`, `blocked_domains`, and
 or empty string reads as "no preference" and does not clear the workspace
 value), and `provider_options` is shallow-merged with per-request keys winning.
 `provider` is informational: the active web-search backend is configured on the
-gateway itself via `WEB_SEARCH_URL`, so Otari does not switch backends based on
+gateway itself via `OTARI_WEB_SEARCH_URL`, so Otari does not switch backends based on
 this field.
 
 ### Failure

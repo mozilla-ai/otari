@@ -51,9 +51,12 @@ No `providers` block, no `database_url`, no `master_key`.
 
 ### 2. Set your otari.ai credentials
 
-You need your Otari token from your otari.ai account.
+You need the gateway token (`gw-...`) for this Otari instance from otari.ai.
+In otari.ai, go to `Organisation > Gateways`, create or open a gateway, then
+click `Create token`. This is not the per-request user token (`tk_...`) that
+clients send in `Authorization: Bearer ...`.
 
-Pass them as environment variables. Create a `.env` file:
+Pass it as an environment variable. Create a `.env` file:
 
 ```bash
 OTARI_AI_TOKEN=gw_your_token_here
@@ -97,7 +100,7 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer <your-otari-user-token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "openai:gpt-4o",
+    "model": "openai/gpt-4o",
     "messages": [{"role": "user", "content": "Say hello in one short sentence."}]
   }'
 ```

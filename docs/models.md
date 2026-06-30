@@ -15,19 +15,6 @@ vertexai:gemini-2.0-flash
 
 The `provider` prefix tells Otari which backend to route to. The `model_name` is passed directly to that provider's API.
 
-### Pinning a HuggingFace inference backend
-
-HuggingFace Inference Providers is a router: the same model id (for example `zai-org/GLM-4.6`) can be served by several backends (Together, Novita, and others), and in the default "auto" mode the backend, and therefore the price, is chosen at request time. To route (and price) deterministically, pin a backend with a `:<backend>` suffix on the model id, which the HuggingFace router honors server side:
-
-```text
-huggingface:zai-org/GLM-4.6:together
-huggingface:zai-org/GLM-4.6:novita
-```
-
-The pinned-selector grammar is `huggingface:<model>:<backend>`. Otari splits the provider off the first `:`, so everything after it (`<model>:<backend>`) is forwarded as the model id and the `:<backend>` suffix reaches the router unchanged. The router also accepts policy suffixes such as `:cheapest`, `:fastest`, `:preferred`, and `:auto`.
-
-This grammar is the contract consumers build against. The otari.ai platform's pricing UI, for instance, offers each priceable backend as a pinned `huggingface:<model>:<backend>` selector, because a pinned selector resolves to a single backend, which is what makes a HuggingFace model priceable (auto mode cannot be priced from the model id alone).
-
 ## Supported providers
 
 Otari depends on `any-llm-sdk[all]`. Provider support can change as the SDK evolves.
@@ -99,6 +86,7 @@ In `config.yml`:
 providers:
   openai:
     api_key: "sk-..."
+    api_base: "https://api.openai.com/v1"  # optional for hosted OpenAI
 ```
 
 Or via environment variable:
@@ -109,17 +97,20 @@ export OPENAI_API_KEY="sk-..."
 
 Both approaches work. Config file values take precedence over environment variables.
 
+In standalone mode, provider config only tells Otari how to reach the backend.
+Otari also requires pricing for the model you call by default, unless
+`default_pricing` covers it or `require_pricing: false` is set.
+
 For the full configuration reference, see [Configuration](configuration.md).
 
-## Multiple named instances of one implementation
+## Named provider instances
 
-The `providers` map is keyed by an **instance name**. Normally that name is the
-any-llm implementation itself (`openai`, `anthropic`, ...), so a key like
-`openai` both names the instance and selects the implementation. To run two
-backends that share an implementation, for example real OpenAI alongside a
-self-hosted OpenAI-compatible server (vLLM, llama.cpp, LM Studio), give each a
-distinct instance name and set `provider_type` to the underlying
-implementation:
+The `providers` map is keyed by instance name. Most of the time that name is
+also the provider, such as `openai` or `anthropic`.
+
+If you want to use multiple backends that share one provider implementation,
+give one of them a custom name and set `provider_type`. This is common for
+self-hosted OpenAI-compatible servers such as vLLM, llama.cpp, or LM Studio:
 
 ```yaml
 providers:
@@ -132,25 +123,23 @@ providers:
     api_key: ${HOME_LAB_TOKEN}
 ```
 
-Route to an instance with `instance_name:model`. A request for
-`home_lab:deepseek-v4-flash` resolves instance `home_lab` to
-`provider_type: openai` and dispatches to any-llm with `provider=openai`,
-`model=deepseek-v4-flash`, and the instance's `api_base` / `api_key`. any-llm
-never sees the name `home_lab`; it is an Otari-level routing key.
-`openai:gpt-4o` continues to hit real OpenAI. Pricing and usage are keyed on the
-instance name (`home_lab:deepseek-v4-flash`), so configure pricing under that
-key (or run with `require_pricing: false` for an unpriced self-hosted backend).
+Route to a named instance with `instance_name:model`. For example,
+`home_lab:deepseek-v4-flash` uses the `home_lab` config, but Otari sends the
+request through the OpenAI provider implementation with that instance's
+`api_base` and `api_key`. `openai:gpt-4o` still uses the regular `openai`
+config.
+
+Pricing and usage are keyed on the instance name, so configure pricing under
+`home_lab:deepseek-v4-flash` if you want that model to be priceable. If you do
+not set `provider_type`, the key works as before and names the provider
+directly.
 
 `provider_type: openai-compatible` and `provider_type: openai_compatible` are
 both accepted as aliases for `openai`.
 
-Existing configs are unaffected: a key with no `provider_type` is its own
-implementation, exactly as before.
-
-Named instances are a standalone-mode feature. In hybrid mode the local
-`providers` map is empty (per-request credentials come from otari.ai), so there
-are no instances to resolve and the platform's routing policy decides the
-provider.
+Named instances are a standalone-mode feature. In hybrid mode, provider
+credentials come from otari.ai per request, so local named instances are not
+used.
 
 ### Declaring models for backends without `/v1/models`
 
@@ -180,3 +169,31 @@ Query Otari to see which models are available:
 curl http://localhost:8000/v1/models \
   -H "Authorization: Bearer <your-api-key>"
 ```
+
+## Provider-specific notes
+
+### Pinning a HuggingFace inference backend
+
+HuggingFace Inference Providers is a router: the same model id (for example
+`zai-org/GLM-4.6`) can be served by several backends (Together, Novita, and
+others), and in the default "auto" mode the backend, and therefore the price,
+is chosen at request time. To route (and price) deterministically, pin a
+backend with a `:<backend>` suffix on the model id, which the HuggingFace
+router honors server side:
+
+```text
+huggingface:zai-org/GLM-4.6:together
+huggingface:zai-org/GLM-4.6:novita
+```
+
+The pinned-selector grammar is `huggingface:<model>:<backend>`. Otari splits
+the provider off the first `:`, so everything after it (`<model>:<backend>`) is
+forwarded as the model id and the `:<backend>` suffix reaches the router
+unchanged. The router also accepts policy suffixes such as `:cheapest`,
+`:fastest`, `:preferred`, and `:auto`.
+
+This grammar is the contract consumers build against. The otari.ai platform's
+pricing UI, for instance, offers each priceable backend as a pinned
+`huggingface:<model>:<backend>` selector, because a pinned selector resolves to
+a single backend, which is what makes a HuggingFace model priceable (auto mode
+cannot be priced from the model id alone).

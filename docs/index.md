@@ -27,6 +27,6 @@ Start with the [Quickstart](quickstart.md). It gets Otari running locally and wa
 - [API reference](api-reference.md) — every endpoint, with auth and availability per mode.
 - [Use with Claude Code](use-with-claude-code.md) — point the Claude Code CLI at Otari.
 - [Use with opencode](use-with-opencode.md) — point the opencode CLI at Otari.
-- [Supported models](supported-models.md) — providers, model format, and capabilities.
+- [Supported models](models.md) — providers, model format, and capabilities.
 - [Hybrid-mode protocol](hybrid-mode-protocol.md) — Otari/platform wire contract, for platform builders.
 - [SDK compatibility](sdk-compatibility.md) — how the language SDKs are released and which SDK version works with which Otari version.
