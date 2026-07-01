@@ -3,7 +3,7 @@
 # Database connection URL.
 # PostgreSQL is used by the full docker compose stack (postgres service is defined in docker-compose.yml).
 # For local development without Docker, switch to SQLite:
-#   database_url: "sqlite+aiosqlite:///./otari.db"
+#   database_url: "sqlite:///./otari.db"
 database_url: "postgresql://otari:otari@postgres:5432/otari"
 
 # Server configuration - if you want to use a different port, change it here and in the docker-compose.yml file.
@@ -90,7 +90,7 @@ providers:
 # Format: "provider:model" -> input/output price per million tokens
 # Database pricing takes precedence - config only sets initial values
 # Prices are in USD per million tokens
-pricing:
+# pricing:
   # See https://cloud.google.com/vertex-ai/generative-ai/pricing
   # vertexai:Qwen3-235B-A22B-Instruct-2507:
   #   input_price_per_million: 0.25
