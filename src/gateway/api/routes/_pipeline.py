@@ -53,8 +53,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import verify_api_key_or_master_key
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._platform import (
+    _DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS,
     _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS,
     _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP,
+    _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY,
     _STREAM_FIRST_CHUNK_TIMEOUT_MS_KEY,
     _STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY,
     ResolvedAttempt,
@@ -1268,6 +1270,25 @@ def stream_first_chunk_timeout_seconds(config: GatewayConfig, *, tool_mode: bool
     )
 
 
+def stream_final_attempt_extra_seconds(config: GatewayConfig) -> float:
+    """Extra first-chunk grace granted only to the sole/final streaming attempt.
+
+    Added on top of the per-attempt failover budget for the terminal attempt,
+    which has no next entry in the routing policy to fall over to. Keeps that
+    attempt's wait bounded while not converting a slow-but-valid first token into
+    a timeout. Mode-agnostic (applies on top of the plain or tool-loop budget).
+    """
+    return (
+        int(
+            config.platform.get(
+                _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY,
+                _DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS,
+            )
+        )
+        / 1000
+    )
+
+
 # ---------------------------------------------------------------------------
 # Shared request runners
 # ---------------------------------------------------------------------------
@@ -1411,6 +1432,7 @@ async def run_streaming_with_fallback(
     """
     tool_mode = tool_ctx.use_tool_loop
     first_chunk_timeout = stream_first_chunk_timeout_seconds(config, tool_mode=tool_mode)
+    final_attempt_extra = stream_final_attempt_extra_seconds(config)
 
     backend_stack = AsyncExitStack()
     pool_for_loop: Any = None
@@ -1490,6 +1512,7 @@ async def run_streaming_with_fallback(
             classify_error=_classify_upstream_error,
             on_attempt_failed=_on_attempt_failed,
             first_chunk_timeout_seconds=first_chunk_timeout,
+            final_attempt_extra_seconds=final_attempt_extra,
         )
     except BaseException as exc:
         # No attempt yielded a first chunk: the request ends in an error

@@ -65,6 +65,19 @@ _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP = 30000
 _STREAM_FIRST_CHUNK_TIMEOUT_MS_KEY = "streaming_first_chunk_timeout_ms"
 _STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY = "streaming_first_chunk_timeout_ms_tool_loop"
 
+# Extra first-chunk grace added ONLY to the sole/final attempt, on top of the
+# per-attempt budget above. That budget is a failover trigger: it abandons a slow
+# attempt so the next entry in the routing policy can be tried. The final attempt
+# has no next entry, so a tight cap there only turns a slow-but-valid first token
+# into a 504 with nothing to fall over to. Granting grace keeps the terminal wait
+# bounded (a genuinely hung upstream still times out at budget + grace) while not
+# failing valid slow-to-start responses. Applied on top of whichever base budget
+# is in effect (plain or tool-loop). Defaults to 0 (no grace), so behavior is
+# unchanged unless an operator opts in via ``config.platform`` (v1.2 will move
+# these onto the routing_policy schema).
+_DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS = 0
+_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY = "streaming_final_attempt_extra_first_chunk_timeout_ms"
+
 
 class ResolvedAttempt(BaseModel):
     """A single resolution attempt returned by the platform."""
