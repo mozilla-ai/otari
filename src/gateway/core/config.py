@@ -378,6 +378,27 @@ class GatewayConfig(BaseSettings):
             raise ValueError(msg)
         return normalized
 
+    @field_validator("platform")
+    @classmethod
+    def _validate_platform_streaming_timeouts(cls, platform: dict[str, Any]) -> dict[str, Any]:
+        """Reject non-sensical streaming first-chunk timeout settings at load time.
+
+        The per-attempt first-chunk budgets must be positive: a zero or negative
+        wait would treat every attempt as instantly hung. The terminal-attempt
+        extra grace must be non-negative, since it is added on top of the budget.
+        """
+        positive_ms_keys = (
+            "streaming_first_chunk_timeout_ms",
+            "streaming_first_chunk_timeout_ms_tool_loop",
+        )
+        for key in positive_ms_keys:
+            if key in platform and float(platform[key]) <= 0:
+                raise ValueError(f"{key} must be > 0, got {platform[key]}")
+        extra_key = "streaming_final_attempt_extra_first_chunk_timeout_ms"
+        if extra_key in platform and float(platform[extra_key]) < 0:
+            raise ValueError(f"{extra_key} must be >= 0, got {platform[extra_key]}")
+        return platform
+
     def validate_mode_selection(self) -> None:
         configured_mode = self.mode.strip().lower()
         # "platform" is the legacy alias for "hybrid" (the otari.ai-connected
@@ -537,6 +558,15 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
         # control.
         "STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS": (
             "streaming_first_chunk_timeout_ms",
+            int,
+        ),
+        # Extra first-chunk grace for the sole/final streaming attempt, added on
+        # top of the per-attempt budget above. The failover budget exists to move
+        # to the next routing-policy entry when an attempt is slow; the final
+        # attempt has no next entry, so this keeps its wait bounded without cutting
+        # off a slow-but-valid first token.
+        "STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS": (
+            "streaming_final_attempt_extra_first_chunk_timeout_ms",
             int,
         ),
     }
