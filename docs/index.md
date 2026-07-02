@@ -21,6 +21,7 @@ Start with the [Quickstart](quickstart.md). It gets Otari running locally and wa
 - [Deployment](deployment.md) — hybrid mode, optional services, and deployment-specific configuration.
 - [Modes](modes.md) — standalone vs hybrid, and what changes between them.
 - [Built-in tools](tools.md) — sandboxed code execution and web search Otari runs itself.
+- [MCP](mcp.md) — connect MCP servers to chat, messages, and responses requests.
 - [Files](files.md) — file uploads and document understanding for local models.
 - [Guardrails](guardrails.md) — request-level checks like prompt-injection detection.
 - [Configuration](configuration.md) — the full config file and environment variable reference.
