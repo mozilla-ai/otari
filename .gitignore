@@ -21,3 +21,5 @@ otari-gateway.db
 otari.db
 
 .DS_Store
+
+.idea/

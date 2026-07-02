@@ -343,8 +343,12 @@ The mechanism is a per-attempt **first-chunk gate**. For each attempt:
    — provider returned `401` / `5xx` / network error before the stream even
    opened — classify the error: retryable failures move to the next attempt;
    non-retryable failures propagate.
-2. Wait for the first chunk with a bounded timeout
-   (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS`, default 2000 ms). If the
+2. Wait for the first chunk with a bounded timeout. Non-final attempts use the
+   per-attempt failover budget (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS`,
+   default 2000 ms). The sole/final attempt has no next attempt to fall over to,
+   so it additionally gets `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS`
+   of grace on top of the budget (default 0, i.e. unchanged), so a slow-but-valid
+   first token is not turned into a timeout, while the wait stays bounded. If the
    upstream raises before yielding or the wait times out, move to the next
    attempt.
 3. Once a first chunk is in hand, commit. Stitch it back onto the iterator
@@ -352,8 +356,8 @@ The mechanism is a per-attempt **first-chunk gate**. For each attempt:
 
 **Latency contract:** zero added latency in the success case — the first
 chunk is held only for the microseconds it takes to call the SSE response
-builder. In the failure case, each abandoned attempt costs at most
-`first_chunk_timeout_seconds`.
+builder. In the failure case, each abandoned non-final attempt costs at most the
+failover budget; the final attempt costs at most budget + grace.
 
 **What this catches:** auth errors (`401`/`403`), rate-limits (`429`),
 upstream `5xx`, connection failures, hung connections, "stream opens but
@@ -378,3 +382,4 @@ flag.
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |
 | `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. |
+| `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt, on top of the budget. `0` = unchanged. |
