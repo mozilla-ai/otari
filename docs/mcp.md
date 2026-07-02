@@ -5,10 +5,13 @@ tools exposed by MCP servers.
 
 Add MCP as a top-level request field, not a `tools` entry.
 
-Use one of:
+Use either or both of:
 
 - `mcp_servers`: inline MCP server configs the gateway should connect to directly
 - `mcp_server_ids`: workspace-scoped MCP server ids resolved through otari.ai (hybrid mode only)
+
+In hybrid mode, Otari resolves `mcp_server_ids` first and appends the resulting
+server configs to any inline `mcp_servers`.
 
 When the model emits an MCP tool call, Otari:
 
@@ -61,7 +64,6 @@ standalone mode, `mcp_server_ids` returns `400`.
 
 ## Limits and safety
 
-- MCP works on `/v1/chat/completions`, `/v1/messages`, and `/v1/responses`
 - `mcp_servers` and `mcp_server_ids` cannot be combined with `otari_code_execution` or `otari_web_search` in the same request yet
 - `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`
 - MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present

@@ -28,8 +28,8 @@ Each SDK reports the Otari/spec version its generated core was built from.
   endpoint or field that SDK uses.
 - New endpoints are additive. An older SDK simply does not expose them.
 
-To find the gateway version, check `/health` or `docs/public/openapi.json`
-(`info.version`).
+To find the running gateway version, check `/health/readiness`, or
+`/openapi.json` (`info.version`) when docs are enabled.
 
 ## Compatibility matrix
 
@@ -60,7 +60,8 @@ SDK may also ship shell-only fixes with no Otari release.
 1. A spec change regenerates the typed core and opens PRs in the SDK repos.
 2. A maintainer reviews and merges the regeneration PR.
 3. `release-please` opens or updates the SDK's release PR.
-4. Merging the release PR tags the release and publishes the SDK.
+4. Merging the release PR tags the release and publishes the SDK. For Go, the
+   tag itself is the consumable release via `go get`.
 
 Otari and the SDKs therefore move on separate release tracks, linked by spec
 version rather than matching package numbers.
