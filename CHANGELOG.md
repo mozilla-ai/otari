@@ -4,6 +4,39 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.2.0](https://github.com/mozilla-ai/otari/releases/tag/v0.2.0) - 2026-07-03
+
+
+
+### Bug Fixes
+
+- **client:** Send Postman auth as Authorization Bearer in [#220](https://github.com/mozilla-ai/otari/pull/220) by [@njbrake](https://github.com/njbrake) ([`45ba952`](https://github.com/mozilla-ai/otari/commit/45ba952422559285da7df7c0b98b6128bdc0f379))
+- **ui:** Redesign root tutorial page and fix dead quickstart link in [#218](https://github.com/mozilla-ai/otari/pull/218) by [@njbrake](https://github.com/njbrake) ([`e510156`](https://github.com/mozilla-ai/otari/commit/e51015697de7d9e5d67c87d6ca8e392b53d0b667))
+- **ui:** Drop "(Proxy Server)" label and add a landing-page favicon in [#222](https://github.com/mozilla-ai/otari/pull/222) by [@njbrake](https://github.com/njbrake) ([`41162c3`](https://github.com/mozilla-ai/otari/commit/41162c30c0aac47642a7968de5be7314b739f547))
+- **pricing:** Warn and skip instead of crashing for unlisted providers in [#215](https://github.com/mozilla-ai/otari/pull/215) by [@njbrake](https://github.com/njbrake) ([`80c36d1`](https://github.com/mozilla-ai/otari/commit/80c36d1e92efc61825c5a8b95d1c3c91f7a7858d))
+
+
+### Features
+
+- **client:** Generate Postman collection from OpenAPI spec in [#216](https://github.com/mozilla-ai/otari/pull/216) by [@njbrake](https://github.com/njbrake) ([`07abe38`](https://github.com/mozilla-ai/otari/commit/07abe38c102a7908ae32b836a4fff12156d81f79))
+- **gateway:** Classify hybrid streaming failures and envelope hybrid messages errors in [#202](https://github.com/mozilla-ai/otari/pull/202) by [@khaledosman](https://github.com/khaledosman) ([`52fc430`](https://github.com/mozilla-ai/otari/commit/52fc4300a98e1bf1ed777f45762c5d7538175ad7))
+- **providers:** Support multiple named provider instances in [#219](https://github.com/mozilla-ai/otari/pull/219) by [@njbrake](https://github.com/njbrake) ([`c6576a2`](https://github.com/mozilla-ai/otari/commit/c6576a286a9de9398fbbff25741ccb19c63ac7f9))
+- **sandbox:** Consume the platform code-execution resolve by [@agpituk](https://github.com/agpituk) ([`d768976`](https://github.com/mozilla-ai/otari/commit/d768976c2b040e4f74323052618948ad4811ec01))
+- **hybrid:** Forward request session_label to platform usage report in [#233](https://github.com/mozilla-ai/otari/pull/233) by [@khaledosman](https://github.com/khaledosman) ([`5fdbe75`](https://github.com/mozilla-ai/otari/commit/5fdbe751e54b95cc5cafc60d332cf3dd72bc4c48))
+- Opt-in first-chunk grace for the final streaming attempt in [#240](https://github.com/mozilla-ai/otari/pull/240) by [@peteski22](https://github.com/peteski22) ([`73c8837`](https://github.com/mozilla-ai/otari/commit/73c8837c3222cd14c4e6141c7d75cef659bea0e4))
+
+
+### Other
+
+- Fixed example config file in [#236](https://github.com/mozilla-ai/otari/pull/236) by [@aittalam](https://github.com/aittalam) ([`0f50350`](https://github.com/mozilla-ai/otari/commit/0f5035012966631e14e57c520c42e1518f510b26))
+
+
+
+### New Contributors
+
+- [@aittalam](https://github.com/aittalam) made their first contribution in [#236](https://github.com/mozilla-ai/otari/pull/236)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.1.0...v0.2.0
 ## [0.1.0](https://github.com/mozilla-ai/otari/releases/tag/v0.1.0) - 2026-06-25
 
 
@@ -197,8 +230,8 @@ The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
 ### New Contributors
 
+- [@njbrake](https://github.com/njbrake) made their first contribution in [#214](https://github.com/mozilla-ai/otari/pull/214)
 - [@khaledosman](https://github.com/khaledosman) made their first contribution in [#212](https://github.com/mozilla-ai/otari/pull/212)
-- [@njbrake](https://github.com/njbrake) made their first contribution in [#201](https://github.com/mozilla-ai/otari/pull/201)
 - [@dependabot[bot]](https://github.com/dependabot[bot]) made their first contribution in [#193](https://github.com/mozilla-ai/otari/pull/193)
 - [@tbille](https://github.com/tbille) made their first contribution in [#196](https://github.com/mozilla-ai/otari/pull/196)
 - [@angpt](https://github.com/angpt) made their first contribution in [#119](https://github.com/mozilla-ai/otari/pull/119)
