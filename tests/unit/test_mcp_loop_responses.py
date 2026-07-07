@@ -560,13 +560,14 @@ async def test_stream_passes_text_events_through_and_terminates(monkeypatch: pyt
 
     monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
 
-    types: list[str] = []
-    async for event in responses_tool_loop_stream(
-        completion_kwargs={"model": "fake", "input_data": "hi"},
-        pool=cast(Any, _FakePool(tool_names=[])),
-        max_iterations=3,
-    ):
-        types.append(event.type)
+    types = [
+        event.type
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "hi"},
+            pool=cast(Any, _FakePool(tool_names=[])),
+            max_iterations=3,
+        )
+    ]
     assert types == [
         "response.output_text.delta",
         "response.output_text.delta",
@@ -642,13 +643,14 @@ async def test_stream_foreign_function_call_forwards_terminal_and_exits(
     monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
 
     pool = _FakePool(tool_names=["fetch_url"])  # doesn't own user_tool
-    types: list[str] = []
-    async for event in responses_tool_loop_stream(
-        completion_kwargs={"model": "fake", "input_data": "go"},
-        pool=cast(Any, pool),
-        max_iterations=5,
-    ):
-        types.append(event.type)
+    types = [
+        event.type
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
+    ]
     assert "response.completed" in types
     assert pool.calls == []
 

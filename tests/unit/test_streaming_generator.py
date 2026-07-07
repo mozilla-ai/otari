@@ -40,17 +40,18 @@ async def test_streaming_generator_success_with_usage() -> None:
     async def on_error(error: str) -> None:
         pytest.fail("on_error should not be called")
 
-    events: list[str] = []
-    async for event in streaming_generator(
-        stream=_items("hello", "usage"),
-        format_chunk=_format_chunk,
-        extract_usage=_extract_usage,
-        fmt=OPENAI_STREAM_FORMAT,
-        on_complete=on_complete,
-        on_error=on_error,
-        label="test:model",
-    ):
-        events.append(event)
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_items("hello", "usage"),
+            format_chunk=_format_chunk,
+            extract_usage=_extract_usage,
+            fmt=OPENAI_STREAM_FORMAT,
+            on_complete=on_complete,
+            on_error=on_error,
+            label="test:model",
+        )
+    ]
 
     assert events == ["data: hello\n\n", "data: usage\n\n", "data: [DONE]\n\n"]
     assert len(completed_usage) == 1
@@ -69,17 +70,18 @@ async def test_streaming_generator_no_usage_skips_on_complete() -> None:
     async def on_error(error: str) -> None:
         pytest.fail("on_error should not be called")
 
-    events: list[str] = []
-    async for event in streaming_generator(
-        stream=_items("hello"),
-        format_chunk=_format_chunk,
-        extract_usage=lambda _: None,
-        fmt=OPENAI_STREAM_FORMAT,
-        on_complete=on_complete,
-        on_error=on_error,
-        label="test:model",
-    ):
-        events.append(event)
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_items("hello"),
+            format_chunk=_format_chunk,
+            extract_usage=lambda _: None,
+            fmt=OPENAI_STREAM_FORMAT,
+            on_complete=on_complete,
+            on_error=on_error,
+            label="test:model",
+        )
+    ]
 
     assert events == ["data: hello\n\n", "data: [DONE]\n\n"]
     assert not completed
@@ -102,18 +104,19 @@ async def test_streaming_generator_no_usage_invokes_on_no_usage() -> None:
         nonlocal no_usage_called
         no_usage_called = True
 
-    events: list[str] = []
-    async for event in streaming_generator(
-        stream=_items("hello"),
-        format_chunk=_format_chunk,
-        extract_usage=lambda _: None,
-        fmt=OPENAI_STREAM_FORMAT,
-        on_complete=on_complete,
-        on_error=on_error,
-        label="test:model",
-        on_no_usage=on_no_usage,
-    ):
-        events.append(event)
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_items("hello"),
+            format_chunk=_format_chunk,
+            extract_usage=lambda _: None,
+            fmt=OPENAI_STREAM_FORMAT,
+            on_complete=on_complete,
+            on_error=on_error,
+            label="test:model",
+            on_no_usage=on_no_usage,
+        )
+    ]
 
     assert events == ["data: hello\n\n", "data: [DONE]\n\n"]
     assert not completed
@@ -176,17 +179,18 @@ async def test_streaming_generator_error_openai_format() -> None:
         yield "hello"
         raise RuntimeError(_PROVIDER_CRASHED)
 
-    events: list[str] = []
-    async for event in streaming_generator(
-        stream=_failing_stream(),
-        format_chunk=_format_chunk,
-        extract_usage=lambda _: None,
-        fmt=OPENAI_STREAM_FORMAT,
-        on_complete=on_complete,
-        on_error=on_error,
-        label="test:model",
-    ):
-        events.append(event)
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_failing_stream(),
+            format_chunk=_format_chunk,
+            extract_usage=lambda _: None,
+            fmt=OPENAI_STREAM_FORMAT,
+            on_complete=on_complete,
+            on_error=on_error,
+            label="test:model",
+        )
+    ]
 
     assert events[0] == "data: hello\n\n"
     assert "server_error" in events[1]
@@ -208,17 +212,18 @@ async def test_streaming_generator_error_anthropic_format() -> None:
         raise RuntimeError(_PROVIDER_CRASHED)
         yield  # pragma: no cover
 
-    events: list[str] = []
-    async for event in streaming_generator(
-        stream=_failing_stream(),
-        format_chunk=_format_chunk,
-        extract_usage=lambda _: None,
-        fmt=ANTHROPIC_STREAM_FORMAT,
-        on_complete=on_complete,
-        on_error=on_error,
-        label="test:model",
-    ):
-        events.append(event)
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_failing_stream(),
+            format_chunk=_format_chunk,
+            extract_usage=lambda _: None,
+            fmt=ANTHROPIC_STREAM_FORMAT,
+            on_complete=on_complete,
+            on_error=on_error,
+            label="test:model",
+        )
+    ]
 
     assert len(events) == 1
     assert "api_error" in events[0]
@@ -238,17 +243,18 @@ async def test_streaming_generator_error_logging_failure_is_swallowed() -> None:
         raise RuntimeError(_PROVIDER_CRASHED)
         yield  # pragma: no cover
 
-    events: list[str] = []
-    async for event in streaming_generator(
-        stream=_failing_stream(),
-        format_chunk=_format_chunk,
-        extract_usage=lambda _: None,
-        fmt=OPENAI_STREAM_FORMAT,
-        on_complete=on_complete,
-        on_error=on_error,
-        label="test:model",
-    ):
-        events.append(event)
+    events = [
+        event
+        async for event in streaming_generator(
+            stream=_failing_stream(),
+            format_chunk=_format_chunk,
+            extract_usage=lambda _: None,
+            fmt=OPENAI_STREAM_FORMAT,
+            on_complete=on_complete,
+            on_error=on_error,
+            label="test:model",
+        )
+    ]
 
     assert "server_error" in events[0]
     assert events[1] == "data: [DONE]\n\n"
