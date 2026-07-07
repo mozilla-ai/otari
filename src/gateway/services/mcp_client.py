@@ -129,9 +129,7 @@ class MCPClientPool:
         if owner is None:
             raise KeyError(f"No MCP server owns tool {name!r}")
         result = await self._servers[owner].session.call_tool(name, arguments)
-        parts: list[str] = []
-        for block in result.content:
-            parts.append(_render_content_block(block))
+        parts = [_render_content_block(block) for block in result.content]
         flattened = "\n".join(p for p in parts if p)
         if result.isError:
             return f"[tool error] {flattened}"

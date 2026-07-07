@@ -499,13 +499,14 @@ async def test_stream_loop_passes_chunks_through_and_terminates(monkeypatch: pyt
 
     monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
 
-    pieces: list[str | None] = []
-    async for c in mcp_tool_loop_stream(
-        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
-        pool=_FakePool(tool_names=[]),
-        max_iterations=3,
-    ):
-        pieces.append(c.choices[0].delta.content if c.choices else None)
+    pieces = [
+        c.choices[0].delta.content if c.choices else None
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}]},
+            pool=_FakePool(tool_names=[]),
+            max_iterations=3,
+        )
+    ]
     assert pieces == ["hi", " there"]
 
 
@@ -532,14 +533,15 @@ async def test_stream_loop_runs_mcp_tool_and_continues(monkeypatch: pytest.Monke
     monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
 
     pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
-    finishes: list[str | None] = []
-    async for c in mcp_tool_loop_stream(
-        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-        pool=pool,
-        max_iterations=5,
-    ):
-        if c.choices and c.choices[0].finish_reason:
-            finishes.append(c.choices[0].finish_reason)
+    finishes = [
+        c.choices[0].finish_reason
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=5,
+        )
+        if c.choices and c.choices[0].finish_reason
+    ]
     # Only the final iteration's `stop` is forwarded; the intermediate
     # `tool_calls` terminal is suppressed.
     assert finishes == ["stop"]
@@ -568,14 +570,15 @@ async def test_stream_loop_forwards_terminal_when_model_emits_foreign_tool(
     monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
 
     pool = _FakePool(tool_names=["fetch_url"])  # doesn't own user_tool
-    finishes: list[str | None] = []
-    async for c in mcp_tool_loop_stream(
-        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
-        pool=pool,
-        max_iterations=5,
-    ):
-        if c.choices and c.choices[0].finish_reason:
-            finishes.append(c.choices[0].finish_reason)
+    finishes = [
+        c.choices[0].finish_reason
+        async for c in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=pool,
+            max_iterations=5,
+        )
+        if c.choices and c.choices[0].finish_reason
+    ]
     assert finishes == ["tool_calls"]
     assert pool.calls == []
 
