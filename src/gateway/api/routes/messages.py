@@ -52,6 +52,7 @@ from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
+from gateway.services.composite_hook import try_serve_composite
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
@@ -398,6 +399,16 @@ async def create_message(
     )
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
+
+    # Composite dispatch hook (gated OFF by default): on a recognized approved
+    # composite at a deterministic turn, serve a synthetic response without
+    # calling the provider. Any non-serve decision returns None and falls
+    # through to the normal dispatch below, so this is inert unless enabled.
+    composite_served = await try_serve_composite(
+        request=request, ctx=ctx, background_tasks=background_tasks
+    )
+    if composite_served is not None:
+        return composite_served
 
     # ------------------------------------------------------------------
     # Streaming path

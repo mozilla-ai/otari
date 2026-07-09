@@ -20,6 +20,12 @@ from typing import Any
 
 MAX_EXPR_DEPTH = 8
 
+# Cap the input length before running a whitelisted regex. The patterns are
+# simple but linear-time only for bounded input; the value can come from tenant
+# messages (trigger / tool_result), so an unbounded value could stall the async
+# event loop. Over-length input punts.
+MAX_REGEX_INPUT = 4096
+
 # Whitelisted regex patterns the ``regex_extract`` transform may use. A plan
 # cannot supply an arbitrary pattern (avoids catastrophic backtracking and
 # keeps evaluation bounded).
@@ -165,13 +171,15 @@ def evaluate_expression(expr: Any, messages: list[dict[str, Any]], *, depth: int
         parts = [str(evaluate_expression(v, messages, depth=depth + 1)) for v in values]
         return sep.join(parts)
     if op == "regex_extract":
-        if not isinstance(arg, dict):
+        if not isinstance(arg, dict) or "value" not in arg:
             raise ExpressionError("regex_extract needs {value, pattern}")
         pattern_name = str(arg.get("pattern", ""))
         pattern = _REGEX_WHITELIST.get(pattern_name)
         if pattern is None:
             raise ExpressionError(f"pattern {pattern_name!r} not whitelisted")
         value = str(evaluate_expression(arg["value"], messages, depth=depth + 1))
+        if len(value) > MAX_REGEX_INPUT:
+            raise ExpressionError("regex input too long")
         match = re.search(pattern, value)
         if match is None:
             raise ExpressionError("regex did not match")
@@ -184,36 +192,76 @@ def evaluate_expression(expr: Any, messages: list[dict[str, Any]], *, depth: int
 # ---------------------------------------------------------------------------
 
 
-def _actionable_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
+def _actionable_nodes(plan: Any) -> list[dict[str, Any]]:
+    if not isinstance(plan, dict):
+        return []
     nodes = plan.get("nodes", [])
+    if not isinstance(nodes, list):
+        return []
     return [n for n in nodes if isinstance(n, dict) and n.get("type")]
 
 
-def matches_envelope(plan: dict[str, Any], messages: list[dict[str, Any]]) -> bool:
+def _emit_prefix_and_tail(
+    nodes: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None] | None:
+    """Parse nodes as ``[emit_tool_use*, optional single trailing non-emit]``.
+
+    Returns ``(emit_nodes, tail)`` for that supported shape, else ``None``. Any
+    other shape (a non-emit node with emits after it, or more than one trailing
+    non-emit) is unsupported and the interpreter punts it, rather than risk
+    mis-counting position: position is the count of executed tool_use turns, and
+    only an all-emit prefix keeps that count in lockstep with the plan nodes, so
+    a mixed shape could otherwise re-serve a turn the model already produced.
+    """
+    emit_nodes: list[dict[str, Any]] = []
+    tail: dict[str, Any] | None = None
+    for node in nodes:
+        if node.get("type") == "emit_tool_use":
+            if tail is not None:
+                return None
+            emit_nodes.append(node)
+        else:
+            if tail is not None:
+                return None
+            tail = node
+    return emit_nodes, tail
+
+
+def matches_envelope(plan: Any, messages: list[dict[str, Any]]) -> bool:
     """Cheap, modelless recognize check: the tool_use sequence so far must be a
-    prefix of the plan's expected sequence. A deviation means the run left the
+    prefix of the plan's expected emit sequence, and the plan must be a
+    supported shape. A deviation (or an unsupported shape) means the run left the
     validated envelope and must punt."""
-    expected = [n.get("tool") for n in _actionable_nodes(plan) if n.get("type") == "emit_tool_use"]
+    if not isinstance(plan, dict):
+        return False
+    parsed = _emit_prefix_and_tail(_actionable_nodes(plan))
+    if parsed is None:
+        return False
+    emit_nodes, _tail = parsed
+    expected = [n.get("tool") for n in emit_nodes]
     executed = executed_tool_names(messages)
     if len(executed) > len(expected):
         return False
     return executed == expected[: len(executed)]
 
 
-def next_action(plan: dict[str, Any], messages: list[dict[str, Any]]) -> Action:
+def next_action(plan: Any, messages: list[dict[str, Any]]) -> Action:
     """Yield the next action for a matched plan given the visible messages."""
-    if not matches_envelope(plan, messages):
+    if not isinstance(plan, dict):
+        return Punt("malformed_plan")
+    parsed = _emit_prefix_and_tail(_actionable_nodes(plan))
+    if parsed is None:
+        return Punt("unsupported_plan_shape")
+    emit_nodes, tail = parsed
+
+    expected = [n.get("tool") for n in emit_nodes]
+    executed = executed_tool_names(messages)
+    if len(executed) > len(expected) or executed != expected[: len(executed)]:
         return Punt("out_of_envelope")
 
-    nodes = _actionable_nodes(plan)
-    index = len(executed_tool_names(messages))
-    if index >= len(nodes):
-        return Punt("plan_exhausted")
-
-    node = nodes[index]
-    node_type = node.get("type")
-
-    if node_type == "emit_tool_use":
+    index = len(executed)
+    if index < len(emit_nodes):
+        node = emit_nodes[index]
         tool = node.get("tool")
         if not isinstance(tool, str):
             return Punt("malformed_node")
@@ -224,27 +272,30 @@ def next_action(plan: dict[str, Any], messages: list[dict[str, Any]]) -> Action:
         try:
             for arg_name, arg_expr in args_spec.items():
                 tool_input[arg_name] = evaluate_expression(arg_expr, messages)
-        except ExpressionError:
+        except (ExpressionError, KeyError, TypeError, ValueError, IndexError, RecursionError):
+            # A plan is semi-trusted data; any evaluation failure degrades to a
+            # punt rather than crashing the request path.
             return Punt("arg_expression_failed")
         return EmitToolUse(tool_name=tool, tool_input=tool_input)
 
-    if node_type == "emit_terminal":
-        return EmitTerminal(text=str(node.get("text", "")))
-
-    if node_type == "sub_judgment":
-        # T1 sub-judgment requires a small-model call, handled by the T1 node
-        # (a later milestone). Until then, punt so the frontier serves the turn.
+    # All emit nodes served; handle the optional trailing node.
+    if tail is None:
+        return Punt("plan_exhausted")
+    tail_type = tail.get("type")
+    if tail_type == "emit_terminal":
+        return EmitTerminal(text=str(tail.get("text", "")))
+    if tail_type == "sub_judgment":
+        # T1 sub-judgment requires a small-model call (a later milestone).
+        # Until then, punt so the frontier serves the turn.
         return Punt("t1_not_enabled")
-
-    if node_type == "punt":
+    if tail_type == "punt":
         return Punt("plan_punt")
-
     return Punt("unknown_node_type")
 
 
 def verify_action(
     action: Action,
-    verifier_spec: dict[str, Any],
+    verifier_spec: Any,
     plan: dict[str, Any],
     messages: list[dict[str, Any]],
 ) -> bool:
@@ -253,6 +304,8 @@ def verify_action(
     ``action_sequence_match``: the emitted tool must equal the expected tool at
     the current position.
     """
+    if not isinstance(verifier_spec, dict):
+        return True
     spec_type = verifier_spec.get("type")
     if spec_type == "action_sequence_match":
         if not isinstance(action, EmitToolUse):

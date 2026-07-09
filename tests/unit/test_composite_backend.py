@@ -91,3 +91,13 @@ async def test_cache_keys_by_token_and_automation() -> None:
     await backend.fetch(user_token="tk2", automation_key="automation:a")
     await backend.fetch(user_token="tk1", automation_key="automation:b")
     assert inner.calls == 3  # distinct keys, each a miss
+
+
+@pytest.mark.asyncio
+async def test_cache_is_bounded_under_key_rotation() -> None:
+    # A caller rotating tokens must not grow the cache without bound.
+    inner = _CountingBackend()
+    backend = CachingCompositeBackend(inner, ttl_seconds=30.0, max_entries=64, clock=lambda: 0.0)
+    for i in range(1000):
+        await backend.fetch(user_token=f"tk{i}", automation_key="automation:a")
+    assert len(backend._cache) <= 64

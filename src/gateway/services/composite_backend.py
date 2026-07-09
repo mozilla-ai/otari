@@ -96,10 +96,12 @@ class CachingCompositeBackend:
         inner: CompositeBackend,
         *,
         ttl_seconds: float = 30.0,
+        max_entries: int = 1024,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._inner = inner
         self._ttl = ttl_seconds
+        self._max_entries = max_entries
         self._clock = clock
         self._cache: dict[tuple[str | None, str | None], tuple[float, list[dict[str, Any]]]] = {}
 
@@ -112,8 +114,22 @@ class CachingCompositeBackend:
         if entry is not None and now - entry[0] < self._ttl:
             return entry[1]
         value = await self._inner.fetch(user_token=user_token, automation_key=automation_key)
-        self._cache[key] = (now, value)
+        self._store(key, now, value)
         return value
+
+    def _store(self, key: tuple[str | None, str | None], now: float, value: list[dict[str, Any]]) -> None:
+        # Bound the cache so a caller rotating tokens/automation keys cannot grow
+        # it without limit (the only gateway-side state).
+        if key not in self._cache and len(self._cache) >= self._max_entries:
+            self._evict(now)
+        self._cache[key] = (now, value)
+
+    def _evict(self, now: float) -> None:
+        for expired_key in [k for k, (t, _) in self._cache.items() if now - t >= self._ttl]:
+            del self._cache[expired_key]
+        # Still at cap after dropping expired: evict oldest by insertion order.
+        while len(self._cache) >= self._max_entries:
+            del self._cache[next(iter(self._cache))]
 
 
 def build_composite_backend(config: GatewayConfig) -> CompositeBackend:

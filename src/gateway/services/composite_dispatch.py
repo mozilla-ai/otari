@@ -55,7 +55,10 @@ Decision = Serve | Shadow | NoDispatch
 
 
 def _match(composites: list[dict[str, Any]], session_label: str) -> dict[str, Any] | None:
-    return next((c for c in composites if c.get("automation_key") == session_label), None)
+    return next(
+        (c for c in composites if isinstance(c, dict) and c.get("automation_key") == session_label),
+        None,
+    )
 
 
 def decide(

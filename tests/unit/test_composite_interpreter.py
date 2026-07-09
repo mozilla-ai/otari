@@ -41,6 +41,10 @@ def _tool_result(tool_use_id: str, content: Any) -> dict[str, Any]:
     return {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": content}]}
 
 
+def _user_turn() -> list[dict[str, Any]]:
+    return [{"role": "user", "content": "go"}]
+
+
 # ---------------------------------------------------------------------------
 # Visible-state helpers
 # ---------------------------------------------------------------------------
@@ -210,3 +214,70 @@ def test_verify_action_sequence_match_fails_on_wrong_tool() -> None:
     action = EmitToolUse(tool_name="wrong_tool", tool_input={})
     spec = {"type": "action_sequence_match", "expected_tools": _MODAL}
     assert verify_action(action, spec, plan, [{"role": "user", "content": "go"}]) is False
+
+
+# ---------------------------------------------------------------------------
+# Adversarial: malformed data must degrade to a punt, never crash
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_plan", ["a string", 123, ["a", "list"], None])
+def test_next_action_malformed_plan_punts(bad_plan: Any) -> None:
+    action = next_action(bad_plan, _user_turn())
+    assert isinstance(action, Punt)
+    assert matches_envelope(bad_plan, _user_turn()) is False
+
+
+def test_next_action_non_dict_nodes_punt() -> None:
+    assert isinstance(next_action({"nodes": "not-a-list"}, _user_turn()), Punt)
+    # Non-dict node entries are ignored, leaving an empty plan -> exhausted.
+    action = next_action({"nodes": ["str", 1, None]}, _user_turn())
+    assert isinstance(action, Punt)
+
+
+def test_verify_action_non_dict_verifier_is_safe() -> None:
+    action = EmitToolUse(tool_name="x", tool_input={})
+    assert verify_action(action, ["not", "a", "dict"], {}, _user_turn()) is True
+    assert verify_action(action, None, {}, _user_turn()) is True
+
+
+def test_unsupported_mixed_shape_punts_not_reserves() -> None:
+    # emit, then a non-emit, then another emit is unsupported: serving it by
+    # indexing all nodes by executed-tool count would re-serve B after the model
+    # already emitted it during the sub_judgment turn. Must punt instead.
+    plan = {
+        "nodes": [
+            {"type": "emit_tool_use", "tool": "A", "args": {}},
+            {"type": "sub_judgment"},
+            {"type": "emit_tool_use", "tool": "B", "args": {}},
+        ]
+    }
+    # Model already executed A then B.
+    messages = [_assistant_tool_use("A", "t1"), _tool_result("t1", {}), _assistant_tool_use("B", "t2")]
+    action = next_action(plan, messages)
+    assert isinstance(action, Punt)
+    assert action.reason == "unsupported_plan_shape"
+
+
+def test_trailing_sub_judgment_after_emits_punts_t1() -> None:
+    plan = {
+        "nodes": [
+            {"type": "emit_tool_use", "tool": "A", "args": {}},
+            {"type": "emit_tool_use", "tool": "B", "args": {}},
+            {"type": "sub_judgment"},
+        ]
+    }
+    # First two turns emit A then B in order.
+    assert next_action(plan, _user_turn()).tool_name == "A"  # type: ignore[union-attr]
+    after_a = [_assistant_tool_use("A", "t1"), _tool_result("t1", {})]
+    assert next_action(plan, after_a).tool_name == "B"  # type: ignore[union-attr]
+    after_b = [*after_a, _assistant_tool_use("B", "t2")]
+    tail = next_action(plan, after_b)
+    assert isinstance(tail, Punt)
+    assert tail.reason == "t1_not_enabled"
+
+
+def test_regex_input_length_capped() -> None:
+    huge = {"regex_extract": {"value": {"const": "a" * 5000}, "pattern": "email"}}
+    with pytest.raises(ExpressionError):
+        evaluate_expression(huge, [])

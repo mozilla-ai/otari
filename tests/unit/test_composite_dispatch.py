@@ -84,6 +84,19 @@ def test_draft_status_not_dispatchable() -> None:
     assert d.reason == "not_dispatchable_status"
 
 
+def test_decide_tolerates_non_dict_composite_entries() -> None:
+    # A malformed platform payload (a non-dict entry) must not crash decide().
+    composites = ["not-a-dict", _composite("approved")]
+    d = decide(composites, _user_turn(), session_label="automation:9cb676db")  # type: ignore[list-item]
+    assert isinstance(d, Serve)
+
+
+def test_decide_malformed_plan_no_dispatch() -> None:
+    composite = {"automation_key": "automation:9cb676db", "status": "approved", "plan": "not-a-dict"}
+    d = decide([composite], _user_turn(), session_label="automation:9cb676db")
+    assert isinstance(d, NoDispatch)
+
+
 def test_action_matches_model_name_level() -> None:
     action = EmitToolUse(tool_name="resolve_time", tool_input={})
     assert action_matches_model(action, {"type": "tool_use", "name": "resolve_time"}) is True
