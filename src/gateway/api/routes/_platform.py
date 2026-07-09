@@ -675,6 +675,83 @@ async def _resolve_platform_code_execution(
     )
 
 
+async def _resolve_platform_composites(
+    config: GatewayConfig,
+    user_token: str,
+    automation_key: str | None = None,
+) -> list[dict[str, Any]]:
+    """Fetch the workspace's dispatchable composite definitions via the platform.
+
+    Modeled on :func:`_resolve_platform_code_execution` but **fail-open**: on any
+    missing config, timeout, network error, non-200, or malformed body this
+    returns ``[]`` so the request proceeds to the provider exactly as today
+    (docs/tool-compositor-layer-plan.md sec 5.2). Composites are an optimization;
+    they must never break or block a request.
+    """
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        return []
+
+    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
+    url = _platform_url(platform_base_url, "/gateway/composites")
+    headers = {"X-Gateway-Token": config.platform_token or "", "X-User-Token": user_token}
+    params = {"automation_key": automation_key} if automation_key else {}
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout_ms / 1000) as client:
+            response = await client.get(url, headers=headers, params=params)
+    except (httpx.TimeoutException, httpx.NetworkError):
+        return []
+
+    if response.status_code != 200:
+        return []
+    try:
+        payload = response.json()
+    except ValueError:
+        return []
+    composites = payload.get("composites") if isinstance(payload, dict) else None
+    return composites if isinstance(composites, list) else []
+
+
+async def _report_platform_composite_usage(
+    config: GatewayConfig,
+    user_token: str,
+    report: dict[str, Any],
+) -> None:
+    """POST one composite execution to the platform (best-effort, dual-token).
+
+    Mirrors :func:`_report_platform_usage`'s bounded-retry, swallow-on-failure
+    posture. Dual-token because the platform derives the execution's scope from
+    the forwarded user token.
+    """
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        return
+
+    timeout_ms = int(config.platform.get("usage_timeout_ms", 5000))
+    max_retries = int(config.platform.get("usage_max_retries", 3))
+    url = _platform_url(platform_base_url, "/gateway/composite-usage")
+    headers = {"X-Gateway-Token": config.platform_token or "", "X-User-Token": user_token}
+
+    delay_seconds = 0.25
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = await _post_platform(
+                url=url, headers=headers, body=report, timeout_seconds=timeout_ms / 1000
+            )
+        except (httpx.TimeoutException, httpx.NetworkError):
+            if attempt >= max_retries:
+                return
+            await asyncio.sleep(delay_seconds)
+            delay_seconds *= 2
+            continue
+        # 2xx or a non-retryable client error: done. Only retry on 5xx.
+        if response.status_code < 500 or attempt >= max_retries:
+            return
+        await asyncio.sleep(delay_seconds)
+        delay_seconds *= 2
+
+
 async def _report_platform_usage(
     config: GatewayConfig,
     correlation_id: str,
