@@ -160,11 +160,11 @@ This starts Otari on port 8000 backed by a Postgres container, so keys, budgets,
 
 ### Render
 
-Run standalone Otari on [Render](https://render.com) from the repo Blueprint: a Starter web service on the published `mzdotai/otari` image plus managed Postgres 16 on the private network. On Apply you can fill OpenAI, Anthropic, Mistral, and/or Gemini keys (leave unused ones blank); Render generates `OTARI_MASTER_KEY`, runs migrations, and prints a bootstrap `gw-…` key in the logs.
+Deploy Otari with fully managed Postgres on Render for free. Just add your provider credentials; Render provisions and connects your services automatically.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari)
 
-See [`deploy/render/`](deploy/render/README.md) for the env table, why `PORT`/`OTARI_PORT` are both set, and a short smoke-test list.
+Read [`the docs`](deploy/render/README.md) for more details.
 
 ### Railway
 

@@ -1,66 +1,70 @@
 # Deploy Otari on Render
 
-[`render.yaml`](../../render.yaml) at the repo root is the Blueprint. This page
-is how to use it and what to check after Apply.
+Deploy Otari and Render Postgres from a Blueprint ([`render.yaml`](./render.yaml)). Render pulls the published Otari image rather than building this repository.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari)
 
-## Resources
+## What gets deployed
 
-| Name | Plan / kind | Notes |
+| Resource | Plan | Details |
 | --- | --- | --- |
-| `otari` | Web, Starter | `docker.io/mzdotai/otari:0.2.0`, `/health`, Oregon |
-| `otari-db` | Postgres 16, basic-256mb | User/db `otari`, `ipAllowList: []` (private only) |
+| `otari` | Free web service | `docker.io/mzdotai/otari:0.2.0`, Oregon, health check at `/health/readiness` |
+| `otari-db` | Free Render Postgres 16 | Database and user `otari`, private connections only |
 
-Render does not build from this tree. It pulls the published image. On first
-boot, `OTARI_AUTO_MIGRATE` runs Alembic and `OTARI_BOOTSTRAP_API_KEY` prints a
-`gw-…` client key once in the service logs.
+The web service is stateless. Postgres stores users, API key hashes, budgets, pricing, and usage history. On first boot, Otari runs its database migrations and creates a bootstrap API key, which is printed once in the service logs.
 
-Postgres 16 matches the `postgres:16-alpine` service in
-[`docker-compose.yml`](../../docker-compose.yml). Otari is not locked to that
-major; change `postgresMajorVersion` in the Blueprint if you prefer another.
+## Free instance limits
 
-## Env vars
+The free configuration is intended for evaluation and hobby use:
 
-Otari’s own settings are `OTARI_<FIELD>`. Upstream provider SDKs (through
-[any-llm](https://github.com/mozilla-ai/any-llm)) read their usual key names.
+- Render spins down the web service after 15 minutes without inbound traffic. Waking it can take about a minute.
+- Each workspace receives 750 free web-service hours per month, shared across its free services.
+- Free Postgres is limited to 1 GB, expires after 30 days, and does not support backups.
+
+Upgrade to paid instances before production use. See Render's full list of [Free instance limitations](https://render.com/docs/free).
+
+## Configuration
+
+The Blueprint wires the web service and database together. Otari settings use the `OTARI_<FIELD>` convention:
 
 | Variable | Set how | Notes |
 | --- | --- | --- |
-| `PORT`, `OTARI_PORT` | both `8000` | Otari listens on `OTARI_PORT`. Render’s health check and routing use `PORT`. They have to agree. |
-| `OTARI_HOST` | `0.0.0.0` | Without this, the process only binds localhost inside the container. |
-| `OTARI_DATABASE_URL` | from `otari-db` | Keys, budgets, usage. |
-| `OTARI_MASTER_KEY` | generated | Management APIs. Copy it from the Environment tab after deploy. |
-| `OTARI_REQUIRE_PRICING` | `false` | Image default is `true`. With no pricing table yet, that rejects every model. |
-| `OTARI_AUTO_MIGRATE` | `true` | |
-| `OTARI_BOOTSTRAP_API_KEY` | `true` | |
+| `PORT`, `OTARI_PORT` | `8000` | Keeps Render's detected port aligned with Otari's listening port. |
+| `OTARI_HOST` | `0.0.0.0` | Binds Otari on the container network. |
+| `OTARI_DATABASE_URL` | from `otari-db` | Uses the database's internal connection string. |
+| `OTARI_MASTER_KEY` | generated | Protects management APIs. Retrieve it from the Environment tab. |
+| `OTARI_DEFAULT_PRICING` | `true` | Uses bundled prices for common models while keeping fail-closed pricing enabled. |
+| `OTARI_AUTO_MIGRATE` | `true` | Runs Alembic migrations during startup. |
+| `OTARI_BOOTSTRAP_API_KEY` | `true` | Creates a first-use API key when the database has no keys. |
 
-Apply also prompts for four provider keys, all optional in the form:
+Render's `postgresql://` connection string works without modification. Otari selects the async database driver automatically.
 
-- `OPENAI_API_KEY`
-- `ANTHROPIC_API_KEY`
-- `MISTRAL_API_KEY`
-- `GEMINI_API_KEY`
+### Provider credentials
 
-Fill the ones you will call; leave the others empty. Chat completions need at
-least one. Anything else from [`docs/models.md`](../../docs/models.md) can be
-added later on the service Environment tab under its native name.
+During initial setup, Render prompts for `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, and `GEMINI_API_KEY`. Each field is optional, but at least one provider credential is required before the gateway can serve requests. Leave unused fields blank.
 
-When you do want priced models, put pricing (and the rest of structured config)
-in `OTARI_CONFIG_YAML` or `OTARI_CONFIG_B64`. See
-[Full config via environment](../../docs/configuration.md#full-config-via-environment).
+The underlying [any-llm](https://github.com/mozilla-ai/any-llm) SDK reads each provider's native environment variables. To use any other provider from [`docs/models.md`](../../docs/models.md), add its variable on the service's Environment tab. Render prompts for variables marked `sync: false` only during initial creation, so add or rotate credentials for an existing service from that tab.
 
-Render’s `postgresql://` URL is fine as-is. Otari rewrites it to the async
-driver on its own.
+### Pricing
+
+The Blueprint keeps `OTARI_REQUIRE_PRICING` at its fail-closed default and
+enables bundled fallback pricing. Database pricing always takes precedence. For a custom model that is not covered by the bundled data, add pricing through the `/v1/pricing` API, `OTARI_CONFIG_YAML`, or `OTARI_CONFIG_B64`. See [Full config via environment](../../docs/configuration.md#full-config-via-environment).
 
 ## Deploy
 
-1. Use the button above (or the same link in the root README).
-2. On Apply, enter whatever provider keys you need.
-3. Wait until `otari` and `otari-db` are live, then grab the `*.onrender.com` URL
-   from the Dashboard.
+1. Click **Deploy to Render** above.
+2. In the **Blueprint Path** field, paste:
 
-## Test it
+   ```text
+   deploy/render/render.yaml
+   ```
+
+3. Enter the provider credentials you need and leave unused fields blank.
+4. Review the two free resources, then apply the Blueprint.
+5. Wait for `otari` and `otari-db` to become live. Copy the web service's
+   `*.onrender.com` URL from the Dashboard.
+
+## Verify
 
 ```bash
 export OTARI_URL=https://<your-service>.onrender.com
@@ -69,8 +73,8 @@ curl "$OTARI_URL/health"
 curl "$OTARI_URL/health/readiness"
 ```
 
-Readiness should show the database connected. Pull the bootstrap `gw-…` key out
-of the **otari** logs (first boot only):
+Readiness should report that the database is connected. Find the bootstrap
+`gw-…` key in the `otari` service logs. It is printed in full only once, during the first successful startup.
 
 ```bash
 curl "$OTARI_URL/v1/chat/completions" \
@@ -82,20 +86,23 @@ curl "$OTARI_URL/v1/chat/completions" \
   }'
 ```
 
-Use a `provider:model` string that matches a key you actually set.
+Use a `provider:model` value that matches a credential you supplied. Clients should use `$OTARI_URL/v1` as their OpenAI-compatible base URL.
 
-Quick checks:
+For a longer-lived deployment, use `OTARI_MASTER_KEY` to create a named API key, then revoke the bootstrap key through the key-management API.
 
-- [ ] Web + Postgres both live
-- [ ] `/health` OK
-- [ ] `/health/readiness` → database connected
-- [ ] `gw-…` key in logs
-- [ ] Chat completion returns 200
-- [ ] Clients talk to `$OTARI_URL/v1` — the image’s sample page still hardcodes `http://localhost:8000/v1`
+## Upgrade for production
 
-## Editing the Blueprint
+Before the free database expires, change the web-service plan to `starter` and the database plan to `basic-256mb` or higher. Paid web services do not spin down when idle, and paid Render Postgres adds continuous backups and point-in-time recovery.
 
-Change [`render.yaml`](../../render.yaml), keep the image tag pinned unless you
-mean to float, then apply it on a throwaway Render project and run the checks
-above. If the Deploy button’s repo URL moves, update this README, the root
-README, and `docs/deployment.md` together.
+The Blueprint pins the Otari image to a release tag, and image-backed services do not redeploy when a new image is published to that tag. To upgrade, change `image.url` to the desired release and sync the Blueprint. To keep every Blueprint update manual, turn off Auto Sync in the Blueprint settings.
+
+## Maintaining the Blueprint
+
+When changing the Blueprint:
+
+1. Validate it against Render's current schema:
+
+   ```bash
+   render blueprints validate deploy/render/render.yaml
+   ```
+2. If the deploy link or Blueprint path changes, update this README, the project root [`README.md`](../../README.md), and `docs/deployment.md` together.

@@ -21,20 +21,24 @@ When turning that setup into a longer-lived deployment:
 
 ## Deploy on Render
 
-The repo-root [`render.yaml`](../render.yaml) Blueprint deploys Otari as an
-image-backed web service (`docker.io/mzdotai/otari:0.2.0`) with Render-managed
-Postgres 16. `OTARI_DATABASE_URL` comes from the database connection string.
-Both `PORT` and `OTARI_PORT` are set to `8000` because Otari listens on
-`OTARI_PORT`, not Render's injected `PORT` alone. Health checks use `/health`.
+This repo contains a Render Blueprint ([`render.yaml`](../deploy/render/render.yaml)), an infrastructure-as-code file that defines your stack.
+
+It deploys the published Otari image (`docker.io/mzdotai/otari:0.2.0`) as a free web service alongside a free Render Postgres 16 database.
+
+- Render injects the database’s internal connection string as `OTARI_DATABASE_URL`, sets `PORT` and `OTARI_PORT` to `8000`, and checks `/health/readiness`.
+- On Apply, provide whichever provider credentials you use. Render generates `OTARI_MASTER_KEY`, runs migrations, creates the bootstrap API key, and enables bundled pricing.
+
+Copy this value into Render's **Blueprint Path** field:
+
+```text
+deploy/render/render.yaml
+```
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari)
 
-On Apply, Render prompts for `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`MISTRAL_API_KEY`, and `GEMINI_API_KEY`. Set whichever providers you need; leave
-the others empty. `OTARI_MASTER_KEY` is generated for you, and
-`OTARI_REQUIRE_PRICING=false` keeps an env-only deploy usable before you add
-pricing. Smoke tests and the full env table are in
-[`deploy/render/`](https://github.com/mozilla-ai/otari/tree/main/deploy/render).
+**Note:** Free instances are intended for evaluation. The web service spins down after 15 minutes without traffic, and the database is limited to 1 GB, expires after 30 days, and has no backups.
+
+The Blueprint, upgrade instructions, and full env table are available at [`deploy/render/`](https://github.com/mozilla-ai/otari/tree/main/deploy/render).
 
 ## Deploy on Railway
 
@@ -46,10 +50,8 @@ and a managed Postgres, wired together with
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
 
-You set at least one provider key (the form prompts for `OPENAI_API_KEY`; add a
-variable like `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, or `GEMINI_API_KEY` to use
-another provider). The master key is auto-generated and `OTARI_REQUIRE_PRICING=false`
-is pre-set so an env-only deploy is usable out of the box. The template
+You set at least one provider key (the form prompts for `OPENAI_API_KEY`; add a variable like `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, or `GEMINI_API_KEY` to use
+another provider). The master key is auto-generated and `OTARI_REQUIRE_PRICING=false` is pre-set so an env-only deploy is usable out of the box. The template
 definition lives in
 [`deploy/railway/`](https://github.com/mozilla-ai/otari/tree/main/deploy/railway).
 
