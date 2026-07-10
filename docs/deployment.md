@@ -19,6 +19,23 @@ When turning that setup into a longer-lived deployment:
 - Add `pricing` entries for every model you want budget enforcement on.
 - Point container health checks at `/health` and `/health/readiness`.
 
+## Deploy on Render
+
+The repo-root [`render.yaml`](../render.yaml) Blueprint deploys Otari as an
+image-backed web service (`docker.io/mzdotai/otari:0.2.0`) with Render-managed
+Postgres 16. `OTARI_DATABASE_URL` comes from the database connection string.
+Both `PORT` and `OTARI_PORT` are set to `8000` because Otari listens on
+`OTARI_PORT`, not Render's injected `PORT` alone. Health checks use `/health`.
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari)
+
+On Apply, Render prompts for `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`MISTRAL_API_KEY`, and `GEMINI_API_KEY`. Set whichever providers you need; leave
+the others empty. `OTARI_MASTER_KEY` is generated for you, and
+`OTARI_REQUIRE_PRICING=false` keeps an env-only deploy usable before you add
+pricing. Smoke tests and the full env table are in
+[`deploy/render/`](https://github.com/mozilla-ai/otari/tree/main/deploy/render).
+
 ## Deploy on Railway
 
 For a hosted standalone deployment without local setup, use the one-click

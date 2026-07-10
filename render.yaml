@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+#
+# Otari on Render — Blueprint for one-click deploy
+# Docs: deploy/render/README.md
+# Image: https://hub.docker.com/r/mzdotai/otari
+#
+# Pattern: image-wrapper (official mzdotai/otari image; no source build on Render)
+# Env-only standalone: Otari web + managed Postgres (auto_migrate + bootstrap key).
+
+previews:
+  generation: off
+
+projects:
+  - name: otari
+    environments:
+      - name: production
+        services:
+          - type: web
+            name: otari
+            runtime: image
+            plan: starter
+            region: oregon
+            image:
+              url: docker.io/mzdotai/otari:0.2.0
+            healthCheckPath: /health
+            envVars:
+              # Otari binds OTARI_PORT (default 8000), not Render's PORT.
+              # Pin both so Render's port scanner and the process agree.
+              - key: PORT
+                value: "8000"
+              - key: OTARI_PORT
+                value: "8000"
+              - key: OTARI_HOST
+                value: "0.0.0.0"
+              - key: OTARI_DATABASE_URL
+                fromDatabase:
+                  name: otari-db
+                  property: connectionString
+              - key: OTARI_MASTER_KEY
+                generateValue: true
+              # Image default is require_pricing=true (fail-closed). An env-only
+              # deploy has no pricing table, so disable until you add pricing via
+              # OTARI_CONFIG_YAML or the /v1/pricing API.
+              - key: OTARI_REQUIRE_PRICING
+                value: "false"
+              - key: OTARI_AUTO_MIGRATE
+                value: "true"
+              - key: OTARI_BOOTSTRAP_API_KEY
+                value: "true"
+              # Provider credentials (any-llm). Prompted on initial Blueprint
+              # create so deployers can fill whichever providers they use.
+              # At least one is needed to serve traffic; leave unused keys blank.
+              - key: OPENAI_API_KEY
+                sync: false
+              - key: ANTHROPIC_API_KEY
+                sync: false
+              - key: MISTRAL_API_KEY
+                sync: false
+              - key: GEMINI_API_KEY
+                sync: false
+
+        databases:
+          - name: otari-db
+            plan: basic-256mb
+            region: oregon
+            databaseName: otari
+            user: otari
+            postgresMajorVersion: "16"
+            ipAllowList: []
