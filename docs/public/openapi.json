@@ -2952,11 +2952,6 @@
             "description": "Successful Response"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          }
-        ],
         "summary": "Health Liveness",
         "tags": [
           "health"
@@ -2981,11 +2976,6 @@
             "description": "Successful Response"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          }
-        ],
         "summary": "Health Readiness",
         "tags": [
           "health"

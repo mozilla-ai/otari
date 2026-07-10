@@ -107,9 +107,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
         lifespan=_create_lifespan(config),
     )
 
-    # Addition of a cosmetic fix for the openapi schema, this just adds the
-    # ApiKeyAuth security scheme to the openapi schema and applies it to all the
-    # openapi paths
     def custom_openapi() -> dict[str, Any]:
         if app.openapi_schema:
             return app.openapi_schema
@@ -136,7 +133,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         }
 
         for path, path_item in openapi_schema.get("paths", {}).items():
-            if path in _PUBLIC_PREFIXES:
+            if path.startswith(_PUBLIC_PREFIXES):
                 continue
             for operation in path_item.values():
                 if isinstance(operation, dict):
