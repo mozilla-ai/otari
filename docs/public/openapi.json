@@ -2892,6 +2892,14 @@
         "title": "ValidationError",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "description": "Enter your API key here (sent as Otari-Key header).",
+        "in": "header",
+        "name": "Otari-Key",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
@@ -2944,6 +2952,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Health Liveness",
         "tags": [
           "health"
@@ -2968,6 +2981,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Health Readiness",
         "tags": [
           "health"
@@ -3044,6 +3062,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Speech",
         "tags": [
           "audio"
@@ -3084,6 +3107,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Transcription",
         "tags": [
           "audio"
@@ -3157,6 +3185,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Batches",
         "tags": [
           "batches"
@@ -3195,6 +3228,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Batch",
         "tags": [
           "batches"
@@ -3245,6 +3283,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Retrieve Batch",
         "tags": [
           "batches"
@@ -3295,6 +3338,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Cancel Batch",
         "tags": [
           "batches"
@@ -3351,6 +3399,11 @@
             "description": "LLM provider error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Retrieve Batch Results",
         "tags": [
           "batches"
@@ -3412,6 +3465,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Budgets",
         "tags": [
           "budgets"
@@ -3452,6 +3510,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Budget",
         "tags": [
           "budgets"
@@ -3488,6 +3551,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete Budget",
         "tags": [
           "budgets"
@@ -3529,6 +3597,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Budget",
         "tags": [
           "budgets"
@@ -3580,6 +3653,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Update Budget",
         "tags": [
           "budgets"
@@ -3620,6 +3698,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Chat Completions",
         "tags": [
           "chat"
@@ -3660,6 +3743,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Embedding",
         "tags": [
           "embeddings"
@@ -3728,6 +3816,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Files",
         "tags": [
           "files"
@@ -3770,6 +3863,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create File",
         "tags": [
           "files"
@@ -3831,6 +3929,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete File",
         "tags": [
           "files"
@@ -3890,6 +3993,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get File",
         "tags": [
           "files"
@@ -3947,6 +4055,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get File Content",
         "tags": [
           "files"
@@ -3987,6 +4100,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Image",
         "tags": [
           "images"
@@ -4048,6 +4166,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Keys",
         "tags": [
           "keys"
@@ -4088,6 +4211,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Key",
         "tags": [
           "keys"
@@ -4124,6 +4252,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete Key",
         "tags": [
           "keys"
@@ -4165,6 +4298,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Key",
         "tags": [
           "keys"
@@ -4216,6 +4354,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Update Key",
         "tags": [
           "keys"
@@ -4256,6 +4399,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Message",
         "tags": [
           "messages"
@@ -4298,6 +4446,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Count Message Tokens",
         "tags": [
           "messages"
@@ -4350,6 +4503,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Models",
         "tags": [
           "models"
@@ -4393,6 +4551,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Model",
         "tags": [
           "models"
@@ -4447,6 +4610,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Moderation",
         "tags": [
           "moderations"
@@ -4508,6 +4676,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Pricing",
         "tags": [
           "pricing"
@@ -4548,6 +4721,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Set Pricing",
         "tags": [
           "pricing"
@@ -4603,6 +4781,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete Pricing",
         "tags": [
           "pricing"
@@ -4663,6 +4846,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Pricing",
         "tags": [
           "pricing"
@@ -4710,6 +4898,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Pricing History",
         "tags": [
           "pricing"
@@ -4750,6 +4943,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Rerank",
         "tags": [
           "rerank"
@@ -4790,6 +4988,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Response",
         "tags": [
           "responses"
@@ -4907,6 +5110,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Usage",
         "tags": [
           "usage"
@@ -4968,6 +5176,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Users",
         "tags": [
           "users"
@@ -5008,6 +5221,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create User",
         "tags": [
           "users"
@@ -5044,6 +5262,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete User",
         "tags": [
           "users"
@@ -5085,6 +5308,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get User",
         "tags": [
           "users"
@@ -5136,6 +5364,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Update User",
         "tags": [
           "users"
@@ -5206,6 +5439,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get User Usage",
         "tags": [
           "users"
