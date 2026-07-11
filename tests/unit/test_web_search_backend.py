@@ -613,3 +613,95 @@ async def test_auth_token_not_leaked_to_result_page_fetches(monkeypatch: pytest.
     fetch_reqs = [r for r in transport.captured if r.url.path in ("/post-a", "/post-b")]
     assert search_reqs and all(r.headers.get("X-Gateway-Token") == "gw-secret-token" for r in search_reqs)
     assert fetch_reqs and all("X-Gateway-Token" not in r.headers for r in fetch_reqs)
+
+
+# --- OTel tracing ------------------------------------------------------------
+
+
+def _make_otel_provider() -> tuple[object, object]:
+    """Return an (exporter, provider) pair with an in-memory span exporter."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    return exporter, provider
+
+
+@pytest.mark.asyncio
+async def test_call_tool_emits_span_with_query_and_result_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful web_search call must emit a span named 'web_search' with
+    query and result_count attributes set."""
+    from opentelemetry import trace as otel_trace
+
+    import gateway.services.web_search_backend as wsb_module
+
+    exporter, provider = _make_otel_provider()
+    original_provider = otel_trace.get_tracer_provider()
+    otel_trace.set_tracer_provider(provider)  # type: ignore[arg-type]
+    wsb_module.tracer = provider.get_tracer(wsb_module.__name__)  # type: ignore[attr-defined]
+
+    try:
+        _patched_async_client(
+            {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
+            monkeypatch,
+        )
+
+        async with WebSearchBackend(base_url="http://searxng:8080", extract_content=False) as backend:
+            await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
+    finally:
+        otel_trace.set_tracer_provider(original_provider)
+        wsb_module.tracer = otel_trace.get_tracer(wsb_module.__name__)
+
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    assert isinstance(exporter, InMemorySpanExporter)
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    assert span.name == WEB_SEARCH_TOOL_NAME
+    assert span.attributes is not None
+    assert span.attributes["web_search.query"] == "claude code"
+    assert span.attributes["web_search.result_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_call_tool_span_records_error_when_backend_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the search backend is unreachable the span must record the exception
+    and have an ERROR status."""
+    from opentelemetry import trace as otel_trace
+    from opentelemetry.trace import StatusCode
+
+    import gateway.services.web_search_backend as wsb_module
+
+    exporter, provider = _make_otel_provider()
+    original_provider = otel_trace.get_tracer_provider()
+    otel_trace.set_tracer_provider(provider)  # type: ignore[arg-type]
+    wsb_module.tracer = provider.get_tracer(wsb_module.__name__)  # type: ignore[attr-defined]
+
+    try:
+        _patched_async_client(
+            {("searxng", "/search"): httpx.ConnectError("connection refused")},
+            monkeypatch,
+        )
+
+        async with WebSearchBackend(base_url="http://searxng:8080") as backend:
+            with pytest.raises(WebSearchNotReachableError):
+                await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "x"})
+    finally:
+        otel_trace.set_tracer_provider(original_provider)
+        wsb_module.tracer = otel_trace.get_tracer(wsb_module.__name__)
+
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    assert isinstance(exporter, InMemorySpanExporter)
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    assert span.name == WEB_SEARCH_TOOL_NAME
+    assert span.status.status_code == StatusCode.ERROR
+    assert len(span.events) >= 1
+    assert any(e.name == "exception" for e in span.events)
+
