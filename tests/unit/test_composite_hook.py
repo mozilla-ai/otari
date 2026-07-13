@@ -109,11 +109,32 @@ async def test_shadow_composite_falls_through(monkeypatch: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_no_session_label_returns_none(monkeypatch: Any) -> None:
+async def test_no_derivable_key_returns_none(monkeypatch: Any) -> None:
+    # No explicit label and no tools -> nothing to key on, nothing to serve.
     monkeypatch.setenv("OTARI_COMPOSITES_ENABLED", "true")
     monkeypatch.setattr(composite_hook, "_get_backend", lambda cfg: _StubBackend([_composite()]))
-    result = await _serve(_request(session_label=None))
+    result = await _serve(_request(session_label=None, tools=None))
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_no_label_fingerprint_serves(monkeypatch: Any) -> None:
+    # Zero tenant change: no session_label, but the request carries tools, so the
+    # gateway derives an fp:<hash> key. An approved composite registered under
+    # that same derived key serves the turn.
+    from gateway.services.composite_key import derive_automation_key
+
+    request = _request(session_label=None, system="You are an automation.", tools=[{"name": "resolve_time"}])
+    fp_key = derive_automation_key(request)
+    assert fp_key is not None and fp_key.startswith("fp:")
+
+    composite = _composite()
+    composite["automation_key"] = fp_key
+    monkeypatch.setenv("OTARI_COMPOSITES_ENABLED", "true")
+    monkeypatch.setattr(composite_hook, "_get_backend", lambda cfg: _StubBackend([composite]))
+    result = await _serve(request)
+    assert isinstance(result, dict)
+    assert result["content"][0]["name"] == "resolve_time"
 
 
 @pytest.mark.asyncio

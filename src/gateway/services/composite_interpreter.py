@@ -26,6 +26,14 @@ MAX_EXPR_DEPTH = 8
 # event loop. Over-length input punts.
 MAX_REGEX_INPUT = 4096
 
+# A ``map`` node expands to one body iteration per element of its runtime list.
+# Cap the expansion so a pathologically long list cannot make position
+# accounting walk unboundedly; over the cap the interpreter punts to the model.
+MAX_MAP_ITEMS = 1000
+
+# Sentinel distinguishing "no current map item" from a real item value of None.
+_NO_ITEM: Any = object()
+
 # Whitelisted regex patterns the ``regex_extract`` transform may use. A plan
 # cannot supply an arbitrary pattern (avoids catastrophic backtracking and
 # keeps evaluation bounded).
@@ -132,12 +140,16 @@ def _navigate(value: Any, path: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def evaluate_expression(expr: Any, messages: list[dict[str, Any]], *, depth: int = 0) -> Any:
+def evaluate_expression(
+    expr: Any, messages: list[dict[str, Any]], *, depth: int = 0, item: Any = _NO_ITEM
+) -> Any:
     """Evaluate a restricted arg-map expression over visible message state.
 
     Supported ops (each a single-key dict): ``const``, ``trigger``,
-    ``last_tool_result``, ``lower``, ``join``, ``regex_extract``. Anything else
-    raises ``ExpressionError`` (which the caller converts to a punt).
+    ``last_tool_result``, ``item``, ``lower``, ``join``, ``regex_extract``.
+    Anything else raises ``ExpressionError`` (which the caller converts to a
+    punt). ``item`` resolves a dotted path into the current ``map`` loop element
+    and is only valid inside a ``map`` body (``item`` is ``_NO_ITEM`` elsewhere).
     """
     if depth > MAX_EXPR_DEPTH:
         raise ExpressionError("expression too deep")
@@ -158,8 +170,12 @@ def evaluate_expression(expr: Any, messages: list[dict[str, Any]], *, depth: int
             raise ExpressionError("last_tool_result needs {tool, path}")
         content = last_tool_result(messages, str(arg.get("tool", "")))
         return _navigate(content, str(arg.get("path", "")))
+    if op == "item":
+        if item is _NO_ITEM:
+            raise ExpressionError("item reference outside a map body")
+        return _navigate(item, str(arg))
     if op == "lower":
-        value = evaluate_expression(arg, messages, depth=depth + 1)
+        value = evaluate_expression(arg, messages, depth=depth + 1, item=item)
         return str(value).lower()
     if op == "join":
         if not isinstance(arg, dict):
@@ -168,7 +184,7 @@ def evaluate_expression(expr: Any, messages: list[dict[str, Any]], *, depth: int
         values = arg.get("values", [])
         if not isinstance(values, list):
             raise ExpressionError("join values must be a list")
-        parts = [str(evaluate_expression(v, messages, depth=depth + 1)) for v in values]
+        parts = [str(evaluate_expression(v, messages, depth=depth + 1, item=item)) for v in values]
         return sep.join(parts)
     if op == "regex_extract":
         if not isinstance(arg, dict) or "value" not in arg:
@@ -177,7 +193,7 @@ def evaluate_expression(expr: Any, messages: list[dict[str, Any]], *, depth: int
         pattern = _REGEX_WHITELIST.get(pattern_name)
         if pattern is None:
             raise ExpressionError(f"pattern {pattern_name!r} not whitelisted")
-        value = str(evaluate_expression(arg["value"], messages, depth=depth + 1))
+        value = str(evaluate_expression(arg["value"], messages, depth=depth + 1, item=item))
         if len(value) > MAX_REGEX_INPUT:
             raise ExpressionError("regex input too long")
         match = re.search(pattern, value)
@@ -201,30 +217,87 @@ def _actionable_nodes(plan: Any) -> list[dict[str, Any]]:
     return [n for n in nodes if isinstance(n, dict) and n.get("type")]
 
 
-def _emit_prefix_and_tail(
+@dataclass(frozen=True)
+class _Step:
+    """One flattened emit position: the tool to emit, the node carrying its arg
+    map, and the current ``map`` element (``_NO_ITEM`` outside a map body)."""
+
+    tool: str
+    node: dict[str, Any]
+    item: Any
+
+
+def _parse_plan(
     nodes: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None] | None:
-    """Parse nodes as ``[emit_tool_use*, optional single trailing non-emit]``.
+    """Parse nodes as ``[(emit_tool_use | map)*, optional single trailing node]``.
 
-    Returns ``(emit_nodes, tail)`` for that supported shape, else ``None``. Any
-    other shape (a non-emit node with emits after it, or more than one trailing
-    non-emit) is unsupported and the interpreter punts it, rather than risk
-    mis-counting position: position is the count of executed tool_use turns, and
-    only an all-emit prefix keeps that count in lockstep with the plan nodes, so
-    a mixed shape could otherwise re-serve a turn the model already produced.
+    Returns ``(body_nodes, tail)`` for that supported shape, else ``None``. A
+    ``map`` node expands (at ``_flatten`` time) to one body iteration per element
+    of its runtime list, so a plan may now serve a variable-length loop, not just
+    a fixed sequence. Position is still the count of executed tool_use turns and
+    stays in lockstep with the flattened steps; any node type other than
+    emit/map may appear only once, as the trailing node (a terminal, a
+    sub_judgment, or an explicit punt). Anything else is unsupported and punts.
     """
-    emit_nodes: list[dict[str, Any]] = []
+    body_nodes: list[dict[str, Any]] = []
     tail: dict[str, Any] | None = None
     for node in nodes:
-        if node.get("type") == "emit_tool_use":
+        if node.get("type") in ("emit_tool_use", "map"):
             if tail is not None:
                 return None
-            emit_nodes.append(node)
+            body_nodes.append(node)
         else:
             if tail is not None:
                 return None
             tail = node
-    return emit_nodes, tail
+    return body_nodes, tail
+
+
+def _flatten(
+    body_nodes: list[dict[str, Any]], messages: list[dict[str, Any]], need: int
+) -> list[_Step] | None:
+    """Expand body nodes into an ordered list of emit steps, lazily.
+
+    Expansion stops once ``need`` steps exist (the caller only ever needs up to
+    the current position), so a ``map`` is evaluated only once the run has
+    actually reached it, by which point its list-producing tool_result is already
+    visible. Returns ``None`` on any malformed node or unevaluable ``over``
+    expression, which the caller turns into a punt.
+    """
+    steps: list[_Step] = []
+    for node in body_nodes:
+        if len(steps) >= need:
+            break
+        ntype = node.get("type")
+        if ntype == "emit_tool_use":
+            tool = node.get("tool")
+            if not isinstance(tool, str):
+                return None
+            steps.append(_Step(tool, node, _NO_ITEM))
+            continue
+        # map: one body iteration per element of the runtime list.
+        body = node.get("body")
+        if not isinstance(body, list) or not body:
+            return None
+        for inner in body:
+            if (
+                not isinstance(inner, dict)
+                or inner.get("type") != "emit_tool_use"
+                or not isinstance(inner.get("tool"), str)
+            ):
+                return None
+        try:
+            over = evaluate_expression(node.get("over"), messages)
+        except (ExpressionError, KeyError, TypeError, ValueError, IndexError, RecursionError):
+            return None
+        if not isinstance(over, list) or len(over) > MAX_MAP_ITEMS:
+            return None
+        for element in over:
+            steps.extend(_Step(inner["tool"], inner, element) for inner in body)
+            if len(steps) >= need:
+                break
+    return steps
 
 
 def matches_envelope(plan: Any, messages: list[dict[str, Any]]) -> bool:
@@ -234,12 +307,15 @@ def matches_envelope(plan: Any, messages: list[dict[str, Any]]) -> bool:
     validated envelope and must punt."""
     if not isinstance(plan, dict):
         return False
-    parsed = _emit_prefix_and_tail(_actionable_nodes(plan))
+    parsed = _parse_plan(_actionable_nodes(plan))
     if parsed is None:
         return False
-    emit_nodes, _tail = parsed
-    expected = [n.get("tool") for n in emit_nodes]
+    body_nodes, _tail = parsed
     executed = executed_tool_names(messages)
+    steps = _flatten(body_nodes, messages, len(executed) + 1)
+    if steps is None:
+        return False
+    expected = [s.tool for s in steps]
     if len(executed) > len(expected):
         return False
     return executed == expected[: len(executed)]
@@ -249,36 +325,36 @@ def next_action(plan: Any, messages: list[dict[str, Any]]) -> Action:
     """Yield the next action for a matched plan given the visible messages."""
     if not isinstance(plan, dict):
         return Punt("malformed_plan")
-    parsed = _emit_prefix_and_tail(_actionable_nodes(plan))
+    parsed = _parse_plan(_actionable_nodes(plan))
     if parsed is None:
         return Punt("unsupported_plan_shape")
-    emit_nodes, tail = parsed
+    body_nodes, tail = parsed
 
-    expected = [n.get("tool") for n in emit_nodes]
     executed = executed_tool_names(messages)
+    steps = _flatten(body_nodes, messages, len(executed) + 1)
+    if steps is None:
+        return Punt("map_expansion_failed")
+    expected = [s.tool for s in steps]
     if len(executed) > len(expected) or executed != expected[: len(executed)]:
         return Punt("out_of_envelope")
 
     index = len(executed)
-    if index < len(emit_nodes):
-        node = emit_nodes[index]
-        tool = node.get("tool")
-        if not isinstance(tool, str):
-            return Punt("malformed_node")
-        args_spec = node.get("args", {})
+    if index < len(steps):
+        step = steps[index]
+        args_spec = step.node.get("args", {})
         if not isinstance(args_spec, dict):
             return Punt("malformed_args")
         tool_input: dict[str, Any] = {}
         try:
             for arg_name, arg_expr in args_spec.items():
-                tool_input[arg_name] = evaluate_expression(arg_expr, messages)
+                tool_input[arg_name] = evaluate_expression(arg_expr, messages, item=step.item)
         except (ExpressionError, KeyError, TypeError, ValueError, IndexError, RecursionError):
             # A plan is semi-trusted data; any evaluation failure degrades to a
             # punt rather than crashing the request path.
             return Punt("arg_expression_failed")
-        return EmitToolUse(tool_name=tool, tool_input=tool_input)
+        return EmitToolUse(tool_name=step.tool, tool_input=tool_input)
 
-    # All emit nodes served; handle the optional trailing node.
+    # All body steps served; handle the optional trailing node.
     if tail is None:
         return Punt("plan_exhausted")
     tail_type = tail.get("type")
@@ -302,19 +378,33 @@ def verify_action(
     """Mechanical check on the produced action. On failure the caller punts.
 
     ``action_sequence_match``: the emitted tool must equal the expected tool at
-    the current position.
+    the current position. When the spec carries an explicit ``expected_tools``
+    list it is used directly; otherwise the expected tool is derived from the
+    plan itself (map-aware), so a synthesized plan that ships no static tool list
+    is still mechanically checked rather than blocked.
     """
     if not isinstance(verifier_spec, dict):
         return True
-    spec_type = verifier_spec.get("type")
-    if spec_type == "action_sequence_match":
-        if not isinstance(action, EmitToolUse):
-            return True  # terminals/punts are not sequence-checked
-        expected = verifier_spec.get("expected_tools", [])
-        index = len(executed_tool_names(messages))
-        if not isinstance(expected, list) or index >= len(expected):
+    if verifier_spec.get("type") != "action_sequence_match":
+        # No verifier or unknown type: do not block (the caller may still punt on
+        # other signals).
+        return True
+    if not isinstance(action, EmitToolUse):
+        return True  # terminals/punts are not sequence-checked
+    index = len(executed_tool_names(messages))
+
+    expected_tools = verifier_spec.get("expected_tools")
+    if isinstance(expected_tools, list) and expected_tools:
+        if index >= len(expected_tools):
             return False
-        return bool(action.tool_name == expected[index])
-    # No verifier or unknown type: do not block (the caller may still punt on
-    # other signals).
-    return True
+        return bool(action.tool_name == expected_tools[index])
+
+    # Derive the expected tool from the plan's own flattened steps.
+    parsed = _parse_plan(_actionable_nodes(plan))
+    if parsed is None:
+        return False
+    body_nodes, _tail = parsed
+    steps = _flatten(body_nodes, messages, index + 1)
+    if steps is None or index >= len(steps):
+        return False
+    return bool(action.tool_name == steps[index].tool)

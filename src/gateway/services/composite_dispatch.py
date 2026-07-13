@@ -54,11 +54,44 @@ class NoDispatch:
 Decision = Serve | Shadow | NoDispatch
 
 
-def _match(composites: list[dict[str, Any]], session_label: str) -> dict[str, Any] | None:
-    return next(
-        (c for c in composites if isinstance(c, dict) and c.get("automation_key") == session_label),
-        None,
-    )
+def _required_tools(composite: dict[str, Any]) -> list[str]:
+    envelope = composite.get("recognize_envelope") or {}
+    required = envelope.get("required_tools")
+    return required if isinstance(required, list) else []
+
+
+def _tools_satisfied(composite: dict[str, Any], tool_names: list[str] | None) -> bool:
+    """A composite may require specific tools to be present on the request (its
+    recognize envelope's ``required_tools``). This distinguishes, e.g., a main
+    orchestrator agent from a sub-agent that shares the same session label but
+    exposes a different tool set."""
+    required = _required_tools(composite)
+    if not required:
+        return True
+    if tool_names is None:
+        return False
+    return set(required).issubset(set(tool_names))
+
+
+def _match(
+    composites: list[dict[str, Any]], session_label: str, tool_names: list[str] | None
+) -> dict[str, Any] | None:
+    """Pick the composite for this turn among those sharing the session label.
+
+    One automation can register several composites under one label, one per agent
+    role (a main orchestrator and its sub-agents), each gated by the tools its
+    plan needs. Choose the most specific satisfied candidate (largest
+    ``required_tools``), so a sub-agent request whose tools are a superset of the
+    main agent's still binds to its own, more specific, composite rather than the
+    orchestrator's."""
+    candidates = [
+        c
+        for c in composites
+        if isinstance(c, dict) and c.get("automation_key") == session_label and _tools_satisfied(c, tool_names)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda c: len(_required_tools(c)))
 
 
 def decide(
@@ -66,6 +99,7 @@ def decide(
     messages: list[dict[str, Any]],
     *,
     session_label: str | None,
+    tool_names: list[str] | None = None,
 ) -> Decision:
     """Decide how to handle the current turn.
 
@@ -79,9 +113,10 @@ def decide(
     if not session_label:
         return NoDispatch("no_session_label")
 
-    composite = _match(composites, session_label)
+    has_key = any(isinstance(c, dict) and c.get("automation_key") == session_label for c in composites)
+    composite = _match(composites, session_label, tool_names)
     if composite is None:
-        return NoDispatch("no_match")
+        return NoDispatch("tools_mismatch" if has_key else "no_match")
 
     plan = composite.get("plan", {})
     action = next_action(plan, messages)

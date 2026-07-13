@@ -32,6 +32,7 @@ from gateway.core.env import otari_env
 from gateway.services.composite_backend import CompositeBackend, build_composite_backend
 from gateway.services.composite_dispatch import Serve, decide
 from gateway.services.composite_interpreter import EmitTerminal, EmitToolUse
+from gateway.services.composite_key import derive_automation_key
 from gateway.services.composite_response import (
     terminal_response,
     tool_use_response,
@@ -83,14 +84,22 @@ async def try_serve_composite(
     """Return a served response for a recognized approved composite, else None."""
     if not composites_enabled():
         return None
-    session_label = getattr(request, "session_label", None)
-    if not session_label:
+    automation_key = derive_automation_key(request)
+    if not automation_key:
         return None
 
     try:
         backend = _get_backend(ctx.config)
-        composites = await backend.fetch(user_token=ctx.user_token, automation_key=session_label)
-        decision = decide(composites, request.messages, session_label=session_label)
+        composites = await backend.fetch(user_token=ctx.user_token, automation_key=automation_key)
+        raw_tools = getattr(request, "tools", None)
+        tool_names = (
+            [t["name"] for t in raw_tools if isinstance(t, dict) and t.get("name")]
+            if isinstance(raw_tools, list)
+            else None
+        )
+        decision = decide(
+            composites, request.messages, session_label=automation_key, tool_names=tool_names
+        )
         if not isinstance(decision, Serve):
             return None
 
@@ -105,7 +114,7 @@ async def try_serve_composite(
                 _report_platform_composite_usage,
                 ctx.config,
                 ctx.user_token,
-                _served_report(decision, session_label),
+                _served_report(decision, automation_key),
             )
 
         # The provider will not be called for this turn; refund the reservation.

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from gateway.services.composite_interpreter import (
+    MAX_MAP_ITEMS,
     EmitTerminal,
     EmitToolUse,
     ExpressionError,
@@ -281,3 +282,105 @@ def test_regex_input_length_capped() -> None:
     huge = {"regex_extract": {"value": {"const": "a" * 5000}, "pattern": "email"}}
     with pytest.raises(ExpressionError):
         evaluate_expression(huge, [])
+
+
+# ---------------------------------------------------------------------------
+# map: serving a variable-length loop
+# ---------------------------------------------------------------------------
+
+
+def _map_plan() -> dict[str, Any]:
+    """list -> reply to each message -> terminal."""
+    return {
+        "nodes": [
+            {"type": "emit_tool_use", "tool": "gmail_list", "args": {}},
+            {
+                "type": "map",
+                "over": {"last_tool_result": {"tool": "gmail_list", "path": "messages"}},
+                "body": [{"type": "emit_tool_use", "tool": "gmail_reply", "args": {"id": {"item": "id"}}}],
+            },
+            {"type": "emit_terminal", "text": "done"},
+        ]
+    }
+
+
+def _after_list(ids: list[str], replied: int = 0) -> list[dict[str, Any]]:
+    """Messages after gmail_list returned ``ids``, with ``replied`` replies done."""
+    messages: list[dict[str, Any]] = [
+        _assistant_tool_use("gmail_list", "t0"),
+        _tool_result("t0", {"messages": [{"id": i} for i in ids]}),
+    ]
+    for n in range(replied):
+        messages.append(_assistant_tool_use("gmail_reply", f"r{n}"))
+        messages.append(_tool_result(f"r{n}", {"ok": True}))
+    return messages
+
+
+def test_map_prefix_served_before_list_exists() -> None:
+    # Turn 0: the list-producing tool has not run, so the map is never reached
+    # and the fixed prefix serves normally (lazy expansion, no premature punt).
+    action = next_action(_map_plan(), _user_turn())
+    assert isinstance(action, EmitToolUse)
+    assert action.tool_name == "gmail_list"
+
+
+def test_map_iterates_body_once_per_item() -> None:
+    plan = _map_plan()
+    first = next_action(plan, _after_list(["m1", "m2"], replied=0))
+    assert isinstance(first, EmitToolUse)
+    assert first.tool_name == "gmail_reply"
+    assert first.tool_input == {"id": "m1"}
+
+    second = next_action(plan, _after_list(["m1", "m2"], replied=1))
+    assert isinstance(second, EmitToolUse)
+    assert second.tool_input == {"id": "m2"}
+
+    # Loop exhausted -> the trailing terminal serves.
+    end = next_action(plan, _after_list(["m1", "m2"], replied=2))
+    assert isinstance(end, EmitTerminal)
+    assert end.text == "done"
+
+
+def test_map_empty_list_falls_through_to_tail() -> None:
+    end = next_action(_map_plan(), _after_list([], replied=0))
+    assert isinstance(end, EmitTerminal)
+
+
+def test_map_envelope_prefix_matches() -> None:
+    assert matches_envelope(_map_plan(), _after_list(["m1", "m2"], replied=1)) is True
+
+
+def test_map_deviation_after_list_punts_out_of_envelope() -> None:
+    messages = [
+        _assistant_tool_use("gmail_list", "t0"),
+        _tool_result("t0", {"messages": [{"id": "m1"}]}),
+        _assistant_tool_use("wrong_tool", "t1"),
+    ]
+    action = next_action(_map_plan(), messages)
+    assert isinstance(action, Punt)
+    assert action.reason == "out_of_envelope"
+
+
+def test_map_over_list_too_long_punts() -> None:
+    ids = [str(i) for i in range(MAX_MAP_ITEMS + 1)]
+    action = next_action(_map_plan(), _after_list(ids, replied=0))
+    assert isinstance(action, Punt)
+    assert action.reason == "map_expansion_failed"
+
+
+def test_item_expression_outside_map_raises() -> None:
+    with pytest.raises(ExpressionError):
+        evaluate_expression({"item": "id"}, [])
+
+
+def test_verify_action_derives_expected_from_plan_without_expected_tools() -> None:
+    # A synthesized plan ships an action_sequence_match verifier with no static
+    # expected_tools list; the verifier must derive the expected tool from the
+    # plan (map-aware) instead of failing every emit.
+    plan = _map_plan()
+    messages = _after_list(["m1"], replied=0)
+    spec = {"type": "action_sequence_match"}
+    good = EmitToolUse(tool_name="gmail_reply", tool_input={"id": "m1"})
+    assert verify_action(good, spec, plan, messages) is True
+    bad = EmitToolUse(tool_name="wrong_tool", tool_input={})
+    assert verify_action(bad, spec, plan, messages) is False

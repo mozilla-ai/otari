@@ -52,7 +52,9 @@ from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
+from gateway.services.composite_capture import capture_automation_request
 from gateway.services.composite_hook import try_serve_composite
+from gateway.services.composite_key import derive_automation_key
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
@@ -400,6 +402,11 @@ async def create_message(
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
 
+    # Capture the automation's spec (system + tools + choreography) from the
+    # traffic we already proxy, for offline intent-synthesis. Gated off by
+    # default; content stays gateway-side.
+    capture_automation_request(request)
+
     # Composite dispatch hook (gated OFF by default): on a recognized approved
     # composite at a deterministic turn, serve a synthetic response without
     # calling the provider. Any non-serve decision returns None and falls
@@ -409,6 +416,12 @@ async def create_message(
     )
     if composite_served is not None:
         return composite_served
+
+    # Attribute this attempt's spend to a stable automation identity so usage
+    # rolls up per automation with zero tenant change: an explicit label wins,
+    # else the derived fingerprint of the stable request prefix. None for
+    # traffic that is neither labelled nor tool-bearing.
+    attribution_label = request.session_label or derive_automation_key(request)
 
     # ------------------------------------------------------------------
     # Streaming path
@@ -436,7 +449,7 @@ async def create_message(
                     background_tasks=background_tasks,
                     rate_limit_info=ctx.rate_limit_info,
                     tool_ctx=tool_ctx,
-                    session_label=request.session_label,
+                    session_label=attribution_label,
                 )
             except HTTPException as exc:
                 # Hybrid terminal failures arrive as format-agnostic plain-string
@@ -505,7 +518,7 @@ async def create_message(
             model=model,
             platform_correlation_id=platform_correlation_id,
             platform_request_id=platform_request_id,
-            session_label=request.session_label,
+            session_label=attribution_label,
         )
 
     # ------------------------------------------------------------------
@@ -524,7 +537,7 @@ async def create_message(
                 background_tasks=background_tasks,
                 config=config,
                 rate_limit_info=ctx.rate_limit_info,
-                session_label=request.session_label,
+                session_label=attribution_label,
             )
         except HTTPException as exc:
             # Hybrid terminal failures arrive as format-agnostic plain-string

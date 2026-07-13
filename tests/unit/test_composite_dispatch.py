@@ -97,6 +97,58 @@ def test_decide_malformed_plan_no_dispatch() -> None:
     assert isinstance(d, NoDispatch)
 
 
+def test_required_tools_gate() -> None:
+    composite = _composite("approved")
+    composite["recognize_envelope"] = {"required_tools": ["resolve_time", "gmail_task"]}
+    label = "automation:9cb676db"
+    # Main agent (has both tools) -> serves.
+    assert isinstance(
+        decide([composite], _user_turn(), session_label=label, tool_names=["resolve_time", "gmail_task"]),
+        Serve,
+    )
+    # Sub-agent (missing resolve_time) -> no dispatch.
+    d = decide([composite], _user_turn(), session_label=label, tool_names=["gmail_list_emails"])
+    assert isinstance(d, NoDispatch)
+    assert d.reason == "tools_mismatch"
+    # Tools unknown -> no dispatch (fail safe).
+    assert isinstance(decide([composite], _user_turn(), session_label=label, tool_names=None), NoDispatch)
+
+
+def _role_composite(suffix: str, required: list[str], first_tool: str) -> dict[str, Any]:
+    key = "automation:multi"
+    return {
+        "automation_key": key,
+        "name": f"auto:{key}#{suffix}",
+        "status": "approved",
+        "plan": {"nodes": [{"type": "emit_tool_use", "tool": first_tool, "args": {}}]},
+        "verifier_spec": {"type": "action_sequence_match"},
+        "recognize_envelope": {"automation_key": key, "required_tools": required},
+    }
+
+
+def test_role_selection_prefers_most_specific() -> None:
+    # One automation, two roles under the same label: a main orchestrator and a
+    # sub-agent whose tools are a superset. Each request must bind to its own role.
+    main = _role_composite("main", ["resolve_time"], "resolve_time")
+    sub = _role_composite("sub", ["resolve_time", "gmail_list_emails"], "gmail_list_emails")
+    label = "automation:multi"
+
+    # Sub-agent request satisfies BOTH; the more specific (sub) composite wins.
+    d_sub = decide(
+        [main, sub],
+        _user_turn(),
+        session_label=label,
+        tool_names=["resolve_time", "gmail_list_emails", "gmail_reply_to_email"],
+    )
+    assert isinstance(d_sub, Serve)
+    assert d_sub.action.tool_name == "gmail_list_emails"
+
+    # Main-agent request (no sub tools) satisfies only the main composite.
+    d_main = decide([main, sub], _user_turn(), session_label=label, tool_names=["resolve_time", "gmail_task"])
+    assert isinstance(d_main, Serve)
+    assert d_main.action.tool_name == "resolve_time"
+
+
 def test_action_matches_model_name_level() -> None:
     action = EmitToolUse(tool_name="resolve_time", tool_input={})
     assert action_matches_model(action, {"type": "tool_use", "name": "resolve_time"}) is True
