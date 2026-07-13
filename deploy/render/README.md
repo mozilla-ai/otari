@@ -2,7 +2,7 @@
 
 Deploy Otari and Render Postgres from a Blueprint ([`render.yaml`](./render.yaml)). Render pulls the published Otari image rather than building this repository.
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&blueprintPath=deploy/render/render.yaml)
 
 ## What gets deployed
 
@@ -52,8 +52,8 @@ enables bundled fallback pricing. Database pricing always takes precedence. For 
 
 ## Deploy
 
-1. Click **Deploy to Render** above.
-2. In the **Blueprint Path** field, paste:
+1. Click **Deploy to Render** above. The button passes `blueprintPath=deploy/render/render.yaml` so Render loads this Blueprint instead of looking for a root `render.yaml`.
+2. If you create the Blueprint from the Dashboard instead (**New → Blueprint**), set **Blueprint Path** to:
 
    ```text
    deploy/render/render.yaml

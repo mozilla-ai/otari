@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://render.com/schema/render.yaml.json
 #
-# Otari on Render: Blueprint for one-click deploy
+# Otari on Render: Blueprint for deploy from deploy/render/render.yaml
 # Docs: deploy/render/README.md
 # Image: https://hub.docker.com/r/mzdotai/otari
 #
