@@ -102,8 +102,9 @@ from gateway.services.mcp_loop import (
     ToolBackend,
 )
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
-from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
+from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import (
     StreamFormat,
@@ -385,6 +386,7 @@ class RequestContext:
         user_id: str | None,
         rate_limit_info: RateLimitInfo | None,
         reservation: ReservationHandle | None,
+        resolved_provider: ResolvedProvider | None = None,
     ) -> None:
         self.config = config
         self.db = db
@@ -396,6 +398,34 @@ class RequestContext:
         self.user_id = user_id
         self.rate_limit_info = rate_limit_info
         self.reservation = reservation
+        # Standalone-only: the provider selector resolved once for the
+        # pricing/budget gate in `resolve_request_context`. Route handlers
+        # reuse this for dispatch instead of calling `resolve_provider_selector`
+        # a second time, which would redo the provider-kwargs build (and, for
+        # Vertex AI instances, re-parse the service-account credentials from
+        # disk and reconstruct the RSA-backed `Credentials` object) for no
+        # reason. `None` in hybrid mode (no local provider resolution happens)
+        # and in the rare case the selector couldn't be parsed for the gate
+        # check -- callers fall back to `resolve_provider_selector` themselves
+        # in that case, same as before this field existed.
+        self.resolved_provider = resolved_provider
+
+
+def resolve_dispatch_provider(ctx: RequestContext, config: GatewayConfig, model_selector: str) -> ResolvedProvider:
+    """Get the ``ResolvedProvider`` for dispatch, reusing the one computed for
+    the pricing/budget gate (``ctx.resolved_provider``) instead of resolving
+    the selector a second time. Standalone-mode route handlers should call
+    this rather than ``resolve_provider_selector`` directly.
+
+    Falls back to a fresh ``resolve_provider_selector`` call only when
+    ``ctx.resolved_provider`` is ``None`` -- the rare case where the gate
+    check couldn't parse the selector (an unparseable selector has no
+    pricing, but dispatch still needs its own resolution attempt so any-llm's
+    own error surfaces instead of a stale gate-check failure).
+    """
+    if ctx.resolved_provider is not None:
+        return ctx.resolved_provider
+    return resolve_provider_selector(config, model_selector)
 
 
 async def _bill_vision_side_call(
@@ -494,6 +524,7 @@ async def resolve_request_context(
     user_id: str | None = None
     rate_limit_info: RateLimitInfo | None = None
     reservation: ReservationHandle | None = None
+    resolved_provider: ResolvedProvider | None = None
 
     if hybrid_mode:
         user_token = _extract_platform_user_token(raw_request)
@@ -539,6 +570,9 @@ async def resolve_request_context(
         try:
             resolved = resolve_provider_selector(config, model)
             gate_instance, gate_impl, gate_model = resolved.instance, resolved.provider, resolved.model
+            # Reused by the route handler for dispatch (see `RequestContext.resolved_provider`)
+            # instead of calling `resolve_provider_selector` a second time.
+            resolved_provider = resolved
         except (ValueError, AnyLLMError):
             gate_instance, gate_impl, gate_model = None, None, model
 
@@ -620,6 +654,7 @@ async def resolve_request_context(
         user_id=user_id,
         rate_limit_info=rate_limit_info,
         reservation=reservation,
+        resolved_provider=resolved_provider,
     )
 
 
@@ -669,6 +704,35 @@ class ToolContext:
         return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search
 
 
+async def _validate_mcp_server_urls(
+    adapter: FormatAdapter[Any, Any], mcp_servers: list[McpServerConfig]
+) -> None:
+    """SSRF/scheme safety check for every MCP server URL in this request.
+
+    Covers both request-body-supplied servers and platform-resolved ones
+    (``mcp_server_ids``): both land in the same merged list before this runs.
+    Runs concurrently since each check does an independent DNS lookup;
+    ``asyncio.gather`` (default ``return_exceptions=False``) surfaces the
+    first ``UnsafeURLError`` it sees and cancels the rest.
+
+    This used to run synchronously inside a Pydantic ``model_validator`` at
+    request-body-parse time (see ``McpServerConfig``/``GuardrailConfig``
+    docstrings). It moved here because the DNS lookup must be awaited, and
+    Pydantic validators can't await. One observable side effect: a rejected
+    URL now surfaces as ``400`` (via ``adapter.error``) instead of Pydantic's
+    ``422``.
+    """
+    try:
+        await asyncio.gather(
+            *(
+                validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token))
+                for server in mcp_servers
+            )
+        )
+    except UnsafeURLError as exc:
+        raise adapter.error(400, str(exc), ErrorKind.INVALID_REQUEST) from exc
+
+
 async def prepare_gateway_tools(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -712,6 +776,9 @@ async def prepare_gateway_tools(
                 mcp_server_ids=mcp_server_ids,
             )
             mcp_servers = (mcp_servers or []) + resolved_mcp_servers
+
+        if mcp_servers:
+            await _validate_mcp_server_urls(adapter, mcp_servers)
 
         sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
         sandbox_url: str | None = otari_env("SANDBOX_URL") or None

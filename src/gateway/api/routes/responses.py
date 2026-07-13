@@ -31,6 +31,7 @@ from gateway.api.routes._pipeline import (
     prepare_gateway_tools,
     rate_limit_headers,
     release_reservation,
+    resolve_dispatch_provider,
     resolve_request_context,
     run_platform_non_stream,
     run_single_attempt_stream,
@@ -52,7 +53,6 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
 )
-from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -326,7 +326,7 @@ async def create_response(
         for attempt in route.attempts:
             _ensure_provider_supports_responses(LLMProvider(attempt.provider))
     else:
-        resolved = resolve_provider_selector(config, request_body.model)
+        resolved = resolve_dispatch_provider(ctx, config, request_body.model)
         # ``provider`` is the underlying implementation handed to any-llm;
         # ``billing_instance`` is the otari routing key pricing/usage key on.
         provider, model = resolved.provider, resolved.model

@@ -18,7 +18,9 @@ route handlers call right after auth and before dispatching to the provider.
 
 The service URL is operator-controlled (``OTARI_GUARDRAILS_URL``); callers may
 override it per-guardrail via :attr:`GuardrailConfig.url`, which is SSRF-checked
-at parse time (see :mod:`gateway.models.guardrails`).
+here in :func:`run_input_guardrails` (not at parse time: the check does a DNS
+lookup that must be awaited, and Pydantic validators can't await — see
+:mod:`gateway.models.guardrails`).
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from gateway.models.guardrails import GuardrailConfig
+from gateway.services.url_safety import validate_mcp_url
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +168,15 @@ async def run_input_guardrails(
     results: list[GuardrailResult] = []
     async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT_S) as client:
         for cfg in input_guardrails:
+            # A caller-supplied `url` override is SSRF-checked here rather than
+            # at request-body-parse time (the check does a DNS lookup that must
+            # be awaited). Unlike GuardrailsNotReachableError below, an unsafe
+            # URL is a malformed request, not a runtime failure: it always
+            # rejects the request (mode-independent) via UnsafeURLError, which
+            # this loop deliberately does not catch — the caller
+            # (apply_input_guardrails) maps it to a 400.
+            if cfg.url is not None:
+                await validate_mcp_url(cfg.url, has_authorization_token=False)
             base_url = (cfg.url or default_url or "").rstrip("/")
             try:
                 if not base_url:
