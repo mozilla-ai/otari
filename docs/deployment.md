@@ -50,8 +50,10 @@ and a managed Postgres, wired together with
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
 
-You set at least one provider key (the form prompts for `OPENAI_API_KEY`; add a variable like `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, or `GEMINI_API_KEY` to use
-another provider). The master key is auto-generated and `OTARI_REQUIRE_PRICING=false` is pre-set so an env-only deploy is usable out of the box. The template
+You set at least one provider key (the form prompts for `OPENAI_API_KEY`; add a
+variable like `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, or `GEMINI_API_KEY` to use
+another provider). The master key is auto-generated and `OTARI_REQUIRE_PRICING=false`
+is pre-set so an env-only deploy is usable out of the box. The template
 definition lives in
 [`deploy/railway/`](https://github.com/mozilla-ai/otari/tree/main/deploy/railway).
 
