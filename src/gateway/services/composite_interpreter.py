@@ -31,6 +31,10 @@ MAX_REGEX_INPUT = 4096
 # accounting walk unboundedly; over the cap the interpreter punts to the model.
 MAX_MAP_ITEMS = 1000
 
+# Cap nested control-flow depth (``branch``/``map`` nesting) so plan expansion is
+# bounded; over the cap the interpreter punts.
+MAX_BRANCH_DEPTH = 8
+
 # Sentinel distinguishing "no current map item" from a real item value of None.
 _NO_ITEM: Any = object()
 
@@ -200,7 +204,73 @@ def evaluate_expression(
         if match is None:
             raise ExpressionError("regex did not match")
         return match.group(1)
+    if op == "filter":
+        # {"filter": {"over": <expr>, "keep": <predicate>}} -> the elements of the
+        # list for which the predicate holds (each element bound as ``item``).
+        # Lets a ``map`` iterate a filtered list, e.g. reply only to matching mail.
+        if not isinstance(arg, dict) or "over" not in arg or "keep" not in arg:
+            raise ExpressionError("filter needs {over, keep}")
+        over = evaluate_expression(arg["over"], messages, depth=depth + 1, item=item)
+        if not isinstance(over, list):
+            raise ExpressionError("filter over must be a list")
+        if len(over) > MAX_MAP_ITEMS:
+            raise ExpressionError("filter list too long")
+        return [
+            element
+            for element in over
+            if evaluate_predicate(arg["keep"], messages, depth=depth + 1, item=element)
+        ]
     raise ExpressionError(f"unknown op {op!r}")
+
+
+def evaluate_predicate(
+    pred: Any, messages: list[dict[str, Any]], *, depth: int = 0, item: Any = _NO_ITEM
+) -> bool:
+    """Evaluate a restricted boolean predicate over visible state, for ``branch``
+    and ``filter``. Single-op object; ops: ``non_empty``, ``exists``, ``equals``,
+    ``not``, ``and``, ``or``. No general eval, depth-bounded. Raises
+    ``ExpressionError`` when it cannot decide (the caller turns that into a punt),
+    except ``exists``/``non_empty`` which resolve a missing value to ``False``.
+    """
+    if depth > MAX_EXPR_DEPTH:
+        raise ExpressionError("predicate too deep")
+    if not isinstance(pred, dict) or len(pred) != 1:
+        raise ExpressionError("predicate must be a single-op object")
+    (op, arg), = pred.items()
+
+    if op == "non_empty":
+        try:
+            value = evaluate_expression(arg, messages, depth=depth + 1, item=item)
+        except ExpressionError:
+            return False
+        if value is None:
+            return False
+        if isinstance(value, (list, str, dict)):
+            return len(value) > 0
+        return bool(value)
+    if op == "exists":
+        try:
+            evaluate_expression(arg, messages, depth=depth + 1, item=item)
+        except ExpressionError:
+            return False
+        return True
+    if op == "equals":
+        if not isinstance(arg, dict) or "left" not in arg or "right" not in arg:
+            raise ExpressionError("equals needs {left, right}")
+        left = evaluate_expression(arg["left"], messages, depth=depth + 1, item=item)
+        right = evaluate_expression(arg["right"], messages, depth=depth + 1, item=item)
+        return bool(left == right)
+    if op == "not":
+        return not evaluate_predicate(arg, messages, depth=depth + 1, item=item)
+    if op == "and":
+        if not isinstance(arg, list):
+            raise ExpressionError("and needs a list of predicates")
+        return all(evaluate_predicate(p, messages, depth=depth + 1, item=item) for p in arg)
+    if op == "or":
+        if not isinstance(arg, list):
+            raise ExpressionError("or needs a list of predicates")
+        return any(evaluate_predicate(p, messages, depth=depth + 1, item=item) for p in arg)
+    raise ExpressionError(f"unknown predicate op {op!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -243,7 +313,7 @@ def _parse_plan(
     body_nodes: list[dict[str, Any]] = []
     tail: dict[str, Any] | None = None
     for node in nodes:
-        if node.get("type") in ("emit_tool_use", "map"):
+        if node.get("type") in ("emit_tool_use", "map", "branch"):
             if tail is not None:
                 return None
             body_nodes.append(node)
@@ -254,49 +324,78 @@ def _parse_plan(
     return body_nodes, tail
 
 
+def _expand(
+    nodes: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    need: int,
+    steps: list[_Step],
+    *,
+    item: Any,
+    depth: int,
+) -> bool:
+    """Expand a node list into emit steps in ``steps``, lazily and recursively.
+
+    Handles ``emit_tool_use`` (one step), ``map`` (one body iteration per element
+    of its runtime list, element bound as ``item``), and ``branch`` (evaluate the
+    predicate over visible state and expand the ``then`` or ``else`` list). Stops
+    early once ``need`` steps exist. Returns ``False`` on any malformed node or
+    unevaluable expression, which the caller turns into a punt.
+    """
+    if depth > MAX_BRANCH_DEPTH:
+        return False
+    for node in nodes:
+        if len(steps) >= need:
+            return True
+        if not isinstance(node, dict):
+            return False
+        ntype = node.get("type")
+        if ntype == "emit_tool_use":
+            tool = node.get("tool")
+            if not isinstance(tool, str):
+                return False
+            steps.append(_Step(tool, node, item))
+        elif ntype == "map":
+            body = node.get("body")
+            if not isinstance(body, list) or not body:
+                return False
+            try:
+                over = evaluate_expression(node.get("over"), messages, item=item)
+            except (ExpressionError, KeyError, TypeError, ValueError, IndexError, RecursionError):
+                return False
+            if not isinstance(over, list) or len(over) > MAX_MAP_ITEMS:
+                return False
+            for element in over:
+                if not _expand(body, messages, need, steps, item=element, depth=depth + 1):
+                    return False
+                if len(steps) >= need:
+                    return True
+        elif ntype == "branch":
+            try:
+                took = evaluate_predicate(node.get("predicate"), messages, item=item)
+            except (ExpressionError, KeyError, TypeError, ValueError, IndexError, RecursionError):
+                return False
+            chosen = node.get("then") if took else node.get("else")
+            chosen = chosen or []
+            if not isinstance(chosen, list):
+                return False
+            if not _expand(chosen, messages, need, steps, item=item, depth=depth + 1):
+                return False
+        else:
+            return False
+    return True
+
+
 def _flatten(
     body_nodes: list[dict[str, Any]], messages: list[dict[str, Any]], need: int
 ) -> list[_Step] | None:
     """Expand body nodes into an ordered list of emit steps, lazily.
 
-    Expansion stops once ``need`` steps exist (the caller only ever needs up to
-    the current position), so a ``map`` is evaluated only once the run has
-    actually reached it, by which point its list-producing tool_result is already
-    visible. Returns ``None`` on any malformed node or unevaluable ``over``
-    expression, which the caller turns into a punt.
+    Wraps ``_expand``; returns ``None`` (the caller punts) on any malformed node,
+    unevaluable ``over``/``predicate``, or over-deep nesting.
     """
     steps: list[_Step] = []
-    for node in body_nodes:
-        if len(steps) >= need:
-            break
-        ntype = node.get("type")
-        if ntype == "emit_tool_use":
-            tool = node.get("tool")
-            if not isinstance(tool, str):
-                return None
-            steps.append(_Step(tool, node, _NO_ITEM))
-            continue
-        # map: one body iteration per element of the runtime list.
-        body = node.get("body")
-        if not isinstance(body, list) or not body:
-            return None
-        for inner in body:
-            if (
-                not isinstance(inner, dict)
-                or inner.get("type") != "emit_tool_use"
-                or not isinstance(inner.get("tool"), str)
-            ):
-                return None
-        try:
-            over = evaluate_expression(node.get("over"), messages)
-        except (ExpressionError, KeyError, TypeError, ValueError, IndexError, RecursionError):
-            return None
-        if not isinstance(over, list) or len(over) > MAX_MAP_ITEMS:
-            return None
-        for element in over:
-            steps.extend(_Step(inner["tool"], inner, element) for inner in body)
-            if len(steps) >= need:
-                break
+    if not _expand(body_nodes, messages, need, steps, item=_NO_ITEM, depth=0):
+        return None
     return steps
 
 
