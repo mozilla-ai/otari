@@ -24,6 +24,7 @@ from gateway.services.budget_service import (
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.streaming import relabel_model
 from gateway.types.moderation import ModerationResponse
 
 # Locked phrasing — cross-SDK error contract. Do not reword.
@@ -186,4 +187,6 @@ async def create_moderation(
         for key, value in rate_limit_headers(rate_limit_info).items():
             response.headers[key] = value
 
+    if resolved.alias is not None:
+        relabel_model(result, resolved.alias)
     return result

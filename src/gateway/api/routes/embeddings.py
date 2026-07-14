@@ -26,6 +26,7 @@ from gateway.services.budget_service import (
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
 from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.streaming import relabel_model
 
 router = APIRouter(prefix="/v1", tags=["embeddings"])
 
@@ -172,4 +173,6 @@ async def create_embedding(
         for key, value in rate_limit_headers(rate_limit_info).items():
             response.headers[key] = value
 
+    if resolved.alias is not None:
+        relabel_model(result, resolved.alias)
     return result

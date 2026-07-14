@@ -8,7 +8,7 @@ and the alias is what appears in GET /v1/models and in the response ``model``.
 
 from collections.abc import AsyncIterator, Generator
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm.types.completion import (
@@ -19,6 +19,9 @@ from any_llm.types.completion import (
     ChoiceDelta,
     ChunkChoice,
     CompletionUsage,
+    CreateEmbeddingResponse,
+    Embedding,
+    Usage,
 )
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -26,6 +29,7 @@ from sqlalchemy import create_engine, text
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
 from gateway.db import Base, get_db
 from gateway.main import create_app
+from gateway.types.moderation import ModerationResponse, ModerationResult
 
 from .conftest import _run_alembic_migrations, build_async_session_override
 
@@ -250,3 +254,57 @@ async def test_streaming_response_model_echoes_alias(client: TestClient) -> None
     # The streamed chunks carry the alias, never the underlying model name.
     assert "myopusmodel" in body
     assert "claude-opus-4" not in body
+
+
+# ---------------------------------------------------------------------------
+# Non-chat surfaces whose responses carry a ``model`` field
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_embeddings_response_model_echoes_alias(client: TestClient) -> None:
+    _create_user(client)
+
+    mock_response = CreateEmbeddingResponse(
+        data=[Embedding(embedding=[0.1, 0.2], index=0, object="embedding")],
+        model="qwen3",  # what the provider returns
+        object="list",
+        usage=Usage(prompt_tokens=5, total_tokens=5),
+    )
+
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_response):
+        resp = client.post(
+            "/v1/embeddings",
+            json={"model": "housemodel", "input": "hello", "user": "test-user"},
+            headers=HEADERS,
+        )
+    assert resp.status_code == 200
+    # The caller sees the alias they sent, not the underlying model name.
+    assert resp.json()["model"] == "housemodel"
+
+
+@pytest.mark.asyncio
+async def test_moderations_response_model_echoes_alias(client: TestClient) -> None:
+    _create_user(client)
+
+    mock_response = ModerationResponse(
+        id="modr-alias",
+        model="claude-opus-4",  # what the provider returns
+        results=[
+            ModerationResult(
+                flagged=False,
+                categories={"violence": False},
+                category_scores={"violence": 0.01},
+            )
+        ],
+    )
+
+    with patch("gateway.api.routes.moderations.amoderation", new_callable=AsyncMock, return_value=mock_response):
+        resp = client.post(
+            "/v1/moderations",
+            json={"model": "myopusmodel", "input": "hello", "user": "test-user"},
+            headers=HEADERS,
+        )
+    assert resp.status_code == 200
+    # The caller sees the alias they sent, not the underlying model name.
+    assert resp.json()["model"] == "myopusmodel"
