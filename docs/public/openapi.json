@@ -1026,7 +1026,7 @@
         "type": "object"
       },
       "GuardrailConfig": {
-        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated at parse time with the\nsame SSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
+        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated by\n:func:`gateway.services.guardrails.run_input_guardrails` (not here at parse\ntime \u2014 the check does a DNS lookup that must be awaited) with the same\nSSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
         "properties": {
           "mode": {
             "default": "monitor",
@@ -1255,7 +1255,7 @@
         "type": "object"
       },
       "McpServerConfig": {
-        "description": "Inline MCP server configuration accepted on the chat completions request.\n\nStreamable HTTP transport. The `url` must be reachable from the gateway process.\n\nURL safety is enforced at parse time:\n\n* SSRF guard rejects private, link-local, and reserved IP ranges. Loopback is\n  allowed by default (sidecars, dev) \u2014 set ``OTARI_MCP_ALLOW_LOOPBACK=false`` to disable.\n* Plain ``http://`` is rejected when ``authorization_token`` is set, to keep\n  bearer tokens off the wire in cleartext.",
+        "description": "Inline MCP server configuration accepted on the chat completions request.\n\nStreamable HTTP transport. The `url` must be reachable from the gateway process.\n\nURL safety (SSRF guard against private/link-local/reserved IP ranges, plus\nrejecting plain ``http://`` when ``authorization_token`` is set) is\nenforced by :func:`gateway.services.url_safety.validate_mcp_url`, called\nfrom the async request pipeline (``prepare_gateway_tools``) rather than\nhere at parse time: the safety check does a DNS lookup, which must be\nawaited so it can't block the event loop, and Pydantic validators run\nsynchronously during request-body parsing.",
         "properties": {
           "allowed_tools": {
             "anyOf": [

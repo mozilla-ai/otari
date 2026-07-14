@@ -32,6 +32,7 @@ from gateway.api.routes._pipeline import (
     log_usage,
     prepare_gateway_tools,
     rate_limit_headers,
+    resolve_dispatch_provider,
     resolve_request_context,
     run_platform_non_stream,
     run_single_attempt_stream,
@@ -55,7 +56,6 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
-from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
@@ -390,7 +390,7 @@ async def chat_completions(
         # Standalone path: single attempt, no fallback (no `route.attempts`).
         # Resolve the instance to its implementation; dispatch any-llm against
         # ``implementation:model`` while billing/logging key on the instance.
-        resolved = resolve_provider_selector(config, request.model)
+        resolved = resolve_dispatch_provider(ctx, config, request.model)
         call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
@@ -426,7 +426,7 @@ async def chat_completions(
             session_label=request.session_label,
         )
 
-    resolved = resolve_provider_selector(config, request.model)
+    resolved = resolve_dispatch_provider(ctx, config, request.model)
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     completion = await run_standalone_non_stream(
         adapter=_ADAPTER,
