@@ -41,6 +41,8 @@ projects:
                 generateValue: true
               # Keep fail-closed pricing enabled and use Otari's bundled prices
               # for common models. Custom models still need explicit pricing.
+              - key: OTARI_REQUIRE_PRICING
+                value: "true"
               - key: OTARI_DEFAULT_PRICING
                 value: "true"
               - key: OTARI_AUTO_MIGRATE

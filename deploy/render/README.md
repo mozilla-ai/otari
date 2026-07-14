@@ -33,7 +33,8 @@ The Blueprint wires the web service and database together. Otari settings use th
 | `OTARI_HOST` | `0.0.0.0` | Binds Otari on the container network. |
 | `OTARI_DATABASE_URL` | from `otari-db` | Uses the database's internal connection string. |
 | `OTARI_MASTER_KEY` | generated | Protects management APIs. Retrieve it from the Environment tab. |
-| `OTARI_DEFAULT_PRICING` | `true` | Uses bundled prices for common models while keeping fail-closed pricing enabled. |
+| `OTARI_REQUIRE_PRICING` | `true` | Fail closed when a model has no pricing entry. Set explicitly so image upgrades cannot weaken this policy. |
+| `OTARI_DEFAULT_PRICING` | `true` | Uses bundled prices for common models while fail-closed pricing stays enabled. |
 | `OTARI_AUTO_MIGRATE` | `true` | Runs Alembic migrations during startup. |
 | `OTARI_BOOTSTRAP_API_KEY` | `true` | Creates a first-use API key when the database has no keys. |
 
@@ -47,8 +48,8 @@ The underlying [any-llm](https://github.com/mozilla-ai/any-llm) SDK reads each p
 
 ### Pricing
 
-The Blueprint keeps `OTARI_REQUIRE_PRICING` at its fail-closed default and
-enables bundled fallback pricing. Database pricing always takes precedence. For a custom model that is not covered by the bundled data, add pricing through the `/v1/pricing` API, `OTARI_CONFIG_YAML`, or `OTARI_CONFIG_B64`. See [Full config via environment](../../docs/configuration.md#full-config-via-environment).
+The Blueprint sets `OTARI_REQUIRE_PRICING=true` (fail closed) and
+`OTARI_DEFAULT_PRICING=true` (bundled fallback prices). Database pricing always takes precedence. For a custom model that is not covered by the bundled data, add pricing through the `/v1/pricing` API, `OTARI_CONFIG_YAML`, or `OTARI_CONFIG_B64`. See [Full config via environment](../../docs/configuration.md#full-config-via-environment).
 
 ## Deploy
 
@@ -100,7 +101,7 @@ The Blueprint pins the Otari image to a release tag, and image-backed services d
 
 When changing the Blueprint:
 
-1. Validate it against Render's current schema:
+1. Validate it against Render's current schema (requires [Render CLI](https://render.com/docs/cli) v2.7.0 or newer):
 
    ```bash
    render blueprints validate deploy/render/render.yaml
