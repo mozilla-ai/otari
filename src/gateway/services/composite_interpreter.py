@@ -14,11 +14,18 @@ eval, no I/O, and evaluation is depth-bounded.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
 
 MAX_EXPR_DEPTH = 8
+
+# Tool results arrive on the wire as strings (usually JSON) or as content-block
+# lists, not as navigable objects. Cap the size we will attempt to json.loads so
+# a pathologically large result cannot stall the event loop; over the cap it stays
+# a string and any navigation into it fails to a punt.
+MAX_JSON_PARSE_INPUT = 262144
 
 # Cap the input length before running a whitelisted regex. The patterns are
 # simple but linear-time only for bounded input; the value can come from tenant
@@ -94,9 +101,33 @@ def executed_tool_names(messages: list[dict[str, Any]]) -> list[str]:
     ]
 
 
+def _coerce_result(content: Any) -> Any:
+    """Coerce a tool_result payload into a navigable object when possible.
+
+    Real tool results come back as JSON strings (or as a list of Anthropic
+    content blocks), so arg-maps/predicates that navigate fields
+    (``last_tool_result(tool).field``) would otherwise fail on a bare string.
+    A string that parses as a JSON object/array is returned parsed; anything
+    else (plain text, already-structured value) is returned unchanged.
+    """
+    if isinstance(content, list):
+        # Anthropic content-block list: concatenate its text blocks.
+        texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+        if texts:
+            content = "".join(texts)
+    if isinstance(content, str):
+        stripped = content.strip()
+        if stripped[:1] in ("{", "[") and len(stripped) <= MAX_JSON_PARSE_INPUT:
+            try:
+                return json.loads(stripped)
+            except (ValueError, TypeError):
+                return content
+    return content
+
+
 def last_tool_result(messages: list[dict[str, Any]], tool_name: str) -> Any:
     """Content of the most recent tool_result for ``tool_name`` (by matching the
-    tool_use id), or None."""
+    tool_use id), coerced to a navigable object when it is a JSON string, or None."""
     # Map tool_use_id -> tool name from assistant turns.
     id_to_name: dict[str, str] = {}
     for message in messages:
@@ -113,13 +144,19 @@ def last_tool_result(messages: list[dict[str, Any]], tool_name: str) -> Any:
                 tuid = block.get("tool_use_id")
                 if isinstance(tuid, str) and id_to_name.get(tuid) == tool_name:
                     result = block.get("content")
-    return result
+    return _coerce_result(result)
 
 
 def _navigate(value: Any, path: str) -> Any:
-    """Navigate a dotted path over dicts/lists. Numeric segments index lists."""
-    if path == "":
+    """Navigate a dotted path over dicts/lists. Numeric segments index lists.
+
+    ``""`` and ``"$"`` (JSONPath root, which the synthesizer commonly emits) both
+    mean the whole value; a leading ``"$."`` is stripped.
+    """
+    if path in ("", "$"):
         return value
+    if path.startswith("$."):
+        path = path[2:]
     current = value
     for segment in path.split("."):
         if isinstance(current, dict):
@@ -164,10 +201,10 @@ def evaluate_expression(
     if op == "const":
         return arg
     if op == "trigger":
-        # The trigger payload is the first user message's content when it is a
-        # structured block; navigate a dotted path into it.
+        # The trigger payload is the first user message's content; coerce a JSON
+        # string to an object, then navigate a dotted path into it.
         first_user = next((m for m in messages if m.get("role") == "user"), None)
-        payload = first_user.get("content") if first_user else None
+        payload = _coerce_result(first_user.get("content") if first_user else None)
         return _navigate(payload, str(arg))
     if op == "last_tool_result":
         if not isinstance(arg, dict):
@@ -220,6 +257,18 @@ def evaluate_expression(
             for element in over
             if evaluate_predicate(arg["keep"], messages, depth=depth + 1, item=element)
         ]
+    if op == "parse_json":
+        # Explicitly parse a nested value that is itself a JSON string (the
+        # top-level tool_result is already coerced by last_tool_result).
+        value = evaluate_expression(arg, messages, depth=depth + 1, item=item)
+        if isinstance(value, (dict, list)):
+            return value
+        if isinstance(value, str) and len(value) <= MAX_JSON_PARSE_INPUT:
+            try:
+                return json.loads(value)
+            except (ValueError, TypeError) as exc:
+                raise ExpressionError("parse_json: invalid JSON") from exc
+        raise ExpressionError("parse_json: not a parseable value")
     raise ExpressionError(f"unknown op {op!r}")
 
 

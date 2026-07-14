@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from gateway.services.composite_interpreter import (
@@ -9,6 +10,7 @@ from gateway.services.composite_interpreter import (
     Punt,
     evaluate_expression,
     evaluate_predicate,
+    last_tool_result,
     next_action,
 )
 
@@ -107,3 +109,59 @@ def test_branch_second_reply_uses_second_item() -> None:
     action = next_action(_PLAN, msgs)
     assert isinstance(action, EmitToolUse)
     assert action.tool_input == {"id": "b"}
+
+
+# -- JSON-string tool results (the real-world case) -------------------------
+
+
+def _msgs_after_list_str(payload: Any) -> list[dict[str, Any]]:
+    """Like _msgs_after_list but the tool_result content is a JSON STRING, as real
+    integrations return it (not an already-parsed object)."""
+    return [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "gmail_list_emails", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": json.dumps(payload)}]},
+    ]
+
+
+def test_last_tool_result_parses_json_string() -> None:
+    msgs = _msgs_after_list_str({"emails": [{"id": "a"}]})
+    assert last_tool_result(msgs, "gmail_list_emails") == {"emails": [{"id": "a"}]}
+
+
+def test_last_tool_result_parses_content_block_list() -> None:
+    blocks = [{"type": "text", "text": '{"k": 1}'}]
+    msgs = [
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "x", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": blocks}]},
+    ]
+    assert last_tool_result(msgs, "x") == {"k": 1}
+
+
+def test_last_tool_result_plain_string_unchanged() -> None:
+    msgs = [
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "x", "input": {}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "sent"}]},
+    ]
+    assert last_tool_result(msgs, "x") == "sent"
+
+
+def test_branch_and_argmap_serve_over_json_string_result() -> None:
+    # The exact real-world failure: branch predicate + arg-map navigate fields of
+    # a tool result that arrived as a JSON string. With coercion it now serves.
+    action = next_action(_PLAN, _msgs_after_list_str({"emails": [{"id": "a"}, {"id": "b"}]}))
+    assert isinstance(action, EmitToolUse)
+    assert action.tool_name == "gmail_reply_to_email"
+    assert action.tool_input == {"id": "a"}
+
+
+def test_parse_json_op() -> None:
+    assert evaluate_expression({"parse_json": {"const": '{"a": 1}'}}, []) == {"a": 1}
+    assert evaluate_expression({"parse_json": {"const": {"a": 1}}}, []) == {"a": 1}
+
+
+def test_last_tool_result_dollar_root_over_json_string() -> None:
+    # Synthesizer commonly emits path "$" (JSONPath root); it means the whole result.
+    msgs = _msgs_after_list_str([{"id": "a"}, {"id": "b"}])  # a bare JSON array string
+    got = evaluate_expression({"last_tool_result": {"tool": "gmail_list_emails", "path": "$"}}, msgs)
+    assert got == [{"id": "a"}, {"id": "b"}]
