@@ -59,6 +59,15 @@ def test_validate_rejects_unknown_provider_prefix() -> None:
         GatewayConfig(aliases={"a": "not_a_provider:model"}).validate_aliases()
 
 
+@pytest.mark.parametrize("name", ["openai:gpt-4o", "openai/gpt-4o", "my:model"])
+def test_validate_rejects_selector_shaped_name(name: str) -> None:
+    # Alias lookup runs before selector resolution, so a name containing a
+    # delimiter would silently reroute requests for a real provider:model.
+    config = GatewayConfig(aliases={name: "anthropic:claude-opus-4"})
+    with pytest.raises(ValueError, match="must not contain"):
+        config.validate_aliases()
+
+
 def test_validate_rejects_collision_with_provider_instance() -> None:
     config = GatewayConfig(
         providers={"openai": {"api_key": "sk"}},

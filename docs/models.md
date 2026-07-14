@@ -195,8 +195,9 @@ discovered models.
 
 Constraints, checked at startup: a target must be of the form `instance:model` or
 `provider:model` whose prefix is a configured instance or a known provider; an
-alias name must not collide with a provider instance name; and an alias target
-must not be another alias (no chaining).
+alias name must not contain `:` or `/` (a selector-shaped name would silently
+reroute requests for the real model) and must not collide with a provider
+instance name; and an alias target must not be another alias (no chaining).
 
 Like named instances, aliases are a standalone-mode feature. In hybrid mode model
 resolution and routing are owned by the otari.ai platform, so the local `aliases`

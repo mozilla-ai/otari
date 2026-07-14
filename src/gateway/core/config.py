@@ -351,12 +351,18 @@ class GatewayConfig(BaseSettings):
         Each alias must name a non-empty target selector with a usable
         ``instance``/``provider`` prefix; the prefix must resolve to a configured
         provider instance or a known any-llm implementation. An alias name must
-        not collide with a configured provider instance (that would be ambiguous)
-        and its target must not itself be an alias (no chaining for now).
+        not contain a selector delimiter (``:`` or ``/``): alias lookup runs
+        before selector resolution, so such a name would silently reroute
+        requests for a real ``provider:model``. It must also not collide with a
+        configured provider instance (that would be ambiguous), and its target
+        must not itself be an alias (no chaining for now).
         """
         for name, target in self.aliases.items():
             if not name:
                 msg = "alias name must not be empty."
+                raise ValueError(msg)
+            if ":" in name or "/" in name:
+                msg = f"alias name '{name}' must not contain ':' or '/' (it would shadow a real model selector)."
                 raise ValueError(msg)
             if name in self.providers:
                 msg = f"alias '{name}' collides with a configured provider instance name."
