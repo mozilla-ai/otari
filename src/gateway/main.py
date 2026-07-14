@@ -144,7 +144,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     app.openapi = custom_openapi  # type: ignore[method-assign]
 
-
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def root_tutorial() -> str:
         return ROOT_TUTORIAL_HTML
