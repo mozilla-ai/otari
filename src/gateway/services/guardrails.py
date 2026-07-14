@@ -25,6 +25,7 @@ lookup that must be awaited, and Pydantic validators can't await — see
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 
@@ -139,9 +140,18 @@ async def run_input_guardrails(
 ) -> GuardrailVerdict:
     """Run every input-direction guardrail and return the aggregate verdict.
 
-    Only guardrails with ``"input"`` in :attr:`GuardrailConfig.on` run here
-    (``"output"`` is accepted but not yet enforced — see the model docstring).
-    Each guardrail's URL is ``cfg.url or default_url``.
+    Only guardrails with ``"input"`` in :attr:`GuardrailConfig.on` are
+    *evaluated* here (``"output"`` is accepted but not yet enforced — see the
+    model docstring). Each guardrail's URL is ``cfg.url or default_url``.
+
+    URL *safety* is checked for every entry in ``guardrails`` up front,
+    regardless of direction — not narrowed to ``input_guardrails`` — so an
+    output-direction guardrail's ``url`` override is SSRF-checked here too,
+    even though it isn't evaluated yet. This intentionally preserves the
+    coverage the removed parse-time Pydantic validator had (see
+    :mod:`gateway.models.guardrails`): when output enforcement is built, its
+    code path can assume the URL was already validated instead of needing to
+    remember to add the check itself.
 
     Failure handling depends on the guardrail's ``mode``:
 
@@ -161,6 +171,22 @@ async def run_input_guardrails(
         GuardrailsNotReachableError: if a ``block``-mode guardrail can't be
             evaluated.
     """
+    # A caller-supplied `url` override is SSRF-checked here rather than at
+    # request-body-parse time (the check does a DNS lookup that must be
+    # awaited). Covers every configured guardrail regardless of `on`
+    # direction (see docstring above): deliberately runs before the
+    # input-only filter/early-return below, so an output-only guardrail's
+    # url is validated even though it isn't evaluated yet. Unlike
+    # GuardrailsNotReachableError below, an unsafe URL is a malformed
+    # request, not a runtime failure: it always rejects the request
+    # (mode-independent) via UnsafeURLError, which this function
+    # deliberately does not catch; the caller (apply_input_guardrails)
+    # maps it to a 400.
+    if guardrails:
+        await asyncio.gather(
+            *(validate_mcp_url(g.url, has_authorization_token=False) for g in guardrails if g.url is not None)
+        )
+
     input_guardrails = [g for g in guardrails if "input" in g.on]
     if not input_guardrails:
         return GuardrailVerdict()
@@ -168,15 +194,6 @@ async def run_input_guardrails(
     results: list[GuardrailResult] = []
     async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT_S) as client:
         for cfg in input_guardrails:
-            # A caller-supplied `url` override is SSRF-checked here rather than
-            # at request-body-parse time (the check does a DNS lookup that must
-            # be awaited). Unlike GuardrailsNotReachableError below, an unsafe
-            # URL is a malformed request, not a runtime failure: it always
-            # rejects the request (mode-independent) via UnsafeURLError, which
-            # this loop deliberately does not catch — the caller
-            # (apply_input_guardrails) maps it to a 400.
-            if cfg.url is not None:
-                await validate_mcp_url(cfg.url, has_authorization_token=False)
             base_url = (cfg.url or default_url or "").rstrip("/")
             try:
                 if not base_url:

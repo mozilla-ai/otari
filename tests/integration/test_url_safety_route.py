@@ -53,6 +53,29 @@ def test_unsafe_guardrail_url_returns_400(
     assert "link-local" in resp.json()["detail"]
 
 
+def test_unsafe_output_only_guardrail_url_returns_400(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """An output-direction guardrail is never *evaluated* today (v1 enforces
+    input only), but its `url` override must still be SSRF-checked: the
+    check covers every configured guardrail regardless of `on` direction, not
+    just the ones currently enforced."""
+    resp = client.post(
+        "/v1/messages",
+        json={
+            "model": "anthropic:claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "guardrails": [{"profile": "prompt-injection", "on": ["output"], "url": _UNSAFE_URL}],
+        },
+        headers=api_key_header,
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "link-local" in resp.json()["detail"]
+
+
 def test_safe_mcp_server_url_no_longer_validated_at_parse_time() -> None:
     """`McpServerConfig` construction itself does no I/O (and cannot raise on
     an unsafe URL) now that the check moved to the async pipeline; this is

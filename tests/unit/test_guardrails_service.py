@@ -101,6 +101,21 @@ async def test_output_only_guardrail_is_skipped(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
+async def test_output_only_guardrail_url_is_still_ssrf_checked() -> None:
+    """An output-only guardrail is never *evaluated* (see the sibling test
+    above), but its `url` override must still be SSRF-checked: the check
+    covers every configured guardrail regardless of `on` direction, not just
+    the ones this function currently enforces. Otherwise output enforcement
+    landing later would silently need to remember to add the check itself."""
+    with pytest.raises(UnsafeURLError, match="link-local"):
+        await run_input_guardrails(
+            [GuardrailConfig(profile="prompt-injection", on=["output"], url="http://169.254.169.254/x")],
+            "x",
+            default_url=_URL,
+        )
+
+
+@pytest.mark.asyncio
 async def test_missing_url_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(GuardrailsNotReachableError):
         await run_input_guardrails(
