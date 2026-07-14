@@ -25,12 +25,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
 from fastapi import BackgroundTasks
 from fastapi.responses import StreamingResponse
 
 from gateway.core.env import otari_env
 from gateway.services.composite_backend import CompositeBackend, build_composite_backend
-from gateway.services.composite_dispatch import Serve, decide
+from gateway.services.composite_dispatch import Serve, ServeT1, decide
 from gateway.services.composite_interpreter import EmitTerminal, EmitToolUse
 from gateway.services.composite_key import derive_automation_key
 from gateway.services.composite_response import (
@@ -45,8 +46,21 @@ _TRUE = {"1", "true", "yes", "on"}
 _backend: CompositeBackend | None = None
 
 
+_DEFAULT_T1_MODEL = "claude-haiku-4-5-20251001"
+
+
 def composites_enabled() -> bool:
     return otari_env("COMPOSITES_ENABLED", "false").strip().lower() in _TRUE
+
+
+def t1_enabled() -> bool:
+    """T1 serving (a cheap model for a below-frontier judgment) is opt-in."""
+    return otari_env("T1_ENABLED", "false").strip().lower() in _TRUE
+
+
+def _t1_model(composite: dict[str, Any]) -> str:
+    spec = composite.get("model_spec") or {}
+    return str(spec.get("model") or otari_env("T1_MODEL", _DEFAULT_T1_MODEL))
 
 
 def _get_backend(config: Any) -> CompositeBackend:
@@ -100,6 +114,13 @@ async def try_serve_composite(
         decision = decide(
             composites, request.messages, session_label=automation_key, tool_names=tool_names
         )
+        if isinstance(decision, ServeT1):
+            if not t1_enabled():
+                return None  # T1 off: fall through so the frontier serves the judgment
+            return await _serve_t1(
+                request=request, ctx=ctx, decision=decision,
+                automation_key=automation_key, background_tasks=background_tasks,
+            )
         if not isinstance(decision, Serve):
             return None
 
@@ -144,3 +165,99 @@ async def try_serve_composite(
     except Exception:
         logger.warning("composite hook failed; falling through to provider", exc_info=True)
         return None
+
+
+async def _serve_t1(
+    *,
+    request: Any,
+    ctx: Any,
+    decision: ServeT1,
+    automation_key: str,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any] | StreamingResponse | None:
+    """Serve a below-frontier judgment turn with a cheap model.
+
+    Calls the gateway's own ``/v1/messages`` with the cheap model and the
+    request's own context (reusing all credential/provider machinery), tagged
+    ``X-Otari-T1`` so the composite hook is skipped on that inner call (no
+    recursion), then serves the cheap model's decision. Any error falls through
+    to the frontier.
+    """
+    cheap = _t1_model(decision.composite)
+    self_url = otari_env("T1_SELF_URL", "http://localhost:8000").rstrip("/")
+    payload: dict[str, Any] = {
+        "model": cheap,
+        "max_tokens": int(getattr(request, "max_tokens", 0) or 1024),
+        "messages": request.messages,
+    }
+    system = getattr(request, "system", None)
+    if system:
+        payload["system"] = system
+    tools = getattr(request, "tools", None)
+    if tools:
+        payload["tools"] = tools
+    headers = {
+        "Authorization": f"Bearer {ctx.user_token or ''}",
+        "content-type": "application/json",
+        "anthropic-version": "2023-06-01",
+        "X-Otari-T1": "1",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            resp = await client.post(f"{self_url}/v1/messages", json=payload, headers=headers)
+        resp.raise_for_status()
+        body = resp.json()
+    except Exception:
+        logger.warning("T1 cheap-model call failed; falling through to the frontier", exc_info=True)
+        return None
+
+    content = body.get("content") if isinstance(body, dict) else None
+    if not isinstance(content, list):
+        return None
+    usage = body.get("usage") or {}
+
+    from gateway.api.routes._pipeline import release_reservation
+
+    await release_reservation(ctx)
+
+    if ctx.user_token:
+        from gateway.api.routes._platform import _report_platform_composite_usage
+
+        background_tasks.add_task(
+            _report_platform_composite_usage,
+            ctx.config,
+            ctx.user_token,
+            {
+                "composite_program_id": decision.composite.get("composite_program_id"),
+                "composite_program_version_id": decision.composite.get("composite_program_version_id"),
+                "tier": "t1_model",
+                "outcome": "served",
+                "shadow": False,
+                "session_label": automation_key,
+                "turns_served": 1,
+                "turns_matched": 0,
+                "nested_input_tokens": int(usage.get("input_tokens", 0) or 0),
+                "nested_output_tokens": int(usage.get("output_tokens", 0) or 0),
+            },
+        )
+
+    model = request.model
+    stream = bool(getattr(request, "stream", False))
+    tool_use = next((b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"), None)
+    if tool_use is not None:
+        name = str(tool_use.get("name", ""))
+        tool_input = tool_use.get("input") or {}
+        if stream:
+            events = tool_use_stream_events(model=model, tool_name=name, tool_input=tool_input)
+
+            async def _gen() -> Any:
+                for event in events:
+                    yield f"event: {event.type}\ndata: {event.model_dump_json(exclude_none=True)}\n\n"
+
+            return StreamingResponse(_gen(), media_type="text/event-stream")
+        return tool_use_response(model=model, tool_name=name, tool_input=tool_input).model_dump(exclude_none=True)
+
+    text = "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    if not stream:
+        return terminal_response(model=model, text=text).model_dump(exclude_none=True)
+    return None

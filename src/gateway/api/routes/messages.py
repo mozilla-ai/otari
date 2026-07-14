@@ -402,20 +402,24 @@ async def create_message(
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
 
-    # Capture the automation's spec (system + tools + choreography) from the
-    # traffic we already proxy, for offline intent-synthesis. Gated off by
-    # default; content stays gateway-side.
-    capture_automation_request(request)
+    # Skip capture + the composite hook for the gateway's own T1 sub-call (a
+    # cheap-model completion the hook makes for a judgment turn); otherwise it
+    # would recurse into the same composite and re-capture its own traffic.
+    is_t1_internal = raw_request.headers.get("x-otari-t1") is not None
+    if not is_t1_internal:
+        # Capture the automation's spec (system + tools + choreography) from the
+        # traffic we already proxy, for offline intent-synthesis. Gated off by
+        # default; content stays gateway-side.
+        capture_automation_request(request)
 
-    # Composite dispatch hook (gated OFF by default): on a recognized approved
-    # composite at a deterministic turn, serve a synthetic response without
-    # calling the provider. Any non-serve decision returns None and falls
-    # through to the normal dispatch below, so this is inert unless enabled.
-    composite_served = await try_serve_composite(
-        request=request, ctx=ctx, background_tasks=background_tasks
-    )
-    if composite_served is not None:
-        return composite_served
+        # Composite dispatch hook (gated OFF by default): on a recognized
+        # approved composite, serve without the frontier (T0 emit, or T1 via a
+        # cheap model). Any non-serve decision returns None and falls through.
+        composite_served = await try_serve_composite(
+            request=request, ctx=ctx, background_tasks=background_tasks
+        )
+        if composite_served is not None:
+            return composite_served
 
     # Attribute this attempt's spend to a stable automation identity so usage
     # rolls up per automation with zero tenant change: an explicit label wins,

@@ -12,6 +12,7 @@ from gateway.services.composite_interpreter import (
     EmitToolUse,
     ExpressionError,
     Punt,
+    SubJudgment,
     evaluate_expression,
     executed_tool_names,
     last_tool_result,
@@ -184,11 +185,12 @@ def test_next_action_builds_args_from_expressions() -> None:
     assert action.tool_input == {"channel": "C123"}
 
 
-def test_next_action_sub_judgment_punts_until_t1() -> None:
-    plan = {"version": 1, "nodes": [{"type": "sub_judgment"}]}
+def test_next_action_sub_judgment_yields_subjudgment() -> None:
+    node = {"type": "sub_judgment", "for": "decide"}
+    plan = {"version": 1, "nodes": [node]}
     action = next_action(plan, [{"role": "user", "content": "go"}])
-    assert isinstance(action, Punt)
-    assert action.reason == "t1_not_enabled"
+    assert isinstance(action, SubJudgment)
+    assert action.node == node
 
 
 def test_next_action_emit_terminal() -> None:
@@ -260,7 +262,7 @@ def test_unsupported_mixed_shape_punts_not_reserves() -> None:
     assert action.reason == "unsupported_plan_shape"
 
 
-def test_trailing_sub_judgment_after_emits_punts_t1() -> None:
+def test_trailing_sub_judgment_after_emits_yields_subjudgment() -> None:
     plan = {
         "nodes": [
             {"type": "emit_tool_use", "tool": "A", "args": {}},
@@ -274,8 +276,7 @@ def test_trailing_sub_judgment_after_emits_punts_t1() -> None:
     assert next_action(plan, after_a).tool_name == "B"  # type: ignore[union-attr]
     after_b = [*after_a, _assistant_tool_use("B", "t2")]
     tail = next_action(plan, after_b)
-    assert isinstance(tail, Punt)
-    assert tail.reason == "t1_not_enabled"
+    assert isinstance(tail, SubJudgment)
 
 
 def test_regex_input_length_capped() -> None:

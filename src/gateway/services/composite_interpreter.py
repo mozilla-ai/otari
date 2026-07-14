@@ -75,7 +75,16 @@ class Punt:
     reason: str
 
 
-Action = EmitToolUse | EmitTerminal | Punt
+@dataclass(frozen=True)
+class SubJudgment:
+    """The recognized plan reached a below-frontier judgment step (T1). The hook
+    serves it with a cheap model when T1 is enabled, else punts to the frontier.
+    ``node`` carries the plan's ``sub_judgment`` node (``for``/``output`` hints)."""
+
+    node: dict[str, Any]
+
+
+Action = EmitToolUse | EmitTerminal | Punt | SubJudgment
 
 
 # ---------------------------------------------------------------------------
@@ -509,9 +518,9 @@ def next_action(plan: Any, messages: list[dict[str, Any]]) -> Action:
     if tail_type == "emit_terminal":
         return EmitTerminal(text=str(tail.get("text", "")))
     if tail_type == "sub_judgment":
-        # T1 sub-judgment requires a small-model call (a later milestone).
-        # Until then, punt so the frontier serves the turn.
-        return Punt("t1_not_enabled")
+        # A below-frontier judgment step: the hook serves it with a cheap model
+        # (T1) when enabled, otherwise punts to the frontier.
+        return SubJudgment(node=tail)
     if tail_type == "punt":
         return Punt("plan_punt")
     return Punt("unknown_node_type")

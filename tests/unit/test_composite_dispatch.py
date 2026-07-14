@@ -155,3 +155,14 @@ def test_action_matches_model_name_level() -> None:
     assert action_matches_model(action, {"type": "tool_use", "name": "other"}) is False
     assert action_matches_model(action, None) is False
     assert action_matches_model(Punt("x"), {"type": "tool_use", "name": "resolve_time"}) is False
+
+
+def test_approved_sub_judgment_yields_servet1() -> None:
+    from gateway.services.composite_dispatch import ServeT1
+
+    comp = _composite("approved")
+    comp["plan"] = {"nodes": [{"type": "sub_judgment", "for": "decide next"}]}
+    comp["verifier_spec"] = {}
+    decision = decide([comp], _user_turn(), session_label="automation:9cb676db", tool_names=None)
+    assert isinstance(decision, ServeT1)
+    assert decision.node.get("for") == "decide next"

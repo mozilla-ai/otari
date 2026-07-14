@@ -20,6 +20,7 @@ from gateway.services.composite_interpreter import (
     EmitTerminal,
     EmitToolUse,
     Punt,
+    SubJudgment,
     next_action,
     verify_action,
 )
@@ -33,6 +34,15 @@ class Serve:
     """Serve a synthetic response for this turn; skip the provider call."""
 
     action: EmitToolUse | EmitTerminal
+    composite: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ServeT1:
+    """Serve this turn with a cheap model (T1): the recognized plan reached a
+    below-frontier judgment step. The hook makes the cheap-model call."""
+
+    node: dict[str, Any]
     composite: dict[str, Any]
 
 
@@ -51,7 +61,7 @@ class NoDispatch:
     reason: str
 
 
-Decision = Serve | Shadow | NoDispatch
+Decision = Serve | ServeT1 | Shadow | NoDispatch
 
 
 def _required_tools(composite: dict[str, Any]) -> list[str]:
@@ -134,6 +144,8 @@ def decide(
     if status == _APPROVED:
         if isinstance(action, Punt):
             return NoDispatch(action.reason)
+        if isinstance(action, SubJudgment):
+            return ServeT1(node=action.node, composite=composite)
         return Serve(action=action, composite=composite)
     return NoDispatch("not_dispatchable_status")
 
