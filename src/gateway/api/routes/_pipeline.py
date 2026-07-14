@@ -406,7 +406,7 @@ class RequestContext:
         # disk and reconstruct the RSA-backed `Credentials` object) for no
         # reason. `None` in hybrid mode (no local provider resolution happens)
         # and in the rare case the selector couldn't be parsed for the gate
-        # check -- callers fall back to `resolve_provider_selector` themselves
+        # check; callers fall back to `resolve_provider_selector` themselves
         # in that case, same as before this field existed.
         self.resolved_provider = resolved_provider
 
@@ -418,7 +418,7 @@ def resolve_dispatch_provider(ctx: RequestContext, config: GatewayConfig, model_
     this rather than ``resolve_provider_selector`` directly.
 
     Falls back to a fresh ``resolve_provider_selector`` call only when
-    ``ctx.resolved_provider`` is ``None`` -- the rare case where the gate
+    ``ctx.resolved_provider`` is ``None``: the rare case where the gate
     check couldn't parse the selector (an unparseable selector has no
     pricing, but dispatch still needs its own resolution attempt so any-llm's
     own error surfaces instead of a stale gate-check failure).
@@ -712,8 +712,11 @@ async def _validate_mcp_server_urls(
     Covers both request-body-supplied servers and platform-resolved ones
     (``mcp_server_ids``): both land in the same merged list before this runs.
     Runs concurrently since each check does an independent DNS lookup;
-    ``asyncio.gather`` (default ``return_exceptions=False``) surfaces the
-    first ``UnsafeURLError`` it sees and cancels the rest.
+    ``asyncio.gather`` (default ``return_exceptions=False``) propagates the
+    first ``UnsafeURLError`` it sees as soon as it's raised. Note this does
+    *not* cancel the other in-flight checks: they keep running in the
+    background and are simply not awaited further; harmless here since
+    ``validate_mcp_url`` has no side effects beyond a DNS lookup.
 
     This used to run synchronously inside a Pydantic ``model_validator`` at
     request-body-parse time (see ``McpServerConfig``/``GuardrailConfig``

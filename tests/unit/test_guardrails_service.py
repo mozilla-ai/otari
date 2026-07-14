@@ -202,7 +202,7 @@ async def test_unsafe_url_override_rejected_in_block_mode() -> None:
 @pytest.mark.asyncio
 async def test_unsafe_url_override_rejected_in_monitor_mode_too() -> None:
     """Unlike GuardrailsNotReachableError, an unsafe URL is a malformed
-    request, not a runtime failure -- monitor mode does not fail this open."""
+    request, not a runtime failure: monitor mode does not fail this open."""
     with pytest.raises(UnsafeURLError, match="link-local"):
         await run_input_guardrails(
             [GuardrailConfig(profile="prompt-injection", mode="monitor", url="http://169.254.169.254/x")],

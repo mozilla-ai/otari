@@ -60,7 +60,7 @@ def test_safe_mcp_server_url_no_longer_validated_at_parse_time() -> None:
     `url_safety` at all."""
     from gateway.models.mcp import McpServerConfig
 
-    # Constructing with an unsafe URL does not raise -- the check runs later,
+    # Constructing with an unsafe URL does not raise: the check runs later,
     # from `prepare_gateway_tools`, where it can be awaited.
     cfg = McpServerConfig(name="x", url=_UNSAFE_URL)
     assert cfg.url == _UNSAFE_URL
