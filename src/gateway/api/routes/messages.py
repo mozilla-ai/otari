@@ -34,6 +34,7 @@ from gateway.api.routes._pipeline import (
     default_attempt_kwargs,
     prepare_gateway_tools,
     rate_limit_headers,
+    resolve_dispatch_provider,
     resolve_request_context,
     run_platform_non_stream,
     run_single_attempt_stream,
@@ -59,7 +60,6 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
-from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -480,7 +480,7 @@ async def create_message(
             platform_request_id = route.request_id
             billing_provider: Any = LLMProvider(attempt.provider)
         else:
-            resolved = resolve_provider_selector(config, request.model)
+            resolved = resolve_dispatch_provider(ctx, config, request.model)
             model = resolved.model
             call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
             billing_provider = resolved.instance
@@ -540,7 +540,7 @@ async def create_message(
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
-    resolved = resolve_provider_selector(config, request.model)
+    resolved = resolve_dispatch_provider(ctx, config, request.model)
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,
