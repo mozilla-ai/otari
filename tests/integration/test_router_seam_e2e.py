@@ -17,6 +17,7 @@ from typing import Any
 from unittest.mock import patch
 
 import httpx
+import httpx2
 import pytest
 from any_llm.types.completion import (
     ChatCompletion,
@@ -68,8 +69,10 @@ class _RerouteBackend:
         return RoutingDecision(ordered_models=[self.target], confidence=0.9, rationale="test reroute")
 
 
-def _post_chat(client: TestClient, headers: dict[str, str], *, stream: bool = False) -> httpx.Response:
-    resp: httpx.Response = client.post(
+def _post_chat(client: TestClient, headers: dict[str, str], *, stream: bool = False) -> httpx2.Response:
+    # Starlette's TestClient returns its vendored ``httpx2.Response``; the real
+    # ``httpx`` import above is still used for the upstream mock responses.
+    resp: httpx2.Response = client.post(
         "/v1/chat/completions",
         json={
             "model": REQUESTED_MODEL,
