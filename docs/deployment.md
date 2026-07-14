@@ -36,6 +36,8 @@ If you create the Blueprint from the Dashboard (**New → Blueprint**) instead o
 
 The Blueprint, upgrade instructions, and full env table are available at [`deploy/render/`](https://github.com/mozilla-ai/otari/tree/main/deploy/render).
 
+This Blueprint deploys standalone mode with a local Postgres database. To run hybrid mode instead, see [Connect to otari.ai](#connect-to-otariai).
+
 ## Deploy on Railway
 
 For a hosted standalone deployment without local setup, use the one-click

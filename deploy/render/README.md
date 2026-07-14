@@ -13,6 +13,8 @@ Deploy Otari and Render Postgres from a Blueprint ([`render.yaml`](./render.yaml
 
 The web service is stateless. Postgres stores users, API key hashes, budgets, pricing, and usage history. On first boot, Otari runs its database migrations and creates a bootstrap API key, which is printed once in the service logs.
 
+This Blueprint deploys Otari in standalone mode. Otari also supports hybrid mode, delegating provider routing, auth, and usage tracking to [otari.ai](https://otari.ai) instead of a local database — see [Modes](../../docs/modes.md).
+
 ## Free instance limits
 
 The free configuration is intended for evaluation and hobby use:
