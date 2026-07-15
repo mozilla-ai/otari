@@ -80,7 +80,13 @@ where = ["src"]
 include = ["gateway*"]
 
 [tool.setuptools.package-data]
-gateway = ["templates/*.html", "templates/*.svg"]
+gateway = [
+    "templates/*.html",
+    "templates/*.svg",
+    "static/dashboard/index.html",
+    "static/dashboard/favicon.svg",
+    "static/dashboard/assets/*",
+]
 
 [tool.ruff]
 target-version = "py313"

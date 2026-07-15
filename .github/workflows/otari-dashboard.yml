@@ -1,0 +1,57 @@
+name: Otari Dashboard
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'web/**'
+      - 'src/gateway/static/dashboard/**'
+      - '.github/workflows/otari-dashboard.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'web/**'
+      - 'src/gateway/static/dashboard/**'
+      - '.github/workflows/otari-dashboard.yml'
+  workflow_dispatch:
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      with:
+        persist-credentials: false
+
+    - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Type-check
+      run: npm run typecheck
+
+    - name: Test
+      run: npm test
+
+    - name: Build
+      run: npm run build
+
+    - name: Verify committed bundle is up to date
+      run: |
+        if ! git diff --quiet -- ../src/gateway/static/dashboard; then
+          echo "::error::The committed dashboard bundle in src/gateway/static/dashboard is stale."
+          echo "Run 'npm --prefix web run build' and commit the result."
+          git --no-pager diff --stat -- ../src/gateway/static/dashboard
+          exit 1
+        fi

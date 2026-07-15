@@ -17,6 +17,7 @@ from gateway.api.routes import (
     pricing,
     rerank,
     responses,
+    settings,
     usage,
     users,
 )
@@ -52,3 +53,4 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(pricing.router)
     app.include_router(usage.router)
     app.include_router(router_routes.router)
+    app.include_router(settings.router)
