@@ -4,12 +4,9 @@ import { useAuth } from "@/auth/AuthContext";
 import { AppShell } from "@/components/AppShell";
 import type { PageKey } from "@/components/AppShell";
 import { Login } from "@/components/Login";
-import { KeysPage } from "@/pages/KeysPage";
 import { ModelsPage } from "@/pages/ModelsPage";
 import { OverviewPage } from "@/pages/OverviewPage";
-import { PricingPage } from "@/pages/PricingPage";
 import { UsagePage } from "@/pages/UsagePage";
-import { UsersPage } from "@/pages/UsersPage";
 
 export default function App() {
   const { isAuthenticated } = useAuth();
@@ -24,9 +21,6 @@ export default function App() {
       {page === "overview" ? <OverviewPage /> : null}
       {page === "usage" ? <UsagePage /> : null}
       {page === "models" ? <ModelsPage /> : null}
-      {page === "pricing" ? <PricingPage /> : null}
-      {page === "keys" ? <KeysPage /> : null}
-      {page === "users" ? <UsersPage /> : null}
     </AppShell>
   );
 }

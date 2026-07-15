@@ -2,21 +2,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetch } from "@/api/client";
 import type {
-  CreateKeyRequest,
-  CreateKeyResponse,
-  CreateUserRequest,
   GatewaySettings,
   HealthResponse,
-  KeyInfo,
   ModelListResponse,
   PricingResponse,
   SetPricingRequest,
   UsageEntry,
-  UserResponse,
 } from "@/api/types";
 
-const KEYS = "keys";
-const USERS = "users";
 const USAGE = "usage";
 const HEALTH = "health";
 const MODELS = "models";
@@ -28,74 +21,6 @@ export function useHealth() {
     queryKey: [HEALTH],
     queryFn: () => apiFetch<HealthResponse>("/health"),
     staleTime: 60_000,
-  });
-}
-
-export function useKeys() {
-  return useQuery({
-    queryKey: [KEYS],
-    queryFn: () => apiFetch<KeyInfo[]>("/v1/keys?limit=1000"),
-  });
-}
-
-export function useCreateKey() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateKeyRequest) =>
-      apiFetch<CreateKeyResponse>("/v1/keys", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [KEYS] });
-      void queryClient.invalidateQueries({ queryKey: [USERS] });
-    },
-  });
-}
-
-export function useSetKeyActive() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
-      apiFetch<KeyInfo>(`/v1/keys/${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ is_active: isActive }),
-      }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
-  });
-}
-
-export function useDeleteKey() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<void>(`/v1/keys/${encodeURIComponent(id)}`, { method: "DELETE" }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
-  });
-}
-
-export function useUsers() {
-  return useQuery({
-    queryKey: [USERS],
-    queryFn: () => apiFetch<UserResponse[]>("/v1/users?limit=1000"),
-  });
-}
-
-export function useCreateUser() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (body: CreateUserRequest) =>
-      apiFetch<UserResponse>("/v1/users", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [USERS] }),
-  });
-}
-
-export function useDeleteUser() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (userId: string) =>
-      apiFetch<void>(`/v1/users/${encodeURIComponent(userId)}`, { method: "DELETE" }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [USERS] });
-      void queryClient.invalidateQueries({ queryKey: [KEYS] });
-    },
   });
 }
 
@@ -121,10 +46,7 @@ export function useBackfillUsageCost() {
         method: "POST",
         body: JSON.stringify({ model_key: modelKey }),
       }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [USAGE] });
-      void queryClient.invalidateQueries({ queryKey: [USERS] });
-    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [USAGE] }),
   });
 }
 
