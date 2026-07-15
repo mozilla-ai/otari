@@ -52,8 +52,12 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
 
     rowcount = getattr(result, "rowcount", 0)
     if rowcount and rowcount > 0:
+        # Captured before commit: rollback() expires ORM instances, so reading
+        # user.user_id in the error path would attempt sync IO in the async
+        # session (MissingGreenlet), masking the original commit error.
+        user_id_str = user.user_id
         reset_log = BudgetResetLog(
-            user_id=user.user_id,
+            user_id=user_id_str,
             budget_id=budget.budget_id,
             previous_spend=float(user.spend),
             reset_at=now,
@@ -64,9 +68,9 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
             await db.commit()
         except SQLAlchemyError as e:
             await db.rollback()
-            logger.error("Failed to commit CAS budget reset for user '%s': %s", user.user_id, e)
+            logger.error("Failed to commit CAS budget reset for user '%s': %s", user_id_str, e)
             raise
-        refreshed = await get_active_user(db, user.user_id)
+        refreshed = await get_active_user(db, user_id_str)
         return refreshed or user
 
     await db.rollback()
