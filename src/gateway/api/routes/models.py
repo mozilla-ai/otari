@@ -52,15 +52,19 @@ class ModelListResponse(BaseModel):
     data: list[ModelObject]
 
 
+def _owner_from_key(model_key: str) -> str:
+    """The provider a ``provider:model`` key names, or "unknown" for a bare name."""
+    provider, separator, _ = model_key.partition(":")
+    return provider if separator else "unknown"
+
+
 def _model_from_pricing(pricing: ModelPricing) -> ModelObject:
     """Convert a ModelPricing row to an OpenAI-compatible ModelObject."""
-    parts = pricing.model_key.split(":", 1)
-    owned_by = parts[0] if len(parts) > 1 else "unknown"
     created = int(calendar.timegm(pricing.created_at.utctimetuple()))
     return ModelObject(
         id=pricing.model_key,
         created=created,
-        owned_by=owned_by,
+        owned_by=_owner_from_key(pricing.model_key),
         pricing=ModelPricingInfo(
             input_price_per_million=pricing.input_price_per_million,
             output_price_per_million=pricing.output_price_per_million,
@@ -298,6 +302,15 @@ async def get_model(
                     break
 
     if not pricing and not discovered_model:
+        # Neither priced nor discoverable, yet the gateway may still serve this
+        # model and bill it at the genai-prices default: request-time lookup
+        # consults the same fallback. Reporting 404 for a model that is being
+        # charged for is the lie phase 3 of the listing exists to avoid, so
+        # answer with the effective rate when there is one.
+        fallback = ModelObject(id=model_id, created=0, owned_by=_owner_from_key(model_id))
+        _apply_default_pricing(fallback)
+        if fallback.pricing is not None:
+            return fallback
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Model '{model_id}' not found",

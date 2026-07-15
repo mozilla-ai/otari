@@ -8,6 +8,7 @@ import {
   usePricing,
   useSetPricing,
   useSettings,
+  useUnlistedModels,
   useUsageSummary,
 } from "@/api/hooks";
 import { Field } from "@/components/Field";
@@ -334,6 +335,18 @@ export function ModelsPage() {
   const [showForm, setShowForm] = useState(false);
   const [backfillFor, setBackfillFor] = useState<string | null>(null);
 
+  // Models with traffic that the catalog does not describe: an alias's target
+  // (withheld on purpose), or anything undiscoverable and unpriced. They are
+  // still being billed, so their rate has to be fetched by name.
+  const unlistedKeys = useMemo(() => {
+    const catalogIds = new Set((models.data?.data ?? []).map((model) => model.id));
+    const configuredKeys = new Set(currentPricing(pricing.data ?? []).map((row) => row.model_key));
+    return (usage.data?.by_model ?? [])
+      .map((row) => row.key)
+      .filter((key) => !catalogIds.has(key) && !configuredKeys.has(key));
+  }, [models.data, pricing.data, usage.data]);
+  const unlisted = useUnlistedModels(unlistedKeys);
+
   const rows = useMemo<ModelRow[]>(() => {
     // Aggregated server-side over the whole log, so these counts do not drift
     // once the usage table outgrows a single page.
@@ -399,11 +412,31 @@ export function ModelsPage() {
       add(key, key, providerFromModelKey(key));
     }
     for (const used of usageByKey.values()) {
-      add(used.key, used.model, used.provider ?? "—");
+      // The gateway's effective rate for this model, if it could name one.
+      // Without it the row would claim "not priced" while showing real spend.
+      const priced = unlisted.get(used.key);
+      add(
+        used.key,
+        used.model,
+        used.provider ?? "—",
+        priced
+          ? {
+              key: used.key,
+              model: used.model,
+              provider: used.provider ?? "—",
+              inputPrice: priced.pricing?.input_price_per_million ?? null,
+              outputPrice: priced.pricing?.output_price_per_million ?? null,
+              source: priced.pricing_source === "default" ? "default" : priced.pricing ? "configured" : "none",
+              requests: 0,
+              totalTokens: 0,
+              cost: 0,
+            }
+          : undefined,
+      );
     }
 
     return result.sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model));
-  }, [models.data, usage.data, pricing.data]);
+  }, [models.data, usage.data, pricing.data, unlisted]);
 
   const isLoading = models.isLoading || usage.isLoading || pricing.isLoading;
 

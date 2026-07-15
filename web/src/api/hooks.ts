@@ -1,10 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch } from "@/api/client";
+import { ApiError, apiFetch } from "@/api/client";
 import type {
   GatewaySettings,
   HealthResponse,
   ModelListResponse,
+  ModelObject,
   PricingResponse,
   SetPricingRequest,
   UsageEntry,
@@ -68,6 +69,37 @@ export function useModels() {
     queryKey: [MODELS],
     queryFn: () => apiFetch<ModelListResponse>("/v1/models"),
     staleTime: 60_000,
+  });
+}
+
+// Prices models the catalog does not list. GET /v1/models omits a model that is
+// neither priced nor discoverable, and omits an alias's target on purpose, yet
+// either can still have traffic and be billed at the default rate. Asking about
+// each one by name is the only way to show what it actually costs.
+//
+// Bounded by "models with traffic the catalog does not describe", which is empty
+// unless model_discovery is off. A model the gateway truly cannot price 404s,
+// which is not an error worth retrying or surfacing: the row just stays unpriced.
+export function useUnlistedModels(keys: string[]) {
+  return useQueries({
+    queries: keys.map((key) => ({
+      queryKey: [MODELS, key],
+      queryFn: () => apiFetch<ModelObject>(`/v1/models/${encodeURIComponent(key)}`),
+      retry: (_count: number, error: Error) => !(error instanceof ApiError && error.status === 404),
+      staleTime: 60_000,
+    })),
+    // Keyed by the requested key rather than the response id, so a row that came
+    // back under a different id is dropped instead of shown against the wrong
+    // model. `combine` keeps the map reference stable between renders.
+    combine: (results) => {
+      const byKey = new Map<string, ModelObject>();
+      results.forEach((result, index) => {
+        if (result.data) {
+          byKey.set(keys[index], result.data);
+        }
+      });
+      return byKey;
+    },
   });
 }
 

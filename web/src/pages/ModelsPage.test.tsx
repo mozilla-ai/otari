@@ -82,11 +82,20 @@ function renderWithClient(ui: ReactElement) {
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
+function notFound(): Response {
+  return new Response(JSON.stringify({ detail: "Model not found" }), {
+    status: 404,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-function mockApi(opts: { byModel?: ModelUsage[]; post?: (url: string) => Response } = {}) {
+function mockApi(
+  opts: { byModel?: ModelUsage[]; post?: (url: string) => Response; unlisted?: (url: string) => Response } = {},
+) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -95,6 +104,9 @@ function mockApi(opts: { byModel?: ModelUsage[]; post?: (url: string) => Respons
     }
     if (url.includes("/v1/settings")) {
       return jsonResponse(SETTINGS);
+    }
+    if (url.includes("/v1/models/")) {
+      return opts.unlisted ? opts.unlisted(url) : notFound();
     }
     if (url.includes("/v1/models")) {
       return jsonResponse(CATALOG);
@@ -135,6 +147,40 @@ describe("ModelsPage", () => {
 
     expect(screen.getByText("4,200")).toBeInTheDocument();
     expect(screen.getByText("63,000")).toBeInTheDocument();
+  });
+
+  it("prices a model with traffic that the catalog does not list", async () => {
+    // An alias's target is withheld from the catalog on purpose, yet usage bills
+    // it by name. Claiming "not priced" next to its spend would be a lie, so the
+    // rate is fetched for it.
+    mockApi({
+      byModel: [modelUsage("openai", "gpt-4o-mini", 1250)],
+      unlisted: () =>
+        jsonResponse({
+          id: "openai:gpt-4o-mini",
+          object: "model",
+          created: 0,
+          owned_by: "openai",
+          pricing: { input_price_per_million: 0.99, output_price_per_million: 1.99 },
+          pricing_source: "default",
+        }),
+    });
+
+    renderWithClient(<ModelsPage />);
+
+    expect(await screen.findByText("$0.99")).toBeInTheDocument();
+    expect(screen.getByText("$1.99")).toBeInTheDocument();
+    expect(screen.getByText("1,250")).toBeInTheDocument();
+  });
+
+  it("leaves a model unpriced when the gateway cannot price it either", async () => {
+    // 404 means nothing can name a rate for it, which is what "not priced" says.
+    mockApi({ byModel: [modelUsage("mystery", "unknown-model", 3)] });
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("unknown-model");
+
+    expect(screen.getByText("not priced")).toBeInTheDocument();
   });
 
   it("edits a configured price inline", async () => {
