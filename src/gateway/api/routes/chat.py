@@ -1,9 +1,7 @@
-import asyncio
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-import httpx
 from any_llm import LLMProvider, acompletion
 from any_llm.types.completion import (
     ChatCompletion,
@@ -20,17 +18,14 @@ from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
 from gateway.api.routes._helpers import latest_user_text
 from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
-    ALL_PROVIDERS_FAILED_DETAIL,
-    ALL_PROVIDERS_TIMED_OUT_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
-    SANDBOX_UNREACHABLE_DETAIL,
-    WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
     classify_provider_error,
     default_attempt_kwargs,
     log_usage,
     prepare_gateway_tools,
+    raise_all_streaming_attempts_failed,
     rate_limit_headers,
     resolve_dispatch_provider,
     resolve_request_context,
@@ -56,8 +51,6 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
-from gateway.services.sandbox_backend import SandboxNotReachableError
-from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
@@ -349,43 +342,9 @@ async def chat_completions(
                 )
             except HTTPException:
                 raise
-            except SandboxNotReachableError as exc:
-                logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=SANDBOX_UNREACHABLE_DETAIL,
-                ) from exc
-            except WebSearchNotReachableError as exc:
-                logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=WEB_SEARCH_UNREACHABLE_DETAIL,
-                ) from exc
             except Exception as exc:
                 # Every attempt failed before any bytes were flushed.
-                logger.error(
-                    "All streaming attempts failed request_id=%s: %s",
-                    route.request_id,
-                    exc,
-                )
-                # Classify when there is a single attempt, or when the failure is
-                # a non-retryable invalid request (400/422): that short-circuits
-                # the fallback and is definitive regardless of attempt count, so
-                # it matches the non-streaming path. Otherwise surface the
-                # multi-attempt aggregate.
-                mapping = classify_provider_error(exc)
-                invalid_request = mapping is not None and mapping.status_code == status.HTTP_400_BAD_REQUEST
-                if invalid_request or len(route.attempts) <= 1:
-                    raise _ADAPTER.provider_error(exc) from exc
-                if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
-                    raise HTTPException(
-                        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                        detail=ALL_PROVIDERS_TIMED_OUT_DETAIL,
-                    ) from exc
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=ALL_PROVIDERS_FAILED_DETAIL,
-                ) from exc
+                raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
 
         # Standalone path: single attempt, no fallback (no `route.attempts`).
         # Resolve the instance to its implementation; dispatch any-llm against
@@ -429,18 +388,13 @@ async def chat_completions(
 
     resolved = resolve_dispatch_provider(ctx, config, request.model)
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
-    completion = await run_standalone_non_stream(
+    return await run_standalone_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,
+        response=response,
         provider=resolved.instance,
         model=resolved.model,
         display_model=resolved.alias,
     )
-
-    if ctx.rate_limit_info:
-        for key, value in rate_limit_headers(ctx.rate_limit_info).items():
-            response.headers[key] = value
-
-    return completion

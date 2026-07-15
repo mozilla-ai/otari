@@ -35,7 +35,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import Any, Generic, NamedTuple, Protocol, TypeVar
+from typing import Any, Generic, NamedTuple, NoReturn, Protocol, TypeVar
 from urllib.parse import ParseResult, urlparse
 
 import httpx
@@ -69,6 +69,9 @@ from gateway.api.routes._platform import (
     _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
     run_platform_attempts,
+)
+from gateway.api.routes._platform import (
+    default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
 from gateway.api.routes._tools import (
     _build_web_search_backend,
@@ -348,22 +351,6 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         """Adjust the ``run_platform_attempts``-shaped kwargs for the format's
         provider call (the responses format re-splits ``provider:model``)."""
         ...
-
-
-def default_attempt_kwargs(
-    attempt: ResolvedAttempt,
-    base_request_fields: dict[str, Any],
-) -> dict[str, Any]:
-    """Standard platform-attempt kwargs: credentials + ``provider:model`` selector."""
-    attempt_provider = LLMProvider(attempt.provider)
-    kwargs: dict[str, Any] = {"api_key": attempt.api_key}
-    if attempt.api_base:
-        kwargs["api_base"] = attempt.api_base
-    return {
-        **kwargs,
-        **base_request_fields,
-        "model": f"{attempt_provider.value}:{attempt.model}",
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -1647,6 +1634,38 @@ async def _stream_with_stack_cleanup(
         await backend_stack.aclose()
 
 
+def raise_all_streaming_attempts_failed(
+    adapter: FormatAdapter[Any, Any],
+    exc: Exception,
+    route: ResolvedRoute,
+) -> NoReturn:
+    """Map a terminal :func:`run_streaming_with_fallback` failure (no attempt
+    yielded a first chunk) onto the format's wire error.
+
+    Gateway-side backend failures (sandbox / web_search eager-open) get a 502
+    with a backend-specific detail so operators don't chase a fake provider
+    outage. Provider failures are classified when there is a single attempt,
+    or when the failure is a non-retryable invalid request (400/422): that
+    short-circuits the fallback and is definitive regardless of attempt count,
+    matching the non-streaming path. Otherwise the multi-attempt aggregate
+    surfaces (504 when the last failure was a timeout, else 502).
+    """
+    if isinstance(exc, SandboxNotReachableError):
+        logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
+        raise adapter.error(502, SANDBOX_UNREACHABLE_DETAIL, ErrorKind.API) from exc
+    if isinstance(exc, WebSearchNotReachableError):
+        logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
+        raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
+    logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
+    mapping = classify_provider_error(exc)
+    invalid_request = mapping is not None and mapping.status_code == status.HTTP_400_BAD_REQUEST
+    if invalid_request or len(route.attempts) <= 1:
+        raise adapter.provider_error(exc) from exc
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+        raise adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API) from exc
+    raise adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API) from exc
+
+
 async def run_platform_non_stream(
     *,
     adapter: FormatAdapter[ResultT, Any],
@@ -1724,6 +1743,20 @@ async def run_platform_non_stream(
             on_success=_on_attempt_success,
             max_tool_iterations=tool_ctx.max_tool_iterations,
         )
+    except SandboxNotReachableError as exc:
+        # The sandbox is part of the gateway's own infra, not the LLM
+        # provider; a distinct status stops operators chasing a "provider
+        # outage" that is actually the sandbox container being down. 502
+        # keeps "upstream dependency failed" semantics. Runs through the
+        # inline flush below because the error response drops the queued
+        # BackgroundTasks for any earlier attempts' reports.
+        logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
+        await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
+        raise adapter.error(502, SANDBOX_UNREACHABLE_DETAIL, ErrorKind.API) from exc
+    except WebSearchNotReachableError as exc:
+        logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
+        await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
+        raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     except HTTPException:
         # An error response drops the queued BackgroundTasks, so send the
         # per-attempt error reports inline before propagating. The background
@@ -1741,15 +1774,17 @@ async def run_standalone_non_stream(
     ctx: RequestContext,
     tool_ctx: ToolContext,
     call_kwargs: dict[str, Any],
+    response: Response,
     provider: Any,
     model: str,
     display_model: str | None = None,
 ) -> ResultT:
     """Standalone-mode non-streaming dispatch with reservation settlement.
 
-    Success writes the usage log (per the adapter's no-usage policy) and
-    reconciles the reservation against actual cost; every failure path refunds
-    the reservation before mapping the error to the format's wire envelope.
+    Success applies the rate-limit headers to ``response``, writes the usage
+    log (per the adapter's no-usage policy), and reconciles the reservation
+    against actual cost; every failure path refunds the reservation before
+    mapping the error to the format's wire envelope.
 
     ``display_model`` (a configured alias) relabels the result's ``model`` field
     before returning, so the underlying provider/model stays hidden; billing and
@@ -1757,6 +1792,9 @@ async def run_standalone_non_stream(
     """
     try:
         result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
+        if ctx.rate_limit_info:
+            for key, value in rate_limit_headers(ctx.rate_limit_info).items():
+                response.headers[key] = value
         if ctx.db is not None:
             usage_data = adapter.extract_usage(result)
             actual_cost: float | None = None

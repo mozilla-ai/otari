@@ -468,11 +468,11 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Single-attempt tool-loop streaming in hybrid mode must honor the
-    platform contract: X-Correlation-ID + X-Otari-Request-ID headers + usage
-    report via _report_platform_usage on complete. Regression test for the
-    issue where ``_stream_responses`` was the standalone helper and silently
-    dropped the platform metadata when invoked for platform + tool_loop.
+    """Tool-loop streaming in hybrid mode must honor the platform contract:
+    X-Correlation-ID + X-Otari-Request-ID headers + usage report via
+    _report_platform_usage on complete. Regression test for the issue where
+    ``_stream_responses`` was the standalone helper and silently dropped the
+    platform metadata when invoked for platform + tool_loop.
     """
     usage_reports: list[dict[str, Any]] = []
 

@@ -723,9 +723,9 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Single-attempt tool-loop streaming in hybrid mode must still honor
-    the platform contract: X-Correlation-ID + X-Otari-Request-ID headers,
-    and usage reported back via _report_platform_usage on stream complete.
+    """Tool-loop streaming in hybrid mode must honor the platform contract:
+    X-Correlation-ID + X-Otari-Request-ID headers, and usage reported back
+    via _report_platform_usage on stream complete.
 
     Regression test for the issue where ``_stream_messages`` was the
     standalone helper and silently dropped the platform metadata when
@@ -806,9 +806,8 @@ def test_hybrid_mode_tool_loop_streaming_forwards_session_label(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The streaming success closure (``build_streaming_response._on_complete``)
-    on the ``run_single_attempt_stream`` hybrid path (used by messages/responses
-    for tool-loop streaming, which chat does not take) must carry the caller's
-    session_label onto the usage report."""
+    on the hybrid tool-loop streaming path (now ``run_streaming_with_fallback``,
+    same as chat) must carry the caller's session_label onto the usage report."""
     usage_reports: list[dict[str, Any]] = []
 
     async def fake_post_platform(
