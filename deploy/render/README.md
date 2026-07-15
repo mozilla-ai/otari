@@ -95,11 +95,7 @@ For a longer-lived deployment, use `OTARI_MASTER_KEY` to create a named API key,
 
 ### Otari Gateway Tester
 
-For a browser chat UI against the gateway (instead of `curl`), deploy the companion [Otari Tester](https://github.com/ojusave/otari-tester) app on Render:
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ojusave/otari-tester)
-
-Point `OTARI_BASE_URL` at your Otari service URL and paste the bootstrap `gw-…` key from the Otari logs (or set `OTARI_API_KEY` in the tester Blueprint). The UI loads models from `GET /v1/models` when the gateway catalog is available.
+For a browser chat UI against the gateway (instead of `curl`), use the companion [Otari Tester](https://github.com/ojusave/otari-tester). Point it at your Otari service URL and paste the bootstrap `gw-…` key from the Otari logs. The UI loads models from `GET /v1/models` when the gateway catalog is available.
 
 ## Upgrade for production
 
