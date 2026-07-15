@@ -143,3 +143,31 @@ async def test_backend_error_fails_open(monkeypatch: Any) -> None:
     monkeypatch.setattr(composite_hook, "_get_backend", lambda cfg: _Boom())
     result = await _serve(_request())
     assert result is None
+
+
+def test_sanitize_t1_messages_strips_unroundtrippable_blocks() -> None:
+    # Thinking, server_tool_use, and web-search result blocks 502 the self-call;
+    # keep only the plain conversational flow (text/tool_use/tool_result/image).
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "go"}]},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "thinking", "thinking": "hmm"},
+                {"type": "server_tool_use", "name": "web_search", "input": {}},
+                {"type": "tool_use", "id": "t1", "name": "gmail_list_emails", "input": {}},
+            ],
+        },
+        {"role": "user", "content": [{"type": "web_search_tool_result", "content": []}]},
+        {"role": "assistant", "content": [{"type": "thinking", "thinking": "only-thinking"}]},
+    ]
+    out = composite_hook._sanitize_t1_messages(messages)
+    # assistant turn keeps only its tool_use; the thinking-only turn and the
+    # web-search-result-only turn are dropped entirely.
+    assert [m["role"] for m in out] == ["user", "assistant"]
+    assert out[1]["content"] == [{"type": "tool_use", "id": "t1", "name": "gmail_list_emails", "input": {}}]
+
+
+def test_sanitize_t1_messages_passes_through_string_content() -> None:
+    messages = [{"role": "user", "content": "plain string"}]
+    assert composite_hook._sanitize_t1_messages(messages) == messages

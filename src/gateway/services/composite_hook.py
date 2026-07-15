@@ -88,6 +88,39 @@ def _sanitize_t1_tools(tools: Any) -> list[dict[str, Any]] | None:
     return kept or None
 
 
+_T1_KEEP_BLOCK_TYPES = {"text", "tool_use", "tool_result", "image"}
+
+
+def _sanitize_t1_messages(messages: Any) -> list[dict[str, Any]]:
+    """Strip content blocks the cheap-model self-call cannot round-trip.
+
+    The captured conversation can carry blocks produced by the frontier's own
+    tooling: thinking / redacted_thinking, server_tool_use, and web-search or
+    code-execution result blocks. The gateway's self ``/v1/messages`` path does
+    not serialize those, so re-sending them verbatim 502s the T1 call. A
+    below-frontier judgment only needs the plain conversational flow, so keep
+    text/tool_use/tool_result/image blocks and drop the rest; a message left with
+    no content (e.g. an assistant turn that was only thinking) is dropped, which
+    keeps tool_use/tool_result pairing intact.
+    """
+    if not isinstance(messages, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        content = m.get("content")
+        if not isinstance(content, list):
+            out.append(m)
+            continue
+        kept = [
+            b for b in content if not isinstance(b, dict) or b.get("type") in _T1_KEEP_BLOCK_TYPES
+        ]
+        if kept:
+            out.append({**m, "content": kept})
+    return out
+
+
 def _get_backend(config: Any) -> CompositeBackend:
     global _backend
     if _backend is None:
@@ -223,7 +256,7 @@ async def _serve_t1(
     payload: dict[str, Any] = {
         "model": cheap,
         "max_tokens": int(getattr(request, "max_tokens", 0) or 1024),
-        "messages": request.messages,
+        "messages": _sanitize_t1_messages(request.messages),
     }
     system = getattr(request, "system", None)
     if system:
