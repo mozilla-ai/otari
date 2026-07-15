@@ -137,6 +137,28 @@ def db_session(test_config: GatewayConfig) -> Generator[Session]:
         engine.dispose()
 
 
+@pytest.fixture
+def db_session_factory(test_config: GatewayConfig) -> Generator[Callable[[], Session]]:
+    """Hand out fresh standalone DB sessions for verifying state outside the client.
+
+    Some tests read DB state at several points around a request, or poll while a
+    background writer commits usage logs; each read needs its own session so it
+    observes the latest committed rows rather than a cached identity map. This
+    owns one engine for the test and centralizes the boilerplate those tests used
+    to hand-roll (create_engine / sessionmaker / dispose) at each call site.
+    """
+    engine = create_engine(test_config.database_url, pool_pre_ping=True)
+    factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def make_session() -> Session:
+        return factory()
+
+    try:
+        yield make_session
+    finally:
+        engine.dispose()
+
+
 @pytest.fixture(scope="session")
 def test_config(postgres_url: str) -> GatewayConfig:
     """Create a test configuration."""

@@ -12,15 +12,14 @@ guard so all three endpoints stay consistent.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session
 
-from gateway.core.config import GatewayConfig
 from gateway.models.entities import UsageLog, User
 
 from .conftest import MODEL_NAME
@@ -45,41 +44,33 @@ def _configure_pricing(client: TestClient, headers: dict[str, str], model_key: s
     assert res.status_code == 200
 
 
-def _user_state(test_config: GatewayConfig, user_id: str) -> tuple[float, float]:
-    engine = create_engine(test_config.database_url)
-    session_local = sessionmaker(bind=engine)
-    db = session_local()
+def _user_state(make_session: Callable[[], Session], user_id: str) -> tuple[float, float]:
+    db = make_session()
     try:
         user = db.query(User).filter(User.user_id == user_id).first()
         assert user is not None
         return float(user.spend), float(user.reserved)
     finally:
         db.close()
-        engine.dispose()
 
 
-def _poll_usage_logs(test_config: GatewayConfig, user_id: str, *, timeout: float = 3.0) -> list[str]:
-    engine = create_engine(test_config.database_url)
-    session_local = sessionmaker(bind=engine)
+def _poll_usage_logs(make_session: Callable[[], Session], user_id: str, *, timeout: float = 3.0) -> list[str]:
     deadline = time.time() + timeout
-    try:
-        while True:
-            db = session_local()
-            try:
-                rows = db.query(UsageLog).filter(UsageLog.user_id == user_id).all()
-                if rows or time.time() > deadline:
-                    return [r.status for r in rows]
-            finally:
-                db.close()
-            time.sleep(0.1)
-    finally:
-        engine.dispose()
+    while True:
+        db = make_session()
+        try:
+            rows = db.query(UsageLog).filter(UsageLog.user_id == user_id).all()
+            if rows or time.time() > deadline:
+                return [r.status for r in rows]
+        finally:
+            db.close()
+        time.sleep(0.1)
 
 
 def test_chat_streaming_precommit_error_refunds(
     client: TestClient,
     master_key_header: dict[str, str],
-    test_config: GatewayConfig,
+    db_session_factory: Callable[[], Session],
 ) -> None:
     user_id = "precommit-chat"
     _seed_budgeted_user(client, master_key_header, user_id)
@@ -101,16 +92,16 @@ def test_chat_streaming_precommit_error_refunds(
         )
 
     assert response.status_code == 502
-    spend, reserved = _user_state(test_config, user_id)
+    spend, reserved = _user_state(db_session_factory, user_id)
     assert spend == pytest.approx(0.0)
     assert reserved == pytest.approx(0.0)
-    assert _poll_usage_logs(test_config, user_id) == ["error"]
+    assert _poll_usage_logs(db_session_factory, user_id) == ["error"]
 
 
 def test_messages_streaming_precommit_error_refunds(
     client: TestClient,
     master_key_header: dict[str, str],
-    test_config: GatewayConfig,
+    db_session_factory: Callable[[], Session],
 ) -> None:
     user_id = "precommit-messages"
     _seed_budgeted_user(client, master_key_header, user_id)
@@ -133,16 +124,16 @@ def test_messages_streaming_precommit_error_refunds(
         )
 
     assert response.status_code == 500
-    spend, reserved = _user_state(test_config, user_id)
+    spend, reserved = _user_state(db_session_factory, user_id)
     assert spend == pytest.approx(0.0)
     assert reserved == pytest.approx(0.0)  # hold refunded (was leaked before the fix)
-    assert _poll_usage_logs(test_config, user_id) == ["error"]
+    assert _poll_usage_logs(db_session_factory, user_id) == ["error"]
 
 
 def test_responses_streaming_precommit_error_refunds(
     client: TestClient,
     master_key_header: dict[str, str],
-    test_config: GatewayConfig,
+    db_session_factory: Callable[[], Session],
 ) -> None:
     user_id = "precommit-responses"
     _seed_budgeted_user(client, master_key_header, user_id)
@@ -161,7 +152,7 @@ def test_responses_streaming_precommit_error_refunds(
         )
 
     assert response.status_code == 502
-    spend, reserved = _user_state(test_config, user_id)
+    spend, reserved = _user_state(db_session_factory, user_id)
     assert spend == pytest.approx(0.0)
     assert reserved == pytest.approx(0.0)  # hold refunded (was leaked before the fix)
-    assert _poll_usage_logs(test_config, user_id) == ["error"]
+    assert _poll_usage_logs(db_session_factory, user_id) == ["error"]

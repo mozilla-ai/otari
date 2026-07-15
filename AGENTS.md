@@ -87,8 +87,11 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 ### Test Environment Notes
 - `pytest.ini` sets:
   - `timeout = 120`
-  - `reruns = 5`
-  - `reruns_delay = 10`
+  - There is no global rerun policy. A blanket `reruns` would let a test that
+    passes one time in several count as green, hiding flakiness and ordering
+    bugs suite-wide. Mark a genuinely flaky test with
+    `@pytest.mark.flaky(reruns=...)` (from `pytest-rerunfailures`) and say why,
+    rather than reintroducing a global retry.
 - Integration tests can use:
   - `TEST_DATABASE_URL` (if provided), or
   - Testcontainers PostgreSQL (`postgres:17`) if not provided.
