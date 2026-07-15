@@ -19,6 +19,25 @@ When turning that setup into a longer-lived deployment:
 - Add `pricing` entries for every model you want budget enforcement on.
 - Point container health checks at `/health` and `/health/readiness`.
 
+## Deploy on Render
+
+This repo contains a Render Blueprint ([`render.yaml`](../deploy/render/render.yaml)), an infrastructure-as-code file that defines your stack.
+
+It deploys the published Otari image (`docker.io/mzdotai/otari:0.2.0`) as a free web service alongside a free Render Postgres 16 database.
+
+- On Apply, provide whichever provider credentials you use. Render provisions the web service and Postgres, injects the database’s internal connection string as `OTARI_DATABASE_URL`, generates `OTARI_MASTER_KEY`, sets `PORT` and `OTARI_PORT` to `8000`, enables fail-closed bundled pricing (`OTARI_REQUIRE_PRICING` and `OTARI_DEFAULT_PRICING`), and checks `/health/readiness`.
+- On Otari startup, the app runs database migrations and creates the bootstrap API key (printed once in the service logs).
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&blueprintPath=deploy/render/render.yaml)
+
+If you create the Blueprint from the Dashboard (**New → Blueprint**) instead of the button, set **Blueprint Path** to `deploy/render/render.yaml`.
+
+**Note:** Free instances are intended for evaluation. The web service spins down after 15 minutes without traffic, and the database is limited to 1 GB, expires after 30 days, and has no backups.
+
+The Blueprint, upgrade instructions, and full env table are available at [`deploy/render/`](https://github.com/mozilla-ai/otari/tree/main/deploy/render).
+
+This Blueprint deploys standalone mode with a local Postgres database. Render also has a hybrid-mode Blueprint connected to otari.ai — see [Hybrid mode](https://github.com/mozilla-ai/otari/tree/main/deploy/render#hybrid-mode) in the Render docs, or [Connect to otari.ai](#connect-to-otariai) below for the general Docker instructions.
+
 ## Deploy on Railway
 
 For a hosted standalone deployment without local setup, use the one-click
