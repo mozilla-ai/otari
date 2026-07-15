@@ -19,9 +19,26 @@ browser tab's session storage.
 ```bash
 cd web
 npm install
-npm run dev        # Vite dev server (proxy/point it at a running gateway)
+npm run dev        # Vite dev server on :5173, proxying the API to :8000
 npm run typecheck
 npm test
+```
+
+`npm run dev` serves only the SPA, so it proxies `/v1` and `/health` to a
+gateway at `http://localhost:8000` (see `vite.config.ts`). Start one first, for
+example `uv run otari serve --config config.yml`, then sign in with that
+gateway's master key. To develop against a gateway running elsewhere:
+
+```bash
+OTARI_DEV_API=https://your-app.up.railway.app npm run dev
+```
+
+If the source is edited through a bind mount (an agent working in a container,
+say) and hot reload misses changes, the host watcher may not see the writes as
+filesystem events. Fall back to polling:
+
+```bash
+VITE_USE_POLLING=1 npm run dev
 ```
 
 ## Build
