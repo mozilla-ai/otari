@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
@@ -609,6 +609,21 @@ async def resolve_request_context(
                 post_chars, vision_usage = await normalize_messages(
                     user_id, gate_impl, gate_model, gate_instance
                 )
+                # Bill the vision describe side-call before the reservation
+                # top-up: its cost is already incurred by normalize_messages,
+                # so a 402 from the top-up below must not skip it (the refund
+                # in the except path releases only the main reservation; the
+                # vision spend is committed independently and stays billed).
+                if vision_usage is not None:
+                    await _bill_vision_side_call(
+                        db=db,
+                        log_writer=log_writer,
+                        config=config,
+                        api_key_id=api_key_id,
+                        user_id=user_id,
+                        endpoint=adapter.endpoint,
+                        usage=vision_usage,
+                    )
                 post_estimate = estimate_cost(
                     gate_pricing,
                     prompt_chars=post_chars,
@@ -622,16 +637,6 @@ async def resolve_request_context(
                     model=model,
                     strategy=config.budget_strategy,
                 )
-                if vision_usage is not None:
-                    await _bill_vision_side_call(
-                        db=db,
-                        log_writer=log_writer,
-                        config=config,
-                        api_key_id=api_key_id,
-                        user_id=user_id,
-                        endpoint=adapter.endpoint,
-                        usage=vision_usage,
-                    )
             except HTTPException:
                 await refund_reservation(db, reservation)
                 raise
@@ -1158,6 +1163,36 @@ async def open_stream(
 # Streaming settlement (the single copy of the callback bundle)
 # ---------------------------------------------------------------------------
 
+# Strong references to in-flight fire-and-forget usage-report tasks. Without
+# these, asyncio only holds a weak reference and a scheduled report can be
+# garbage collected before it runs; a done-callback discards each task once
+# it finishes.
+_USAGE_REPORT_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _schedule_usage_report(coro: Coroutine[Any, Any, None], correlation_id: str) -> None:
+    """Run a platform usage report in the background without losing it.
+
+    Keeps the task strongly referenced until it completes and logs a failed
+    report instead of letting the exception vanish with the task object.
+    """
+    task = asyncio.create_task(coro)
+    _USAGE_REPORT_TASKS.add(task)
+
+    def _finalize(finished: asyncio.Task[None]) -> None:
+        _USAGE_REPORT_TASKS.discard(finished)
+        if finished.cancelled():
+            return
+        exc = finished.exception()
+        if exc is not None:
+            logger.warning(
+                "Background platform usage report failed correlation_id=%s: %s",
+                correlation_id,
+                exc,
+            )
+
+    task.add_done_callback(_finalize)
+
 
 def build_streaming_response(
     *,
@@ -1196,14 +1231,15 @@ def build_streaming_response(
     async def _on_complete(usage_data: CompletionUsage) -> None:
         if platform_active:
             assert platform_correlation_id is not None
-            asyncio.create_task(
+            _schedule_usage_report(
                 _report_platform_usage(
                     config=config,
                     correlation_id=platform_correlation_id,
                     outcome="success",
                     usage=usage_data,
                     session_label=session_label,
-                )
+                ),
+                platform_correlation_id,
             )
             return
         if db is None or log_writer is None:
@@ -1257,14 +1293,15 @@ def build_streaming_response(
     async def _on_error(error: str) -> None:
         if platform_active:
             assert platform_correlation_id is not None
-            asyncio.create_task(
+            _schedule_usage_report(
                 _report_platform_usage(
                     config=config,
                     correlation_id=platform_correlation_id,
                     outcome="error",
                     usage=None,
                     session_label=session_label,
-                )
+                ),
+                platform_correlation_id,
             )
             return
         if db is None or log_writer is None:
