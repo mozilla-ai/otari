@@ -38,6 +38,8 @@ The Blueprint, upgrade instructions, and full env table are available at [`deplo
 
 This Blueprint deploys standalone mode with a local Postgres database. Render also has a hybrid-mode Blueprint connected to otari.ai — see [Hybrid mode](https://github.com/mozilla-ai/otari/tree/main/deploy/render#hybrid-mode) in the Render docs, or [Connect to otari.ai](#connect-to-otariai) below for the general Docker instructions.
 
+To smoke-test the deployed gateway from a browser, use the [Otari Gateway Tester](https://github.com/ojusave/otari-tester) (documented under [Verify → Otari Gateway Tester](https://github.com/mozilla-ai/otari/blob/main/deploy/render/README.md#otari-gateway-tester)).
+
 ## Deploy on Railway
 
 For a hosted standalone deployment without local setup, use the one-click

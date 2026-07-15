@@ -93,6 +93,14 @@ Use a `provider:model` value that matches a credential you supplied. Clients sho
 
 For a longer-lived deployment, use `OTARI_MASTER_KEY` to create a named API key, then revoke the bootstrap key through the key-management API.
 
+### Otari Gateway Tester
+
+For a browser chat UI against the gateway (instead of `curl`), deploy the companion [Otari Tester](https://github.com/ojusave/otari-tester) app on Render:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/ojusave/otari-tester)
+
+Point `OTARI_BASE_URL` at your Otari service URL and paste the bootstrap `gw-…` key from the Otari logs (or set `OTARI_API_KEY` in the tester Blueprint). The UI loads models from `GET /v1/models` when the gateway catalog is available.
+
 ## Upgrade for production
 
 Before the free database expires, change the web-service plan to `starter` and the database plan to `basic-256mb` or higher. Paid web services do not spin down when idle, and paid Render Postgres adds continuous backups and point-in-time recovery.
