@@ -1,6 +1,73 @@
 {
   "components": {
     "schemas": {
+      "AliasRequest": {
+        "description": "Request to create or update an alias.",
+        "properties": {
+          "name": {
+            "description": "Display name callers use as the model, e.g. 'fast-model'.",
+            "title": "Name",
+            "type": "string"
+          },
+          "target": {
+            "description": "Selector the alias resolves to, as 'provider:model' or 'instance:model'.",
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "target"
+        ],
+        "title": "AliasRequest",
+        "type": "object"
+      },
+      "AliasResponse": {
+        "description": "A model alias and where it is defined.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "target",
+          "source"
+        ],
+        "title": "AliasResponse",
+        "type": "object"
+      },
       "AudioSpeechRequest": {
         "description": "OpenAI-compatible audio speech (TTS) request.\n\nThe speech fields are derived from any-llm's ``AudioSpeechParams`` (see\n``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. ``user`` is gateway-only (billing / auth scoping); it is not an\nany-llm param and is stripped before the request is forwarded.",
         "properties": {
@@ -2982,6 +3049,123 @@
         ]
       }
     },
+    "/v1/aliases": {
+      "get": {
+        "description": "List every alias in force, from config.yml and from storage.",
+        "operationId": "list_aliases_v1_aliases_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AliasResponse"
+                  },
+                  "title": "Response List Aliases V1 Aliases Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List Aliases",
+        "tags": [
+          "aliases"
+        ]
+      },
+      "post": {
+        "description": "Create or update a stored alias.",
+        "operationId": "set_alias_v1_aliases_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AliasRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AliasResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Alias",
+        "tags": [
+          "aliases"
+        ]
+      }
+    },
+    "/v1/aliases/{name}": {
+      "delete": {
+        "description": "Delete a stored alias.",
+        "operationId": "delete_alias_v1_aliases__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Alias",
+        "tags": [
+          "aliases"
+        ]
+      }
+    },
     "/v1/audio/speech": {
       "post": {
         "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
@@ -4677,7 +4861,7 @@
         ]
       },
       "post": {
-        "description": "Set or update pricing for a model.",
+        "description": "Set or update pricing for a model.\n\nRejects an alias: pricing, budgets, and usage all key on the resolved\ntarget, so a row stored under an alias name would never be read.",
         "operationId": "set_pricing_v1_pricing_post",
         "requestBody": {
           "content": {

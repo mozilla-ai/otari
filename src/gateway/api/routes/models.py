@@ -13,6 +13,7 @@ from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing
+from gateway.services.alias_service import effective_aliases
 from gateway.services.model_discovery_service import discover_all_models, get_model_cache
 from gateway.services.provider_kwargs import normalize_pricing_key
 
@@ -64,14 +65,15 @@ def _model_from_pricing(pricing: ModelPricing) -> ModelObject:
     )
 
 
-def _alias_model(config: GatewayConfig, alias: str, pricing_lookup: dict[str, ModelPricing]) -> ModelObject:
-    """Build a ModelObject for a configured alias.
+def _alias_model(
+    config: GatewayConfig, alias: str, target: str, pricing_lookup: dict[str, ModelPricing]
+) -> ModelObject:
+    """Build a ModelObject for an alias, from config.yml or from storage.
 
     The alias id is what the caller sees; pricing is looked up from the resolved
     target's canonical key so an alias shows the real model's price without
     revealing the provider/model behind it.
     """
-    target = config.aliases[alias]
     pricing = pricing_lookup.get(normalize_pricing_key(config, target))
     return ModelObject(
         id=alias,
@@ -86,9 +88,9 @@ def _alias_model(config: GatewayConfig, alias: str, pricing_lookup: dict[str, Mo
     )
 
 
-def _alias_target_keys(config: GatewayConfig) -> set[str]:
-    """Canonical pricing keys of every configured alias target."""
-    return {normalize_pricing_key(config, target) for target in config.aliases.values()}
+def _alias_target_keys(config: GatewayConfig, aliases: dict[str, str]) -> set[str]:
+    """Canonical pricing keys of every alias target."""
+    return {normalize_pricing_key(config, target) for target in aliases.values()}
 
 
 def _pricing_key_candidates(config: GatewayConfig, target: str) -> list[str]:
@@ -159,6 +161,9 @@ async def list_models(
     # would be withheld from the listing by phase 2 yet never match its alias, so
     # its price would show nowhere.
     pricing_lookup = _normalized_pricing_lookup(config, pricing_map)
+    # Read once: phase 2 withholds these targets and phase 3 lists the names, and
+    # the two must agree even if a write lands between them.
+    aliases = effective_aliases(config)
 
     merged: dict[str, ModelObject] = {}
 
@@ -190,18 +195,19 @@ async def list_models(
     # forces a pricing entry for it, and publishing that entry here would expose
     # the very name the alias exists to hide. Whether real models are listed is
     # governed by ``model_discovery`` (phase 1), never by pricing config.
-    alias_targets = _alias_target_keys(config)
+    alias_targets = _alias_target_keys(config, aliases)
     for model_key, pricing in pricing_map.items():
         if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
             continue
         merged[model_key] = _model_from_pricing(pricing)
 
-    # Phase 3: configured aliases. An alias is a display name, not a provider, so
-    # it is only listed for the unfiltered listing; a ``?provider=`` filter asks
-    # for one provider's real models and must not leak the alias mapping.
+    # Phase 3: aliases, from config.yml and from storage alike. An alias is a
+    # display name, not a provider, so it is only listed for the unfiltered
+    # listing; a ``?provider=`` filter asks for one provider's real models and
+    # must not leak the alias mapping.
     if provider is None:
-        for alias in config.aliases:
-            merged[alias] = _alias_model(config, alias, pricing_lookup)
+        for alias, target in aliases.items():
+            merged[alias] = _alias_model(config, alias, target, pricing_lookup)
 
     sorted_models = sorted(merged.values(), key=lambda m: m.id)
     return ModelListResponse(data=sorted_models)
@@ -214,14 +220,13 @@ async def get_model(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ModelObject:
     """Get details for a specific model."""
-    # A configured alias resolves to its own entry, with pricing read from the
-    # resolved target so the underlying provider/model stays hidden. Only the
-    # target's own rows are loaded rather than the whole pricing table.
-    if model_id in config.aliases:
-        pricing_map = await _get_pricing_map(
-            db, model_keys=_pricing_key_candidates(config, config.aliases[model_id])
-        )
-        return _alias_model(config, model_id, _normalized_pricing_lookup(config, pricing_map))
+    # An alias resolves to its own entry, with pricing read from the resolved
+    # target so the underlying provider/model stays hidden. Only the target's own
+    # rows are loaded rather than the whole pricing table.
+    alias_target = effective_aliases(config).get(model_id)
+    if alias_target is not None:
+        pricing_map = await _get_pricing_map(db, model_keys=_pricing_key_candidates(config, alias_target))
+        return _alias_model(config, model_id, alias_target, _normalized_pricing_lookup(config, pricing_map))
 
     # Check the pricing table first.
     stmt = (

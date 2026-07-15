@@ -4,6 +4,7 @@ import os
 import re
 import types
 import typing
+from collections.abc import Container
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -345,10 +346,10 @@ class GatewayConfig(BaseSettings):
         target = self.aliases.get(name)
         return target if isinstance(target, str) and target else None
 
-    def validate_aliases(self) -> None:
-        """Validate the ``aliases`` map at startup so misconfig fails fast.
+    def validate_alias(self, name: str, target: str, *, alias_names: Container[str] | None = None) -> None:
+        """Validate a single alias, raising ``ValueError`` with the reason.
 
-        Each alias must name a non-empty target selector with a usable
+        An alias must name a non-empty target selector with a usable
         ``instance``/``provider`` prefix; the prefix must resolve to a configured
         provider instance or a known any-llm implementation. An alias name must
         not contain a selector delimiter (``:`` or ``/``): alias lookup runs
@@ -356,44 +357,55 @@ class GatewayConfig(BaseSettings):
         requests for a real ``provider:model``. It must also not collide with a
         configured provider instance (that would be ambiguous), and its target
         must not itself be an alias (no chaining for now).
+
+        ``alias_names`` is the set of names that count as aliases for the
+        chaining check, defaulting to the configured ones. Callers that also
+        store aliases elsewhere (the runtime ``model_aliases`` table) pass the
+        union, so chaining is rejected no matter which side each alias came from.
         """
+        known_aliases: Container[str] = self.aliases if alias_names is None else alias_names
+
+        if not name:
+            msg = "alias name must not be empty."
+            raise ValueError(msg)
+        if ":" in name or "/" in name:
+            msg = f"alias name '{name}' must not contain ':' or '/' (it would shadow a real model selector)."
+            raise ValueError(msg)
+        if name in self.providers:
+            msg = f"alias '{name}' collides with a configured provider instance name."
+            raise ValueError(msg)
+        if not isinstance(target, str) or not target:
+            msg = f"aliases.{name} must be a non-empty target selector string."
+            raise ValueError(msg)
+        colon, slash = target.find(":"), target.find("/")
+        cut = colon if colon != -1 and (slash == -1 or colon < slash) else slash
+        if cut <= 0 or cut == len(target) - 1:
+            msg = f"aliases.{name} target '{target}' must be of the form 'instance:model' or 'provider:model'."
+            raise ValueError(msg)
+        prefix = target[:cut]
+        if prefix in known_aliases:
+            msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
+            raise ValueError(msg)
+        if prefix in self.providers:
+            return
+        # No PROVIDER_TYPE_ALIASES mapping here: that normalizes an instance's
+        # declared provider_type, not a selector prefix. Request-time routing
+        # splits the selector through any-llm, which knows no such mapping, so
+        # accepting "openai-compatible:model" would pass startup and then fail
+        # on the first request.
+        try:
+            LLMProvider(prefix)
+        except ValueError as exc:
+            msg = (
+                f"aliases.{name} target '{target}' prefix '{prefix}' is neither a configured "
+                "provider instance nor a known provider implementation."
+            )
+            raise ValueError(msg) from exc
+
+    def validate_aliases(self) -> None:
+        """Validate the ``aliases`` map at startup so misconfig fails fast."""
         for name, target in self.aliases.items():
-            if not name:
-                msg = "alias name must not be empty."
-                raise ValueError(msg)
-            if ":" in name or "/" in name:
-                msg = f"alias name '{name}' must not contain ':' or '/' (it would shadow a real model selector)."
-                raise ValueError(msg)
-            if name in self.providers:
-                msg = f"alias '{name}' collides with a configured provider instance name."
-                raise ValueError(msg)
-            if not isinstance(target, str) or not target:
-                msg = f"aliases.{name} must be a non-empty target selector string."
-                raise ValueError(msg)
-            colon, slash = target.find(":"), target.find("/")
-            cut = colon if colon != -1 and (slash == -1 or colon < slash) else slash
-            if cut <= 0 or cut == len(target) - 1:
-                msg = f"aliases.{name} target '{target}' must be of the form 'instance:model' or 'provider:model'."
-                raise ValueError(msg)
-            prefix = target[:cut]
-            if prefix in self.aliases:
-                msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
-                raise ValueError(msg)
-            if prefix in self.providers:
-                continue
-            # No PROVIDER_TYPE_ALIASES mapping here: that normalizes an instance's
-            # declared provider_type, not a selector prefix. Request-time routing
-            # splits the selector through any-llm, which knows no such mapping, so
-            # accepting "openai-compatible:model" would pass startup and then fail
-            # on the first request.
-            try:
-                LLMProvider(prefix)
-            except ValueError as exc:
-                msg = (
-                    f"aliases.{name} target '{target}' prefix '{prefix}' is neither a configured "
-                    "provider instance nor a known provider implementation."
-                )
-                raise ValueError(msg) from exc
+            self.validate_alias(name, target)
 
     def validate_provider_instances(self) -> None:
         """Validate per-instance ``provider_type`` / ``models`` declarations.

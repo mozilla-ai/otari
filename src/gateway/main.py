@@ -1,5 +1,6 @@
+import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, Callable
 
 from fastapi import FastAPI, Request, Response
@@ -14,6 +15,7 @@ from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayC
 from gateway.core.database import create_session, init_db
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
+from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
@@ -69,6 +71,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         configure_default_pricing(config.default_pricing)
         log_writer: LogWriter
+        alias_refresher: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
@@ -77,8 +80,13 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 await bootstrap_first_api_key(config, session)
                 await initialize_pricing_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
+                await load_aliases_at_startup(session)
             log_writer = create_log_writer(config.log_writer_strategy)
             app.state.file_store = build_file_store(config)
+            # Alias resolution is synchronous and reads a cache, so something has
+            # to reload it. A write refreshes its own worker; this is what makes
+            # every other worker and replica catch up.
+            alias_refresher = asyncio.create_task(run_alias_refresher())
 
         await log_writer.start()
         app.state.log_writer = log_writer
@@ -86,6 +94,11 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         try:
             yield
         finally:
+            if alias_refresher is not None:
+                alias_refresher.cancel()
+                with suppress(asyncio.CancelledError):
+                    await alias_refresher
+                reset_alias_cache()
             await log_writer.stop()
 
     return lifespan

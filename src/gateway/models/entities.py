@@ -134,6 +134,34 @@ class User(Base):
         }
 
 
+class ModelAlias(Base):
+    """A display name that resolves to a real model selector.
+
+    The runtime counterpart of the ``aliases:`` block in config.yml: same
+    meaning, but writable through the API. Pricing, budgets, and usage all key
+    on the resolved target, so nothing here is billed against ``name``.
+    """
+
+    __tablename__ = "model_aliases"
+
+    name: Mapped[str] = mapped_column(primary_key=True)
+    target: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "target": self.target,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class ModelPricing(Base):
     """Model pricing configuration."""
 

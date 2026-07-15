@@ -180,8 +180,8 @@ def test_alias_target_keys_are_canonical() -> None:
         providers={"anthropic": {"api_key": "sk-ant"}},
         aliases={"myopusmodel": "anthropic:claude-opus-4"},
     )
-    assert _alias_target_keys(config) == {"anthropic:claude-opus-4"}
-    assert normalize_pricing_key(config, "anthropic/claude-opus-4") in _alias_target_keys(config)
+    assert _alias_target_keys(config, config.aliases) == {"anthropic:claude-opus-4"}
+    assert normalize_pricing_key(config, "anthropic/claude-opus-4") in _alias_target_keys(config, config.aliases)
 
 
 def test_relabel_top_level_model() -> None:
