@@ -25,6 +25,13 @@ _SYNC_DATABASE_URL: str | None = None
 # "database is locked", in milliseconds.
 _SQLITE_BUSY_TIMEOUT_MS = 5000
 
+# Async drivers this gateway can be pointed at, mapped to the sync driver
+# Alembic needs for the same database. Both are declared dependencies.
+_ASYNC_TO_SYNC_DRIVER = {
+    "sqlite+aiosqlite": "sqlite",
+    "postgresql+asyncpg": "postgresql",
+}
+
 
 def _to_async_url(database_url: str) -> tuple[str, dict[str, Any]]:
     """Convert a sync SQLAlchemy URL into its async equivalent."""
@@ -50,6 +57,25 @@ def _to_async_url(database_url: str) -> tuple[str, dict[str, Any]]:
         return database_url, connect_args
 
     return database_url, connect_args
+
+
+def to_sync_url(database_url: str) -> str:
+    """Convert an async SQLAlchemy URL into its sync equivalent.
+
+    Alembic builds a synchronous engine, so an async URL reaches it as a driver
+    it cannot run and fails with ``MissingGreenlet``. The app engine accepts
+    either form (see :func:`_to_async_url`), so the documented
+    ``sqlite+aiosqlite://`` URL must not be the one thing that breaks startup.
+
+    A URL that is already synchronous, or whose driver has no async counterpart
+    here, is returned unchanged.
+    """
+
+    url: URL = make_url(database_url)
+    sync_drivername = _ASYNC_TO_SYNC_DRIVER.get(url.drivername)
+    if sync_drivername is None:
+        return database_url
+    return url.set(drivername=sync_drivername).render_as_string(hide_password=False)
 
 
 def _run_migrations(database_url: str) -> None:
