@@ -358,26 +358,34 @@ class _Step:
 def _parse_plan(
     nodes: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any] | None] | None:
-    """Parse nodes as ``[(emit_tool_use | map)*, optional single trailing node]``.
+    """Parse nodes as ``[(emit_tool_use | map | branch)*, optional trailing node]``.
 
-    Returns ``(body_nodes, tail)`` for that supported shape, else ``None``. A
-    ``map`` node expands (at ``_flatten`` time) to one body iteration per element
-    of its runtime list, so a plan may now serve a variable-length loop, not just
-    a fixed sequence. Position is still the count of executed tool_use turns and
-    stays in lockstep with the flattened steps; any node type other than
-    emit/map may appear only once, as the trailing node (a terminal, a
-    sub_judgment, or an explicit punt). Anything else is unsupported and punts.
+    Returns ``(body_nodes, tail)``. A ``map`` node expands (at ``_flatten`` time)
+    to one body iteration per element of its runtime list, so a plan may serve a
+    variable-length loop, not just a fixed sequence. Position is the count of
+    executed tool_use turns and stays in lockstep with the flattened steps.
+
+    The body is the leading run of emit/map/branch nodes; the first node of any
+    other type becomes the tail (a terminal, a sub_judgment, or an explicit punt).
+    Nodes after that first tail are unreachable, a terminal or punt ends the run
+    and a sub_judgment is the hand-off boundary where a composite stops serving
+    (post-judgment mechanical work is not yet expressible in one plan), so they are
+    truncated rather than rejecting the whole plan. This makes a plan always
+    degrade to its maximal servable prefix instead of failing wholesale, which is
+    both safe (the tail hands off to the frontier) and strictly better for
+    coverage than punting the entire automation. Returns ``None`` only for a
+    non-list input, which the caller treats as an unsupported shape.
     """
+    if not isinstance(nodes, list):
+        return None
     body_nodes: list[dict[str, Any]] = []
     tail: dict[str, Any] | None = None
     for node in nodes:
+        if tail is not None:
+            break
         if node.get("type") in ("emit_tool_use", "map", "branch"):
-            if tail is not None:
-                return None
             body_nodes.append(node)
         else:
-            if tail is not None:
-                return None
             tail = node
     return body_nodes, tail
 

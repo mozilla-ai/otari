@@ -244,10 +244,11 @@ def test_verify_action_non_dict_verifier_is_safe() -> None:
     assert verify_action(action, None, {}, _user_turn()) is True
 
 
-def test_unsupported_mixed_shape_punts_not_reserves() -> None:
-    # emit, then a non-emit, then another emit is unsupported: serving it by
-    # indexing all nodes by executed-tool count would re-serve B after the model
-    # already emitted it during the sub_judgment turn. Must punt instead.
+def test_mixed_shape_degrades_to_servable_prefix_then_hands_off() -> None:
+    # emit, then a non-emit, then another emit: the plan degrades to its maximal
+    # servable prefix [A] with the sub_judgment as the hand-off boundary, and the
+    # trailing emit B (post-judgment mechanical work) is truncated, not expressed.
+    # This must never re-serve B by indexing all nodes by executed-tool count.
     plan = {
         "nodes": [
             {"type": "emit_tool_use", "tool": "A", "args": {}},
@@ -255,11 +256,17 @@ def test_unsupported_mixed_shape_punts_not_reserves() -> None:
             {"type": "emit_tool_use", "tool": "B", "args": {}},
         ]
     }
-    # Model already executed A then B.
-    messages = [_assistant_tool_use("A", "t1"), _tool_result("t1", {}), _assistant_tool_use("B", "t2")]
-    action = next_action(plan, messages)
+    # Turn 1 (nothing executed): serve the prefix step A, no model.
+    assert next_action(plan, []) == EmitToolUse(tool_name="A", tool_input={})
+    # Turn 2 (A executed): the boundary is a below-frontier judgment.
+    after_a = [_assistant_tool_use("A", "t1"), _tool_result("t1", {})]
+    assert isinstance(next_action(plan, after_a), SubJudgment)
+    # Turn 3 (A then B executed): the run is past the served prefix, so it punts to
+    # the frontier rather than re-serving B.
+    after_b = [*after_a, _assistant_tool_use("B", "t2")]
+    action = next_action(plan, after_b)
     assert isinstance(action, Punt)
-    assert action.reason == "unsupported_plan_shape"
+    assert action.reason == "out_of_envelope"
 
 
 def test_trailing_sub_judgment_after_emits_yields_subjudgment() -> None:

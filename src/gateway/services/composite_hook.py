@@ -31,7 +31,7 @@ from fastapi.responses import StreamingResponse
 
 from gateway.core.env import otari_env
 from gateway.services.composite_backend import CompositeBackend, build_composite_backend
-from gateway.services.composite_dispatch import Serve, ServeT1, decide
+from gateway.services.composite_dispatch import NoDispatch, Serve, ServeT1, decide
 from gateway.services.composite_interpreter import EmitTerminal, EmitToolUse
 from gateway.services.composite_key import derive_automation_key
 from gateway.services.composite_response import (
@@ -61,6 +61,31 @@ def t1_enabled() -> bool:
 def _t1_model(composite: dict[str, Any]) -> str:
     spec = composite.get("model_spec") or {}
     return str(spec.get("model") or otari_env("T1_MODEL", _DEFAULT_T1_MODEL))
+
+
+def _valid_t1_tool(tool: Any) -> bool:
+    """Whether a tool is safe to forward on the cheap-model judgment call.
+
+    The normal request path normalizes tools (``prepare_gateway_tools`` +
+    ``openai_to_anthropic_tools``) before dispatch; the T1 self-call sends them
+    raw, so a schema-less short-form tool (e.g. a bare ``code_execution`` with no
+    ``input_schema``) reaches the provider unnormalized and is rejected, failing
+    the whole judgment. Keep only tools the provider accepts as-is: a custom or
+    function tool that carries a schema, or a native server tool declared by
+    ``type``. A below-frontier judgment does not need the dropped ones.
+    """
+    if not isinstance(tool, dict):
+        return False
+    if any(isinstance(tool.get(k), dict) for k in ("input_schema", "parameters", "function")):
+        return True
+    return isinstance(tool.get("type"), str)
+
+
+def _sanitize_t1_tools(tools: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(tools, list):
+        return None
+    kept = [t for t in tools if _valid_t1_tool(t)]
+    return kept or None
 
 
 def _get_backend(config: Any) -> CompositeBackend:
@@ -113,6 +138,16 @@ async def try_serve_composite(
         )
         decision = decide(
             composites, request.messages, session_label=automation_key, tool_names=tool_names
+        )
+        logger.info(
+            "composite dispatch key=%s fetched=%d req_tools=%d executed=%d decision=%s%s",
+            automation_key,
+            len(composites),
+            len(tool_names or []),
+            len([b for m in request.messages if m.get("role") == "assistant" for b in (m.get("content") or [])
+                 if isinstance(b, dict) and b.get("type") == "tool_use"]),
+            type(decision).__name__,
+            f"({decision.reason})" if isinstance(decision, NoDispatch) else "",
         )
         if isinstance(decision, ServeT1):
             if not t1_enabled():
@@ -193,7 +228,7 @@ async def _serve_t1(
     system = getattr(request, "system", None)
     if system:
         payload["system"] = system
-    tools = getattr(request, "tools", None)
+    tools = _sanitize_t1_tools(getattr(request, "tools", None))
     if tools:
         payload["tools"] = tools
     headers = {
@@ -207,6 +242,13 @@ async def _serve_t1(
             resp = await client.post(f"{self_url}/v1/messages", json=payload, headers=headers)
         resp.raise_for_status()
         body = resp.json()
+    except httpx.HTTPStatusError as exc:
+        logger.warning(
+            "T1 cheap-model call failed (status=%s); falling through to the frontier: %s",
+            exc.response.status_code,
+            exc.response.text[:300],
+        )
+        return None
     except Exception:
         logger.warning("T1 cheap-model call failed; falling through to the frontier", exc_info=True)
         return None
