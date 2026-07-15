@@ -153,6 +153,86 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     ]
 
 
+def test_hybrid_mode_forwards_session_label_and_strips_it_upstream(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A request-body ``session_label`` reaches the platform usage report (for
+    cost attribution) but is stripped before the provider call."""
+    usage_reports: list[dict[str, Any]] = []
+    upstream_kwargs: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68",
+                    "fallback_enabled": False,
+                    "attempts": [
+                        {
+                            "attempt_id": "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68",
+                            "position": 0,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-platform-key",
+                            "api_base": "https://api.openai.com/v1",
+                            "managed": True,
+                        }
+                    ],
+                },
+            )
+
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        upstream_kwargs.append(kwargs)
+        return ChatCompletion(
+            id="chatcmpl-platform",
+            object="chat.completion",
+            created=1700000000,
+            model="gpt-4o-mini",
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="hello"),
+                    finish_reason="stop",
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=10, completion_tokens=7, total_tokens=17),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "session_label": "my-run-personas",
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    # Exactly one provider call and one usage report — pin the counts so a
+    # regression that double-reports or double-dispatches this single-attempt
+    # request is caught rather than masked by indexing the first entry.
+    assert len(upstream_kwargs) == 1
+    assert len(usage_reports) == 1
+    # The label rides the usage report ...
+    assert usage_reports[0]["session_label"] == "my-run-personas"
+    # ... but never leaks to the upstream provider call.
+    assert "session_label" not in upstream_kwargs[0]
+
+
 def test_hybrid_mode_accepts_legacy_resolve_shape(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -1348,3 +1428,197 @@ def test_hybrid_mode_streaming_multi_attempt_classifies_non_retryable_invalid_re
     }
     # Non-retryable: the fallback must short-circuit after the first attempt.
     assert len(calls) == 1
+
+
+class _FakeSandboxBackend:
+    """Minimal SandboxBackend duck-type that records the purpose_hint it was built
+    with and resolves the tool loop in a single round (no real sandbox call)."""
+
+    last_purpose_hint: str | None = None
+
+    def __init__(self, *, sandbox_url: str, purpose_hint: str | None = None, auth_token: str | None = None) -> None:
+        type(self).last_purpose_hint = purpose_hint
+
+    async def __aenter__(self) -> "_FakeSandboxBackend":
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+    @property
+    def openai_tools(self) -> list[dict[str, Any]]:
+        return [{"type": "function", "function": {"name": "code_execution", "description": "", "parameters": {}}}]
+
+    def owns_tool(self, name: str) -> bool:
+        return name == "code_execution"
+
+    def purpose_hints(self) -> list[tuple[str, str]]:
+        return []
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        return "ok"
+
+
+def _sandbox_loop_completion() -> ChatCompletion:
+    return ChatCompletion(
+        id="cmpl-sbx",
+        object="chat.completion",
+        created=0,
+        model="openai:gpt-4o-mini",
+        choices=[
+            Choice(finish_reason="stop", index=0, message=ChatCompletionMessage(role="assistant", content="done"))
+        ],
+        usage=CompletionUsage(prompt_tokens=3, completion_tokens=2, total_tokens=5),
+    )
+
+
+def test_platform_mode_sandbox_403_when_disabled(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An otari_code_execution request whose workspace has code execution disabled
+    is rejected with 403 before any provider call."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-disabled")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": False})
+        return httpx.Response(204)
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "code execution is not enabled for this workspace"}
+
+
+def test_platform_mode_sandbox_applies_workspace_default_purpose_hint(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When enabled and the request omits a purpose_hint, the workspace
+    default_purpose_hint is applied to the sandbox tool surface."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+    _FakeSandboxBackend.last_purpose_hint = None
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-default-hint")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": True, "default_purpose_hint": "workspace hint"})
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        return _sandbox_loop_completion()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert _FakeSandboxBackend.last_purpose_hint == "workspace hint"
+
+
+def test_platform_mode_sandbox_per_request_hint_wins(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A per-request purpose_hint overrides the workspace default."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+    _FakeSandboxBackend.last_purpose_hint = None
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-req-hint")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": True, "default_purpose_hint": "workspace hint"})
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        return _sandbox_loop_completion()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_code_execution", "purpose_hint": "request hint"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert _FakeSandboxBackend.last_purpose_hint == "request hint"
+
+
+def test_platform_mode_sandbox_applies_workspace_max_iterations_cap(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The workspace's resolved code-exec max_iterations caps the tool loop.
+    The request omits max_tool_iterations, so the workspace cap (2) binds over
+    the default (10) and reaches the loop unchanged."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+
+    captured: dict[str, int] = {}
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-max-iters")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": True, "max_iterations": 2})
+        return httpx.Response(204)
+
+    async def fake_mcp_tool_loop(**kwargs: Any) -> ChatCompletion:
+        captured["max_iterations"] = kwargs["max_iterations"]
+        return _sandbox_loop_completion()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
+    monkeypatch.setattr("gateway.api.routes.chat.mcp_tool_loop", fake_mcp_tool_loop)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert captured["max_iterations"] == 2

@@ -14,6 +14,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.model_labeling import relabel_model
 from gateway.models.entities import APIKey, UsageLog
 from gateway.rate_limit import check_rate_limit
 from gateway.services.budget_service import (
@@ -186,4 +187,6 @@ async def create_moderation(
         for key, value in rate_limit_headers(rate_limit_info).items():
             response.headers[key] = value
 
+    if resolved.alias is not None:
+        relabel_model(result, resolved.alias)
     return result

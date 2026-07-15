@@ -575,13 +575,14 @@ async def test_stream_passes_text_events_through_and_terminates(monkeypatch: pyt
 
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
 
-    types: list[str] = []
-    async for event in anthropic_tool_loop_stream(
-        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
-        pool=cast(Any, _FakePool(tool_names=[])),
-        max_iterations=3,
-    ):
-        types.append(event.type)
+    types = [
+        event.type
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+            pool=cast(Any, _FakePool(tool_names=[])),
+            max_iterations=3,
+        )
+    ]
     # All events forwarded — single-iteration path, terminal events included.
     assert types == [
         "message_start",
@@ -628,14 +629,15 @@ async def test_stream_runs_owned_tool_and_continues(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
 
     pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
-    terminal_types: list[str] = []
-    async for event in anthropic_tool_loop_stream(
-        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
-        pool=cast(Any, pool),
-        max_iterations=5,
-    ):
-        if event.type in {"message_delta", "message_stop"}:
-            terminal_types.append(event.type)
+    terminal_types = [
+        event.type
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
+        if event.type in {"message_delta", "message_stop"}
+    ]
     # Only the FINAL iteration's terminal events are forwarded. The intermediate
     # ``tool_use`` iteration's terminal events are dropped.
     assert terminal_types == ["message_delta", "message_stop"]
@@ -665,14 +667,15 @@ async def test_stream_forwards_terminal_when_model_emits_foreign_tool(monkeypatc
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
 
     pool = _FakePool(tool_names=["fetch_url"])  # doesn't own user_tool
-    terminal_types: list[str] = []
-    async for event in anthropic_tool_loop_stream(
-        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
-        pool=cast(Any, pool),
-        max_iterations=5,
-    ):
-        if event.type in {"message_delta", "message_stop"}:
-            terminal_types.append(event.type)
+    terminal_types = [
+        event.type
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
+        if event.type in {"message_delta", "message_stop"}
+    ]
     assert terminal_types == ["message_delta", "message_stop"]
     assert pool.calls == []
 

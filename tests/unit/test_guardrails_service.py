@@ -13,6 +13,7 @@ import pytest
 
 from gateway.models.guardrails import GuardrailConfig
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
+from gateway.services.url_safety import UnsafeURLError
 
 _URL = "http://anyguardrails:8000"
 
@@ -100,6 +101,21 @@ async def test_output_only_guardrail_is_skipped(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
+async def test_output_only_guardrail_url_is_still_ssrf_checked() -> None:
+    """An output-only guardrail is never *evaluated* (see the sibling test
+    above), but its `url` override must still be SSRF-checked: the check
+    covers every configured guardrail regardless of `on` direction, not just
+    the ones this function currently enforces. Otherwise output enforcement
+    landing later would silently need to remember to add the check itself."""
+    with pytest.raises(UnsafeURLError, match="link-local"):
+        await run_input_guardrails(
+            [GuardrailConfig(profile="prompt-injection", on=["output"], url="http://169.254.169.254/x")],
+            "x",
+            default_url=_URL,
+        )
+
+
+@pytest.mark.asyncio
 async def test_missing_url_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(GuardrailsNotReachableError):
         await run_input_guardrails(
@@ -183,3 +199,61 @@ async def test_explicit_null_valid_is_inconclusive_not_flagged(monkeypatch: pyte
     )
     assert verdict.blocked is False
     assert verdict.results[0].valid is None
+
+
+@pytest.mark.asyncio
+async def test_unsafe_url_override_rejected_in_block_mode() -> None:
+    """A per-guardrail `url` override is SSRF-checked here (not at parse time,
+    since the check does a DNS lookup that must be awaited). Unlike a
+    service-unreachable failure, this is mode-independent: it always rejects."""
+    with pytest.raises(UnsafeURLError, match="link-local"):
+        await run_input_guardrails(
+            [GuardrailConfig(profile="prompt-injection", mode="block", url="http://169.254.169.254/x")],
+            "x",
+            default_url=_URL,
+        )
+
+
+@pytest.mark.asyncio
+async def test_unsafe_url_override_rejected_in_monitor_mode_too() -> None:
+    """Unlike GuardrailsNotReachableError, an unsafe URL is a malformed
+    request, not a runtime failure: monitor mode does not fail this open."""
+    with pytest.raises(UnsafeURLError, match="link-local"):
+        await run_input_guardrails(
+            [GuardrailConfig(profile="prompt-injection", mode="monitor", url="http://169.254.169.254/x")],
+            "x",
+            default_url=_URL,
+        )
+
+
+@pytest.mark.asyncio
+async def test_safe_url_override_is_used_instead_of_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A safe per-guardrail `url` override passes the check and is used.
+
+    Stubs DNS resolution (rather than relying on real network access, which
+    may be unavailable in CI/sandboxed environments) to a public IP so the
+    safety check deterministically passes.
+    """
+    import ipaddress
+
+    from gateway.services import url_safety
+
+    async def _fake_resolve(_host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr(url_safety, "_resolve_all_async", _fake_resolve)
+
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["host"] = request.url.host or ""
+        return httpx.Response(200, json={"profile": "prompt-injection", "result": {"valid": True}})
+
+    _patch_transport(monkeypatch, handler)
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection", url="https://override.example.com")],
+        "x",
+        default_url=_URL,
+    )
+    assert verdict.blocked is False
+    assert captured["host"] == "override.example.com"

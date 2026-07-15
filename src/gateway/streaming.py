@@ -11,6 +11,7 @@ from any_llm.types.completion import CompletionUsage
 
 from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
+from gateway.model_labeling import relabel_model
 
 A = TypeVar("A")  # Attempt-like, opaque to this module
 C = TypeVar("C")  # Chunk type emitted by the upstream stream
@@ -81,6 +82,7 @@ async def streaming_generator(
     label: str,
     on_no_usage: Callable[[], Awaitable[None]] | None = None,
     on_incomplete: Callable[[], Awaitable[None]] | None = None,
+    display_model: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -89,6 +91,9 @@ async def streaming_generator(
         format_chunk: Formats a chunk into an SSE string
         extract_usage: Extracts usage from a chunk, or returns None if no usage present
         fmt: SSE format configuration (done marker, error payload, etc.)
+        display_model: When set (a configured alias was used), each chunk's
+            ``model`` field is relabeled to this before formatting, so the
+            underlying provider/model never appears on the wire.
         on_complete: Called with aggregated usage after successful streaming that
             included usage data
         on_error: Called with error message on failure
@@ -112,6 +117,8 @@ async def streaming_generator(
             if chunk_usage:
                 usage = _merge_usage(usage, chunk_usage)
                 has_usage = True
+            if display_model is not None:
+                chunk = relabel_model(chunk, display_model)
             yield format_chunk(chunk)
         yield fmt.done_marker
 
@@ -161,6 +168,7 @@ async def iterate_streaming_attempts(
     classify_error: Callable[[BaseException], tuple[bool, str]],
     on_attempt_failed: Callable[[A, StreamingAttemptFailure], Awaitable[None]],
     first_chunk_timeout_seconds: float = DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS,
+    final_attempt_extra_seconds: float = 0.0,
 ) -> tuple[A, AsyncIterator[C]]:
     """Iterate over ``attempts`` until one yields its first chunk; return that
     attempt and an iterator that re-emits the chunk followed by the rest of
@@ -173,9 +181,15 @@ async def iterate_streaming_attempts(
        so the caller can record per-attempt failure metadata (regardless of
        whether the error is retryable), then retryable errors continue to the
        next attempt and non-retryable errors propagate.
-    2. The first chunk is awaited with a ``first_chunk_timeout_seconds`` cap.
-       If the timeout fires or the upstream raises before yielding, the same
-       classification + ``on_attempt_failed`` logic applies.
+    2. The first chunk is awaited under a per-attempt cap. For non-final
+       attempts the cap is ``first_chunk_timeout_seconds``, a failover trigger
+       that abandons a slow attempt so the next one in the plan is tried. The
+       final (or sole) attempt has nothing to fall over to, so it gets
+       ``first_chunk_timeout_seconds + final_attempt_extra_seconds``: extra grace
+       on top of the failover budget so a slow-but-valid first token still
+       streams, while the wait stays bounded (a genuinely hung upstream still
+       times out). If the wait times out or the upstream raises before yielding,
+       the same classification + ``on_attempt_failed`` logic applies.
     3. Once a first chunk is in hand, we commit — the function returns and
        the caller flushes the response. Errors after this point reach the
        client; they cannot be hidden without buffering the entire stream.
@@ -188,12 +202,15 @@ async def iterate_streaming_attempts(
 
     Latency contract: zero added latency in the success case — we hold the
     first chunk only long enough to call this function's caller. In the
-    failure case, each abandoned attempt costs at most
-    ``first_chunk_timeout_seconds``.
+    failure case, each abandoned non-final attempt costs at most
+    ``first_chunk_timeout_seconds``; the final attempt costs at most
+    ``first_chunk_timeout_seconds + final_attempt_extra_seconds``.
     """
     last_exception: BaseException | None = None
+    final_index = len(attempts) - 1
 
-    for attempt in attempts:
+    for index, attempt in enumerate(attempts):
+        is_final_attempt = index == final_index
         try:
             stream = await build_stream(attempt)
         except BaseException as exc:
@@ -204,10 +221,18 @@ async def iterate_streaming_attempts(
                 raise
             continue
 
+        # The failover cap only buys something when a next attempt exists, so the
+        # sole/final attempt gets extra grace on top of it rather than being cut
+        # off with nothing to fall over to.
+        attempt_timeout = first_chunk_timeout_seconds
+        if is_final_attempt:
+            attempt_timeout += final_attempt_extra_seconds
+
+        first_chunk: C
         try:
-            first_chunk: C = await asyncio.wait_for(
+            first_chunk = await asyncio.wait_for(
                 stream.__anext__(),
-                timeout=first_chunk_timeout_seconds,
+                timeout=attempt_timeout,
             )
         except StopAsyncIteration:
             # Stream completed without yielding. Unusual but valid — commit

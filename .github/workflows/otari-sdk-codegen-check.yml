@@ -35,14 +35,14 @@ jobs:
         language: [python, typescript, go, rust]
     steps:
       - name: Checkout Otari
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # Read-only job: it generates clients and opens no PRs, so the checkout
           # credential is unused. Drop it rather than leave a token in .git/config
           # while the generator and project code run.
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           python-version: 3.14
           activate-environment: true
@@ -51,7 +51,7 @@ jobs:
         run: uv sync --dev --frozen
 
       - name: Set up Java (OpenAPI Generator runtime)
-        uses: actions/setup-java@ad2b38190b15e4d6bdf0c97fb4fca8412226d287 # v5.3.0
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
         with:
           distribution: temurin
           java-version: '17'

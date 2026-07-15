@@ -1,6 +1,7 @@
 # Modes
 
-Otari operates in two modes: **standalone** and **connected to otari.ai**.
+Otari operates in two modes: **standalone** and **connected to otari.ai**
+(`hybrid mode`).
 
 ## Standalone
 
@@ -14,11 +15,16 @@ This is the default. Otari manages everything locally:
 
 All endpoints are available. On first startup, Otari bootstraps an API key and logs it to the console.
 
-## Connected to otari.ai
+## Connected to otari.ai (Hybrid Mode)
 
 When connected to [otari.ai](https://otari.ai), Otari delegates provider routing, authentication, and usage tracking to the platform.
 
 This mode activates automatically when `OTARI_AI_TOKEN` is set.
+
+`OTARI_AI_TOKEN` is the gateway token (`gw-...`) you create in otari.ai for
+this Otari instance. In otari.ai, go to `Organisation > Gateways`, create or
+open a gateway, then click `Create token`. It is not the per-request user token
+(`tk_...`) that clients send in `Authorization: Bearer ...`.
 
 ### What otari.ai handles
 
@@ -27,40 +33,58 @@ This mode activates automatically when `OTARI_AI_TOKEN` is set.
 - **Usage reporting**: Otari reports token usage back to otari.ai after each request.
 - **MCP server resolution**: workspace-scoped MCP servers are resolved through the platform.
 
-### What changes
+### What changes on your Otari instance
 
-- No local database is used.
+- No local database is used for keys, users, budgets, or usage logs.
 - The `providers` block in `config.yml` must be empty (or absent).
 - Only these routes are exposed: `/health`, `/health/liveness`, `/health/readiness`, `/v1/chat/completions`, `/v1/messages`, and `/v1/responses`.
-- All other `/v1/*` routes are unavailable from this Otari instance.
 - Chat requests use `Authorization: Bearer <otari-user-token>`.
 - The `/health` endpoint includes platform reachability status.
 
 ### Setup
 
 ```bash
-export OTARI_AI_TOKEN=gw_your_token_here
+export OTARI_AI_TOKEN=gw-your-token-here
 ```
 
 See [Deployment](deployment.md) for the full Docker setup.
 
 ## Managed models vs. your own keys
 
-Hybrid mode resolves provider credentials in one of two ways, and the difference decides who pays and where the request is allowed to run.
+In hybrid mode, a request can use either your own provider key or a
+mozilla.ai-managed model. The practical differences are: whose credential is
+used, who pays, what the model string looks like, and whether the request can
+run through a self-hosted gateway.
+
+| Option | Credential source | Billing | Model string | Works on a self-hosted gateway? |
+|---|---|---|---|---|
+| Your own keys (BYO) | Your provider key stored in otari.ai | The upstream provider bills you directly | `provider/model` (or `provider:model`) | Yes |
+| Managed models | mozilla.ai-managed upstream key | Your otari.ai wallet | `mzai:...` | No |
 
 ### Your own keys (BYO)
 
-You store provider API keys in the otari.ai vault and assign them to a workspace. When a request arrives, otari.ai hands the matching key back to your Otari instance, which calls the provider directly. The provider bills you; otari.ai does not charge a wallet for these calls. BYO keys work through any Otari gateway, including one you self-host in hybrid mode.
+Store a provider API key in otari.ai and assign it to a workspace. When a
+request arrives, otari.ai returns that workspace key to your Otari instance,
+which then calls the provider directly.
 
-In a request, a BYO model uses the `provider/model` form, such as `openai/gpt-4o` or `anthropic/claude-sonnet-4-6`, resolved against the key you configured for that provider. (Standalone mode uses the `provider:model` form instead. See [Use with Claude Code](use-with-claude-code.md) for the model-string conventions per mode.)
+- The upstream provider bills you directly.
+- This works through any Otari gateway, including one you self-host.
+- Use model strings like `openai/gpt-4o` or `anthropic/claude-sonnet-4-6`.
+- The `provider:model` form also works. See [Use with Claude Code](use-with-claude-code.md) for the model-string conventions per mode.
 
 ### Managed models
 
-Managed models are served with mozilla.ai's own upstream credentials and billed to your otari.ai wallet. You reference them with the `mzai:` prefix (for example `mzai:moonshotai/Kimi-K2.6`) and never supply or see the upstream key.
+Managed models use mozilla.ai-managed upstream credentials. You never supply or
+see the provider key yourself.
 
-Managed models are available only through the gateway that mozilla.ai operates as part of otari.ai. They are not served to a gateway you self-host. This is a deliberate security boundary: a self-hosted Otari instance is a process mozilla.ai does not control, so returning a platform-owned upstream key in the resolve response would expose that secret to whoever runs the instance. A self-hosted gateway can therefore use your BYO keys but not managed models.
+- Usage is billed to your otari.ai wallet.
+- Use the `mzai:` prefix, for example `mzai:moonshotai/Kimi-K2.6`.
+- These models are available only through the gateway that mozilla.ai operates as part of otari.ai.
+- They are not served to a gateway you self-host, because that would expose mozilla.ai-managed upstream credentials outside infrastructure mozilla.ai controls.
 
-If a self-hosted instance requests a managed model, otari.ai rejects the request with `403 ManagedKeyRequiresDefaultGatewayError`. To use managed models, send the request through otari.ai's hosted gateway instead.
+If a self-hosted instance requests a managed model, otari.ai returns
+`403 ManagedKeyRequiresDefaultGatewayError`. To use managed models, send the
+request through otari.ai's hosted gateway instead.
 
 ## Comparison
 
@@ -72,7 +96,7 @@ If a self-hosted instance requests a managed model, otari.ai rejects the request
 | User/budget management | `/v1/users`, `/v1/budgets` | Through otari.ai |
 | Usage tracking | Local database | Reported to otari.ai |
 | Multi-provider fallback | No | Yes |
-| Available API routes | Full Otari API surface | Health + chat completions only |
+| Available API routes | Full Otari API surface | Health, chat completions, messages, and responses |
 
 ## How Otari talks to otari.ai
 

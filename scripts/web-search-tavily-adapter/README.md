@@ -37,7 +37,7 @@ about; anything else is ignored:
    ```bash
    # ./.env  (gitignored)
    TAVILY_API_KEY=tvly-xxxxxxxx
-   GATEWAY_WEB_SEARCH_URL=http://tavily-adapter:8080
+   OTARI_WEB_SEARCH_URL=http://tavily-adapter:8080
    ```
 
    (If you pass an explicit `--env-file PATH`, compose reads that instead of
@@ -46,7 +46,7 @@ about; anything else is ignored:
 2. Start the adapter and the gateway:
 
    ```bash
-   docker compose --profile web-search-tavily up -d --build tavily-adapter gateway
+   docker compose --profile web-search-tavily up -d --build tavily-adapter otari
    ```
 
    (The `web-search-tavily` profile brings up the adapter; the `searxng`

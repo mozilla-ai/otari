@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and usage help
+    url: https://github.com/mozilla-ai/otari/discussions
+    about: Ask setup and configuration questions in Discussions. Please don't open an issue for these.
+  - name: Discord
+    url: https://discord.gg/ZfZPfTdtSe
+    about: Chat with the community and maintainers in real time.
+  - name: Documentation
+    url: https://github.com/mozilla-ai/otari/blob/main/docs/index.md
+    about: Quickstart, configuration, and API reference.

@@ -106,7 +106,7 @@ async def create_image(
         await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"No pricing configured for model '{resolved.instance}:{model}'",
+            detail=f"No pricing configured for model '{request.model}'",
         )
 
     provider_kwargs = resolved.kwargs

@@ -493,6 +493,19 @@
             ],
             "title": "Seed"
           },
+          "session_label": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.",
+            "title": "Session Label"
+          },
           "stop": {
             "anyOf": [
               {
@@ -1086,7 +1099,7 @@
         "type": "object"
       },
       "GuardrailConfig": {
-        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated at parse time with the\nsame SSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
+        "description": "A single guardrail check the caller wants the gateway to enforce.\n\nURL safety: when ``url`` is supplied it is validated by\n:func:`gateway.services.guardrails.run_input_guardrails` (not here at parse\ntime \u2014 the check does a DNS lookup that must be awaited) with the same\nSSRF guard used for MCP server URLs (loopback allowed by default for\nsame-host sidecars; gated by ``OTARI_MCP_ALLOW_LOOPBACK`` /\n``OTARI_MCP_ALLOW_PRIVATE_HOSTS``). Most deployments omit ``url`` and rely\non the operator-set ``OTARI_GUARDRAILS_URL`` instead.",
         "properties": {
           "mode": {
             "default": "monitor",
@@ -1315,7 +1328,7 @@
         "type": "object"
       },
       "McpServerConfig": {
-        "description": "Inline MCP server configuration accepted on the chat completions request.\n\nStreamable HTTP transport. The `url` must be reachable from the gateway process.\n\nURL safety is enforced at parse time:\n\n* SSRF guard rejects private, link-local, and reserved IP ranges. Loopback is\n  allowed by default (sidecars, dev) \u2014 set ``OTARI_MCP_ALLOW_LOOPBACK=false`` to disable.\n* Plain ``http://`` is rejected when ``authorization_token`` is set, to keep\n  bearer tokens off the wire in cleartext.",
+        "description": "Inline MCP server configuration accepted on the chat completions request.\n\nStreamable HTTP transport. The `url` must be reachable from the gateway process.\n\nURL safety (SSRF guard against private/link-local/reserved IP ranges, plus\nrejecting plain ``http://`` when ``authorization_token`` is set) is\nenforced by :func:`gateway.services.url_safety.validate_mcp_url`, called\nfrom the async request pipeline (``prepare_gateway_tools``) rather than\nhere at parse time: the safety check does a DNS lookup, which must be\nawaited so it can't block the event loop, and Pydantic validators run\nsynchronously during request-body parsing.",
         "properties": {
           "allowed_tools": {
             "anyOf": [
@@ -1473,6 +1486,19 @@
           "model": {
             "title": "Model",
             "type": "string"
+          },
+          "session_label": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.",
+            "title": "Session Label"
           },
           "stop_sequences": {
             "anyOf": [
@@ -2194,6 +2220,19 @@
               }
             ],
             "title": "Service Tier"
+          },
+          "session_label": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.",
+            "title": "Session Label"
           },
           "store": {
             "anyOf": [
@@ -2931,6 +2970,14 @@
         "title": "ValidationError",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "description": "Enter your API key here (sent as Otari-Key header).",
+        "in": "header",
+        "name": "Otari-Key",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
@@ -3083,6 +3130,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Speech",
         "tags": [
           "audio"
@@ -3123,6 +3175,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Transcription",
         "tags": [
           "audio"
@@ -3196,6 +3253,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Batches",
         "tags": [
           "batches"
@@ -3234,6 +3296,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Batch",
         "tags": [
           "batches"
@@ -3284,6 +3351,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Retrieve Batch",
         "tags": [
           "batches"
@@ -3334,6 +3406,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Cancel Batch",
         "tags": [
           "batches"
@@ -3390,6 +3467,11 @@
             "description": "LLM provider error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Retrieve Batch Results",
         "tags": [
           "batches"
@@ -3451,6 +3533,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Budgets",
         "tags": [
           "budgets"
@@ -3491,6 +3578,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Budget",
         "tags": [
           "budgets"
@@ -3527,6 +3619,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete Budget",
         "tags": [
           "budgets"
@@ -3568,6 +3665,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Budget",
         "tags": [
           "budgets"
@@ -3619,6 +3721,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Update Budget",
         "tags": [
           "budgets"
@@ -3659,6 +3766,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Chat Completions",
         "tags": [
           "chat"
@@ -3699,6 +3811,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Embedding",
         "tags": [
           "embeddings"
@@ -3767,6 +3884,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Files",
         "tags": [
           "files"
@@ -3809,6 +3931,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create File",
         "tags": [
           "files"
@@ -3870,6 +3997,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete File",
         "tags": [
           "files"
@@ -3929,6 +4061,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get File",
         "tags": [
           "files"
@@ -3986,6 +4123,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get File Content",
         "tags": [
           "files"
@@ -4026,6 +4168,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Image",
         "tags": [
           "images"
@@ -4087,6 +4234,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Keys",
         "tags": [
           "keys"
@@ -4127,6 +4279,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Key",
         "tags": [
           "keys"
@@ -4163,6 +4320,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete Key",
         "tags": [
           "keys"
@@ -4204,6 +4366,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Key",
         "tags": [
           "keys"
@@ -4255,6 +4422,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Update Key",
         "tags": [
           "keys"
@@ -4295,6 +4467,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Message",
         "tags": [
           "messages"
@@ -4337,6 +4514,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Count Message Tokens",
         "tags": [
           "messages"
@@ -4389,6 +4571,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Models",
         "tags": [
           "models"
@@ -4432,6 +4619,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Model",
         "tags": [
           "models"
@@ -4486,6 +4678,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Moderation",
         "tags": [
           "moderations"
@@ -4547,6 +4744,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Pricing",
         "tags": [
           "pricing"
@@ -4587,6 +4789,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Set Pricing",
         "tags": [
           "pricing"
@@ -4642,6 +4849,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete Pricing",
         "tags": [
           "pricing"
@@ -4702,6 +4914,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Pricing",
         "tags": [
           "pricing"
@@ -4749,6 +4966,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Pricing History",
         "tags": [
           "pricing"
@@ -4789,6 +5011,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Rerank",
         "tags": [
           "rerank"
@@ -4829,6 +5056,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create Response",
         "tags": [
           "responses"
@@ -4968,6 +5200,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Usage",
         "tags": [
           "usage"
@@ -5071,6 +5308,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "List Users",
         "tags": [
           "users"
@@ -5111,6 +5353,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Create User",
         "tags": [
           "users"
@@ -5147,6 +5394,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Delete User",
         "tags": [
           "users"
@@ -5188,6 +5440,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get User",
         "tags": [
           "users"
@@ -5239,6 +5496,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Update User",
         "tags": [
           "users"
@@ -5309,6 +5571,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get User Usage",
         "tags": [
           "users"

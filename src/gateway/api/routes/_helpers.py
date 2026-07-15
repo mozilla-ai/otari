@@ -9,6 +9,7 @@ from fastapi import HTTPException, Response, status
 from gateway.core.env import otari_env
 from gateway.models.guardrails import GuardrailConfig
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
+from gateway.services.url_safety import UnsafeURLError
 
 if TYPE_CHECKING:
     from gateway.db import APIKey
@@ -150,8 +151,9 @@ async def apply_input_guardrails(
         bytes are streamed).
 
     Raises:
-        HTTPException: ``403`` when a ``block`` guardrail flags the input;
-            ``502`` when a ``block`` guardrail can't be evaluated.
+        HTTPException: ``400`` when a guardrail's ``url`` override fails the
+            SSRF/scheme safety check; ``403`` when a ``block`` guardrail flags
+            the input; ``502`` when a ``block`` guardrail can't be evaluated.
     """
     if not guardrails:
         return
@@ -159,6 +161,8 @@ async def apply_input_guardrails(
     default_url = otari_env("GUARDRAILS_URL") or None
     try:
         verdict = await run_input_guardrails(guardrails, input_text, default_url=default_url)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except GuardrailsNotReachableError as exc:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 

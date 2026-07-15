@@ -12,10 +12,17 @@ from gateway.core.config import GatewayConfig
 
 
 def test_flush_delivers_all_reports_when_fast(monkeypatch: pytest.MonkeyPatch) -> None:
-    sent: list[tuple[str, str, str | None]] = []
+    sent: list[tuple[str, str, str | None, str | None]] = []
 
-    async def fake_report(config: Any, cid: str, outcome: str, usage: Any, error_class: str | None) -> None:
-        sent.append((cid, outcome, error_class))
+    async def fake_report(
+        config: Any,
+        cid: str,
+        outcome: str,
+        usage: Any,
+        error_class: str | None,
+        session_label: str | None = None,
+    ) -> None:
+        sent.append((cid, outcome, error_class, session_label))
 
     monkeypatch.setattr(_pipeline, "_report_platform_usage", fake_report)
     config = GatewayConfig(platform={"base_url": "http://platform.test"})
@@ -25,10 +32,15 @@ def test_flush_delivers_all_reports_when_fast(monkeypatch: pytest.MonkeyPatch) -
             config,
             [("att-1", "error", None, "http_500"), ("att-2", "error", None, "http_429")],
             "req-1",
+            "my-run-personas",
         )
     )
 
-    assert sorted(sent) == [("att-1", "error", "http_500"), ("att-2", "error", "http_429")]
+    # Every flushed report carries the per-request session label.
+    assert sorted(sent) == [
+        ("att-1", "error", "http_500", "my-run-personas"),
+        ("att-2", "error", "http_429", "my-run-personas"),
+    ]
 
 
 def test_flush_is_bounded_and_does_not_wait_for_a_slow_report(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -39,7 +51,14 @@ def test_flush_is_bounded_and_does_not_wait_for_a_slow_report(monkeypatch: pytes
     """
     completed: list[str] = []
 
-    async def slow_report(config: Any, cid: str, outcome: str, usage: Any, error_class: str | None) -> None:
+    async def slow_report(
+        config: Any,
+        cid: str,
+        outcome: str,
+        usage: Any,
+        error_class: str | None,
+        session_label: str | None = None,
+    ) -> None:
         await asyncio.sleep(10)
         completed.append(cid)
 

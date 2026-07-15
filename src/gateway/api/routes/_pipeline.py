@@ -53,8 +53,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import verify_api_key_or_master_key
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._platform import (
+    _DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS,
     _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS,
     _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP,
+    _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY,
     _STREAM_FIRST_CHUNK_TIMEOUT_MS_KEY,
     _STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY,
     ResolvedAttempt,
@@ -62,6 +64,7 @@ from gateway.api.routes._platform import (
     _classify_upstream_error,
     _extract_platform_user_token,
     _report_platform_usage,
+    _resolve_platform_code_execution,
     _resolve_platform_credentials,
     _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
@@ -78,6 +81,7 @@ from gateway.core.env import otari_env
 from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
 from gateway.metrics import record_cost, record_tokens
+from gateway.model_labeling import relabel_model
 from gateway.models.entities import UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
@@ -99,8 +103,9 @@ from gateway.services.mcp_loop import (
     ToolBackend,
 )
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
-from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
+from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import (
     StreamFormat,
@@ -148,6 +153,8 @@ WEB_SEARCH_CONFLICT_DETAIL = (
     "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same request yet; pick one."
 )
 WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
+SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
+MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed code-execution policy"
 SANDBOX_UNREACHABLE_DETAIL = "code_execution sandbox unreachable — check OTARI_SANDBOX_URL"
 WEB_SEARCH_UNREACHABLE_DETAIL = "web_search backend unreachable — check OTARI_WEB_SEARCH_URL"
 
@@ -233,23 +240,23 @@ def _normalized_origin(parsed: ParseResult) -> tuple[str, str | None, int | None
     return (parsed.scheme, parsed.hostname, port)
 
 
-def web_search_url_targets_platform(web_search_url: str, platform_base_url: str | None) -> bool:
-    """True when ``web_search_url`` is the platform itself (same origin, under its base path).
+def url_targets_platform(url: str, platform_base_url: str | None) -> bool:
+    """True when ``url`` is the platform itself (same origin, under its base path).
 
-    Gates forwarding the platform token to the web-search backend: it is only
-    safe to hand that high-privilege credential to the platform — the host the
-    gateway already trusts it with for resolve. A raw string prefix check is not
-    enough: with a path-less ``PLATFORM_BASE_URL`` (e.g. ``https://api.otari.ai``)
-    a confusable URL like ``https://api.otari.ai.evil.com`` or
-    ``https://api.otari.ai@evil.com`` would satisfy ``startswith`` and leak the
-    token. So compare the parsed (scheme, host, port) origin exactly — with
-    default ports normalized — and require the search path to sit under the base
-    path at a ``/`` boundary.
+    Gates forwarding the platform token to a gateway-managed backend (web search,
+    sandbox): it is only safe to hand that high-privilege credential to the
+    platform — the host the gateway already trusts it with for resolve. A raw
+    string prefix check is not enough: with a path-less ``PLATFORM_BASE_URL``
+    (e.g. ``https://api.otari.ai``) a confusable URL like
+    ``https://api.otari.ai.evil.com`` or ``https://api.otari.ai@evil.com`` would
+    satisfy ``startswith`` and leak the token. So compare the parsed
+    (scheme, host, port) origin exactly — with default ports normalized — and
+    require the target path to sit under the base path at a ``/`` boundary.
     """
     if not platform_base_url:
         return False
     base = urlparse(platform_base_url)
-    target = urlparse(web_search_url)
+    target = urlparse(url)
     if _normalized_origin(target) != _normalized_origin(base):
         return False
     base_path = base.path.rstrip("/")
@@ -380,6 +387,7 @@ class RequestContext:
         user_id: str | None,
         rate_limit_info: RateLimitInfo | None,
         reservation: ReservationHandle | None,
+        resolved_provider: ResolvedProvider | None = None,
     ) -> None:
         self.config = config
         self.db = db
@@ -391,6 +399,34 @@ class RequestContext:
         self.user_id = user_id
         self.rate_limit_info = rate_limit_info
         self.reservation = reservation
+        # Standalone-only: the provider selector resolved once for the
+        # pricing/budget gate in `resolve_request_context`. Route handlers
+        # reuse this for dispatch instead of calling `resolve_provider_selector`
+        # a second time, which would redo the provider-kwargs build (and, for
+        # Vertex AI instances, re-parse the service-account credentials from
+        # disk and reconstruct the RSA-backed `Credentials` object) for no
+        # reason. `None` in hybrid mode (no local provider resolution happens)
+        # and in the rare case the selector couldn't be parsed for the gate
+        # check; callers fall back to `resolve_provider_selector` themselves
+        # in that case, same as before this field existed.
+        self.resolved_provider = resolved_provider
+
+
+def resolve_dispatch_provider(ctx: RequestContext, config: GatewayConfig, model_selector: str) -> ResolvedProvider:
+    """Get the ``ResolvedProvider`` for dispatch, reusing the one computed for
+    the pricing/budget gate (``ctx.resolved_provider``) instead of resolving
+    the selector a second time. Standalone-mode route handlers should call
+    this rather than ``resolve_provider_selector`` directly.
+
+    Falls back to a fresh ``resolve_provider_selector`` call only when
+    ``ctx.resolved_provider`` is ``None``: the rare case where the gate
+    check couldn't parse the selector (an unparseable selector has no
+    pricing, but dispatch still needs its own resolution attempt so any-llm's
+    own error surfaces instead of a stale gate-check failure).
+    """
+    if ctx.resolved_provider is not None:
+        return ctx.resolved_provider
+    return resolve_provider_selector(config, model_selector)
 
 
 async def _bill_vision_side_call(
@@ -489,6 +525,7 @@ async def resolve_request_context(
     user_id: str | None = None
     rate_limit_info: RateLimitInfo | None = None
     reservation: ReservationHandle | None = None
+    resolved_provider: ResolvedProvider | None = None
 
     if hybrid_mode:
         user_token = _extract_platform_user_token(raw_request)
@@ -534,6 +571,9 @@ async def resolve_request_context(
         try:
             resolved = resolve_provider_selector(config, model)
             gate_instance, gate_impl, gate_model = resolved.instance, resolved.provider, resolved.model
+            # Reused by the route handler for dispatch (see `RequestContext.resolved_provider`)
+            # instead of calling `resolve_provider_selector` a second time.
+            resolved_provider = resolved
         except (ValueError, AnyLLMError):
             gate_instance, gate_impl, gate_model = None, None, model
 
@@ -615,6 +655,7 @@ async def resolve_request_context(
         user_id=user_id,
         rate_limit_info=rate_limit_info,
         reservation=reservation,
+        resolved_provider=resolved_provider,
     )
 
 
@@ -664,6 +705,38 @@ class ToolContext:
         return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search
 
 
+async def _validate_mcp_server_urls(
+    adapter: FormatAdapter[Any, Any], mcp_servers: list[McpServerConfig]
+) -> None:
+    """SSRF/scheme safety check for every MCP server URL in this request.
+
+    Covers both request-body-supplied servers and platform-resolved ones
+    (``mcp_server_ids``): both land in the same merged list before this runs.
+    Runs concurrently since each check does an independent DNS lookup;
+    ``asyncio.gather`` (default ``return_exceptions=False``) propagates the
+    first ``UnsafeURLError`` it sees as soon as it's raised. Note this does
+    *not* cancel the other in-flight checks: they keep running in the
+    background and are simply not awaited further; harmless here since
+    ``validate_mcp_url`` has no side effects beyond a DNS lookup.
+
+    This used to run synchronously inside a Pydantic ``model_validator`` at
+    request-body-parse time (see ``McpServerConfig``/``GuardrailConfig``
+    docstrings). It moved here because the DNS lookup must be awaited, and
+    Pydantic validators can't await. One observable side effect: a rejected
+    URL now surfaces as ``400`` (via ``adapter.error``) instead of Pydantic's
+    ``422``.
+    """
+    try:
+        await asyncio.gather(
+            *(
+                validate_mcp_url(server.url, has_authorization_token=bool(server.authorization_token))
+                for server in mcp_servers
+            )
+        )
+    except UnsafeURLError as exc:
+        raise adapter.error(400, str(exc), ErrorKind.INVALID_REQUEST) from exc
+
+
 async def prepare_gateway_tools(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -708,6 +781,9 @@ async def prepare_gateway_tools(
             )
             mcp_servers = (mcp_servers or []) + resolved_mcp_servers
 
+        if mcp_servers:
+            await _validate_mcp_server_urls(adapter, mcp_servers)
+
         sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
         sandbox_url: str | None = otari_env("SANDBOX_URL") or None
         use_sandbox = False
@@ -725,10 +801,31 @@ async def prepare_gateway_tools(
         # token and derives tenancy + per-workspace code-exec policy from it. Never
         # leak it to a standalone exec-service an operator pointed the URL at.
         sandbox_auth_token: str | None = None
-        if use_sandbox and ctx.hybrid_mode and sandbox_url is not None:
+        sandbox_max_iterations: int | None = None
+        if use_sandbox and ctx.hybrid_mode:
             assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-            if web_search_url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
+            assert sandbox_tool_entry is not None  # use_sandbox implies the entry is present
+            if sandbox_url is not None and url_targets_platform(sandbox_url, ctx.config.platform.get("base_url")):
                 sandbox_auth_token = ctx.user_token
+
+            # Platform owns the per-workspace code-exec policy: 403 if the workspace
+            # has it off, otherwise apply the workspace defaults (per-request values
+            # win) — the default purpose hint and the loop-iteration ceiling. The
+            # tools allow-list + exec timeout are re-enforced by the /v1/sandbox proxy.
+            policy = await _resolve_platform_code_execution(config=ctx.config, user_token=ctx.user_token)
+            # Fail closed on a malformed policy: a non-bool `enabled` is a cross-service
+            # contract break, not a "disabled" signal — surface it as 502, never run.
+            enabled = policy.get("enabled")
+            if not isinstance(enabled, bool):
+                raise adapter.error(502, MALFORMED_CODE_EXEC_POLICY_DETAIL, ErrorKind.API)
+            if not enabled:
+                raise adapter.error(403, SANDBOX_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
+            if not sandbox_tool_entry.get("purpose_hint") and policy.get("default_purpose_hint"):
+                sandbox_tool_entry["purpose_hint"] = policy["default_purpose_hint"]
+            resolved_iters = policy.get("max_iterations")
+            # `bool` is an `int` subclass — exclude it so a JSON `true` isn't read as 1.
+            if isinstance(resolved_iters, int) and not isinstance(resolved_iters, bool) and resolved_iters > 0:
+                sandbox_max_iterations = resolved_iters
 
         web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
         web_search_url: str | None = otari_env("WEB_SEARCH_URL") or None
@@ -765,7 +862,7 @@ async def prepare_gateway_tools(
                 # already trusts this token with for resolve). Never leak this
                 # high-privilege credential to a bundled SearXNG or a third-party
                 # adapter that an operator happened to point GATEWAY_WEB_SEARCH_URL at.
-                if web_search_url_targets_platform(web_search_url, ctx.config.platform.get("base_url")):
+                if url_targets_platform(web_search_url, ctx.config.platform.get("base_url")):
                     web_search_auth_token = ctx.config.platform_token
                 web_search_policy = await _resolve_platform_web_search(
                     config=ctx.config,
@@ -803,6 +900,8 @@ async def prepare_gateway_tools(
         max_tool_iterations=min(
             max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
             MAX_TOOL_ITERATIONS_CAP,
+            # The workspace's code-exec max_iterations bounds the loop too (no-op when unset).
+            sandbox_max_iterations or MAX_TOOL_ITERATIONS_CAP,
         ),
         tools_header=tools_header,
     )
@@ -1075,6 +1174,8 @@ def build_streaming_response(
     reservation: ReservationHandle | None,
     platform_correlation_id: str | None = None,
     platform_request_id: str | None = None,
+    session_label: str | None = None,
+    display_model: str | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -1101,6 +1202,7 @@ def build_streaming_response(
                     correlation_id=platform_correlation_id,
                     outcome="success",
                     usage=usage_data,
+                    session_label=session_label,
                 )
             )
             return
@@ -1161,6 +1263,7 @@ def build_streaming_response(
                     correlation_id=platform_correlation_id,
                     outcome="error",
                     usage=None,
+                    session_label=session_label,
                 )
             )
             return
@@ -1205,6 +1308,7 @@ def build_streaming_response(
             label=f"{provider}:{model}",
             on_no_usage=_on_no_usage,
             on_incomplete=_on_incomplete,
+            display_model=display_model,
         ),
         media_type="text/event-stream",
         headers=headers,
@@ -1239,6 +1343,25 @@ def stream_first_chunk_timeout_seconds(config: GatewayConfig, *, tool_mode: bool
     )
 
 
+def stream_final_attempt_extra_seconds(config: GatewayConfig) -> float:
+    """Extra first-chunk grace granted only to the sole/final streaming attempt.
+
+    Added on top of the per-attempt failover budget for the terminal attempt,
+    which has no next entry in the routing policy to fall over to. Keeps that
+    attempt's wait bounded while not converting a slow-but-valid first token into
+    a timeout. Mode-agnostic (applies on top of the plain or tool-loop budget).
+    """
+    return (
+        int(
+            config.platform.get(
+                _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY,
+                _DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS,
+            )
+        )
+        / 1000
+    )
+
+
 # ---------------------------------------------------------------------------
 # Shared request runners
 # ---------------------------------------------------------------------------
@@ -1254,6 +1377,8 @@ async def run_single_attempt_stream(
     model: str,
     platform_correlation_id: str | None = None,
     platform_request_id: str | None = None,
+    session_label: str | None = None,
+    display_model: str | None = None,
 ) -> StreamingResponse:
     """Open a single-attempt stream and wrap it with settlement callbacks.
 
@@ -1298,6 +1423,8 @@ async def run_single_attempt_stream(
         reservation=ctx.reservation,
         platform_correlation_id=platform_correlation_id,
         platform_request_id=platform_request_id,
+        session_label=session_label,
+        display_model=display_model,
     )
 
 
@@ -1305,6 +1432,7 @@ async def _flush_pending_usage_reports(
     config: GatewayConfig,
     pending_error_reports: list[tuple[str, str, Any, str | None]],
     request_id: str,
+    session_label: str | None = None,
 ) -> None:
     """Send the per-attempt error reports inline on the all-failed path.
 
@@ -1327,7 +1455,7 @@ async def _flush_pending_usage_reports(
         results = await asyncio.wait_for(
             asyncio.gather(
                 *(
-                    _report_platform_usage(config, attempt_id, outcome, usage, error_class)
+                    _report_platform_usage(config, attempt_id, outcome, usage, error_class, session_label)
                     for attempt_id, outcome, usage, error_class in pending_error_reports
                 ),
                 return_exceptions=True,
@@ -1360,6 +1488,7 @@ async def run_streaming_with_fallback(
     background_tasks: BackgroundTasks,
     rate_limit_info: RateLimitInfo | None,
     tool_ctx: ToolContext,
+    session_label: str | None = None,
 ) -> StreamingResponse:
     """Multi-attempt streaming for hybrid-mode requests.
 
@@ -1378,6 +1507,7 @@ async def run_streaming_with_fallback(
     """
     tool_mode = tool_ctx.use_tool_loop
     first_chunk_timeout = stream_first_chunk_timeout_seconds(config, tool_mode=tool_mode)
+    final_attempt_extra = stream_final_attempt_extra_seconds(config)
 
     backend_stack = AsyncExitStack()
     pool_for_loop: Any = None
@@ -1438,6 +1568,7 @@ async def run_streaming_with_fallback(
             "error",
             None,
             failure.error_class,
+            session_label,
         )
         pending_error_reports.append((attempt.attempt_id, "error", None, failure.error_class))
         logger.warning(
@@ -1456,6 +1587,7 @@ async def run_streaming_with_fallback(
             classify_error=_classify_upstream_error,
             on_attempt_failed=_on_attempt_failed,
             first_chunk_timeout_seconds=first_chunk_timeout,
+            final_attempt_extra_seconds=final_attempt_extra,
         )
     except BaseException as exc:
         # No attempt yielded a first chunk: the request ends in an error
@@ -1466,7 +1598,9 @@ async def run_streaming_with_fallback(
         # if the flush raises or is interrupted.
         try:
             if not isinstance(exc, asyncio.CancelledError):
-                await _flush_pending_usage_reports(config, pending_error_reports, route.request_id)
+                await _flush_pending_usage_reports(
+                    config, pending_error_reports, route.request_id, session_label
+                )
         finally:
             await backend_stack.aclose()
         raise
@@ -1498,6 +1632,7 @@ async def run_streaming_with_fallback(
         reservation=None,
         platform_correlation_id=chosen.attempt_id,
         platform_request_id=route.request_id,
+        session_label=session_label,
     )
 
 
@@ -1522,6 +1657,7 @@ async def run_platform_non_stream(
     background_tasks: BackgroundTasks,
     config: GatewayConfig,
     rate_limit_info: RateLimitInfo | None,
+    session_label: str | None = None,
 ) -> ResultT:
     """Drive the multi-attempt hybrid-mode non-streaming path via the shared
     ``run_platform_attempts`` runner, dispatching each attempt through the
@@ -1565,6 +1701,7 @@ async def run_platform_non_stream(
             outcome,
             usage,
             error_class,
+            session_label,
         )
         if outcome != "success":
             pending_error_reports.append((attempt.attempt_id, outcome, usage, error_class))
@@ -1594,7 +1731,7 @@ async def run_platform_non_stream(
         # branch only catches HTTPException (what the runner raises on the
         # all-failed path); a CancelledError propagates without doing reporting
         # I/O during teardown.
-        await _flush_pending_usage_reports(config, pending_error_reports, route.request_id)
+        await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
         raise
 
 
@@ -1606,12 +1743,17 @@ async def run_standalone_non_stream(
     call_kwargs: dict[str, Any],
     provider: Any,
     model: str,
+    display_model: str | None = None,
 ) -> ResultT:
     """Standalone-mode non-streaming dispatch with reservation settlement.
 
     Success writes the usage log (per the adapter's no-usage policy) and
     reconciles the reservation against actual cost; every failure path refunds
     the reservation before mapping the error to the format's wire envelope.
+
+    ``display_model`` (a configured alias) relabels the result's ``model`` field
+    before returning, so the underlying provider/model stays hidden; billing and
+    logging above still key on the resolved target ``model``/``provider``.
     """
     try:
         result = await dispatch_non_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
@@ -1631,6 +1773,8 @@ async def run_standalone_non_stream(
                 )
             if ctx.reservation is not None:
                 await reconcile_reservation(ctx.db, ctx.reservation, actual_cost or 0.0)
+        if display_model is not None:
+            relabel_model(result, display_model)
         return result
     except HTTPException:
         await release_reservation(ctx)

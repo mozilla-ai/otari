@@ -113,6 +113,43 @@ def create_app(config: GatewayConfig) -> FastAPI:
         lifespan=_create_lifespan(config),
     )
 
+    def custom_openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+
+        from fastapi.openapi.utils import get_openapi
+
+        openapi_schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+
+        if "components" not in openapi_schema:
+            openapi_schema["components"] = {}
+        if "securitySchemes" not in openapi_schema["components"]:
+            openapi_schema["components"]["securitySchemes"] = {}
+
+        openapi_schema["components"]["securitySchemes"]["ApiKeyAuth"] = {
+            "type": "apiKey",
+            "in": "header",
+            "name": API_KEY_HEADER,
+            "description": f"Enter your API key here (sent as {API_KEY_HEADER} header).",
+        }
+
+        for path, path_item in openapi_schema.get("paths", {}).items():
+            if path.startswith(_PUBLIC_PREFIXES):
+                continue
+            for operation in path_item.values():
+                if isinstance(operation, dict):
+                    operation["security"] = [{"ApiKeyAuth": []}]
+
+        app.openapi_schema = openapi_schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi  # type: ignore[method-assign]
+
     @app.get("/welcome", response_class=HTMLResponse, include_in_schema=False)
     async def root_tutorial() -> str:
         return ROOT_TUTORIAL_HTML

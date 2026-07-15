@@ -1,6 +1,9 @@
 # Configuration for Otari
 
-# Database connection URL
+# Database connection URL.
+# PostgreSQL is used by the full docker compose stack (postgres service is defined in docker-compose.yml).
+# For local development without Docker, switch to SQLite:
+#   database_url: "sqlite:///./otari.db"
 database_url: "postgresql://otari:otari@postgres:5432/otari"
 
 # Server configuration - if you want to use a different port, change it here and in the docker-compose.yml file.
@@ -87,7 +90,7 @@ providers:
 # Format: "provider:model" -> input/output price per million tokens
 # Database pricing takes precedence - config only sets initial values
 # Prices are in USD per million tokens
-pricing:
+# pricing:
   # See https://cloud.google.com/vertex-ai/generative-ai/pricing
   # vertexai:Qwen3-235B-A22B-Instruct-2507:
   #   input_price_per_million: 0.25
@@ -95,3 +98,14 @@ pricing:
   # openai:gpt-5:
     # input_price_per_million: 0.25
     # output_price_per_million: 1.00
+
+# Model aliases (optional): expose a friendly display name that maps to a real
+# selector, hiding the underlying provider/model. Format: name -> target
+# ("provider:model" or a named "instance:model"). The alias is what users see in
+# /v1/models and in response `model` fields; pricing, budgets, and usage key on
+# the resolved target. Set `model_discovery: false` to expose only these curated
+# names. Standalone-mode only.
+# aliases:
+#   myopusmodel: anthropic:claude-opus-4
+#   fastmodel: openai:gpt-5
+#   housemodel: home_lab:qwen3

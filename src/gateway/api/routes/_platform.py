@@ -65,6 +65,19 @@ _DEFAULT_STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP = 30000
 _STREAM_FIRST_CHUNK_TIMEOUT_MS_KEY = "streaming_first_chunk_timeout_ms"
 _STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY = "streaming_first_chunk_timeout_ms_tool_loop"
 
+# Extra first-chunk grace added ONLY to the sole/final attempt, on top of the
+# per-attempt budget above. That budget is a failover trigger: it abandons a slow
+# attempt so the next entry in the routing policy can be tried. The final attempt
+# has no next entry, so a tight cap there only turns a slow-but-valid first token
+# into a 504 with nothing to fall over to. Granting grace keeps the terminal wait
+# bounded (a genuinely hung upstream still times out at budget + grace) while not
+# failing valid slow-to-start responses. Applied on top of whichever base budget
+# is in effect (plain or tool-loop). Defaults to 0 (no grace), so behavior is
+# unchanged unless an operator opts in via ``config.platform`` (v1.2 will move
+# these onto the routing_policy schema).
+_DEFAULT_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS = 0
+_STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY = "streaming_final_attempt_extra_first_chunk_timeout_ms"
+
 
 class ResolvedAttempt(BaseModel):
     """A single resolution attempt returned by the platform."""
@@ -603,12 +616,72 @@ async def _resolve_platform_web_search(
     )
 
 
+async def _resolve_platform_code_execution(
+    config: GatewayConfig,
+    user_token: str,
+) -> dict[str, Any]:
+    """Resolve the workspace's code-execution policy via the platform.
+
+    Mirrors `_resolve_platform_web_search`: same base_url guard, timeout, headers,
+    `_post_platform` call, and status-code handling. POSTs an empty body to
+    `/gateway/code-execution/resolve` and returns the parsed JSON dict on 200
+    (``{enabled, tools, default_purpose_hint, max_iterations, exec_timeout_s}``,
+    soft limits already clamped to operator ceilings platform-side). Client errors
+    forward verbatim; server-side/unexpected responses collapse to 502.
+    """
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Platform mode is misconfigured",
+        )
+
+    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
+    resolve_url = _platform_url(platform_base_url, "/gateway/code-execution/resolve")
+    headers = {
+        "X-Gateway-Token": config.platform_token or "",
+        "X-User-Token": user_token,
+    }
+    body: dict[str, Any] = {}
+
+    try:
+        response = await _post_platform(url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000)
+    except (httpx.TimeoutException, httpx.NetworkError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        ) from None
+
+    if response.status_code == 200:
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    if response.status_code in {401, 402, 403, 404, 429}:
+        detail = _safe_detail_from_platform(response, "Code execution resolution failed")
+        response_headers: dict[str, str] | None = None
+        if response.status_code == 429 and response.headers.get("Retry-After"):
+            response_headers = {"Retry-After": response.headers["Retry-After"]}
+        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
+
+    if response.status_code == 422 or response.status_code >= 500:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        )
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Authorization service unavailable",
+    )
+
+
 async def _report_platform_usage(
     config: GatewayConfig,
     correlation_id: str,
     outcome: str,
     usage: CompletionUsage | None,
     error_class: str | None = None,
+    session_label: str | None = None,
 ) -> None:
     """POST a usage record back to the platform with bounded retries.
 
@@ -627,6 +700,12 @@ async def _report_platform_usage(
     headers = {"X-Gateway-Token": config.platform_token or ""}
 
     payload: dict[str, Any] = {"correlation_id": correlation_id, "status": outcome}
+    # Forward the caller's session label so the platform can attribute this
+    # attempt's spend. Blank is treated as absent; the body field already caps
+    # length, so the platform never has to truncate.
+    normalized_label = (session_label or "").strip()
+    if normalized_label:
+        payload["session_label"] = normalized_label
     if outcome == "success":
         token_usage = usage or CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
         payload["usage"] = {

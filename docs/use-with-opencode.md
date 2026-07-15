@@ -25,8 +25,10 @@ Add Otari as a provider in your `opencode.jsonc`:
 ```
 
 `baseURL` is the Otari root plus `/v1` (opencode appends `/chat/completions`
-itself). Point it at your Otari: `http://localhost:8000/v1` for local
-development, or `https://api.otari.ai/v1` when connected to otari.ai.
+itself). Point it at the gateway you are actually using: `http://localhost:8000/v1`
+for local standalone development, your self-hosted gateway URL plus `/v1` when
+connected to otari.ai, or `https://api.otari.ai/v1` when using otari.ai's
+hosted gateway.
 
 Export your key so opencode reads it from the environment instead of the config
 file, then run with a model:
@@ -44,12 +46,15 @@ accepts for both standalone API keys and connected user tokens.
 The provider id is `otari` (from your config) and the model selector is whatever
 your deployment expects:
 
-- **Standalone:** `provider:model`, e.g. `otari/openai:gpt-4o`,
+- **Standalone, any configured provider:** `provider:model`, e.g. `otari/openai:gpt-4o`,
   `otari/anthropic:claude-sonnet-4-6`, `otari/mistral:mistral-large-latest`.
-- **Connected to otari.ai:** `otari/mzai:<catalog-id>` for a managed open-weight
-  model (e.g. `otari/mzai:moonshotai/Kimi-K2.6`), or `otari/provider/model` for
-  one of your own provider keys (e.g. `otari/openai/gpt-4o`). An `mzai:` prefix
-  selects the managed catalog, so adding it to a proprietary model misroutes it.
+- **Connected to otari.ai, managed models:** `otari/mzai:<catalog-id>`, for
+  example `otari/mzai:moonshotai/Kimi-K2.6`. These run only through otari.ai's
+  hosted gateway.
+- **Connected to otari.ai, your own provider keys:** `otari/openai:gpt-4o` or
+  `otari/openai/gpt-4o`, plus the equivalent Anthropic or Mistral forms. An
+  `mzai:` prefix selects the managed catalog, so adding it to a proprietary
+  model misroutes it.
 
 Any model in the catalog works; Otari routes the request to the right
 provider and records usage and cost for it the same way as any other client.

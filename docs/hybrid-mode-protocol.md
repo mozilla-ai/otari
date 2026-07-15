@@ -43,7 +43,7 @@ For example, the otari.ai resolve response also carries `workspace_id`,
 these today, so they are intentionally absent from the shapes documented here.
 
 When the operator points Otari's web-search backend at the platform
-(`GATEWAY_WEB_SEARCH_URL` under `base_url`), Otari also sends `X-Gateway-Token`
+(`OTARI_WEB_SEARCH_URL` under `base_url`), Otari also sends `X-Gateway-Token`
 on its search queries (`GET {base}/gateway/web-search/search`) so a
 platform-hosted search endpoint can authenticate the gateway. The token is sent
 only when that URL shares the platform origin (scheme/host/port, under the base
@@ -227,7 +227,7 @@ its own value: `max_results`, `allowed_domains`, `blocked_domains`, and
 or empty string reads as "no preference" and does not clear the workspace
 value), and `provider_options` is shallow-merged with per-request keys winning.
 `provider` is informational: the active web-search backend is configured on the
-gateway itself via `WEB_SEARCH_URL`, so Otari does not switch backends based on
+gateway itself via `OTARI_WEB_SEARCH_URL`, so Otari does not switch backends based on
 this field.
 
 ### Failure
@@ -263,11 +263,27 @@ Content-Type: application/json
     "cache_read_tokens": 8,            // provider cache-read input tokens
     "cache_write_tokens": 0           // cache-write (creation) input tokens; Anthropic only
   },
-  "error_class": "http_401"            // optional on error; omitted when the
+  "error_class": "http_401",           // optional on error; omitted when the
                                        // Otari can't classify the failure
                                        // (e.g. mid-stream errors). See below.
+  "session_label": "my-run-personas"   // optional; the caller's cost-attribution
+                                       // label (see below). Omitted when absent.
 }
 ```
+
+`session_label` is an optional caller-supplied label for cost attribution (per
+run, experiment, or conversation). A caller sets it on the request body
+(`session_label` on the chat/messages/responses request); Otari strips it before
+the upstream provider call and forwards it here so the platform can attribute the
+attempt's spend to that session without the caller standing up OpenTelemetry. It
+is trimmed and omitted when blank; Otari caps it at 255 characters at the request
+boundary so the platform never has to truncate. All attempts of one request carry
+the same label.
+
+> **`user` is not used for cost attribution in hybrid mode.** The OpenAI-standard
+> `user` field is stripped before the upstream call and is not forwarded on the
+> usage report, so it does not segment spend here. Callers who want per-run cost
+> breakdown must use `session_label`.
 
 `cache_read_tokens` and `cache_write_tokens` are additive fields carrying the
 provider cached-token counts (default `0` when a provider reports none). Their
@@ -327,8 +343,12 @@ The mechanism is a per-attempt **first-chunk gate**. For each attempt:
    — provider returned `401` / `5xx` / network error before the stream even
    opened — classify the error: retryable failures move to the next attempt;
    non-retryable failures propagate.
-2. Wait for the first chunk with a bounded timeout
-   (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS`, default 2000 ms). If the
+2. Wait for the first chunk with a bounded timeout. Non-final attempts use the
+   per-attempt failover budget (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS`,
+   default 2000 ms). The sole/final attempt has no next attempt to fall over to,
+   so it additionally gets `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS`
+   of grace on top of the budget (default 0, i.e. unchanged), so a slow-but-valid
+   first token is not turned into a timeout, while the wait stays bounded. If the
    upstream raises before yielding or the wait times out, move to the next
    attempt.
 3. Once a first chunk is in hand, commit. Stitch it back onto the iterator
@@ -336,8 +356,8 @@ The mechanism is a per-attempt **first-chunk gate**. For each attempt:
 
 **Latency contract:** zero added latency in the success case — the first
 chunk is held only for the microseconds it takes to call the SSE response
-builder. In the failure case, each abandoned attempt costs at most
-`first_chunk_timeout_seconds`.
+builder. In the failure case, each abandoned non-final attempt costs at most the
+failover budget; the final attempt costs at most budget + grace.
 
 **What this catches:** auth errors (`401`/`403`), rate-limits (`429`),
 upstream `5xx`, connection failures, hung connections, "stream opens but
@@ -362,3 +382,4 @@ flag.
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |
 | `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. |
+| `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt, on top of the budget. `0` = unchanged. |

@@ -34,6 +34,7 @@ from gateway.api.routes._pipeline import (
     default_attempt_kwargs,
     prepare_gateway_tools,
     rate_limit_headers,
+    resolve_dispatch_provider,
     resolve_request_context,
     run_platform_non_stream,
     run_single_attempt_stream,
@@ -45,7 +46,7 @@ from gateway.api.routes._platform import (
     _extract_platform_user_token,
     _resolve_platform_credentials,
 )
-from gateway.api.routes._schema_derive import derive_request_base
+from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
@@ -59,7 +60,6 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
-from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.services.web_search_backend import WebSearchNotReachableError
@@ -92,6 +92,7 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     guardrails: list[GuardrailConfig] | None = Field(default=None, max_length=8)
     tools_header: str | None = None
     max_tool_iterations: int | None = Field(default=None, ge=1, le=MAX_TOOL_ITERATIONS_CAP)
+    session_label: str | None = Field(default=None, max_length=SESSION_LABEL_MAX_LENGTH, description=SESSION_LABEL_DESC)
 
 
 class CountTokensRequest(BaseModel):
@@ -424,6 +425,7 @@ async def create_message(
                     background_tasks=background_tasks,
                     rate_limit_info=ctx.rate_limit_info,
                     tool_ctx=tool_ctx,
+                    session_label=request.session_label,
                 )
             except HTTPException as exc:
                 # Hybrid terminal failures arrive as format-agnostic plain-string
@@ -477,11 +479,13 @@ async def create_message(
             platform_correlation_id = attempt.attempt_id
             platform_request_id = route.request_id
             billing_provider: Any = LLMProvider(attempt.provider)
+            display_model: str | None = None
         else:
-            resolved = resolve_provider_selector(config, request.model)
+            resolved = resolve_dispatch_provider(ctx, config, request.model)
             model = resolved.model
             call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
             billing_provider = resolved.instance
+            display_model = resolved.alias
 
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
@@ -492,6 +496,8 @@ async def create_message(
             model=model,
             platform_correlation_id=platform_correlation_id,
             platform_request_id=platform_request_id,
+            session_label=request.session_label,
+            display_model=display_model,
         )
 
     # ------------------------------------------------------------------
@@ -510,6 +516,7 @@ async def create_message(
                 background_tasks=background_tasks,
                 config=config,
                 rate_limit_info=ctx.rate_limit_info,
+                session_label=request.session_label,
             )
         except HTTPException as exc:
             # Hybrid terminal failures arrive as format-agnostic plain-string
@@ -536,7 +543,7 @@ async def create_message(
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
-    resolved = resolve_provider_selector(config, request.model)
+    resolved = resolve_dispatch_provider(ctx, config, request.model)
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,
@@ -545,6 +552,7 @@ async def create_message(
         call_kwargs=call_kwargs,
         provider=resolved.instance,
         model=resolved.model,
+        display_model=resolved.alias,
     )
 
     if ctx.rate_limit_info:

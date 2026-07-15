@@ -42,23 +42,13 @@ def _allow_private_hosts() -> bool:
     return otari_env("MCP_ALLOW_PRIVATE_HOSTS", "false").lower() in {"1", "true", "yes"}
 
 
-def _resolve_all(host: str) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror:
-        return []
-    out: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
-    for info in infos:
-        sockaddr = info[4]
-        try:
-            out.append(ipaddress.ip_address(sockaddr[0]))
-        except ValueError:
-            continue
-    return out
-
-
-def validate_mcp_url(url: str, *, has_authorization_token: bool) -> None:
+async def validate_mcp_url(url: str, *, has_authorization_token: bool) -> None:
     """Reject URLs that are unsafe for the gateway to fetch.
+
+    Async because DNS resolution (:func:`_resolve_all_async`) must not block
+    the event loop: this is called from the request pipeline, not from
+    request-body parsing, so other concurrent requests keep making progress
+    while a slow/unresolvable hostname is looked up.
 
     Raises :class:`UnsafeURLError` on rejection. Returns ``None`` on accept.
     """
@@ -80,7 +70,7 @@ def validate_mcp_url(url: str, *, has_authorization_token: bool) -> None:
         literal = ipaddress.ip_address(host)
         addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [literal]
     except ValueError:
-        addresses = _resolve_all(host)
+        addresses = await _resolve_all_async(host)
         if not addresses:
             # Couldn't resolve the host at validation time. Rejecting is the
             # safer default: a hostname that fails to resolve here could
