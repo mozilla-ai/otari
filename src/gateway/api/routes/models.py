@@ -5,15 +5,19 @@ from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key
+from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing
-from gateway.services.model_discovery_service import discover_all_models, get_model_cache
+from gateway.services.model_discovery_service import (
+    discover_all_models,
+    discover_models_with_status,
+    get_model_cache,
+)
 from gateway.services.provider_kwargs import normalize_pricing_key
 
 router = APIRouter(prefix="/v1", tags=["models"])
@@ -46,6 +50,31 @@ class ModelListResponse(BaseModel):
 
     object: str = "list"
     data: list[ModelObject]
+
+
+class DiscoverableModel(BaseModel):
+    """A model one provider instance reports as available."""
+
+    id: str = Field(description="Bare model id as the provider reports it.")
+    key: str = Field(description="Selector to send as `model`, in `instance:model` form.")
+
+
+class DiscoverableProvider(BaseModel):
+    """One provider instance's discovery result."""
+
+    provider: str
+    ok: bool = Field(description="False when this instance could not be queried.")
+    error: str | None = Field(
+        default=None,
+        description="Why discovery failed. Null when `ok` is true.",
+    )
+    models: list[DiscoverableModel]
+
+
+class DiscoverableModelsResponse(BaseModel):
+    """Per-provider discovery results for operator model selection."""
+
+    providers: list[DiscoverableProvider]
 
 
 def _model_from_pricing(pricing: ModelPricing) -> ModelObject:
@@ -205,6 +234,42 @@ async def list_models(
 
     sorted_models = sorted(merged.values(), key=lambda m: m.id)
     return ModelListResponse(data=sorted_models)
+
+
+# Declared before GET /models/{model_id:path}: FastAPI matches routes in
+# registration order, so a later declaration would be shadowed and "discoverable"
+# would arrive as a model id. The corollary is that a provider model literally
+# named "discoverable" is unreachable via GET /v1/models/discoverable; that is
+# accepted, and such a model is still listed by GET /v1/models.
+@router.get("/models/discoverable", dependencies=[Depends(verify_master_key)])
+async def list_discoverable_models(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> DiscoverableModelsResponse:
+    """List every model the configured provider credentials can reach.
+
+    Operator-facing counterpart to GET /v1/models, which serves a curated catalog
+    to API callers. This reports each provider separately and keeps its error, so
+    a provider with a bad key is distinguishable from one with no models. It is
+    master-key gated because a provider error message describes the gateway's own
+    configuration.
+    """
+    discoveries = await discover_models_with_status(config)
+    providers = [
+        DiscoverableProvider(
+            provider=discovery.provider,
+            ok=discovery.error is None,
+            error=discovery.error,
+            models=sorted(
+                (
+                    DiscoverableModel(id=model.id, key=f"{discovery.provider}:{model.id}")
+                    for model in discovery.models
+                ),
+                key=lambda m: m.id,
+            ),
+        )
+        for discovery in discoveries
+    ]
+    return DiscoverableModelsResponse(providers=sorted(providers, key=lambda p: p.provider))
 
 
 @router.get("/models/{model_id:path}", dependencies=[Depends(verify_api_key_or_master_key)])

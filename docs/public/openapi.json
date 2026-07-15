@@ -962,6 +962,84 @@
         "title": "CreateUserRequest",
         "type": "object"
       },
+      "DiscoverableModel": {
+        "description": "A model one provider instance reports as available.",
+        "properties": {
+          "id": {
+            "description": "Bare model id as the provider reports it.",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "Selector to send as `model`, in `instance:model` form.",
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key"
+        ],
+        "title": "DiscoverableModel",
+        "type": "object"
+      },
+      "DiscoverableModelsResponse": {
+        "description": "Per-provider discovery results for operator model selection.",
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverableProvider"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "title": "DiscoverableModelsResponse",
+        "type": "object"
+      },
+      "DiscoverableProvider": {
+        "description": "One provider instance's discovery result.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why discovery failed. Null when `ok` is true.",
+            "title": "Error"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverableModel"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "ok": {
+            "description": "False when this instance could not be queried.",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "ok",
+          "models"
+        ],
+        "title": "DiscoverableProvider",
+        "type": "object"
+      },
       "EmbeddingRequest": {
         "description": "OpenAI-compatible embedding request.",
         "properties": {
@@ -4499,6 +4577,33 @@
           }
         ],
         "summary": "List Models",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/v1/models/discoverable": {
+      "get": {
+        "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\nmaster-key gated because a provider error message describes the gateway's own\nconfiguration.",
+        "operationId": "list_discoverable_models_v1_models_discoverable_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoverableModelsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List Discoverable Models",
         "tags": [
           "models"
         ]
