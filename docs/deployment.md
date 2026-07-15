@@ -28,7 +28,7 @@ It deploys the published Otari image (`docker.io/mzdotai/otari:0.2.0`) as a free
 - On Apply, provide whichever provider credentials you use. Render provisions the web service and Postgres, injects the database’s internal connection string as `OTARI_DATABASE_URL`, generates `OTARI_MASTER_KEY`, sets `PORT` and `OTARI_PORT` to `8000`, enables fail-closed bundled pricing (`OTARI_REQUIRE_PRICING` and `OTARI_DEFAULT_PRICING`), and checks `/health/readiness`.
 - On Otari startup, the app runs database migrations and creates the bootstrap API key (printed once in the service logs).
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&blueprintPath=deploy/render/render.yaml)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&path=deploy/render/render.yaml)
 
 If you create the Blueprint from the Dashboard (**New → Blueprint**) instead of the button, set **Blueprint Path** to `deploy/render/render.yaml`.
 
