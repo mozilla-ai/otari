@@ -97,7 +97,7 @@ def test_embeddings_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/embeddings returns 500 when the provider fails."""
+    """POST /v1/embeddings returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.embeddings.aembedding",
         new_callable=AsyncMock,
@@ -108,7 +108,7 @@ def test_embeddings_provider_error(
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
     assert "provider" in resp.json()["detail"].lower()
 
 
@@ -159,7 +159,7 @@ def test_embeddings_logs_error_on_failure(
             json={"model": "openai:text-embedding-3-small", "input": "hello"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
 
     usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
