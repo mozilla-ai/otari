@@ -167,7 +167,7 @@ Deploy Otari with fully managed Postgres on Render for free. Just add your provi
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&blueprintPath=deploy/render/render.yaml)
 
-Read [`the docs`](deploy/render/README.md) for more details.
+Read [`the docs`](deploy/render/README.md) for more details, including a hybrid-mode Blueprint connected to otari.ai.
 
 ### Railway
 

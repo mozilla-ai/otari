@@ -1,6 +1,6 @@
 # Deploy Otari on Render
 
-Deploy Otari and Render Postgres from a Blueprint ([`render.yaml`](./render.yaml)). Render pulls the published Otari image rather than building this repository.
+Deploy Otari and Render Postgres from a Blueprint ([`render.yaml`](./render.yaml)). Render pulls the published Otari image rather than building this repository. For hybrid mode instead, connected to otari.ai, see [Hybrid mode](#hybrid-mode) below.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&blueprintPath=deploy/render/render.yaml)
 
@@ -13,7 +13,7 @@ Deploy Otari and Render Postgres from a Blueprint ([`render.yaml`](./render.yaml
 
 The web service is stateless. Postgres stores users, API key hashes, budgets, pricing, and usage history. On first boot, Otari runs its database migrations and creates a bootstrap API key, which is printed once in the service logs.
 
-This Blueprint deploys Otari in standalone mode. Otari also supports hybrid mode, delegating provider routing, auth, and usage tracking to [otari.ai](https://otari.ai) instead of a local database — see [Modes](../../docs/modes.md).
+This Blueprint deploys Otari in standalone mode. For hybrid mode instead, connected to otari.ai without a local database, see [Hybrid mode](#hybrid-mode) below.
 
 ## Free instance limits
 
@@ -99,13 +99,68 @@ Before the free database expires, change the web-service plan to `starter` and t
 
 The Blueprint pins the Otari image to a release tag, and image-backed services do not redeploy when a new image is published to that tag. To upgrade, change `image.url` to the desired release and sync the Blueprint. To keep every Blueprint update manual, turn off Auto Sync in the Blueprint settings.
 
+## Hybrid mode
+
+The Blueprint above deploys Otari in standalone mode with its own database. Otari also supports hybrid mode, delegating provider routing, auth, and usage tracking to [otari.ai](https://otari.ai) instead — see [Modes](../../docs/modes.md) for the concept.
+
+A separate Blueprint, [`render.hybrid.yaml`](./render.hybrid.yaml), deploys hybrid mode:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&blueprintPath=deploy/render/render.hybrid.yaml)
+
+### What gets deployed
+
+| Resource | Plan | Details |
+| --- | --- | --- |
+| `otari-hybrid` | Free web service | `docker.io/mzdotai/otari:0.2.0`, Oregon, health check at `/health/readiness` |
+
+No database is created. Otari keeps no local state in hybrid mode: users, budgets, and usage are managed by otari.ai instead.
+
+### Configuration
+
+| Variable | Set how | Notes |
+| --- | --- | --- |
+| `PORT`, `OTARI_PORT` | `8000` | Keeps Render's detected port aligned with Otari's listening port. |
+| `OTARI_HOST` | `0.0.0.0` | Binds Otari on the container network. |
+| `OTARI_AI_TOKEN` | you provide | The gateway token (`gw-...`) for this Otari instance. Create it in otari.ai under **Organisation > Gateways > Create token**. Setting this alone switches Otari into hybrid mode; no `OTARI_MODE` is needed. |
+
+`OTARI_MASTER_KEY`, `OTARI_DATABASE_URL`, the pricing flags, and the migration/bootstrap flags from the standalone Blueprint don't apply here: hybrid mode has no local database or management endpoints to protect. Only `/health`, `/health/liveness`, `/health/readiness`, `/v1/chat/completions`, `/v1/messages`, and `/v1/responses` are exposed. Chat requests use `Authorization: Bearer <otari-user-token>` issued by otari.ai, not a locally minted API key.
+
+### Deploy
+
+1. Click **Deploy to Render** above. The button passes `blueprintPath=deploy/render/render.hybrid.yaml`.
+2. Enter your `OTARI_AI_TOKEN`.
+3. Review the single free web service, then apply the Blueprint.
+4. Wait for `otari-hybrid` to become live, then copy its `*.onrender.com` URL from the Dashboard.
+
+### Verify
+
+```bash
+export OTARI_URL=https://<your-service>.onrender.com
+
+curl "$OTARI_URL/health"
+curl "$OTARI_URL/health/readiness"
+```
+
+The `/health` response includes `"mode": "hybrid"` and platform reachability. Then verify a chat request using an otari.ai user token:
+
+```bash
+curl "$OTARI_URL/v1/chat/completions" \
+  -H "Authorization: Bearer <otari-user-token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-4o",
+    "messages": [{"role": "user", "content": "ping"}]
+  }'
+```
+
 ## Maintaining the Blueprint
 
-When changing the Blueprint:
+When changing either Blueprint:
 
 1. Validate it against Render's current schema (requires [Render CLI](https://render.com/docs/cli) v2.7.0 or newer):
 
    ```bash
    render blueprints validate deploy/render/render.yaml
+   render blueprints validate deploy/render/render.hybrid.yaml
    ```
-2. If the deploy link or Blueprint path changes, update this README, the project root [`README.md`](../../README.md), and `docs/deployment.md` together.
+2. If a deploy link or Blueprint path changes, update this README, the project root [`README.md`](../../README.md), and `docs/deployment.md` together.

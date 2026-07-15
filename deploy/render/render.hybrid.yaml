@@ -1,0 +1,42 @@
+# yaml-language-server: $schema=https://render.com/schema/render.yaml.json
+#
+# Otari on Render (hybrid mode): Blueprint for deploy from deploy/render/render.hybrid.yaml
+# Docs: deploy/render/README.md#hybrid-mode
+# Image: https://hub.docker.com/r/mzdotai/otari
+#
+# Pattern: image-wrapper (official mzdotai/otari image; no source build on Render)
+# Hybrid mode: single stateless web service, no database. Otari delegates
+# provider routing, auth, and usage tracking to otari.ai. See docs/modes.md.
+
+previews:
+  generation: "off"
+
+projects:
+  - name: otari-hybrid
+    environments:
+      - name: production
+        services:
+          - type: web
+            name: otari-hybrid
+            runtime: image
+            plan: free
+            region: oregon
+            image:
+              url: docker.io/mzdotai/otari:0.2.0
+            # In hybrid mode, /health/readiness checks platform reachability
+            # instead of a database, so this works with zero local storage.
+            healthCheckPath: /health/readiness
+            envVars:
+              # Otari binds OTARI_PORT (default 8000), not Render's PORT.
+              # Pin both so Render's port scanner and the process agree.
+              - key: PORT
+                value: "8000"
+              - key: OTARI_PORT
+                value: "8000"
+              - key: OTARI_HOST
+                value: "0.0.0.0"
+              # The gateway token (gw-...) from otari.ai. Setting this alone
+              # switches Otari into hybrid mode -- no OTARI_MODE needed.
+              # Create it in otari.ai under Organisation > Gateways > Create token.
+              - key: OTARI_AI_TOKEN
+                sync: false
