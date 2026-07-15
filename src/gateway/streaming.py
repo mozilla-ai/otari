@@ -74,7 +74,7 @@ def relabel_model(obj: Any, display_model: str) -> Any:
         if holder is not None and hasattr(holder, "model"):
             try:
                 holder.model = display_model
-            except (AttributeError, ValueError):  # frozen / validated field — leave as-is
+            except (AttributeError, ValueError):  # frozen / validated field, leave as-is
                 pass
     return obj
 

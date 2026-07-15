@@ -60,6 +60,25 @@ def test_validate_rejects_unknown_provider_prefix() -> None:
         GatewayConfig(aliases={"a": "not_a_provider:model"}).validate_aliases()
 
 
+@pytest.mark.parametrize("prefix", ["openai-compatible", "openai_compatible"])
+def test_validate_rejects_provider_type_alias_prefix(prefix: str) -> None:
+    # A provider_type alias names an instance's implementation, not a selector
+    # prefix: any-llm does not know it, so request-time routing would raise. It
+    # must fail at startup rather than on the first request.
+    with pytest.raises(ValueError, match="neither a configured"):
+        GatewayConfig(aliases={"fastmodel": f"{prefix}:gpt-4o"}).validate_aliases()
+
+
+def test_validate_accepts_instance_named_like_provider_type_alias() -> None:
+    # The prefix is a configured instance here, so it stays valid: only the
+    # unconfigured provider_type-alias prefix is rejected.
+    config = GatewayConfig(
+        providers={"openai-compatible": {"provider_type": "openai", "api_base": "http://x/v1"}},
+        aliases={"fastmodel": "openai-compatible:gpt-4o"},
+    )
+    config.validate_aliases()  # no raise
+
+
 @pytest.mark.parametrize("name", ["openai:gpt-4o", "openai/gpt-4o", "my:model"])
 def test_validate_rejects_selector_shaped_name(name: str) -> None:
     # Alias lookup runs before selector resolution, so a name containing a

@@ -381,8 +381,13 @@ class GatewayConfig(BaseSettings):
                 raise ValueError(msg)
             if prefix in self.providers:
                 continue
+            # No PROVIDER_TYPE_ALIASES mapping here: that normalizes an instance's
+            # declared provider_type, not a selector prefix. Request-time routing
+            # splits the selector through any-llm, which knows no such mapping, so
+            # accepting "openai-compatible:model" would pass startup and then fail
+            # on the first request.
             try:
-                LLMProvider(PROVIDER_TYPE_ALIASES.get(prefix, prefix))
+                LLMProvider(prefix)
             except ValueError as exc:
                 msg = (
                     f"aliases.{name} target '{target}' prefix '{prefix}' is neither a configured "
