@@ -143,6 +143,69 @@ def test_load_config_honors_legacy_gateway_prefix(tmp_path: Path, monkeypatch: p
     assert config.port == 7100
 
 
+def test_load_config_promotes_service_level_fields_from_otari_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The service-level knobs that used to be read only via otari_env() deep in
+    # route/service code are now typed GatewayConfig fields, validated at startup
+    # and populated by the same OTARI_ override machinery as every scalar field.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    for legacy in (
+        "GATEWAY_SANDBOX_URL",
+        "GATEWAY_GUARDRAILS_URL",
+        "GATEWAY_WEB_SEARCH_MAX_RESULTS",
+        "GATEWAY_MCP_ALLOW_LOOPBACK",
+    ):
+        monkeypatch.delenv(legacy, raising=False)
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:9000")
+    monkeypatch.setenv("OTARI_GUARDRAILS_URL", "http://guardrails:8000")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_MAX_RESULTS", "7")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_EXTRACT", "false")
+    monkeypatch.setenv("OTARI_MCP_ALLOW_LOOPBACK", "false")
+
+    config = load_config(str(config_file))
+
+    assert config.sandbox_url == "http://sandbox:9000"
+    assert config.guardrails_url == "http://guardrails:8000"
+    assert config.web_search_max_results == 7
+    assert config.web_search_extract is False
+    assert config.mcp_allow_loopback is False
+
+
+def test_load_config_service_level_fields_honor_legacy_gateway_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Promoting these knobs must not break their legacy GATEWAY_ env names.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
+    monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
+    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://legacy-sandbox:9000")
+    monkeypatch.setenv("GATEWAY_MCP_ALLOW_PRIVATE_HOSTS", "true")
+
+    config = load_config(str(config_file))
+
+    assert config.sandbox_url == "http://legacy-sandbox:9000"
+    assert config.mcp_allow_private_hosts is True
+
+
+def test_load_config_rejects_invalid_service_level_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The promotion buys startup validation: a value the old code silently
+    # ignored (a non-int web-search cap) now fails fast at config load.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_WEB_SEARCH_MAX_RESULTS", "not-an-int")
+
+    with pytest.raises(ValueError):
+        load_config(str(config_file))
+
+
 def test_load_config_otari_env_overrides_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("budget_strategy: for_update\n", encoding="utf-8")

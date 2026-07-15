@@ -65,6 +65,7 @@ pricing:
 | `rate_limit_rpm` | int | none | Max requests per minute per user (none = disabled) |
 | `cors_allow_origins` | list | `[]` | Allowed CORS origins (empty = disabled) |
 | `providers` | dict | `{}` | Provider credentials (see below) |
+| `aliases` | dict | `{}` | Model name aliases (display name to target selector `instance:model` or `provider:model`). The alias is what users see in `GET /v1/models` and in response `model` fields; pricing, budgets, and usage key on the resolved target. Standalone mode only. |
 | `pricing` | dict | `{}` | Model pricing entries |
 | `enable_metrics` | bool | `false` | Enable Prometheus `/metrics` endpoint |
 | `enable_docs` | bool | `true` | Enable `/docs`, `/redoc`, `/openapi.json` |
@@ -76,6 +77,29 @@ pricing:
 | `reject_user_mismatch` | bool | `true` | When `true`, a non-master key whose request names a `user` other than its own is rejected (HTTP 403). When `false`, the client `user` is still forwarded to the provider but spend is always bound to the key's own user. The master key may always bill an arbitrary user. |
 | `stream_missing_usage_policy` | string | `"estimate"` | How to bill a streamed response that completes with no provider usage data: `"estimate"` (charge the up-front estimate), `"fail"` (charge estimate and mark errored), or `"allow_free"` (don't bill). |
 | `budget_estimate_default_output_tokens` | int | `1024` | Output-token count assumed when reserving budget for a request with no declared max output; reconciled to actual usage on completion. |
+| `model_discovery` | bool | `true` | Auto-discover models from configured providers for `GET /v1/models`. |
+| `model_cache_ttl_seconds` | int | `300` | TTL for the in-memory model-discovery cache (`0` disables caching). |
+| `files_enabled` | bool | `true` | Enable the `/v1/files` upload/storage endpoints (standalone mode). |
+| `files_backend` | string | `"local"` | Blob backend for uploaded file bytes (`"local"` filesystem for now). |
+| `files_local_dir` | string | `"./otari-files"` | Directory the `local` files backend writes uploaded bytes to. |
+| `files_max_bytes` | int | `536870912` | Maximum size in bytes for a single uploaded file (512 MiB default). |
+| `files_retention_hours` | int | none | Stop serving files older than N hours (they return 404); none keeps files indefinitely. Stored bytes are not auto-reclaimed. |
+| `file_understanding_enabled` | bool | `true` | Normalize file/image content blocks before the provider call (pass through for capable models, extract to text otherwise). When `false`, blocks are forwarded unchanged. |
+| `vision_strategy` | string | `"describe"` | How image blocks are handled for text-only models: `"describe"` (vision side-call), `"ocr"` (extract text only), or `"off"` (drop with a log line). |
+| `vision_describe_model` | string | none | `provider/model` used to caption images for text-only targets when `vision_strategy="describe"`. When unset, `describe` falls back to a logged drop. |
+| `vision_describe_max_tokens` | int | `1024` | Cap on the describe model's output tokens per image; bounds cost and latency of the vision side-call. |
+| `model_capabilities` | dict | `{}` | Per-model multimodal capability overrides (`provider/model` to `{supports_image, supports_pdf}`). Authoritative over any-llm's provider-level flags; needed for text-only local models behind OpenAI-compatible servers. |
+| `sandbox_url` | string | none | Base URL of the code-execution sandbox backend for `otari_code_execution` tools. When unset, such requests are rejected with HTTP 400. Also settable via `OTARI_SANDBOX_URL`. |
+| `guardrails_url` | string | none | Default input-guardrails service URL, used when a request does not pass its own guardrail `url`. Also settable via `OTARI_GUARDRAILS_URL`. |
+| `tools_header` | string | none | Override for the purpose-hint preamble header injected ahead of gateway-managed tool hints. When unset, a built-in default header is used. Also settable via `OTARI_TOOLS_HEADER`. |
+| `sandbox_purpose_hint` | string | none | Default purpose hint forwarded to the sandbox backend when a tool entry supplies none. Also settable via `OTARI_SANDBOX_PURPOSE_HINT`. |
+| `web_search_purpose_hint` | string | none | Default purpose hint for the web-search backend when a tool entry supplies none. Also settable via `OTARI_WEB_SEARCH_PURPOSE_HINT`. |
+| `web_search_engines` | string | none | Comma-separated SearXNG engine list for the web-search backend. Also settable via `OTARI_WEB_SEARCH_ENGINES`. |
+| `web_search_max_results` | int | none | Default cap on web-search hits (a per-tool `max_results` still overrides it). Also settable via `OTARI_WEB_SEARCH_MAX_RESULTS`. |
+| `web_search_extract` | bool | none | Whether the web-search backend extracts page content in-process (`true`) or returns snippet-only results (`false`). When unset, extraction is on. Also settable via `OTARI_WEB_SEARCH_EXTRACT`. |
+| `web_search_allow_private_hosts` | bool | `false` | SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. Also settable via `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`. |
+| `mcp_allow_loopback` | bool | `true` | SSRF gate: allow MCP server URLs that resolve to loopback (same-host sidecars). Also settable via `OTARI_MCP_ALLOW_LOOPBACK`. |
+| `mcp_allow_private_hosts` | bool | `false` | SSRF gate: allow MCP server URLs that resolve to private/reserved hosts (and accept hostnames that fail to resolve at validation time). Also settable via `OTARI_MCP_ALLOW_PRIVATE_HOSTS`. |
 | `mode` | string | `"standalone"` | Configured mode (`"standalone"` or `"hybrid"`; the legacy value `"platform"` is still accepted). Effective behavior is driven by presence of `OTARI_AI_TOKEN`. |
 | `platform` | dict | `{}` | otari.ai integration settings (`base_url`, timeouts, retries) |
 
@@ -128,6 +152,25 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 | `OTARI_PORT` | Server bind port |
 | `OTARI_AUTO_MIGRATE` | Auto-run migrations on startup |
 | `OTARI_BOOTSTRAP_API_KEY` | Create first-use API key |
+
+### Built-in tools and guardrails variables
+
+These operator-facing settings configure the gateway-managed tools (`otari_code_execution`, `otari_web_search`), the MCP tool loop, and input guardrails. Each is validated at startup and, where it maps to a scalar `GatewayConfig` field, can also be set in the config file (see the config reference above). Every variable also accepts its legacy `GATEWAY_` prefix; `OTARI_` wins when both are set.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OTARI_SANDBOX_URL` | none | Base URL of the code-execution sandbox backend for `otari_code_execution` tools. Required to use that tool. |
+| `OTARI_WEB_SEARCH_URL` | none | Base URL of the web-search backend for `otari_web_search` tools. Required to use that tool. |
+| `OTARI_GUARDRAILS_URL` | none | Default input-guardrails service URL, used when a request does not pass its own guardrail `url`. |
+| `OTARI_TOOLS_HEADER` | built-in | Override for the purpose-hint preamble header injected ahead of gateway-managed tool hints. |
+| `OTARI_SANDBOX_PURPOSE_HINT` | none | Default purpose hint forwarded to the sandbox backend when a tool entry supplies none. |
+| `OTARI_WEB_SEARCH_PURPOSE_HINT` | none | Default purpose hint for the web-search backend when a tool entry supplies none. |
+| `OTARI_WEB_SEARCH_ENGINES` | backend default | Comma-separated SearXNG engine list (e.g. `google,bing`). |
+| `OTARI_WEB_SEARCH_MAX_RESULTS` | backend default | Default cap on returned hits (a per-tool `max_results` still overrides it). Must be `>= 1`. |
+| `OTARI_WEB_SEARCH_EXTRACT` | `true` | `0`/`false` disables in-process content extraction (snippet-only mode). |
+| `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS` | `false` | SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. |
+| `OTARI_MCP_ALLOW_LOOPBACK` | `true` | SSRF gate: allow MCP server URLs that resolve to loopback (same-host sidecars). |
+| `OTARI_MCP_ALLOW_PRIVATE_HOSTS` | `false` | SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept hostnames that fail to resolve at validation time. |
 
 ### Provider credentials
 
