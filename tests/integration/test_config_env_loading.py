@@ -199,15 +199,78 @@ def test_load_config_rejects_hybrid_mode_without_token(tmp_path: Path, monkeypat
         load_config(str(config_file))
 
 
-def test_load_config_prefers_hybrid_mode_when_token_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_config_derives_hybrid_mode_from_token_when_mode_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Token present and no explicit mode: the runtime mode is derived as hybrid.
     config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: standalone\n", encoding="utf-8")
+    config_file.write_text("", encoding="utf-8")
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
 
     config = load_config(str(config_file))
 
-    assert config.mode == "standalone"
+    assert config.mode is None
     assert config.is_hybrid_mode
+    assert config.effective_mode == "hybrid"
+
+
+def test_load_config_rejects_standalone_mode_when_token_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Explicitly asserting standalone while a platform token selects hybrid is a
+    # conflicting configuration and must fail at startup rather than silently
+    # running hybrid.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("mode: standalone\n", encoding="utf-8")
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+
+    with pytest.raises(ValueError, match="conflicts with a platform token"):
+        load_config(str(config_file))
+
+
+def test_load_config_rejects_standalone_mode_from_env_when_token_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The conflict check also covers OTARI_MODE supplied via the environment.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("", encoding="utf-8")
+    monkeypatch.setenv("OTARI_MODE", "standalone")
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+
+    with pytest.raises(ValueError, match="conflicts with a platform token"):
+        load_config(str(config_file))
+
+
+def test_load_config_honors_explicit_standalone_without_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("mode: standalone\n", encoding="utf-8")
+    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
+    monkeypatch.delenv("OTARI_PLATFORM_TOKEN", raising=False)
+    monkeypatch.delenv("ANY_LLM_PLATFORM_TOKEN", raising=False)
+
+    config = load_config(str(config_file))
+
+    assert config.mode == "standalone"
+    assert not config.is_hybrid_mode
+    assert config.effective_mode == "standalone"
+
+
+def test_load_config_unset_mode_without_token_is_standalone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("", encoding="utf-8")
+    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
+    monkeypatch.delenv("OTARI_PLATFORM_TOKEN", raising=False)
+    monkeypatch.delenv("ANY_LLM_PLATFORM_TOKEN", raising=False)
+
+    config = load_config(str(config_file))
+
+    assert config.mode is None
+    assert not config.is_hybrid_mode
+    assert config.effective_mode == "standalone"
 
 
 def test_load_config_accepts_legacy_platform_mode_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,7 +288,7 @@ def test_load_config_accepts_legacy_platform_mode_alias(tmp_path: Path, monkeypa
 
 def test_load_config_accepts_legacy_platform_token_aliases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: standalone\n", encoding="utf-8")
+    config_file.write_text("", encoding="utf-8")
 
     monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "legacy-token")
 
@@ -239,7 +302,7 @@ def test_load_config_prefers_otari_ai_token_over_legacy_aliases(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config_file = tmp_path / "gateway.yml"
-    config_file.write_text("mode: standalone\n", encoding="utf-8")
+    config_file.write_text("", encoding="utf-8")
 
     monkeypatch.setenv("OTARI_AI_TOKEN", "new-token")
     monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "old-token")

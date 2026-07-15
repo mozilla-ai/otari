@@ -19,7 +19,11 @@ All endpoints are available. On first startup, Otari bootstraps an API key and l
 
 When connected to [otari.ai](https://otari.ai), Otari delegates provider routing, authentication, and usage tracking to the platform.
 
-This mode activates automatically when `OTARI_AI_TOKEN` is set.
+This mode activates automatically when `OTARI_AI_TOKEN` is set. You can also set
+`OTARI_MODE` explicitly to assert the intended mode: `OTARI_MODE=hybrid` requires
+a token (startup fails without one), and `OTARI_MODE=standalone` with a token set
+is rejected at startup as conflicting configuration (the token would otherwise
+select hybrid). Leave `OTARI_MODE` unset to let the token decide.
 
 `OTARI_AI_TOKEN` is the gateway token (`gw-...`) you create in otari.ai for
 this Otari instance. In otari.ai, go to `Organisation > Gateways`, create or

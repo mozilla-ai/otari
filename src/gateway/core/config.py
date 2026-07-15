@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 from any_llm import LLMProvider
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 API_KEY_HEADER = "Otari-Key"
@@ -300,18 +300,51 @@ class GatewayConfig(BaseSettings):
             "local models behind OpenAI-compatible servers."
         ),
     )
-    mode: str = Field(default="standalone", description="Otari operating mode: standalone or hybrid")
+    mode: str | None = Field(
+        default=None,
+        description=(
+            "Otari operating mode: 'standalone' or 'hybrid'. When unset (the default), the mode is "
+            "derived from the platform token: hybrid if a token is present (OTARI_AI_TOKEN, legacy "
+            "aliases OTARI_PLATFORM_TOKEN / ANY_LLM_PLATFORM_TOKEN), else standalone. Set explicitly "
+            "to assert the intended mode: 'hybrid' requires a token, and 'standalone' with a token "
+            "present is rejected at startup as conflicting configuration. Legacy value 'platform' is "
+            "accepted as an alias for 'hybrid'."
+        ),
+    )
     platform: dict[str, Any] = Field(default_factory=dict, description="otari.ai connection settings")
+
+    # Resolved once from the environment (primed by load_config, or lazily on
+    # first access for a directly-constructed config) so the runtime mode stays
+    # stable for the process: the token cannot flip mid-request from an env
+    # mutation, and hot paths no longer re-read os.getenv on every access.
+    _platform_token: str | None = PrivateAttr(default=None)
+    _platform_token_resolved: bool = PrivateAttr(default=False)
+
+    def _resolve_platform_token(self) -> str | None:
+        if not self._platform_token_resolved:
+            self._platform_token = _get_platform_token_from_env()
+            self._platform_token_resolved = True
+        return self._platform_token
 
     @property
     def platform_token(self) -> str | None:
-        return _get_platform_token_from_env()
+        return self._resolve_platform_token()
+
+    @property
+    def configured_mode(self) -> str | None:
+        """The explicitly set mode (normalized), or None when unset/blank."""
+        normalized = (self.mode or "").strip().lower()
+        return normalized or None
 
     @property
     def effective_mode(self) -> str:
-        if self.platform_token:
+        configured = self.configured_mode
+        if configured in {"hybrid", "platform"}:
             return "hybrid"
-        return "standalone"
+        if configured == "standalone":
+            return "standalone"
+        # Mode unset: derive from the platform token.
+        return "hybrid" if self.platform_token else "standalone"
 
     @property
     def is_hybrid_mode(self) -> bool:
@@ -471,7 +504,11 @@ class GatewayConfig(BaseSettings):
         return platform
 
     def validate_mode_selection(self) -> None:
-        configured_mode = self.mode.strip().lower()
+        configured_mode = self.configured_mode
+        # Mode unset: the runtime mode is derived from the token, so there is
+        # nothing to assert here.
+        if configured_mode is None:
+            return
         # "platform" is the legacy alias for "hybrid" (the otari.ai-connected
         # runtime mode); accept it so pre-rename configs keep working.
         if configured_mode not in {"standalone", "hybrid", "platform"}:
@@ -483,6 +520,14 @@ class GatewayConfig(BaseSettings):
             msg = (
                 "OTARI_MODE=hybrid (legacy value: platform) requires OTARI_AI_TOKEN to be set "
                 "(legacy token aliases: OTARI_PLATFORM_TOKEN, ANY_LLM_PLATFORM_TOKEN)."
+            )
+            raise ValueError(msg)
+        if configured_mode == "standalone" and token_present:
+            msg = (
+                "OTARI_MODE=standalone (legacy: GATEWAY_MODE) conflicts with a platform token being set "
+                "(OTARI_AI_TOKEN, legacy aliases OTARI_PLATFORM_TOKEN / ANY_LLM_PLATFORM_TOKEN): the "
+                "token selects hybrid mode. Unset the token to run standalone, or remove OTARI_MODE to "
+                "let the token select hybrid mode."
             )
             raise ValueError(msg)
 
@@ -558,6 +603,10 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     _apply_platform_env_overrides(config_dict)
 
     config = GatewayConfig(**config_dict)
+    # Resolve and cache the platform token once, at load time, so the runtime
+    # mode is fixed for the process instead of re-derived from os.getenv on
+    # every property read.
+    config._resolve_platform_token()
     config.validate_mode_selection()
     config.validate_provider_instances()
     config.validate_aliases()
@@ -649,7 +698,7 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
             continue
         platform[field_name] = caster(value)
 
-    configured_mode = str(config.get("mode", "")).strip().lower()
+    configured_mode = str(config.get("mode") or "").strip().lower()
     platform_requested = configured_mode in {"hybrid", "platform"} or _get_platform_token_from_env() is not None
     if platform_requested and not platform.get("base_url"):
         platform["base_url"] = DEFAULT_PLATFORM_BASE_URL
