@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
+from any_llm.exceptions import AnyLLMError
 from any_llm import aimage_generation
 from any_llm.types.image import ImageGenerationParams, ImagesResponse
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -25,6 +26,7 @@ from gateway.services.budget_service import (
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
+from gateway.api.routes._pipeline import _raise_for_unresolvable_model
 from gateway.services.provider_kwargs import resolve_provider_selector
 
 router = APIRouter(prefix="/v1", tags=["images"])
@@ -88,7 +90,10 @@ async def create_image(
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    resolved = resolve_provider_selector(config, request.model)
+    try:
+        resolved = resolve_provider_selector(config, request.model)
+    except (ValueError, AnyLLMError) as exc:
+        _raise_for_unresolvable_model(request.model, exc)
     provider, model = resolved.provider, resolved.model
 
     # Image pricing repurposes input_price_per_million as price-per-image.

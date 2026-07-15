@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
+from any_llm.exceptions import AnyLLMError
 from any_llm import AnyLLM, LLMProvider
 from any_llm.api import acancel_batch, acreate_batch, alist_batches, aretrieve_batch, aretrieve_batch_results
 from any_llm.exceptions import BatchNotCompleteError, UnsupportedProviderError
@@ -19,6 +20,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
 from gateway.services.log_writer import LogWriter
+from gateway.api.routes._pipeline import _raise_for_unresolvable_model
 from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
 
 router = APIRouter(prefix="/v1/batches", tags=["batches"])
@@ -121,7 +123,10 @@ async def create_batch(
     user_id = api_key.user_id if api_key else None
 
     try:
-        resolved = resolve_provider_selector(config, request.model)
+        try:
+            resolved = resolve_provider_selector(config, request.model)
+        except (ValueError, AnyLLMError) as exc:
+            _raise_for_unresolvable_model(request.model, exc)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

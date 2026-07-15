@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
+from any_llm.exceptions import AnyLLMError
 from any_llm import aspeech, atranscription
 from any_llm.types.audio import AudioSpeechParams, Transcription
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
@@ -25,6 +26,7 @@ from gateway.services.budget_service import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
+from gateway.api.routes._pipeline import _raise_for_unresolvable_model
 from gateway.services.provider_kwargs import resolve_provider_selector
 
 router = APIRouter(prefix="/v1", tags=["audio"])
@@ -100,7 +102,10 @@ async def create_transcription(
     # state (user exists, not blocked, not already over budget).
     reservation = await reserve_budget(db, user_id, 0.0, model=model, strategy=config.budget_strategy)
 
-    resolved = resolve_provider_selector(config, model)
+    try:
+        resolved = resolve_provider_selector(config, model)
+    except (ValueError, AnyLLMError) as exc:
+        _raise_for_unresolvable_model(model, exc)
     provider, model_name = resolved.provider, resolved.model
 
     provider_kwargs = resolved.kwargs
@@ -262,7 +267,10 @@ async def create_speech(
     # state (user exists, not blocked, not already over budget).
     reservation = await reserve_budget(db, user_id, 0.0, model=request.model, strategy=config.budget_strategy)
 
-    resolved = resolve_provider_selector(config, request.model)
+    try:
+        resolved = resolve_provider_selector(config, request.model)
+    except (ValueError, AnyLLMError) as exc:
+        _raise_for_unresolvable_model(request.model, exc)
     provider, model_name = resolved.provider, resolved.model
 
     provider_kwargs = resolved.kwargs
