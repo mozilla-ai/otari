@@ -5,6 +5,7 @@ Mocks the HTTP layer with `respx` so the suite needs no sandbox container.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -110,8 +111,6 @@ async def test_exec_read_timeout_exceeds_execution_budget(monkeypatch: pytest.Mo
     instant the sandbox finishes, surfacing as a spurious ``SandboxNotReachableError``
     instead of a result. The exec request carries its own longer timeout as headroom.
     """
-    import json
-
     result_block = {
         "type": "code_execution_tool_result",
         "tool_use_id": "t1",
