@@ -50,6 +50,13 @@ export interface UsageSummary {
   by_model: ModelUsage[];
 }
 
+// Identity of the dashboard bundle the gateway is currently serving. Changes
+// when the built app changes, so a tab can tell its own code went stale.
+export interface DashboardBuild {
+  build: string;
+  version: string;
+}
+
 export interface HealthResponse {
   status: string;
   mode?: string;

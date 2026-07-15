@@ -13,7 +13,7 @@ from gateway.api.deps import set_config
 from gateway.api.main import register_routers
 from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
 from gateway.core.database import create_session, init_db
-from gateway.dashboard import get_dashboard_dir
+from gateway.dashboard import get_dashboard_build_id, get_dashboard_dir
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.bootstrap_service import bootstrap_first_api_key
@@ -178,6 +178,15 @@ def create_app(config: GatewayConfig) -> FastAPI:
         @app.get("/", include_in_schema=False)
         async def dashboard_index() -> FileResponse:
             return FileResponse(index_file, media_type="text/html")
+
+        # Lets an open tab notice it is running code this server no longer
+        # serves, and offer a reload, instead of sitting on a stale bundle until
+        # someone thinks to clear their storage. Public like the page it
+        # describes, and read per request so an in-place rebuild is picked up.
+        # The security middleware marks it no-store, which the poll depends on.
+        @app.get("/dashboard-build.json", include_in_schema=False)
+        async def dashboard_build() -> dict[str, str]:
+            return {"build": get_dashboard_build_id(dashboard_dir), "version": __version__}
     else:
 
         @app.get("/", response_class=HTMLResponse, include_in_schema=False)

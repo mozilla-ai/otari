@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { useAuth } from "@/auth/AuthContext";
 import { useHealth } from "@/api/hooks";
+import { UpdatePrompt } from "@/components/UpdatePrompt";
 
 export type PageKey = "overview" | "usage" | "models";
 
@@ -97,7 +98,10 @@ export function AppShell({
         </div>
       </aside>
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">{children}</div>
+        <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
+          <UpdatePrompt />
+          {children}
+        </div>
       </main>
     </div>
   );

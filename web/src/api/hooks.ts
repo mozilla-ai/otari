@@ -2,6 +2,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 
 import { ApiError, apiFetch } from "@/api/client";
 import type {
+  DashboardBuild,
   GatewaySettings,
   HealthResponse,
   ModelListResponse,
@@ -17,6 +18,12 @@ const HEALTH = "health";
 const MODELS = "models";
 const PRICING = "pricing";
 const SETTINGS = "settings";
+const BUILD = "build";
+
+// How often an open tab asks whether the app it is running is still the one the
+// gateway serves. Cheap (a hash of one small file) and only while the tab is
+// open, so a minute keeps a deploy from going unnoticed for long.
+const BUILD_POLL_MS = 60_000;
 
 export function useHealth() {
   return useQuery({
@@ -100,6 +107,21 @@ export function useUnlistedModels(keys: string[]) {
       });
       return byKey;
     },
+  });
+}
+
+export function useDashboardBuild() {
+  return useQuery({
+    queryKey: [BUILD],
+    queryFn: () => apiFetch<DashboardBuild>("/dashboard-build.json"),
+    refetchInterval: BUILD_POLL_MS,
+    // A tab left open in the background is the one most likely to be stale, so
+    // check again the moment someone comes back to it.
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+    // A failed check is not worth reporting: the tab keeps working, and the next
+    // poll retries anyway.
+    retry: false,
   });
 }
 
