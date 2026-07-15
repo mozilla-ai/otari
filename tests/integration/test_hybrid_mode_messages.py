@@ -1047,3 +1047,72 @@ def test_hybrid_mode_preamble_rejection_uses_anthropic_envelope_and_keeps_retry_
     detail = response.json()["detail"]
     assert detail["type"] == "error"
     assert detail["error"]["type"] == "rate_limit_error"
+
+def test_hybrid_mode_tool_loop_streaming_falls_through_pre_lock_in(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Streaming MCP request on /v1/messages: the first attempt errors before
+    yielding any event, so the gateway falls through to the second attempt and
+    streams its response (same pre-lock-in semantics as chat, which this
+    format previously collapsed to a single attempt)."""
+    from any_llm.types.messages import MessageDelta, MessageDeltaEvent, MessageDeltaUsage
+
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _two_attempt_resolve_response_anthropic_first(request_id="tool-stream-req-1")
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    calls: list[str] = []
+
+    class _FakeAuthError(Exception):
+        status_code = 401
+
+    async def fake_loop_stream(**kwargs: Any) -> Any:
+        api_key = str(kwargs["completion_kwargs"].get("api_key"))
+        calls.append(api_key)
+        if api_key == "sk-ant-broken":
+            raise _FakeAuthError("simulated upstream 401 on primary")
+        yield MessageDeltaEvent(
+            type="message_delta",
+            delta=MessageDelta(stop_reason=cast(Any, "end_turn"), stop_sequence=None),
+            usage=MessageDeltaUsage(
+                input_tokens=3,
+                output_tokens=5,
+                cache_creation_input_tokens=None,
+                cache_read_input_tokens=None,
+                server_tool_use=None,
+            ),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline.MCPClientPool", _FakeMcpPool)
+    monkeypatch.setattr("gateway.api.routes.messages.anthropic_tool_loop_stream", fake_loop_stream)
+
+    response = platform_client.post(
+        "/v1/messages",
+        json={
+            "model": "claude-3-5-sonnet-20241022",
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 100,
+            "stream": True,
+            "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:18080/mcp"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["X-Correlation-ID"] == "tool-att-fallback"
+    assert response.headers["X-Otari-Request-ID"] == "tool-stream-req-1"
+    assert "message_delta" in response.text
+    # Both attempts were tried in order: the tool-loop gate is gone.
+    assert calls == ["sk-ant-broken", "sk-ant-real"]
+    # The first attempt's failure was reported to the platform.
+    error_reports = [r for r in usage_reports if r.get("status") == "error"]
+    assert len(error_reports) == 1
+    assert error_reports[0]["correlation_id"] == "tool-att-primary"
