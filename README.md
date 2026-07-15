@@ -213,7 +213,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 export OTARI_AI_TOKEN=gw_xxx
 ```
 
-`OTARI_MODE` is optional and derived from `OTARI_AI_TOKEN`. See [Modes](docs/modes.md) for the full comparison, and [`docs/hybrid-mode-protocol.md`](docs/hybrid-mode-protocol.md) for the wire contract.
+`OTARI_MODE` is optional: when unset, the mode is derived from `OTARI_AI_TOKEN`; when set, it is enforced at startup (`hybrid` requires the token, `standalone` conflicts with it). See [Modes](docs/modes.md) for the full comparison, and [`docs/hybrid-mode-protocol.md`](docs/hybrid-mode-protocol.md) for the wire contract.
 
 ## Built-in tools
 
