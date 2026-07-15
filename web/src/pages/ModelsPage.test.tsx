@@ -44,6 +44,16 @@ const CATALOG: ModelListResponse = {
       pricing: { input_price_per_million: 3, output_price_per_million: 15 },
       pricing_source: "default",
     },
+    // A config.yml alias, exactly as the gateway reports one: owned_by "otari",
+    // its target's price, and pricing_source left at "none".
+    {
+      id: "fast-model",
+      object: "model",
+      created: 0,
+      owned_by: "otari",
+      pricing: { input_price_per_million: 0.15, output_price_per_million: 0.6 },
+      pricing_source: "none",
+    },
   ],
 };
 
@@ -158,6 +168,52 @@ describe("ModelsPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Backfill past usage" }));
     expect(await screen.findByText(/Backfilled 3 requests/)).toBeInTheDocument();
+  });
+
+  it("shows an alias with its target's price and no way to price it", async () => {
+    mockApi();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("fast-model");
+
+    // The alias inherits the target's rate, and is labelled as an alias even
+    // though the gateway reports pricing_source "none" for it.
+    expect(screen.getByText("alias")).toBeInTheDocument();
+    expect(screen.getByText("$0.15")).toBeInTheDocument();
+    // Pricing an alias key is a silent no-op server-side, so it must not be offered.
+    expect(screen.getByText("priced by its target")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Input price for fast-model")).not.toBeInTheDocument();
+  });
+
+  it("ignores a dead pricing row stored under an alias's own name", async () => {
+    // Nothing reads a price keyed on the alias, so showing it would advertise a
+    // rate the gateway never charges.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if ((init?.method ?? "GET").toUpperCase() === "POST") {
+        return jsonResponse(PRICED);
+      }
+      if (url.includes("/v1/settings")) {
+        return jsonResponse(SETTINGS);
+      }
+      if (url.includes("/v1/models")) {
+        return jsonResponse(CATALOG);
+      }
+      if (url.includes("/v1/usage")) {
+        return jsonResponse([]);
+      }
+      return jsonResponse([
+        PRICED,
+        { ...PRICED, model_key: "fast-model", input_price_per_million: 99, output_price_per_million: 99 },
+      ]);
+    });
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("fast-model");
+
+    expect(screen.queryByText("$99.00")).not.toBeInTheDocument();
+    expect(screen.getByText("$0.15")).toBeInTheDocument();
+    expect(screen.getByText("priced by its target")).toBeInTheDocument();
   });
 
   it("does not offer a backfill for a model with no traffic", async () => {

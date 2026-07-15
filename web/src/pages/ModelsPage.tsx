@@ -19,10 +19,18 @@ import { usageByModel } from "@/lib/usage";
 
 const USAGE_LIMIT = 500;
 
+// `owned_by` the gateway stamps on a configured alias (ALIAS_OWNED_BY in
+// src/gateway/api/routes/models.py). Aliases are display names declared in
+// config.yml, not models, so they cannot be priced here: pricing, budgets, and
+// usage all key on the resolved target. Posting a price for an alias key is
+// accepted but never read, so those rows are shown read-only.
+const ALIAS_OWNED_BY = "otari";
+
 // Where a row's price comes from. "configured" is a price in the database and
 // is the only kind that can be edited or cleared; "default" is the bundled
-// genai-prices fallback; "none" means the model is metered at no cost.
-type PriceSource = "configured" | "default" | "none";
+// genai-prices fallback; "alias" is inherited from the alias's target;
+// "none" means the model is metered at no cost.
+type PriceSource = "configured" | "default" | "alias" | "none";
 
 interface ModelRow {
   key: string;
@@ -76,6 +84,13 @@ function SourceChip({ source }: { source: PriceSource }) {
     return (
       <Chip size="sm" color="accent">
         default
+      </Chip>
+    );
+  }
+  if (source === "alias") {
+    return (
+      <Chip size="sm" color="accent">
+        alias
       </Chip>
     );
   }
@@ -181,7 +196,11 @@ function ModelTableRow({ row, onPriced }: { row: ModelRow; onPriced: (modelKey: 
       <Td className="text-right text-[var(--otari-muted)]">{formatNumber(row.totalTokens)}</Td>
       <Td className="text-right">{formatCost(row.cost)}</Td>
       <Td className="text-right whitespace-nowrap">
-        {editing ? (
+        {row.source === "alias" ? (
+          // Pricing an alias key is accepted by the API but never read, so
+          // offering an edit here would look like it worked and change nothing.
+          <span className="text-xs text-[var(--otari-muted)]">priced by its target</span>
+        ) : editing ? (
           <span className="inline-flex items-center gap-2">
             <Button
               size="sm"
@@ -331,8 +350,12 @@ export function ModelsPage() {
         return;
       }
       seen.add(key);
-      const priced = configured.get(key);
       const used = usageByKey.get(key);
+      // An alias reports the price of whatever it resolves to. A pricing row
+      // stored under the alias's own name is dead (nothing reads it), so it
+      // must not be shown as this row's price.
+      const isAlias = catalogRow?.source === "alias";
+      const priced = isAlias ? undefined : configured.get(key);
       result.push({
         key,
         model,
@@ -349,13 +372,23 @@ export function ModelsPage() {
     // The catalog first, so every configured/discovered model shows even with
     // no traffic.
     for (const model of models.data?.data ?? []) {
+      // An alias carries its target's price but reports pricing_source "none",
+      // so classify it by owned_by rather than trusting the source field.
+      const isAlias = model.owned_by === ALIAS_OWNED_BY;
+      const source: PriceSource = isAlias
+        ? "alias"
+        : model.pricing_source === "default"
+          ? "default"
+          : model.pricing
+            ? "configured"
+            : "none";
       add(model.id, model.id, model.owned_by || providerFromModelKey(model.id), {
         key: model.id,
         model: model.id,
         provider: model.owned_by,
         inputPrice: model.pricing?.input_price_per_million ?? null,
         outputPrice: model.pricing?.output_price_per_million ?? null,
-        source: model.pricing_source === "default" ? "default" : model.pricing ? "configured" : "none",
+        source,
         requests: 0,
         totalTokens: 0,
         cost: 0,
