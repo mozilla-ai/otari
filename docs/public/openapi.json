@@ -748,6 +748,17 @@
             "minItems": 1,
             "title": "Requests",
             "type": "array"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
           }
         },
         "required": [
@@ -3110,7 +3121,7 @@
     },
     "/v1/batches": {
       "get": {
-        "description": "List batches for a provider.",
+        "description": "List batches for a provider.\n\nNon-master keys only see batches they own (plus legacy batches without an\nownership marker); the page is filtered after the provider call, so a page\nmay contain fewer than ``limit`` items.",
         "operationId": "list_batches_v1_batches_get",
         "parameters": [
           {
@@ -3186,7 +3197,7 @@
         ]
       },
       "post": {
-        "description": "Create a batch of LLM requests for asynchronous processing.",
+        "description": "Create a batch of LLM requests for asynchronous processing.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
         "operationId": "create_batch_v1_batches_post",
         "requestBody": {
           "content": {
