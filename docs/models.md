@@ -189,9 +189,12 @@ it inherits that price. An alias with no pricing on its target fails closed unde
 `require_pricing`, exactly as the real model would.
 
 To expose only your curated alias names, set `model_discovery: false` so the full
-provider catalog is not listed; the listing then shows just the aliases (plus any
-models you priced explicitly). With discovery on, aliases appear alongside the
-discovered models.
+provider catalog is not listed; the listing then shows just the aliases, plus any
+models you priced explicitly that no alias points at. Pricing an alias target does
+not republish it: the alias entry already carries that price, so pricing a target
+never puts the hidden name back in the listing. Whether real models are listed is
+governed by `model_discovery` alone. With discovery on, aliases appear alongside
+the discovered models, including any target you aliased.
 
 Constraints, checked at startup: a target must be of the form `instance:model` or
 `provider:model` whose prefix is a configured instance or a known provider; an

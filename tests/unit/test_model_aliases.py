@@ -5,8 +5,9 @@ from __future__ import annotations
 import pytest
 from any_llm import LLMProvider
 
+from gateway.api.routes.models import _alias_target_keys
 from gateway.core.config import GatewayConfig
-from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.provider_kwargs import normalize_pricing_key, resolve_provider_selector
 from gateway.streaming import relabel_model
 
 # ---------------------------------------------------------------------------
@@ -150,6 +151,18 @@ class _ResponseEvent:
 
     def __init__(self, model: str) -> None:
         self.response = _HasModel(model)
+
+
+def test_alias_target_keys_are_canonical() -> None:
+    # Targets are collected in canonical "instance:model" form so a pricing row
+    # written in the legacy "provider/model" shape still matches its alias and is
+    # withheld from the listing.
+    config = GatewayConfig(
+        providers={"anthropic": {"api_key": "sk-ant"}},
+        aliases={"myopusmodel": "anthropic:claude-opus-4"},
+    )
+    assert _alias_target_keys(config) == {"anthropic:claude-opus-4"}
+    assert normalize_pricing_key(config, "anthropic/claude-opus-4") in _alias_target_keys(config)
 
 
 def test_relabel_top_level_model() -> None:

@@ -85,6 +85,11 @@ def _alias_model(config: GatewayConfig, alias: str, pricing_lookup: dict[str, Mo
     )
 
 
+def _alias_target_keys(config: GatewayConfig) -> set[str]:
+    """Canonical pricing keys of every configured alias target."""
+    return {normalize_pricing_key(config, target) for target in config.aliases.values()}
+
+
 async def _get_pricing_map(db: AsyncSession, provider_filter: str | None = None) -> dict[str, ModelPricing]:
     """Load latest pricing per model_key, optionally filtered by provider prefix."""
     latest_effective = (
@@ -154,9 +159,15 @@ async def list_models(
             )
 
     # Phase 2: pricing-only models (not discovered but have pricing entries).
+    # An alias target is skipped: billing keys on the real model, so aliasing one
+    # forces a pricing entry for it, and publishing that entry here would expose
+    # the very name the alias exists to hide. Whether real models are listed is
+    # governed by ``model_discovery`` (phase 1), never by pricing config.
+    alias_targets = _alias_target_keys(config)
     for model_key, pricing in pricing_map.items():
-        if model_key not in merged:
-            merged[model_key] = _model_from_pricing(pricing)
+        if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
+            continue
+        merged[model_key] = _model_from_pricing(pricing)
 
     # Phase 3: configured aliases. An alias is a display name, not a provider, so
     # it is only listed for the unfiltered listing; a ``?provider=`` filter asks

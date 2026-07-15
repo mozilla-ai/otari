@@ -128,6 +128,42 @@ def test_alias_listing_surfaces_target_pricing(client: TestClient) -> None:
     assert entry["pricing"]["output_price_per_million"] == 75.0
 
 
+def test_pricing_on_alias_target_does_not_expose_it(client: TestClient) -> None:
+    # Aliasing a model forces a pricing entry on the real target (billing keys
+    # there), and that entry must not put the hidden name back in the listing.
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "home_lab:qwen3",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+        },
+        headers=HEADERS,
+    )
+    resp = client.get("/v1/models", headers=HEADERS)
+    assert resp.status_code == 200
+    ids = {m["id"] for m in resp.json()["data"]}
+    assert ids == {"myopusmodel", "housemodel"}
+
+
+def test_pricing_on_unaliased_model_still_lists_it(client: TestClient) -> None:
+    # Only alias targets are withheld; a priced model nothing points at is still
+    # listed, preserving the pricing-only listing behavior.
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "anthropic:claude-haiku-4",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 5.0,
+        },
+        headers=HEADERS,
+    )
+    resp = client.get("/v1/models", headers=HEADERS)
+    assert resp.status_code == 200
+    ids = {m["id"] for m in resp.json()["data"]}
+    assert ids == {"myopusmodel", "housemodel", "anthropic:claude-haiku-4"}
+
+
 def test_provider_filter_excludes_aliases(client: TestClient) -> None:
     # A ?provider= filter asks for one provider's real models and must not leak
     # the alias mapping.
