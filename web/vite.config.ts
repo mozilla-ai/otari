@@ -18,9 +18,24 @@ const outDir = fileURLToPath(new URL("../src/gateway/static/dashboard", import.m
 const apiTarget = process.env.OTARI_DEV_API ?? "http://localhost:8000";
 const apiProxy = { target: apiTarget, changeOrigin: true };
 
+// Which gateway the dev server talks to decides which master key signs you in,
+// and the app reports an unreachable or unauthorized gateway as an invalid key.
+// Print the target so it is obvious which one is in play.
+const announceApiTarget = {
+  name: "announce-api-target",
+  apply: "serve",
+  configureServer(server: { httpServer: { once: (e: string, cb: () => void) => void } | null }) {
+    server.httpServer?.once("listening", () => {
+      const origin = process.env.OTARI_DEV_API ? "OTARI_DEV_API" : "default";
+      // eslint-disable-next-line no-console
+      console.log(`\n  ➜  API:     ${apiTarget}  (${origin})\n`);
+    });
+  },
+} as const;
+
 export default defineConfig({
   base: "/",
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), announceApiTarget],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
