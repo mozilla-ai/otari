@@ -24,6 +24,7 @@ Start with the [Quickstart](quickstart.md). It gets Otari running locally and wa
 - [MCP](mcp.md) — connect MCP servers to chat, messages, and responses requests.
 - [Files](files.md) — file uploads and document understanding for local models.
 - [Guardrails](guardrails.md) — request-level checks like prompt-injection detection.
+- [Model routing](routing.md): train a router to send easy prompts to cheaper models.
 - [Configuration](configuration.md) — the full config file and environment variable reference.
 - [API reference](api-reference.md) — every endpoint, with auth and availability per mode.
 - [Use with Claude Code](use-with-claude-code.md) — point the Claude Code CLI at Otari.

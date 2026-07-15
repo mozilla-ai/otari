@@ -23,6 +23,17 @@ PROVIDER_TYPE_ALIASES = {
     "openai_compatible": "openai",
 }
 LEGACY_API_KEY_HEADERS = ("AnyLLM-Key", "X-AnyLLM-Key")  # Back-compat aliases; prefer API_KEY_HEADER.
+ROUTER_HEADER = "Otari-Router"  # Per-request routing override: "off" skips routing, "on" uses the server default.
+# Stable per-conversation id for trace-sticky routing. When set, it is the trace
+# identity (namespaced per tenant); absent, the router falls back to hashing the
+# conversation's opening messages, which cannot tell apart two conversations that
+# open identically. See docs/routing-scaling.md.
+CONVERSATION_HEADER = "Otari-Conversation-Id"
+# Routing-memory partition (use-case / category) for this request. When set, the
+# router votes only over the tenant's records carrying the same task label and
+# stays in pass-through until that partition alone is warm; records from other
+# tasks never influence it. Submit the matching label via the /rank task_id.
+ROUTER_TASK_HEADER = "Otari-Router-Task"
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
 PLATFORM_TOKEN_ENV_VARS = (
     "OTARI_AI_TOKEN",
@@ -314,6 +325,46 @@ class GatewayConfig(BaseSettings):
             "local models behind OpenAI-compatible servers."
         ),
     )
+    router_backend: str = Field(
+        default="none",
+        description=(
+            "Model-routing backend: 'none' (disabled, default), 'noop' (echoes the requested model), "
+            "'knn' (kNN routing memory). Strategy (cheapest/fastest) backends are not implemented yet."
+        ),
+    )
+    router_candidates: str = Field(
+        default="",
+        description=(
+            "Comma-separated candidate pool the kNN router may route among (e.g. "
+            "'openai:gpt-4o,openai:gpt-3.5-turbo'). Empty disables rerouting (pass-through). "
+            "The requested model is always appended as the final fallthrough."
+        ),
+    )
+    router_alpha: float = Field(
+        default=0.3,
+        description="kNN router cost-vs-quality dial: higher prefers cheaper models more aggressively.",
+    )
+    router_k: int = Field(default=5, description="kNN router neighbor count.")
+    router_embedding_model: str = Field(
+        default="openai:text-embedding-3-small",
+        description="provider:model used to embed the task signal for kNN routing.",
+    )
+    router_confidence_floor: float = Field(
+        default=0.0,
+        description="Below this routing confidence (0..1), lead with the requested model for safety.",
+    )
+    router_seed_count: int = Field(
+        default=20,
+        description="Per-tenant routing-memory records required before routing leaves pass-through.",
+    )
+    router_granularity: str = Field(
+        default="trace_sticky",
+        description="Routing granularity: 'trace_sticky' (route once per trace, default) or 'step' (per call).",
+    )
+    router_max_vectors_per_tenant: int = Field(
+        default=5000,
+        description="Hard cap on stored routing-memory vectors per tenant; oldest are evicted past this.",
+    )
     mode: str = Field(default="standalone", description="Otari operating mode: standalone or hybrid")
     platform: dict[str, Any] = Field(default_factory=dict, description="otari.ai connection settings")
 
@@ -483,6 +534,29 @@ class GatewayConfig(BaseSettings):
         if extra_key in platform and float(platform[extra_key]) < 0:
             raise ValueError(f"{extra_key} must be >= 0, got {platform[extra_key]}")
         return platform
+
+    @field_validator("router_backend")
+    @classmethod
+    def _validate_router_backend(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"none", "noop", "knn"}
+        if normalized not in allowed:
+            msg = (
+                f"router_backend must be one of {sorted(allowed)}, got '{value}' "
+                "(strategy backends are not implemented yet)"
+            )
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("router_granularity")
+    @classmethod
+    def _validate_router_granularity(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        allowed = {"trace_sticky", "step"}
+        if normalized not in allowed:
+            msg = f"router_granularity must be one of {sorted(allowed)}, got '{value}'"
+            raise ValueError(msg)
+        return normalized
 
     def validate_mode_selection(self) -> None:
         configured_mode = self.mode.strip().lower()

@@ -77,6 +77,12 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 await bootstrap_first_api_key(config, session)
                 await initialize_pricing_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
+                if config.router_backend.strip().lower() == "knn":
+                    # Imported lazily so the default (router off) path does not load
+                    # the kNN backend's any_llm/embedding dependencies at startup.
+                    from gateway.services.knn_router import validate_router_pricing
+
+                    await validate_router_pricing(config, session)
             log_writer = create_log_writer(config.log_writer_strategy)
             app.state.file_store = build_file_store(config)
 

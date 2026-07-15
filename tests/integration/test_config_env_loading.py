@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 import gateway.core.config as config_module
-from gateway.core.config import load_config
+from gateway.core.config import GatewayConfig, load_config
 
 
 def test_load_config_loads_provider_env_vars_from_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -126,6 +126,60 @@ def test_load_config_otari_prefix_covers_all_scalar_fields(
     assert config.require_pricing is False
     assert config.model_cache_ttl_seconds == 42
     assert config.db_pool_timeout == 12.5
+
+
+def test_router_backend_defaults_to_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.delenv("OTARI_ROUTER_BACKEND", raising=False)
+    monkeypatch.delenv("GATEWAY_ROUTER_BACKEND", raising=False)
+
+    assert GatewayConfig().router_backend == "none"
+    assert load_config(str(config_file)).router_backend == "none"
+
+
+def test_router_backend_otari_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_ROUTER_BACKEND", "noop")
+
+    assert load_config(str(config_file)).router_backend == "noop"
+
+
+def test_router_knob_defaults(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Clear both namespaces: config layering honors OTARI_ but still accepts the
+    # legacy GATEWAY_ fallback, so an ambient var in either would skew the defaults.
+    knobs = ("ALPHA", "K", "SEED_COUNT", "GRANULARITY", "CANDIDATES", "EMBEDDING_MODEL")
+    for prefix in ("OTARI_ROUTER_", "GATEWAY_ROUTER_"):
+        for knob in knobs:
+            monkeypatch.delenv(f"{prefix}{knob}", raising=False)
+    config = GatewayConfig()
+    assert config.router_alpha == 0.3
+    assert config.router_k == 5
+    assert config.router_seed_count == 20
+    assert config.router_granularity == "trace_sticky"
+    assert config.router_candidates == ""
+    assert config.router_embedding_model == "openai:text-embedding-3-small"
+
+
+def test_router_knobs_otari_env_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_ROUTER_BACKEND", "knn")
+    monkeypatch.setenv("OTARI_ROUTER_ALPHA", "0.7")
+    monkeypatch.setenv("OTARI_ROUTER_K", "9")
+    monkeypatch.setenv("OTARI_ROUTER_GRANULARITY", "step")
+    monkeypatch.setenv("OTARI_ROUTER_CANDIDATES", "openai:gpt-4o,openai:gpt-3.5-turbo")
+
+    config = load_config(str(config_file))
+    assert config.router_backend == "knn"
+    assert config.router_alpha == 0.7
+    assert config.router_k == 9
+    assert config.router_granularity == "step"
+    assert config.router_candidates == "openai:gpt-4o,openai:gpt-3.5-turbo"
 
 
 def test_load_config_honors_legacy_gateway_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

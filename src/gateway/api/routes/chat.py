@@ -27,6 +27,7 @@ from gateway.api.routes._pipeline import (
     SANDBOX_UNREACHABLE_DETAIL,
     WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
+    RequestContext,
     classify_provider_error,
     default_attempt_kwargs,
     log_usage,
@@ -46,7 +47,7 @@ from gateway.api.routes._platform import (
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
-from gateway.core.config import GatewayConfig
+from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER, GatewayConfig
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
@@ -59,7 +60,9 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
+from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
+from gateway.services.router_backend import RoutingContext, get_router_backend
 from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
@@ -284,6 +287,127 @@ def _streaming_memory_remember(
     return _remember
 
 
+_ROUTER_HEADER_OFF = frozenset({"off", "false", "0", "no", "none", "disabled"})
+_ROUTER_HEADER_ON = frozenset({"on", "true", "1", "yes", "auto", "default"})
+
+
+def _routing_opted_out(raw_request: Request) -> bool:
+    """Whether the client asked to skip routing for this request via ``Otari-Router``.
+
+    Absent header or an "on" value uses the server default (route when a backend
+    is enabled); an "off" value forces pass-through to the requested model. Any
+    other value is a client error.
+    """
+    raw = raw_request.headers.get(ROUTER_HEADER)
+    if raw is None:
+        return False
+    value = raw.strip().lower()
+    if value in _ROUTER_HEADER_OFF:
+        return True
+    if value in _ROUTER_HEADER_ON:
+        return False
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Invalid {ROUTER_HEADER} header '{raw}': expected 'on' or 'off'.",
+    )
+
+
+def _conversation_id(raw_request: Request) -> str | None:
+    """The client-supplied conversation id (``Otari-Conversation-Id``), if any.
+
+    This is the stable identity a trace-sticky router keys its first decision on.
+    A blank header is treated as absent so the router falls back to hashing the
+    conversation's opening messages.
+    """
+    raw = raw_request.headers.get(CONVERSATION_HEADER)
+    if raw is None:
+        return None
+    value = raw.strip()
+    return value or None
+
+
+def _router_task(raw_request: Request) -> str | None:
+    """The client-supplied routing-memory partition (``Otari-Router-Task``), if any.
+
+    Selects which task/use-case partition of the tenant's routing memory this
+    request votes over. A blank header is treated as absent (route over the
+    tenant's whole pool).
+    """
+    raw = raw_request.headers.get(ROUTER_TASK_HEADER)
+    if raw is None:
+        return None
+    value = raw.strip()
+    return value or None
+
+
+async def _resolve_standalone_model(
+    request: ChatCompletionRequest,
+    ctx: RequestContext,
+    config: GatewayConfig,
+    routing_opt_out: bool,
+    conversation_id: str | None,
+    router_task: str | None,
+) -> str:
+    """Pick the model for a standalone request via the routing backend, if any.
+
+    Returns ``request.model`` unchanged when the client opts out for this request
+    (``Otari-Router: off``) or when routing is disabled server-side
+    (``router_backend == "none"`` → backend is ``None``); the ``noop`` backend
+    likewise echoes the requested model, so all three keep current behavior.
+    """
+    requested_model = str(request.model)
+    if routing_opt_out:
+        return requested_model
+    backend = get_router_backend(config)
+    if backend is None:
+        return requested_model
+    candidate_pool = [m.strip() for m in config.router_candidates.split(",") if m.strip()]
+    if requested_model not in candidate_pool:
+        candidate_pool.append(requested_model)
+    # A continuation is any request that already carries an assistant turn. The
+    # backend keys trace-sticky reuse on `trace_key`: the client's conversation id
+    # when supplied, otherwise a per-tenant hash of the conversation's opening
+    # messages (which cannot disambiguate identical openers; see _trace_key).
+    is_continuation = any(m.get("role") == "assistant" for m in request.messages)
+    routing_ctx = RoutingContext(
+        tenant_id=ctx.user_id or "",
+        messages=request.messages,
+        requested_model=requested_model,
+        candidate_pool=candidate_pool,
+        task_id=router_task,
+        has_tools=bool(request.tools),
+        is_trace_continuation=is_continuation,
+        trace_key=conversation_id,
+    )
+    decision = await backend.route(routing_ctx)
+    return decision.ordered_models[0]
+
+
+async def _resolve_routed_dispatch(
+    request: ChatCompletionRequest,
+    ctx: RequestContext,
+    config: GatewayConfig,
+    routing_opt_out: bool,
+    conversation_id: str | None,
+    router_task: str | None,
+) -> ResolvedProvider:
+    """Pick the standalone dispatch target, composing routing with instance/alias resolution.
+
+    Routing runs first (a no-op that echoes ``request.model`` unless a backend is
+    enabled and the client did not opt out). When it leaves the model unchanged,
+    the resolution computed for the pricing/budget gate is reused
+    (``resolve_dispatch_provider``); when it routes to a different model, that
+    model is resolved fresh so its own instance/implementation/alias mapping and
+    credentials are used for both dispatch and billing.
+    """
+    routed_model = await _resolve_standalone_model(
+        request, ctx, config, routing_opt_out, conversation_id, router_task
+    )
+    if routed_model == str(request.model):
+        return resolve_dispatch_provider(ctx, config, request.model)
+    return resolve_provider_selector(config, routed_model)
+
+
 @router.post("/completions", response_model=None)
 async def chat_completions(
     raw_request: Request,
@@ -309,6 +433,12 @@ async def chat_completions(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid request: model is required",
         )
+
+    # Per-request routing override (Otari-Router); validated up front, before any
+    # budget reservation, so a malformed value fails fast.
+    routing_opt_out = _routing_opted_out(raw_request)
+    conversation_id = _conversation_id(raw_request)
+    router_task = _router_task(raw_request)
 
     async def _normalize(
         user_id: str, provider: LLMProvider | None, model: str, instance: str | None
@@ -461,9 +591,12 @@ async def chat_completions(
                 ) from exc
 
         # Standalone path: single attempt, no fallback (no `route.attempts`).
-        # Resolve the instance to its implementation; dispatch any-llm against
+        # Route first (a no-op unless a routing backend is enabled), then resolve
+        # the chosen instance to its implementation; dispatch any-llm against
         # ``implementation:model`` while billing/logging key on the instance.
-        resolved = resolve_dispatch_provider(ctx, config, request.model)
+        resolved = await _resolve_routed_dispatch(
+            request, ctx, config, routing_opt_out, conversation_id, router_task
+        )
         call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
@@ -502,7 +635,9 @@ async def chat_completions(
         _schedule_memory_remember(background_tasks, config, memory_user_token, request.messages, completion)
         return completion
 
-    resolved = resolve_dispatch_provider(ctx, config, request.model)
+    resolved = await _resolve_routed_dispatch(
+        request, ctx, config, routing_opt_out, conversation_id, router_task
+    )
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     completion = await run_standalone_non_stream(
         adapter=_ADAPTER,

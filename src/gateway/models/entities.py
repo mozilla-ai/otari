@@ -255,6 +255,91 @@ class FileObject(Base):
         }
 
 
+class RoutingMemory(Base):
+    """One routing-memory record per scored example: a prompt embedding plus the
+    quality each candidate model earned on it.
+
+    The kNN router (gateway.services.knn_router) retrieves the nearest neighbors
+    of an incoming request's task embedding within a tenant and votes on the
+    cheapest model that is still good enough. One record is one example (one
+    prompt), so the kNN votes over distinct prompts; ``qualities`` maps each model
+    to its ``[0, 1]`` score for this prompt. Records are written by the
+    preference-collection flow.
+
+    Vectors are stored as a JSON list of floats for SQLite/PostgreSQL
+    portability; a tenant's vectors are scanned linearly in Python. This is fine
+    into the low thousands per tenant (the ``router_max_vectors_per_tenant``
+    cap); pgvector / ANN is the documented next step past that. ``embedding_model``
+    tags each row so a change of embedding model invalidates stale vectors
+    instead of mixing incomparable spaces.
+    """
+
+    __tablename__ = "routing_memory"
+    __table_args__ = (
+        Index("ix_routing_memory_tenant_model", "tenant_id", "embedding_model"),
+        Index("ix_routing_memory_tenant_created", "tenant_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id: Mapped[str] = mapped_column(index=True)
+    embedding_model: Mapped[str] = mapped_column()
+    embedding: Mapped[list[float]] = mapped_column(JSON)
+    qualities: Mapped[dict[str, float]] = mapped_column(JSON)
+    task_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    label_source: Mapped[str] = mapped_column(default="human")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert model to dictionary."""
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "embedding_model": self.embedding_model,
+            "qualities": self.qualities,
+            "task_id": self.task_id,
+            "label_source": self.label_source,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class RouterPreference(Base):
+    """An audit record of a preference-collection scoring.
+
+    Each ``/v1/router/preferences/rank`` submission writes one row here for
+    provenance, plus one :class:`RoutingMemory` row per scored example (the prompt
+    with its per-model score map). Keeping the raw per-model scores lets us
+    recompute quality if the mapping changes, and tracks label provenance
+    (human vs. judge).
+    """
+
+    __tablename__ = "router_preferences"
+    __table_args__ = (Index("ix_router_preferences_tenant_created", "tenant_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id: Mapped[str] = mapped_column(index=True)
+    prompt: Mapped[str] = mapped_column()
+    task_id: Mapped[str | None] = mapped_column(default=None)
+    scores: Mapped[dict[str, float]] = mapped_column(JSON)
+    label_source: Mapped[str] = mapped_column(default="human")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert model to dictionary."""
+        return {
+            "id": self.id,
+            "tenant_id": self.tenant_id,
+            "prompt": self.prompt,
+            "task_id": self.task_id,
+            "scores": self.scores,
+            "label_source": self.label_source,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class BudgetResetLog(Base):
     """Budget reset log model for tracking budget resets."""
 
