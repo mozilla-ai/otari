@@ -8,22 +8,19 @@ import {
   usePricing,
   useSetPricing,
   useSettings,
-  useUsage,
+  useUsageSummary,
 } from "@/api/hooks";
 import { Field } from "@/components/Field";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/components/ui";
 import { formatCost, formatNumber } from "@/lib/format";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
-import { usageByModel } from "@/lib/usage";
-
-const USAGE_LIMIT = 500;
 
 // `owned_by` the gateway stamps on a configured alias (ALIAS_OWNED_BY in
 // src/gateway/api/routes/models.py). Aliases are display names declared in
 // config.yml, not models, so they cannot be priced here: pricing, budgets, and
-// usage all key on the resolved target. Posting a price for an alias key is
-// accepted but never read, so those rows are shown read-only.
+// usage all key on the resolved target, and the API rejects a price posted
+// against an alias name.
 const ALIAS_OWNED_BY = "otari";
 
 // Where a row's price comes from. "configured" is a price in the database and
@@ -197,8 +194,8 @@ function ModelTableRow({ row, onPriced }: { row: ModelRow; onPriced: (modelKey: 
       <Td className="text-right">{formatCost(row.cost)}</Td>
       <Td className="text-right whitespace-nowrap">
         {row.source === "alias" ? (
-          // Pricing an alias key is accepted by the API but never read, so
-          // offering an edit here would look like it worked and change nothing.
+          // An alias is priced through its target, and the API rejects a price
+          // posted against the alias name, so there is nothing to offer here.
           <span className="text-xs text-[var(--otari-muted)]">priced by its target</span>
         ) : editing ? (
           <span className="inline-flex items-center gap-2">
@@ -332,13 +329,15 @@ function DefaultPricingBanner() {
 
 export function ModelsPage() {
   const models = useModels();
-  const usage = useUsage(USAGE_LIMIT);
+  const usage = useUsageSummary();
   const pricing = usePricing();
   const [showForm, setShowForm] = useState(false);
   const [backfillFor, setBackfillFor] = useState<string | null>(null);
 
   const rows = useMemo<ModelRow[]>(() => {
-    const usageByKey = new Map(usageByModel(usage.data ?? []).map((row) => [row.key, row]));
+    // Aggregated server-side over the whole log, so these counts do not drift
+    // once the usage table outgrows a single page.
+    const usageByKey = new Map((usage.data?.by_model ?? []).map((row) => [row.key, row]));
     // A configured price wins over whatever the catalog reports, and is the
     // only thing this page can edit or clear.
     const configured = new Map(currentPricing(pricing.data ?? []).map((row) => [row.model_key, row]));
@@ -364,7 +363,7 @@ export function ModelsPage() {
         outputPrice: priced ? priced.output_price_per_million : (catalogRow?.outputPrice ?? null),
         source: priced ? "configured" : (catalogRow?.source ?? "none"),
         requests: used?.requests ?? 0,
-        totalTokens: used?.totalTokens ?? 0,
+        totalTokens: used?.total_tokens ?? 0,
         cost: used?.cost ?? 0,
       });
     };
@@ -372,8 +371,9 @@ export function ModelsPage() {
     // The catalog first, so every configured/discovered model shows even with
     // no traffic.
     for (const model of models.data?.data ?? []) {
-      // An alias carries its target's price but reports pricing_source "none",
-      // so classify it by owned_by rather than trusting the source field.
+      // pricing_source says where an alias's price came from (its target's DB
+      // row, or the default fallback), not that it is an alias, so identity
+      // comes from owned_by.
       const isAlias = model.owned_by === ALIAS_OWNED_BY;
       const source: PriceSource = isAlias
         ? "alias"
@@ -399,7 +399,7 @@ export function ModelsPage() {
       add(key, key, providerFromModelKey(key));
     }
     for (const used of usageByKey.values()) {
-      add(used.key, used.model, used.provider);
+      add(used.key, used.model, used.provider ?? "—");
     }
 
     return result.sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model));

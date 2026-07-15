@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
-import type { GatewaySettings, ModelListResponse, PricingResponse, UsageEntry } from "@/api/types";
+import type { GatewaySettings, ModelListResponse, ModelUsage, PricingResponse, UsageSummary } from "@/api/types";
 import { ModelsPage } from "@/pages/ModelsPage";
 
 const PRICED: PricingResponse = {
@@ -44,38 +44,36 @@ const CATALOG: ModelListResponse = {
       pricing: { input_price_per_million: 3, output_price_per_million: 15 },
       pricing_source: "default",
     },
-    // A config.yml alias, exactly as the gateway reports one: owned_by "otari",
-    // its target's price, and pricing_source left at "none".
+    // A config.yml alias as the gateway reports one: owned_by "otari", and its
+    // target's price, with pricing_source describing where that price came from.
     {
       id: "fast-model",
       object: "model",
       created: 0,
       owned_by: "otari",
       pricing: { input_price_per_million: 0.15, output_price_per_million: 0.6 },
-      pricing_source: "none",
+      pricing_source: "configured",
     },
   ],
 };
 
-// The gateway logs the bare model name plus the provider separately (see
-// log_usage), and usageByModel rejoins them into a "provider:model" key.
-function usageEntry(provider: string, model: string): UsageEntry {
+const EMPTY_SUMMARY: UsageSummary = {
+  totals: { requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost: 0, errors: 0 },
+  by_model: [],
+};
+
+// The gateway groups usage by (provider, model) and keys it as "provider:model",
+// the same identity the catalog and pricing keys use.
+function modelUsage(provider: string, model: string, requests = 1): ModelUsage {
   return {
-    id: `u-${provider}:${model}`,
-    user_id: "alice",
-    api_key_id: null,
-    timestamp: "2026-01-02T00:00:00Z",
+    key: `${provider}:${model}`,
     model,
     provider,
-    endpoint: "/v1/chat/completions",
-    prompt_tokens: 10,
-    completion_tokens: 5,
-    total_tokens: 15,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
+    requests,
+    prompt_tokens: 10 * requests,
+    completion_tokens: 5 * requests,
+    total_tokens: 15 * requests,
     cost: 0,
-    status: "success",
-    error_message: null,
   };
 }
 
@@ -88,7 +86,7 @@ function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-function mockApi(opts: { usage?: UsageEntry[]; post?: (url: string) => Response } = {}) {
+function mockApi(opts: { byModel?: ModelUsage[]; post?: (url: string) => Response } = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
@@ -101,8 +99,8 @@ function mockApi(opts: { usage?: UsageEntry[]; post?: (url: string) => Response 
     if (url.includes("/v1/models")) {
       return jsonResponse(CATALOG);
     }
-    if (url.includes("/v1/usage")) {
-      return jsonResponse(opts.usage ?? []);
+    if (url.includes("/v1/usage/summary")) {
+      return jsonResponse({ ...EMPTY_SUMMARY, by_model: opts.byModel ?? [] });
     }
     return jsonResponse([PRICED]);
   });
@@ -125,6 +123,18 @@ describe("ModelsPage", () => {
     // The configured price wins; the fallback-priced model is marked default.
     expect(screen.getByText("configured")).toBeInTheDocument();
     expect(screen.getByText("default")).toBeInTheDocument();
+  });
+
+  it("reports traffic beyond a single usage page", async () => {
+    // Counts come from the server-side aggregate, so they are not bounded by
+    // the row limit /v1/usage would impose on a client-side tally.
+    mockApi({ byModel: [modelUsage("openai", "gpt-4o", 4200)] });
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    expect(screen.getByText("4,200")).toBeInTheDocument();
+    expect(screen.getByText("63,000")).toBeInTheDocument();
   });
 
   it("edits a configured price inline", async () => {
@@ -151,7 +161,7 @@ describe("ModelsPage", () => {
 
   it("offers a backfill after pricing a model that already has traffic", async () => {
     mockApi({
-      usage: [usageEntry("anthropic", "claude-sonnet-4")],
+      byModel: [modelUsage("anthropic", "claude-sonnet-4")],
       post: (url) =>
         url.includes("/v1/usage/backfill")
           ? jsonResponse({ model_key: "anthropic:claude-sonnet-4", rows_updated: 3, cost_added: 0.12, users_updated: 1 })
@@ -176,11 +186,12 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("fast-model");
 
-    // The alias inherits the target's rate, and is labelled as an alias even
-    // though the gateway reports pricing_source "none" for it.
+    // The alias inherits the target's rate, and is labelled an alias from
+    // owned_by rather than pricing_source, which describes where the target's
+    // price came from and here reads "configured" like any DB-priced model.
     expect(screen.getByText("alias")).toBeInTheDocument();
     expect(screen.getByText("$0.15")).toBeInTheDocument();
-    // Pricing an alias key is a silent no-op server-side, so it must not be offered.
+    // The API rejects a price posted against an alias name, so none is offered.
     expect(screen.getByText("priced by its target")).toBeInTheDocument();
     expect(screen.queryByLabelText("Input price for fast-model")).not.toBeInTheDocument();
   });
@@ -199,8 +210,8 @@ describe("ModelsPage", () => {
       if (url.includes("/v1/models")) {
         return jsonResponse(CATALOG);
       }
-      if (url.includes("/v1/usage")) {
-        return jsonResponse([]);
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse(EMPTY_SUMMARY);
       }
       return jsonResponse([
         PRICED,
@@ -217,7 +228,7 @@ describe("ModelsPage", () => {
   });
 
   it("does not offer a backfill for a model with no traffic", async () => {
-    mockApi({ usage: [] });
+    mockApi({ byModel: [] });
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);

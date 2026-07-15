@@ -8,6 +8,7 @@ import type {
   PricingResponse,
   SetPricingRequest,
   UsageEntry,
+  UsageSummary,
 } from "@/api/types";
 
 const USAGE = "usage";
@@ -24,10 +25,22 @@ export function useHealth() {
   });
 }
 
+// A page of raw log rows, for the per-request log view. Anything reporting a
+// count or a total wants useUsageSummary instead: this is capped server-side, so
+// summing it under-reports as soon as the log outgrows `limit`.
 export function useUsage(limit = 500) {
   return useQuery({
     queryKey: [USAGE, limit],
     queryFn: () => apiFetch<UsageEntry[]>(`/v1/usage?limit=${limit}`),
+  });
+}
+
+// Totals and a per-model breakdown over the whole usage log, aggregated in the
+// database rather than from a page of rows.
+export function useUsageSummary() {
+  return useQuery({
+    queryKey: [USAGE, "summary"],
+    queryFn: () => apiFetch<UsageSummary>("/v1/usage/summary"),
   });
 }
 

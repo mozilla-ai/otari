@@ -19,6 +19,37 @@ export interface UsageEntry {
   error_message: string | null;
 }
 
+// Aggregates computed in the database, so they cover every matching row rather
+// than the page /v1/usage returns. Summing a page under-reports as soon as the
+// log outgrows the limit, which is why these totals do not come from the client.
+export interface UsageTotals {
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost: number;
+  errors: number;
+}
+
+export interface ModelUsage {
+  // "provider:model", or the bare model when no provider was recorded. Matches
+  // how /v1/models ids and pricing keys are formed, so callers can join on it.
+  key: string;
+  model: string;
+  provider: string | null;
+  requests: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost: number;
+}
+
+export interface UsageSummary {
+  totals: UsageTotals;
+  // Busiest model first.
+  by_model: ModelUsage[];
+}
+
 export interface HealthResponse {
   status: string;
   mode?: string;
