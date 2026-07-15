@@ -26,10 +26,11 @@ from any_llm.types.messages import (
     MessageDeltaUsage,
     MessageStopEvent,
     MessageStreamEvent,
+    TextBlock,
     ToolUseBlock,
 )
 from any_llm.types.responses import Response
-from openai.types.responses import ResponseCompletedEvent, ResponseUsage
+from openai.types.responses import ResponseCompletedEvent, ResponseTextDeltaEvent, ResponseUsage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 from gateway.services import mcp_loop_messages as messages_loop_module
@@ -215,4 +216,66 @@ async def test_responses_stream_closes_upstream_on_terminal_exit(monkeypatch: py
         )
     ]
     assert types == ["response.completed"]
+    assert stream.closed
+
+
+def _text_block_start(index: int) -> MsgContentBlockStartEvent:
+    return MsgContentBlockStartEvent(
+        type="content_block_start",
+        index=index,
+        content_block=cast(Any, TextBlock(type="text", text="", citations=None)),
+    )
+
+
+def _responses_text_delta(delta: str) -> ResponseTextDeltaEvent:
+    return ResponseTextDeltaEvent(
+        type="response.output_text.delta",
+        item_id="msg_1",
+        output_index=0,
+        content_index=0,
+        delta=delta,
+        sequence_number=0,
+        logprobs=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_messages_stream_downstream_close_propagates_to_upstream(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Closing the tool-loop generator mid-stream must close the upstream stream too."""
+    stream = _ClosableStream([_text_block_start(0), _text_block_start(1)])
+
+    async def fake_amessages(**kwargs: Any) -> _ClosableStream:
+        return stream
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    agen = anthropic_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10},
+        pool=cast(Any, _FakePool(tool_names=[])),
+        max_iterations=3,
+    )
+    first = await anext(agen)
+    assert getattr(first, "type", None) == "content_block_start"
+    await agen.aclose()
+    assert stream.closed
+
+
+@pytest.mark.asyncio
+async def test_responses_stream_downstream_close_propagates_to_upstream(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Closing the tool-loop generator mid-stream must close the upstream stream too."""
+    stream = _ClosableStream([_responses_text_delta("hi"), _responses_text_delta(" there")])
+
+    async def fake_aresponses(**kwargs: Any) -> _ClosableStream:
+        return stream
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    agen = responses_tool_loop_stream(
+        completion_kwargs={"model": "fake", "input_data": "hi"},
+        pool=cast(Any, _FakePool(tool_names=[])),
+        max_iterations=3,
+    )
+    first = await anext(agen)
+    assert getattr(first, "type", None) == "response.output_text.delta"
+    await agen.aclose()
     assert stream.closed

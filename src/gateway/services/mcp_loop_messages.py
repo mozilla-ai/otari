@@ -15,7 +15,8 @@ The duck-typed pool interface (``owns_tool`` / ``call_tool`` /
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import aclosing
 from typing import TYPE_CHECKING, Any
 
 from any_llm import amessages
@@ -418,7 +419,7 @@ async def anthropic_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
-) -> AsyncIterator[MessageStreamEvent]:
+) -> AsyncGenerator[MessageStreamEvent, None]:
     """Streaming Anthropic Messages tool-use loop.
 
     Forwards every Anthropic event downstream **except** the terminal
@@ -444,10 +445,16 @@ async def anthropic_tool_loop_stream(
     needed because ``amessages`` produces a fresh stream; the next call's
     natural ``message_start`` arrives downstream as if nothing had happened.
     """
-    async for event in run_tool_loop_stream(
-        strategy=_MESSAGES_STRATEGY,
-        completion_kwargs=completion_kwargs,
-        pool=pool,
-        max_iterations=max_iterations,
-    ):
-        yield event
+    # aclosing makes downstream closes (client disconnect) propagate to the
+    # engine generator, and through it to the upstream provider stream,
+    # instead of waiting for event-loop async-generator finalization.
+    async with aclosing(
+        run_tool_loop_stream(
+            strategy=_MESSAGES_STRATEGY,
+            completion_kwargs=completion_kwargs,
+            pool=pool,
+            max_iterations=max_iterations,
+        )
+    ) as inner:
+        async for event in inner:
+            yield event

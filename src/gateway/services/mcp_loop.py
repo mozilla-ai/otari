@@ -19,7 +19,8 @@ wrappers the routes call.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import aclosing
 from typing import TYPE_CHECKING, Any
 
 from any_llm import acompletion
@@ -354,7 +355,7 @@ async def mcp_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
-) -> AsyncIterator[ChatCompletionChunk]:
+) -> AsyncGenerator[ChatCompletionChunk, None]:
     """Yield chunks across multiple `acompletion(stream=True)` calls, with MCP execution between rounds.
 
     Tool-call deltas from intermediate iterations are streamed straight through to the
@@ -370,13 +371,19 @@ async def mcp_tool_loop_stream(
       * the model produced foreign tool_calls (caller needs to dispatch them), or
       * the model produced no MCP-owned calls at all (loop exits, terminal goes through).
     """
-    async for chunk in run_tool_loop_stream(
-        strategy=_CHAT_STRATEGY,
-        completion_kwargs=completion_kwargs,
-        pool=pool,
-        max_iterations=max_iterations,
-    ):
-        yield chunk
+    # aclosing makes downstream closes (client disconnect) propagate to the
+    # engine generator, and through it to the upstream provider stream,
+    # instead of waiting for event-loop async-generator finalization.
+    async with aclosing(
+        run_tool_loop_stream(
+            strategy=_CHAT_STRATEGY,
+            completion_kwargs=completion_kwargs,
+            pool=pool,
+            max_iterations=max_iterations,
+        )
+    ) as inner:
+        async for chunk in inner:
+            yield chunk
 
 
 async def mcp_tool_loop(

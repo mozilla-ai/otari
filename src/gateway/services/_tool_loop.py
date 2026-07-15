@@ -20,7 +20,7 @@ tests can keep monkeypatching them there.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, aclosing, nullcontext
 from enum import Enum, auto
 from typing import Any, Generic, Protocol, TypeVar, cast
@@ -266,7 +266,7 @@ async def run_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
-) -> AsyncIterator[ChunkT]:
+) -> AsyncGenerator[ChunkT, None]:
     """Streaming tool loop, generic over the wire format.
 
     Every upstream event flows through ``strategy.observe``, which does the

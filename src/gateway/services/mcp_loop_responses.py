@@ -23,7 +23,8 @@ execution path and the gateway has nothing to dispatch against.
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import aclosing
 from typing import TYPE_CHECKING, Any
 
 from any_llm import aresponses
@@ -413,7 +414,7 @@ async def responses_tool_loop_stream(
     completion_kwargs: dict[str, Any],
     pool: ToolBackend,
     max_iterations: int,
-) -> AsyncIterator[ResponseStreamEvent]:
+) -> AsyncGenerator[ResponseStreamEvent, None]:
     """Streaming OpenAI Responses tool-use loop.
 
     Forwards every event downstream and tracks ``function_call`` output items
@@ -428,10 +429,16 @@ async def responses_tool_loop_stream(
     the next round. If any foreign function_call is present (or none at all),
     forward ``response.completed`` and exit.
     """
-    async for event in run_tool_loop_stream(
-        strategy=_RESPONSES_STRATEGY,
-        completion_kwargs=completion_kwargs,
-        pool=pool,
-        max_iterations=max_iterations,
-    ):
-        yield event
+    # aclosing makes downstream closes (client disconnect) propagate to the
+    # engine generator, and through it to the upstream provider stream,
+    # instead of waiting for event-loop async-generator finalization.
+    async with aclosing(
+        run_tool_loop_stream(
+            strategy=_RESPONSES_STRATEGY,
+            completion_kwargs=completion_kwargs,
+            pool=pool,
+            max_iterations=max_iterations,
+        )
+    ) as inner:
+        async for event in inner:
+            yield event
