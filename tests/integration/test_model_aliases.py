@@ -92,6 +92,40 @@ def _create_user(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# require_pricing rejection
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/v1/embeddings", {"input": "hello"}),
+        ("/v1/rerank", {"query": "q", "documents": ["a", "b"]}),
+        ("/v1/images/generations", {"prompt": "a cat"}),
+    ],
+)
+def test_unpriced_alias_402_echoes_alias_not_target(
+    client: TestClient,
+    alias_config: GatewayConfig,
+    path: str,
+    payload: dict[str, Any],
+) -> None:
+    # The app holds this config object, so the gate reads the flipped flag. With
+    # no pricing on the target, the 402 must name the alias: echoing
+    # "{instance}:{model}" would hand back the string aliases exist to hide.
+    alias_config.require_pricing = True
+    _create_user(client)
+
+    resp = client.post(path, json={"model": "myopusmodel", "user": "test-user", **payload}, headers=HEADERS)
+
+    assert resp.status_code == 402
+    detail = resp.json()["detail"]
+    assert "myopusmodel" in detail
+    assert "claude-opus-4" not in detail
+    assert "anthropic" not in detail
+
+
+# ---------------------------------------------------------------------------
 # Listing
 # ---------------------------------------------------------------------------
 
@@ -126,6 +160,53 @@ def test_alias_listing_surfaces_target_pricing(client: TestClient) -> None:
     entry = next(m for m in resp.json()["data"] if m["id"] == "myopusmodel")
     assert entry["pricing"]["input_price_per_million"] == 15.0
     assert entry["pricing"]["output_price_per_million"] == 75.0
+
+
+def test_legacy_form_pricing_row_still_prices_alias(client: TestClient, alias_config: GatewayConfig) -> None:
+    # Keys are canonicalized on write, but a row predating that may still use the
+    # legacy "provider/model" separator. It must price the alias and must not put
+    # the target back in the listing: withholding it while failing to match the
+    # alias would show the price nowhere.
+    engine = create_engine(alias_config.database_url)
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO model_pricing "
+                    "(model_key, effective_at, input_price_per_million, output_price_per_million, "
+                    " created_at, updated_at) "
+                    "VALUES ('anthropic/claude-opus-4', NOW(), 15.0, 75.0, NOW(), NOW())"
+                ),
+            )
+            conn.commit()
+    finally:
+        engine.dispose()
+
+    resp = client.get("/v1/models", headers=HEADERS)
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert {m["id"] for m in data} == {"myopusmodel", "housemodel"}
+    entry = next(m for m in data if m["id"] == "myopusmodel")
+    assert entry["pricing"]["input_price_per_million"] == 15.0
+
+    # The single-model endpoint reads the same row through its filtered query.
+    single = client.get("/v1/models/myopusmodel", headers=HEADERS)
+    assert single.json()["pricing"]["input_price_per_million"] == 15.0
+
+
+def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "home_lab:qwen3",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+        },
+        headers=HEADERS,
+    )
+    resp = client.get("/v1/models/housemodel", headers=HEADERS)
+    assert resp.status_code == 200
+    assert resp.json()["pricing"] == {"input_price_per_million": 1.0, "output_price_per_million": 2.0}
 
 
 def test_pricing_on_alias_target_does_not_expose_it(client: TestClient) -> None:

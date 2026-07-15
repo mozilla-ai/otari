@@ -15,6 +15,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.model_labeling import relabel_model
 from gateway.models.entities import APIKey, UsageLog
 from gateway.rate_limit import check_rate_limit
 from gateway.services.budget_service import (
@@ -26,7 +27,6 @@ from gateway.services.budget_service import (
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
 from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.streaming import relabel_model
 
 router = APIRouter(prefix="/v1", tags=["embeddings"])
 
@@ -104,7 +104,7 @@ async def create_embedding(
         await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"No pricing configured for model '{resolved.instance}:{model}'",
+            detail=f"No pricing configured for model '{request.model}'",
         )
 
     provider_kwargs = resolved.kwargs

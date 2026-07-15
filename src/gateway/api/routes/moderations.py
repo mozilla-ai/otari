@@ -14,6 +14,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.model_labeling import relabel_model
 from gateway.models.entities import APIKey, UsageLog
 from gateway.rate_limit import check_rate_limit
 from gateway.services.budget_service import (
@@ -24,7 +25,6 @@ from gateway.services.budget_service import (
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.streaming import relabel_model
 from gateway.types.moderation import ModerationResponse
 
 # Locked phrasing — cross-SDK error contract. Do not reword.

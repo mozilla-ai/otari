@@ -1,6 +1,7 @@
 """OpenAI-compatible models listing endpoint with auto-discovery."""
 
 import calendar
+from collections.abc import Sequence
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -90,8 +91,27 @@ def _alias_target_keys(config: GatewayConfig) -> set[str]:
     return {normalize_pricing_key(config, target) for target in config.aliases.values()}
 
 
-async def _get_pricing_map(db: AsyncSession, provider_filter: str | None = None) -> dict[str, ModelPricing]:
-    """Load latest pricing per model_key, optionally filtered by provider prefix."""
+def _pricing_key_candidates(config: GatewayConfig, target: str) -> list[str]:
+    """Stored key forms that could hold pricing for ``target``.
+
+    Keys are canonicalized on write, but rows predating that may still use the
+    legacy ``provider/model`` separator, so both forms are offered.
+    """
+    canonical = normalize_pricing_key(config, target)
+    return sorted({target, canonical, canonical.replace(":", "/", 1)})
+
+
+def _normalized_pricing_lookup(config: GatewayConfig, pricing_map: dict[str, ModelPricing]) -> dict[str, ModelPricing]:
+    """Re-key a pricing map by canonical model key, matching how targets resolve."""
+    return {normalize_pricing_key(config, key): row for key, row in pricing_map.items()}
+
+
+async def _get_pricing_map(
+    db: AsyncSession,
+    provider_filter: str | None = None,
+    model_keys: Sequence[str] | None = None,
+) -> dict[str, ModelPricing]:
+    """Load latest pricing per model_key, optionally filtered by provider prefix or key set."""
     latest_effective = (
         select(
             ModelPricing.model_key.label("model_key"),
@@ -109,6 +129,9 @@ async def _get_pricing_map(db: AsyncSession, provider_filter: str | None = None)
 
     if provider_filter:
         stmt = stmt.where(ModelPricing.model_key.startswith(f"{provider_filter}:"))
+
+    if model_keys is not None:
+        stmt = stmt.where(ModelPricing.model_key.in_(model_keys))
 
     stmt = stmt.order_by(ModelPricing.model_key)
     result = await db.execute(stmt)
@@ -130,8 +153,12 @@ async def list_models(
     """
     pricing_map = await _get_pricing_map(db, provider_filter=provider)
     # Snapshot before phase 1 mutates ``pricing_map`` (it pops matched keys), so
-    # alias pricing can still be looked up by the target's canonical key.
-    pricing_lookup = dict(pricing_map)
+    # alias pricing can still be looked up by the target's canonical key. Keys are
+    # canonicalized because an alias target is always canonical while a stored row
+    # may use the legacy "provider/model" form; without this a legacy-form row
+    # would be withheld from the listing by phase 2 yet never match its alias, so
+    # its price would show nowhere.
+    pricing_lookup = _normalized_pricing_lookup(config, pricing_map)
 
     merged: dict[str, ModelObject] = {}
 
@@ -188,10 +215,13 @@ async def get_model(
 ) -> ModelObject:
     """Get details for a specific model."""
     # A configured alias resolves to its own entry, with pricing read from the
-    # resolved target so the underlying provider/model stays hidden.
+    # resolved target so the underlying provider/model stays hidden. Only the
+    # target's own rows are loaded rather than the whole pricing table.
     if model_id in config.aliases:
-        pricing_lookup = await _get_pricing_map(db)
-        return _alias_model(config, model_id, pricing_lookup)
+        pricing_map = await _get_pricing_map(
+            db, model_keys=_pricing_key_candidates(config, config.aliases[model_id])
+        )
+        return _alias_model(config, model_id, _normalized_pricing_lookup(config, pricing_map))
 
     # Check the pricing table first.
     stmt = (

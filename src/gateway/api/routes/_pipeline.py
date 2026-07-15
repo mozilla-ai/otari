@@ -81,6 +81,7 @@ from gateway.core.env import otari_env
 from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
 from gateway.metrics import record_cost, record_tokens
+from gateway.model_labeling import relabel_model
 from gateway.models.entities import UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
@@ -110,7 +111,6 @@ from gateway.streaming import (
     StreamFormat,
     StreamingAttemptFailure,
     iterate_streaming_attempts,
-    relabel_model,
     streaming_generator,
 )
 

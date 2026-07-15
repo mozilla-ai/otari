@@ -183,6 +183,14 @@ callers see:
 - The response `model` field (streaming and non-streaming) is relabeled to the
   alias, so the underlying model name never appears on the wire.
 
+Alias routing is applied wherever a model selector is resolved, so an alias is
+accepted on every model-taking endpoint. The response `model` field is relabeled
+on `/v1/chat/completions`, `/v1/messages`, `/v1/responses`, `/v1/embeddings`,
+`/v1/moderations`, and `/v1/rerank`. Other surfaces (`/v1/images`,
+`/v1/audio/*`, `/v1/batches`) route aliases but return the provider payload as-is;
+those payloads carry no `model` field today, so nothing leaks, but a provider that
+started returning one would echo the target rather than the alias.
+
 Pricing, budgets, and usage logs key on the resolved target, not the alias:
 configure pricing once for `anthropic:claude-opus-4` and every alias pointing at
 it inherits that price. An alias with no pricing on its target fails closed under

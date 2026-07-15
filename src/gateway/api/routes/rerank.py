@@ -14,6 +14,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.model_labeling import relabel_model
 from gateway.models.entities import APIKey, UsageLog
 from gateway.rate_limit import check_rate_limit
 from gateway.services.budget_service import (
@@ -101,7 +102,7 @@ async def create_rerank(
         await refund_reservation(db, reservation)
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"No pricing configured for model '{resolved.instance}:{model}'",
+            detail=f"No pricing configured for model '{request.model}'",
         )
 
     provider_kwargs = resolved.kwargs
@@ -173,4 +174,9 @@ async def create_rerank(
         for key, value in rate_limit_headers(rate_limit_info).items():
             response.headers[key] = value
 
+    # Rerank results are returned verbatim and some providers (Voyage, Jina)
+    # carry ``model``, which would echo the target an alias exists to hide. The
+    # call is a no-op on results without the field.
+    if resolved.alias is not None:
+        relabel_model(result, resolved.alias)
     return result

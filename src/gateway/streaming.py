@@ -11,6 +11,7 @@ from any_llm.types.completion import CompletionUsage
 
 from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
+from gateway.model_labeling import relabel_model
 
 A = TypeVar("A")  # Attempt-like, opaque to this module
 C = TypeVar("C")  # Chunk type emitted by the upstream stream
@@ -58,25 +59,6 @@ ANTHROPIC_STREAM_FORMAT = StreamFormat(
     error_payload=f"event: error\ndata: {_ANTHROPIC_ERROR}\n\n",
     yield_done_on_error=False,
 )
-
-
-def relabel_model(obj: Any, display_model: str) -> Any:
-    """Rewrite the ``model`` field on a result or stream chunk in place.
-
-    Used to echo a configured alias back to the caller instead of the real
-    upstream model. Handles the top-level ``model`` field (OpenAI chat chunks and
-    every non-streaming result object) plus the nested locations streaming start
-    events carry it in: Anthropic ``message_start`` (``.message.model``) and the
-    Responses events (``.response.model``). Chunks with no model field anywhere
-    are left untouched, so this is safe to call on every chunk of any format.
-    """
-    for holder in (obj, getattr(obj, "message", None), getattr(obj, "response", None)):
-        if holder is not None and hasattr(holder, "model"):
-            try:
-                holder.model = display_model
-            except (AttributeError, ValueError):  # frozen / validated field, leave as-is
-                pass
-    return obj
 
 
 def _merge_usage(current: CompletionUsage, update: CompletionUsage) -> CompletionUsage:
