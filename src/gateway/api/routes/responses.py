@@ -445,9 +445,11 @@ async def create_response(
             platform_correlation_id = attempt.attempt_id
             platform_request_id = route.request_id
             stream_billing: Any = provider
+            display_model: str | None = None
         else:
             call_kwargs = {**provider_kwargs, **base_request_fields, "model": model}
             stream_billing = billing_instance
+            display_model = resolved.alias
 
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
@@ -459,6 +461,7 @@ async def create_response(
             platform_correlation_id=platform_correlation_id,
             platform_request_id=platform_request_id,
             session_label=request_body.session_label,
+            display_model=display_model,
         )
 
     # ------------------------------------------------------------------
@@ -504,6 +507,7 @@ async def create_response(
         call_kwargs=call_kwargs,
         provider=billing_instance,
         model=model,
+        display_model=resolved.alias,
     )
 
     if ctx.rate_limit_info:

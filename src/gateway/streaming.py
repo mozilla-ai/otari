@@ -11,6 +11,7 @@ from any_llm.types.completion import CompletionUsage
 
 from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
+from gateway.model_labeling import relabel_model
 
 A = TypeVar("A")  # Attempt-like, opaque to this module
 C = TypeVar("C")  # Chunk type emitted by the upstream stream
@@ -81,6 +82,7 @@ async def streaming_generator(
     label: str,
     on_no_usage: Callable[[], Awaitable[None]] | None = None,
     on_incomplete: Callable[[], Awaitable[None]] | None = None,
+    display_model: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -89,6 +91,9 @@ async def streaming_generator(
         format_chunk: Formats a chunk into an SSE string
         extract_usage: Extracts usage from a chunk, or returns None if no usage present
         fmt: SSE format configuration (done marker, error payload, etc.)
+        display_model: When set (a configured alias was used), each chunk's
+            ``model`` field is relabeled to this before formatting, so the
+            underlying provider/model never appears on the wire.
         on_complete: Called with aggregated usage after successful streaming that
             included usage data
         on_error: Called with error message on failure
@@ -112,6 +117,8 @@ async def streaming_generator(
             if chunk_usage:
                 usage = _merge_usage(usage, chunk_usage)
                 has_usage = True
+            if display_model is not None:
+                chunk = relabel_model(chunk, display_model)
             yield format_chunk(chunk)
         yield fmt.done_marker
 
