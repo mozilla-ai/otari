@@ -90,7 +90,8 @@ Content-Type: application/json
       "api_base": "https://api.openai.com/v1",
       "managed": false
     }
-  ]
+  ],
+  "memory_enabled": false          // optional; whether the workspace has memory enabled
 }
 ```
 
@@ -110,6 +111,15 @@ own behaviour.
 
 `attempts` MUST contain at least one entry. An empty list is treated as a
 platform bug and surfaced as `502 Bad Gateway`.
+
+`memory_enabled` tells Otari whether the workspace has persistent memory turned
+on. The platform is authoritative, so Otari makes the hot-path recall call (and
+the fire-and-forget remember call) only when this is `true`, avoiding a wasted
+round-trip for workspaces that do not use memory. It is optional: when a platform
+omits it, Otari defaults to `true` and relies on the memory endpoints' own
+empty-when-disabled behaviour, so no gateway ever silently stops recalling. A
+gateway operator can still hard-disable all memory calls locally with
+`OTARI_MEMORY_ENABLED=false` regardless of this flag.
 
 ### Response — single-attempt shape
 
