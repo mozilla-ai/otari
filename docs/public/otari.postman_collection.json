@@ -135,7 +135,7 @@
         {
           "name": "List Batches",
           "request": {
-            "description": "List batches for a provider.",
+            "description": "List batches for a provider.\n\nNon-master keys only see batches they own (plus legacy batches without an\nownership marker); the page is filtered after the provider call, so a page\nmay contain fewer than ``limit`` items.",
             "header": [],
             "method": "GET",
             "url": {
@@ -182,7 +182,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"requests\": [\n    {\n      \"custom_id\": \"string\",\n      \"body\": {}\n    }\n  ]\n}"
             },
-            "description": "Create a batch of LLM requests for asynchronous processing.",
+            "description": "Create a batch of LLM requests for asynchronous processing.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
             "header": [
               {
                 "key": "Content-Type",
