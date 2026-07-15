@@ -14,15 +14,14 @@ from gateway.services.budget_service import (
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
-    validate_user_budget,
 )
 
 
 @pytest.mark.asyncio
-async def test_validate_user_budget_reads_user_without_locking(
+async def test_reserve_budget_reads_user_without_locking(
     async_db: Any,
 ) -> None:
-    """validate_user_budget should allow under-limit users without lock contention."""
+    """reserve_budget should read the user without a row lock (no for_update)."""
     budget = Budget(
         budget_id="race-budget",
         max_budget=10.0,
@@ -31,7 +30,7 @@ async def test_validate_user_budget_reads_user_without_locking(
 
     user = User(
         user_id="race-user",
-        spend=9.99,
+        spend=9.0,
         budget_id="race-budget",
     )
     async_db.add(user)
@@ -41,19 +40,17 @@ async def test_validate_user_budget_reads_user_without_locking(
         "gateway.services.budget_service.get_active_user",
         wraps=get_active_user,
     ) as mock_get_active_user:
-        result = await validate_user_budget(async_db, "race-user", strategy="cas")
+        handle = await reserve_budget(async_db, "race-user", 0.5, strategy="cas")
 
-    assert result.user_id == "race-user"
+    assert handle.reserved
     assert mock_get_active_user.call_args.kwargs.get("for_update", False) is False
 
 
 @pytest.mark.asyncio
-async def test_budget_check_rejects_at_limit(
+async def test_reserve_budget_rejects_at_limit(
     async_db: Any,
 ) -> None:
-    """Test that a user at or over budget limit is rejected."""
-    from fastapi import HTTPException
-
+    """A user already at the budget limit is rejected, even for a zero-cost request."""
     budget = Budget(
         budget_id="full-budget",
         max_budget=10.0,
@@ -69,7 +66,7 @@ async def test_budget_check_rejects_at_limit(
     await async_db.commit()
 
     with pytest.raises(HTTPException) as exc_info:
-        await validate_user_budget(async_db, "full-user")
+        await reserve_budget(async_db, "full-user", 0.0)
     assert exc_info.value.status_code == 403
 
 

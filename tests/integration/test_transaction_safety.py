@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import API_KEY_HEADER
 from gateway.models.entities import Budget, User
-from gateway.services.budget_service import _is_model_free, reset_user_budget
+from gateway.services.budget_service import _cas_reset_user_budget, _is_model_free
 
 
 def test_create_user_rollback_on_commit_failure(
@@ -104,23 +104,23 @@ def test_set_pricing_rollback_on_commit_failure(
 
 
 @pytest.mark.asyncio
-async def test_reset_user_budget_rollback_on_commit_failure(async_db: AsyncSession) -> None:
-    """reset_user_budget rolls back and re-raises when commit fails."""
-    from datetime import UTC, datetime
+async def test_cas_reset_user_budget_rollback_on_commit_failure(async_db: AsyncSession) -> None:
+    """_cas_reset_user_budget rolls back and re-raises when commit fails."""
+    from datetime import UTC, datetime, timedelta
 
-    user = User(user_id="reset-fail-user", spend=50.0)
+    now = datetime.now(UTC)
+    # A past reset time makes the CAS UPDATE match the row so the code reaches commit.
+    user = User(user_id="reset-fail-user", spend=50.0, next_budget_reset_at=now - timedelta(seconds=1))
     budget = Budget(max_budget=100.0, budget_duration_sec=3600)
     async_db.add_all([user, budget])
     await async_db.commit()
-
-    now = datetime.now(UTC)
 
     with (
         patch.object(async_db, "commit", side_effect=OperationalError("db", {}, Exception("disk full"))),
         patch.object(async_db, "rollback", wraps=async_db.rollback) as mock_rollback,
     ):
         with pytest.raises(OperationalError):
-            await reset_user_budget(async_db, user, budget, now)
+            await _cas_reset_user_budget(async_db, user, budget, now)
 
         mock_rollback.assert_called_once()
 

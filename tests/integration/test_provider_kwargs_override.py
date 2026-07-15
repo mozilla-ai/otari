@@ -9,10 +9,10 @@ from any_llm import LLMProvider
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from gateway.api.routes.chat import get_provider_kwargs
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
 from gateway.db import Base, get_db
 from gateway.main import create_app
+from gateway.services.provider_kwargs import get_provider_kwargs
 
 from .conftest import _run_alembic_migrations, build_async_session_override
 

@@ -31,38 +31,6 @@ def calculate_next_reset(start: datetime, duration_sec: int) -> datetime:
     return start + timedelta(seconds=duration_sec)
 
 
-async def reset_user_budget(db: AsyncSession, user: User, budget: Budget, now: datetime) -> None:
-    """Reset user's budget spend and schedule next reset."""
-
-    previous_spend = float(user.spend)
-    user_id_str = user.user_id
-
-    user.spend = 0.0
-    user.budget_started_at = now
-
-    if budget.budget_duration_sec:
-        user.next_budget_reset_at = calculate_next_reset(now, budget.budget_duration_sec)
-    else:
-        user.next_budget_reset_at = None
-
-    reset_log = BudgetResetLog(
-        user_id=user.user_id,
-        budget_id=budget.budget_id,
-        previous_spend=previous_spend,
-        reset_at=now,
-        next_reset_at=user.next_budget_reset_at,
-    )
-    db.add(reset_log)
-
-    try:
-        await db.commit()
-        await db.refresh(user)
-    except SQLAlchemyError as e:
-        await db.rollback()
-        logger.error("Failed to commit budget reset for user '%s': %s", user_id_str, e)
-        raise
-
-
 async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, now: datetime) -> User:
     next_reset_at = calculate_next_reset(now, budget.budget_duration_sec) if budget.budget_duration_sec else None
 
@@ -108,73 +76,6 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
 async def _get_budget(db: AsyncSession, budget_id: str) -> Budget | None:
     result = await db.execute(select(Budget).where(Budget.budget_id == budget_id))
     return result.scalar_one_or_none()
-
-
-async def validate_user_budget(
-    db: AsyncSession,
-    user_id: str,
-    model: str | None = None,
-    *,
-    strategy: str = "for_update",
-) -> User:
-    """Validate user exists, is not blocked, and has available budget.
-
-    Args:
-        db: Database session
-        user_id: User identifier
-        model: Optional model identifier (e.g., "provider/model") to check if it's a free model
-
-    Returns:
-        User object if validation passes
-
-    Raises:
-        HTTPException: If user is blocked, doesn't exist, or exceeded budget
-
-    """
-    normalized_strategy = strategy or "for_update"
-    normalized_strategy = normalized_strategy.strip().lower()
-    if normalized_strategy not in {"for_update", "cas", "disabled"}:
-        normalized_strategy = "for_update"
-
-    lock_for_update = normalized_strategy == "for_update"
-    user = await get_active_user(db, user_id, for_update=lock_for_update)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User '{user_id}' not found",
-        )
-
-    if user.blocked:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{user_id}' is blocked",
-        )
-
-    if normalized_strategy == "disabled" or not user.budget_id:
-        return user
-
-    budget = await _get_budget(db, user.budget_id)
-    if not budget:
-        return user
-
-    now = datetime.now(UTC)
-    if user.next_budget_reset_at and now >= user.next_budget_reset_at:
-        if normalized_strategy == "cas":
-            user = await _cas_reset_user_budget(db, user, budget, now)
-        else:
-            await reset_user_budget(db, user, budget, now)
-
-    if budget.max_budget is not None and user.spend >= budget.max_budget:
-        if model and await _is_model_free(db, model):
-            return user
-        record_budget_exceeded()
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User '{user_id}' has exceeded budget limit",
-        )
-
-    return user
 
 
 async def _is_model_free(db: AsyncSession, model: str) -> bool:
@@ -303,9 +204,9 @@ async def reserve_budget(
     now = datetime.now(UTC)
     if user.next_budget_reset_at and now >= user.next_budget_reset_at:
         # Always reset via the atomic CAS path: reserve_budget never holds a
-        # row lock (see for_update=False above), so the read-modify-write
-        # reset_user_budget would let concurrent requests at the reset boundary
-        # double-reset (duplicate reset logs, clobbered spend).
+        # row lock (see for_update=False above), so a non-atomic
+        # read-modify-write reset would let concurrent requests at the reset
+        # boundary double-reset (duplicate reset logs, clobbered spend).
         user = await _cas_reset_user_budget(db, user, budget, now)
 
     # Free models do not consume budget; nothing to reserve. Reconciliation will

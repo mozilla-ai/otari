@@ -19,7 +19,6 @@ from gateway.core.config import GatewayConfig
 
 _engine: AsyncEngine | None = None
 _SessionLocal: async_sessionmaker[AsyncSession] | None = None
-_SYNC_DATABASE_URL: str | None = None
 
 # How long a SQLite connection waits for a held lock before raising
 # "database is locked", in milliseconds.
@@ -85,7 +84,7 @@ def _configure_sqlite_pragmas(engine: AsyncEngine) -> None:
 def init_db(config: GatewayConfig) -> None:
     """Initialize async database engine and optionally run migrations."""
 
-    global _engine, _SessionLocal, _SYNC_DATABASE_URL  # noqa: PLW0603
+    global _engine, _SessionLocal  # noqa: PLW0603
 
     database_url = config.database_url
     async_url, connect_args = _to_async_url(database_url)
@@ -104,7 +103,6 @@ def init_db(config: GatewayConfig) -> None:
 
     _engine = create_async_engine(async_url, **engine_kwargs)
     _SessionLocal = async_sessionmaker(_engine, expire_on_commit=False)
-    _SYNC_DATABASE_URL = database_url
 
     if is_sqlite:
         _configure_sqlite_pragmas(_engine)
@@ -139,12 +137,11 @@ async def create_session() -> AsyncIterator[AsyncSession]:
 def reset_db() -> None:
     """Dispose the active engine so it can be re-initialized (testing helper)."""
 
-    global _engine, _SessionLocal, _SYNC_DATABASE_URL  # noqa: PLW0603
+    global _engine, _SessionLocal  # noqa: PLW0603
 
     engine = _engine
     _engine = None
     _SessionLocal = None
-    _SYNC_DATABASE_URL = None
 
     if engine is None:
         return
