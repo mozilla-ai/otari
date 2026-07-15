@@ -364,7 +364,15 @@ async def chat_completions(
     # Memory recall (platform mode, best-effort). Inject recalled facts into the system
     # message before dispatch so every downstream path (stream/non-stream, tool/no-tool)
     # sees them. A failure or a disabled workspace yields no facts and never blocks chat.
-    memory_user_token = ctx.user_token if (config.memory_enabled and ctx.hybrid_mode) else None
+    #
+    # Enablement is the AND of: this gateway not opting out locally (config.memory_enabled,
+    # default on), the platform reporting the workspace has memory on (route.memory_enabled),
+    # and hybrid mode. The platform flag is authoritative, so a workspace with memory off
+    # costs no recall round-trip; the local flag is only a self-hosted kill switch.
+    platform_memory_enabled = ctx.route is not None and ctx.route.memory_enabled
+    memory_user_token = (
+        ctx.user_token if (config.memory_enabled and platform_memory_enabled and ctx.hybrid_mode) else None
+    )
     if memory_user_token:
         try:
             recalled = await _recall_platform_memory(config, memory_user_token, latest_user_text(request.messages))

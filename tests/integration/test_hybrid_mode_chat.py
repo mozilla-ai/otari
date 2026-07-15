@@ -1624,7 +1624,7 @@ def test_platform_mode_sandbox_applies_workspace_max_iterations_cap(
     assert captured["max_iterations"] == 2
 
 
-def _memory_resolve_response() -> httpx.Response:
+def _memory_resolve_response(*, memory_enabled: bool = True) -> httpx.Response:
     return httpx.Response(
         200,
         json={
@@ -1641,6 +1641,8 @@ def _memory_resolve_response() -> httpx.Response:
                     "managed": True,
                 }
             ],
+            # Platform-authoritative: the gateway makes memory calls only when this is true.
+            "memory_enabled": memory_enabled,
         },
     )
 
@@ -1675,7 +1677,7 @@ def test_platform_mode_memory_disabled_makes_no_memory_calls(
         timeout_seconds: float,
     ) -> httpx.Response:
         if url.endswith("/gateway/provider-keys/resolve"):
-            return _memory_resolve_response()
+            return _memory_resolve_response(memory_enabled=False)
         if "/gateway/memory/" in url:
             memory_calls.append(url)
             return httpx.Response(200, json={"facts": []})
@@ -1694,7 +1696,57 @@ def test_platform_mode_memory_disabled_makes_no_memory_calls(
     )
 
     assert response.status_code == 200
-    # memory_enabled defaults to False, so neither recall nor remember is called.
+    # The platform reports the workspace has memory off, so neither recall nor remember runs
+    # even though the gateway's local opt-out is on (default).
+    assert memory_calls == []
+
+
+def test_platform_mode_local_opt_out_suppresses_memory_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A self-hosted gateway can hard-disable memory locally (memory_enabled=False) even when
+    # the platform reports the workspace has memory on.
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+    app = create_app(
+        GatewayConfig(
+            mode="platform",
+            platform={"base_url": "http://platform.test/api/v1"},
+            memory_enabled=False,
+        )
+    )
+
+    memory_calls: list[str] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _memory_resolve_response(memory_enabled=True)
+        if "/gateway/memory/" in url:
+            memory_calls.append(url)
+            return httpx.Response(200, json={"facts": []})
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return _memory_completion("hello")
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+            headers={"Authorization": "Bearer user_test_token"},
+        )
+
+    reset_config()
+    reset_db()
+
+    assert response.status_code == 200
     assert memory_calls == []
 
 

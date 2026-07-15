@@ -228,15 +228,16 @@ class GatewayConfig(BaseSettings):
         description="Enable the /v1/files upload/storage endpoints (standalone mode).",
     )
     memory_enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "Master switch for persistent memory (platform mode). When on, the gateway "
-            "recalls facts from the platform before a completion and stores facts after. "
-            "Per-workspace enablement is still controlled by the platform; this only gates "
-            "whether the gateway makes the calls at all. Recall runs before dispatch, so a "
+            "Self-hosted opt-out for persistent memory (platform mode). The platform is "
+            "authoritative for per-workspace enablement (carried on the resolve response), "
+            "so leave this on (the default) to follow the platform: memory is used only for "
+            "workspaces that enabled it. Set it false to hard-disable all memory calls from "
+            "this gateway regardless of platform config. Recall runs before dispatch, so a "
             "slow memory service adds up to its timeout to time-to-first-token; the storing "
             "call after a completion is fire-and-forget. Both timeouts are tunable via the "
-            "platform settings 'memory_recall_timeout_ms' (default 2000) and "
+            "platform settings 'memory_recall_timeout_ms' (default 8000) and "
             "'memory_remember_timeout_ms' (default 10000), or their PLATFORM_* env aliases."
         ),
     )

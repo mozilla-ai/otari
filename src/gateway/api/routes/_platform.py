@@ -97,6 +97,11 @@ class ResolvedRoute(BaseModel):
     request_id: str
     fallback_enabled: bool
     attempts: list[ResolvedAttempt]
+    # Whether the workspace has persistent memory enabled. The platform is authoritative;
+    # the gateway uses this to decide whether to make the hot-path recall call at all.
+    # Defaults to True so a gateway pointed at an older platform (which omits the field)
+    # still attempts recall, relying on the platform's empty-when-off short-circuit.
+    memory_enabled: bool = True
 
 
 class _AttemptFailure(NamedTuple):
@@ -439,6 +444,8 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
             request_id=str(payload["request_id"]),
             fallback_enabled=bool(payload.get("fallback_enabled", False)),
             attempts=attempts,
+            # Absent on older platforms; default True so recall still runs (see ResolvedRoute).
+            memory_enabled=bool(payload.get("memory_enabled", True)),
         )
 
     correlation_id = str(payload["correlation_id"])
@@ -456,6 +463,7 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
                 managed=bool(payload.get("managed", False)),
             )
         ],
+        memory_enabled=bool(payload.get("memory_enabled", True)),
     )
 
 
@@ -702,7 +710,7 @@ async def _recall_platform_memory(
     if not platform_base_url or not query.strip():
         return []
 
-    timeout_ms = _coerce_timeout_ms(config.platform.get("memory_recall_timeout_ms", 2000), 2000)
+    timeout_ms = _coerce_timeout_ms(config.platform.get("memory_recall_timeout_ms", 8000), 8000)
     url = _platform_url(platform_base_url, "/gateway/memory/recall")
     headers = {
         "X-Gateway-Token": config.platform_token or "",

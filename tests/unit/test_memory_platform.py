@@ -102,7 +102,7 @@ async def test_recall_malformed_timeout_falls_back(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(platform_module, "_post_platform", fake_post)
     out = await _recall_platform_memory(_config(memory_recall_timeout_ms=bad_timeout), "tk", "q")
     assert out == ["ok"]
-    assert captured["timeout_seconds"] == 2.0
+    assert captured["timeout_seconds"] == 8.0
 
 
 # ───────────── remember ─────────────
