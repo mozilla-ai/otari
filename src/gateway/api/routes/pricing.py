@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
+from gateway.services.alias_service import resolve_effective_alias
 from gateway.services.pricing_service import normalize_effective_at
 from gateway.services.provider_kwargs import normalize_pricing_key, split_selector
 
@@ -125,18 +126,18 @@ async def set_pricing(
 ) -> PricingResponse:
     """Set or update pricing for a model.
 
-    Rejects a configured alias: pricing, budgets, and usage all key on the
-    resolved target, so a row stored under an alias name would never be read.
+    Rejects an alias: pricing, budgets, and usage all key on the resolved
+    target, so a row stored under an alias name would never be read.
     """
     # Checked against the raw key: an alias name can never contain a selector
-    # delimiter (see ``validate_aliases``), so normalization would leave it
+    # delimiter (see ``validate_alias``), so normalization would leave it
     # unchanged anyway, and this reads as the same lookup request dispatch does.
-    alias_target = config.resolve_alias(request.model_key)
+    alias_target = resolve_effective_alias(config, request.model_key)
     if alias_target is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                f"'{request.model_key}' is a configured alias for '{alias_target}', not a model. "
+                f"'{request.model_key}' is an alias for '{alias_target}', not a model. "
                 f"Pricing keys on the resolved target, so set the price for '{alias_target}' instead."
             ),
         )

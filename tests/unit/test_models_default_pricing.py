@@ -80,7 +80,9 @@ def _priced(model_key: str, input_rate: float, output_rate: float) -> ModelPrici
 
 
 def test_alias_reports_target_db_price_as_configured() -> None:
-    obj = _alias_model(ALIAS_CONFIG, "fast-model", {"openai:gpt-4o": _priced("openai:gpt-4o", 2.5, 10.0)})
+    obj = _alias_model(
+        ALIAS_CONFIG, "fast-model", "openai:gpt-4o", {"openai:gpt-4o": _priced("openai:gpt-4o", 2.5, 10.0)}
+    )
 
     assert obj.owned_by == "otari"
     assert obj.pricing is not None
@@ -94,7 +96,7 @@ def test_alias_falls_back_to_target_default_price(default_pricing_on: None) -> N
     # No DB row for the target. The gateway still bills this request at the
     # genai-prices rate, so the catalog has to report that rate rather than
     # claiming the model is unpriced.
-    obj = _alias_model(ALIAS_CONFIG, "fast-model", {})
+    obj = _alias_model(ALIAS_CONFIG, "fast-model", "openai:gpt-4o", {})
 
     assert obj.pricing is not None
     assert obj.pricing.input_price_per_million > 0
@@ -106,7 +108,7 @@ def test_alias_never_priced_by_its_display_name(default_pricing_on: None) -> Non
     # alias must be priced from its target, so a lookup keyed on the display name
     # would quietly report the wrong model's rate.
     config = GatewayConfig(aliases={"gpt-4o": "openai:gpt-4o-mini"})
-    obj = _alias_model(config, "gpt-4o", {})
+    obj = _alias_model(config, "gpt-4o", "openai:gpt-4o-mini", {})
     mini = ModelObject(id="openai:gpt-4o-mini", created=0, owned_by="openai")
     _apply_default_pricing(mini)
 
@@ -116,7 +118,9 @@ def test_alias_never_priced_by_its_display_name(default_pricing_on: None) -> Non
 
 
 def test_alias_unpriced_when_target_has_no_price() -> None:
-    obj = _alias_model(GatewayConfig(aliases={"a": "openai:nonexistent-model-xyz"}), "a", {})
+    obj = _alias_model(
+        GatewayConfig(aliases={"a": "openai:nonexistent-model-xyz"}), "a", "openai:nonexistent-model-xyz", {}
+    )
 
     assert obj.pricing is None
     assert obj.pricing_source == "none"

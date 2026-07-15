@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 
 from gateway.api.routes import (
+    aliases,
     audio,
     batches,
     budgets,
@@ -47,6 +48,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(keys.router)
     app.include_router(users.router)
     app.include_router(budgets.router)
+    app.include_router(aliases.router)
     app.include_router(pricing.router)
     app.include_router(usage.router)
     app.include_router(settings.router)
