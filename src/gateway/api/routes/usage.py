@@ -1,16 +1,17 @@
 """Bulk usage log endpoint.
 
 Provides a single query interface over all usage logs with optional
-time range and user filters, ordered newest-first. Intended for
+time range and user filters, ordered newest-first, plus a database-side
+aggregate for callers that need totals rather than rows. Intended for
 external systems that need to sync usage data (billing, analytics).
 """
 
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import Select, case, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,6 +64,29 @@ class UsageEntry(BaseModel):
         )
 
 
+_SelectT = TypeVar("_SelectT", bound=Select[Any])
+
+
+def _filtered_usage(
+    stmt: _SelectT,
+    start_date: datetime | None,
+    end_date: datetime | None,
+    user_id: str | None,
+) -> _SelectT:
+    """Apply the shared time-range / user filters to a usage query.
+
+    Generic over the statement type so a filtered row query and a filtered
+    aggregate query each keep their own result typing.
+    """
+    if start_date is not None:
+        stmt = stmt.where(UsageLog.timestamp >= start_date)
+    if end_date is not None:
+        stmt = stmt.where(UsageLog.timestamp < end_date)
+    if user_id is not None:
+        stmt = stmt.where(UsageLog.user_id == user_id)
+    return stmt
+
+
 @router.get("", dependencies=[Depends(verify_master_key)])
 async def list_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -82,20 +106,132 @@ async def list_usage(
 
     Supports optional filters for time range and user. Paginated via skip/limit.
     Timestamps accept either ISO 8601 strings or Unix epoch seconds (numeric).
+
+    This is a page of raw rows, capped at ``limit``. For counts and totals over
+    every matching row, use ``/v1/usage/summary`` instead of summing a page.
     """
 
-    stmt = select(UsageLog)
-    if start_date is not None:
-        stmt = stmt.where(UsageLog.timestamp >= start_date)
-    if end_date is not None:
-        stmt = stmt.where(UsageLog.timestamp < end_date)
-    if user_id is not None:
-        stmt = stmt.where(UsageLog.user_id == user_id)
-
+    stmt = _filtered_usage(select(UsageLog), start_date, end_date, user_id)
     stmt = stmt.order_by(UsageLog.timestamp.desc()).offset(skip).limit(limit)
     result = await db.execute(stmt)
     logs = result.scalars().all()
     return [UsageEntry.from_model(log) for log in logs]
+
+
+class UsageTotals(BaseModel):
+    """Aggregate counters over every usage row matching the filters."""
+
+    requests: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    cost: float
+    errors: int = Field(description="Requests whose status is not 'success'.")
+
+
+class ModelUsage(BaseModel):
+    """Aggregate counters for one (provider, model) pair."""
+
+    key: str = Field(description="'provider:model', or the bare model when no provider was recorded.")
+    model: str
+    provider: str | None
+    requests: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    cost: float
+
+
+class UsageSummary(BaseModel):
+    """Usage totals plus a per-model breakdown."""
+
+    totals: UsageTotals
+    by_model: list[ModelUsage]
+
+
+@router.get("/summary", dependencies=[Depends(verify_master_key)])
+async def usage_summary(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    start_date: datetime | None = Query(
+        default=None,
+        description="Aggregate logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+    ),
+    end_date: datetime | None = Query(
+        default=None,
+        description="Aggregate logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+    ),
+    user_id: str | None = Query(default=None, description="Filter to a single user"),
+) -> UsageSummary:
+    """Aggregate usage over every matching row, plus a per-model breakdown.
+
+    Counted in the database, so the result covers the whole table rather than a
+    page of it: summing ``/v1/usage`` instead silently under-reports once the
+    row count exceeds the page limit.
+    """
+
+    # SUM over zero matching rows is NULL, not 0, and token/cost columns are
+    # themselves nullable, so every sum is coalesced before it reaches Pydantic.
+    errors = func.sum(case((UsageLog.status != "success", 1), else_=0))
+    totals_stmt = _filtered_usage(
+        select(
+            func.count(UsageLog.id),
+            func.coalesce(func.sum(UsageLog.prompt_tokens), 0),
+            func.coalesce(func.sum(UsageLog.completion_tokens), 0),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0),
+            func.coalesce(func.sum(UsageLog.cost), 0.0),
+            func.coalesce(errors, 0),
+        ),
+        start_date,
+        end_date,
+        user_id,
+    )
+    requests, prompt, completion, total, cost, error_count = (await db.execute(totals_stmt)).one()
+    totals = UsageTotals(
+        requests=int(requests),
+        prompt_tokens=int(prompt),
+        completion_tokens=int(completion),
+        total_tokens=int(total),
+        cost=float(cost),
+        errors=int(error_count),
+    )
+
+    by_model_stmt = _filtered_usage(
+        select(
+            UsageLog.provider,
+            UsageLog.model,
+            func.count(UsageLog.id),
+            func.coalesce(func.sum(UsageLog.prompt_tokens), 0),
+            func.coalesce(func.sum(UsageLog.completion_tokens), 0),
+            func.coalesce(func.sum(UsageLog.total_tokens), 0),
+            func.coalesce(func.sum(UsageLog.cost), 0.0),
+        ),
+        start_date,
+        end_date,
+        user_id,
+    )
+    # Group by provider as well as model so the same model name served by two
+    # providers does not collapse into one misattributed bucket. The model name
+    # breaks ties so the ordering is stable across calls.
+    by_model_stmt = by_model_stmt.group_by(UsageLog.provider, UsageLog.model).order_by(
+        func.count(UsageLog.id).desc(), UsageLog.model
+    )
+    by_model = [
+        ModelUsage(
+            key=f"{row_provider}:{row_model}" if row_provider else row_model,
+            model=row_model,
+            provider=row_provider,
+            requests=int(row_requests),
+            prompt_tokens=int(row_prompt),
+            completion_tokens=int(row_completion),
+            total_tokens=int(row_total),
+            cost=float(row_cost),
+        )
+        for row_provider, row_model, row_requests, row_prompt, row_completion, row_total, row_cost in (
+            await db.execute(by_model_stmt)
+        ).all()
+    ]
+
+    return UsageSummary(totals=totals, by_model=by_model)
 
 
 class BackfillCostRequest(BaseModel):

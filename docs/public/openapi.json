@@ -1714,6 +1714,63 @@
         "title": "ModelPricingInfo",
         "type": "object"
       },
+      "ModelUsage": {
+        "description": "Aggregate counters for one (provider, model) pair.",
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "key": {
+            "description": "'provider:model', or the bare model when no provider was recorded.",
+            "title": "Key",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "model",
+          "provider",
+          "requests",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cost"
+        ],
+        "title": "ModelUsage",
+        "type": "object"
+      },
       "ModerationRequest": {
         "description": "OpenAI-compatible moderation request.",
         "properties": {
@@ -2835,6 +2892,67 @@
           "error_message"
         ],
         "title": "UsageLogResponse",
+        "type": "object"
+      },
+      "UsageSummary": {
+        "description": "Usage totals plus a per-model breakdown.",
+        "properties": {
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/ModelUsage"
+            },
+            "title": "By Model",
+            "type": "array"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/UsageTotals"
+          }
+        },
+        "required": [
+          "totals",
+          "by_model"
+        ],
+        "title": "UsageSummary",
+        "type": "object"
+      },
+      "UsageTotals": {
+        "description": "Aggregate counters over every usage row matching the filters.",
+        "properties": {
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "errors": {
+            "description": "Requests whose status is not 'success'.",
+            "title": "Errors",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cost",
+          "errors"
+        ],
+        "title": "UsageTotals",
         "type": "object"
       },
       "UserResponse": {
@@ -4755,7 +4873,7 @@
         ]
       },
       "post": {
-        "description": "Set or update pricing for a model.",
+        "description": "Set or update pricing for a model.\n\nRejects a configured alias: pricing, budgets, and usage all key on the\nresolved target, so a row stored under an alias name would never be read.",
         "operationId": "set_pricing_v1_pricing_post",
         "requestBody": {
           "content": {
@@ -5083,6 +5201,11 @@
             "description": "Successful Response"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Get Settings",
         "tags": [
           "settings"
@@ -5091,7 +5214,7 @@
     },
     "/v1/usage": {
       "get": {
-        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range and user. Paginated via skip/limit.\nTimestamps accept either ISO 8601 strings or Unix epoch seconds (numeric).",
+        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range and user. Paginated via skip/limit.\nTimestamps accept either ISO 8601 strings or Unix epoch seconds (numeric).\n\nThis is a page of raw rows, capped at ``limit``. For counts and totals over\nevery matching row, use ``/v1/usage/summary`` instead of summing a page.",
         "operationId": "list_usage_v1_usage_get",
         "parameters": [
           {
@@ -5247,7 +5370,107 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "summary": "Backfill Usage Cost",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/usage/summary": {
+      "get": {
+        "description": "Aggregate usage over every matching row, plus a per-model breakdown.\n\nCounted in the database, so the result covers the whole table rather than a\npage of it: summing ``/v1/usage`` instead silently under-reports once the\nrow count exceeds the page limit.",
+        "operationId": "usage_summary_v1_usage_summary_get",
+        "parameters": [
+          {
+            "description": "Aggregate logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Aggregate logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Aggregate logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Aggregate logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "Filter to a single user",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single user",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Usage Summary",
         "tags": [
           "usage"
         ]

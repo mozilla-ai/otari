@@ -5,12 +5,14 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.models.entities import UsageLog, User
 
 USAGE_PATH = "/v1/usage"
+SUMMARY_PATH = "/v1/usage/summary"
 
 
 def _ensure_user(db: Session, user_id: str) -> None:
@@ -297,3 +299,176 @@ def test_list_usage_filter_by_epoch_seconds(
     data = response.json()
     assert len(data) == 1
     assert data[0]["timestamp"] == newer.isoformat()
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/usage/summary
+# ---------------------------------------------------------------------------
+
+
+def test_usage_summary_requires_master_key(client: TestClient) -> None:
+    assert client.get(SUMMARY_PATH).status_code == 401
+
+
+def test_usage_summary_empty_reports_zeros(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    # SUM over no rows is NULL in SQL; the endpoint must report 0, not null.
+    response = client.get(SUMMARY_PATH, headers=master_key_header)
+    assert response.status_code == 200
+    assert response.json() == {
+        "totals": {
+            "requests": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cost": 0.0,
+            "errors": 0,
+        },
+        "by_model": [],
+    }
+
+
+def test_usage_summary_counts_every_row_beyond_the_page_limit(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    # The reason this endpoint exists. /v1/usage is capped at 1000 rows, so a
+    # caller summing a page under-reports the moment the table outgrows it.
+    # Aggregating in the database is the only way to get a true total.
+    rows = 1001
+    base = datetime(2025, 9, 1, 0, 0, tzinfo=UTC)
+    _ensure_user(db_session, "cap-user")
+    for idx in range(rows):
+        db_session.add(
+            UsageLog(
+                id=str(uuid.uuid4()),
+                user_id="cap-user",
+                timestamp=base + timedelta(seconds=idx),
+                model="gpt-4o",
+                provider="openai",
+                endpoint="/v1/chat/completions",
+                prompt_tokens=10,
+                completion_tokens=5,
+                total_tokens=15,
+                cost=0.01,
+                status="success",
+            )
+        )
+    db_session.commit()
+
+    page = client.get(USAGE_PATH, headers=master_key_header, params={"limit": 1000})
+    assert len(page.json()) == 1000  # the whole table does not fit in one page
+
+    totals = client.get(SUMMARY_PATH, headers=master_key_header).json()["totals"]
+    assert totals["requests"] == rows
+    assert totals["total_tokens"] == rows * 15
+    assert totals["cost"] == pytest.approx(rows * 0.01)
+
+
+def test_usage_summary_counts_non_success_as_errors(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    timestamp = datetime(2025, 9, 2, 0, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="err-user", timestamp=timestamp, status="success")
+    _make_log(db_session, user_id="err-user", timestamp=timestamp, status="error")
+    _make_log(db_session, user_id="err-user", timestamp=timestamp, status="rate_limited")
+    db_session.commit()
+
+    totals = client.get(SUMMARY_PATH, headers=master_key_header).json()["totals"]
+    assert totals["requests"] == 3
+    assert totals["errors"] == 2
+
+
+def test_usage_summary_tolerates_null_tokens_and_cost(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    # A request that failed before the provider responded logs no tokens and no
+    # cost. Those nulls must count as zero rather than poison the totals.
+    timestamp = datetime(2025, 9, 3, 0, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="null-user", timestamp=timestamp, prompt_tokens=10, total_tokens=15, cost=0.5)
+    _make_log(
+        db_session,
+        user_id="null-user",
+        timestamp=timestamp,
+        prompt_tokens=None,
+        completion_tokens=None,
+        total_tokens=None,
+        cost=None,
+        status="error",
+    )
+    db_session.commit()
+
+    body = client.get(SUMMARY_PATH, headers=master_key_header).json()
+    assert body["totals"]["requests"] == 2
+    assert body["totals"]["total_tokens"] == 15
+    assert body["totals"]["cost"] == pytest.approx(0.5)
+
+
+def test_usage_summary_by_model_keeps_providers_apart(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    # The same model name served by two providers bills at two different rates,
+    # so collapsing them into one bucket would misattribute the spend.
+    timestamp = datetime(2025, 9, 4, 0, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="multi", timestamp=timestamp, model="llama-3", provider="bedrock", cost=0.02)
+    _make_log(db_session, user_id="multi", timestamp=timestamp, model="llama-3", provider="together", cost=0.03)
+    _make_log(db_session, user_id="multi", timestamp=timestamp, model="llama-3", provider="together", cost=0.03)
+    db_session.commit()
+
+    by_model = client.get(SUMMARY_PATH, headers=master_key_header).json()["by_model"]
+    assert [row["key"] for row in by_model] == ["together:llama-3", "bedrock:llama-3"]  # busiest first
+    assert by_model[0]["requests"] == 2
+    assert by_model[0]["cost"] == pytest.approx(0.06)
+    assert by_model[1]["requests"] == 1
+
+
+def test_usage_summary_by_model_key_omits_absent_provider(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    # Matches how pricing keys are formed: no provider recorded means the bare
+    # model name is the key, not "None:model".
+    _make_log(
+        db_session,
+        user_id="bare",
+        timestamp=datetime(2025, 9, 5, 0, 0, tzinfo=UTC),
+        model="mystery-model",
+        provider=None,
+    )
+    db_session.commit()
+
+    by_model = client.get(SUMMARY_PATH, headers=master_key_header).json()["by_model"]
+    assert by_model[0]["key"] == "mystery-model"
+    assert by_model[0]["provider"] is None
+
+
+def test_usage_summary_respects_user_and_time_filters(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    base = datetime(2025, 9, 6, 0, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="wanted", timestamp=base, cost=0.01)
+    _make_log(db_session, user_id="wanted", timestamp=base - timedelta(hours=1), cost=0.09)
+    _make_log(db_session, user_id="other", timestamp=base, cost=0.05)
+    db_session.commit()
+
+    body = client.get(
+        SUMMARY_PATH,
+        headers=master_key_header,
+        params={"user_id": "wanted", "start_date": base.isoformat()},
+    ).json()
+    assert body["totals"]["requests"] == 1
+    assert body["totals"]["cost"] == pytest.approx(0.01)
+    assert [row["key"] for row in body["by_model"]] == ["openai:gpt-4"]
+    assert body["by_model"][0]["requests"] == 1
