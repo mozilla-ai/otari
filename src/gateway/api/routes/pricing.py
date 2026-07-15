@@ -123,7 +123,24 @@ async def set_pricing(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> PricingResponse:
-    """Set or update pricing for a model."""
+    """Set or update pricing for a model.
+
+    Rejects a configured alias: pricing, budgets, and usage all key on the
+    resolved target, so a row stored under an alias name would never be read.
+    """
+    # Checked against the raw key: an alias name can never contain a selector
+    # delimiter (see ``validate_aliases``), so normalization would leave it
+    # unchanged anyway, and this reads as the same lookup request dispatch does.
+    alias_target = config.resolve_alias(request.model_key)
+    if alias_target is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"'{request.model_key}' is a configured alias for '{alias_target}', not a model. "
+                f"Pricing keys on the resolved target, so set the price for '{alias_target}' instead."
+            ),
+        )
+
     normalized_key = normalize_pricing_key(config, request.model_key)
     effective_at = normalize_effective_at(request.effective_at)
     result = await db.execute(

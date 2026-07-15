@@ -74,11 +74,13 @@ def _alias_model(config: GatewayConfig, alias: str, pricing_lookup: dict[str, Mo
 
     The alias id is what the caller sees; pricing is looked up from the resolved
     target's canonical key so an alias shows the real model's price without
-    revealing the provider/model behind it.
+    revealing the provider/model behind it. ``pricing_source`` describes where
+    that price came from, just as for a real model; the alias itself is
+    identified by ``owned_by``.
     """
-    target = config.aliases[alias]
-    pricing = pricing_lookup.get(normalize_pricing_key(config, target))
-    return ModelObject(
+    canonical_target = normalize_pricing_key(config, config.aliases[alias])
+    pricing = pricing_lookup.get(canonical_target)
+    obj = ModelObject(
         id=alias,
         created=0,
         owned_by=ALIAS_OWNED_BY,
@@ -88,7 +90,14 @@ def _alias_model(config: GatewayConfig, alias: str, pricing_lookup: dict[str, Mo
         )
         if pricing
         else None,
+        pricing_source="configured" if pricing else "none",
     )
+    # Priced from the target, never from the alias's display name: the fallback
+    # keys on a real provider/model, and the display name is neither. Without
+    # this an alias to an unpriced model would report no price while the gateway
+    # billed it at the default rate.
+    _apply_default_pricing(obj, pricing_selector=canonical_target)
+    return obj
 
 
 def _alias_target_keys(config: GatewayConfig) -> set[str]:
@@ -111,17 +120,21 @@ def _normalized_pricing_lookup(config: GatewayConfig, pricing_map: dict[str, Mod
     return {normalize_pricing_key(config, key): row for key, row in pricing_map.items()}
 
 
-def _apply_default_pricing(obj: ModelObject) -> None:
+def _apply_default_pricing(obj: ModelObject, pricing_selector: str | None = None) -> None:
     """Fill the genai-prices default rate for a model that has no DB price.
 
     No-op when the fallback is disabled or the model already carries a price, so
     database pricing always takes precedence. Marks the source as "default".
+
+    ``pricing_selector`` names the model to price when that differs from
+    ``obj.id`` (an alias is priced from its target); it defaults to ``obj.id``.
     """
     if obj.pricing is not None or not default_pricing_enabled():
         return
-    provider_part, separator, model_part = obj.id.partition(":")
+    selector = pricing_selector if pricing_selector is not None else obj.id
+    provider_part, separator, model_part = selector.partition(":")
     provider = provider_part if separator else None
-    model_name = model_part if separator else obj.id
+    model_name = model_part if separator else selector
     default = default_model_pricing(provider, model_name, normalize_effective_at(None))
     if default is not None:
         obj.pricing = ModelPricingInfo(
@@ -225,8 +238,9 @@ async def list_models(
     # Phase 3: fill the genai-prices default for unpriced models, so the catalog
     # shows the effective rate when the fallback is active. Database pricing
     # (phases 1-2) always wins; this only touches models still without a price.
-    # Runs before aliases are added: an alias must be priced from its resolved
-    # target, never from its display name.
+    # Runs before aliases are added: this fills from ``id``, and an alias's id is
+    # a display name the fallback must never be asked to price. Aliases fill
+    # their own default from the resolved target in phase 4.
     for obj in merged.values():
         _apply_default_pricing(obj)
 

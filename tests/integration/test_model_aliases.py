@@ -209,6 +209,64 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
     assert resp.json()["pricing"] == {"input_price_per_million": 1.0, "output_price_per_million": 2.0}
 
 
+def test_alias_listing_reports_where_its_price_came_from(client: TestClient) -> None:
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "anthropic:claude-opus-4",
+            "input_price_per_million": 15.0,
+            "output_price_per_million": 75.0,
+        },
+        headers=HEADERS,
+    )
+    resp = client.get("/v1/models", headers=HEADERS)
+    data = resp.json()["data"]
+    # The target is priced in the database, so the alias says so. The unpriced
+    # alias reports "none" rather than inheriting the other one's source.
+    assert next(m for m in data if m["id"] == "myopusmodel")["pricing_source"] == "configured"
+    assert next(m for m in data if m["id"] == "housemodel")["pricing_source"] == "none"
+
+
+def test_pricing_an_alias_is_rejected(client: TestClient) -> None:
+    # Pricing keys on the resolved target, so a row stored under the alias name
+    # is never read. Accepting the write would report success and silently
+    # change nothing about what the caller is billed.
+    resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "myopusmodel",
+            "input_price_per_million": 99.0,
+            "output_price_per_million": 99.0,
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "alias" in detail
+    # The error names the target, so the caller knows what to price instead.
+    assert "anthropic:claude-opus-4" in detail
+
+    # Nothing was written: the alias is still unpriced, not priced at 99.
+    listing = client.get("/v1/models", headers=HEADERS)
+    assert next(m for m in listing.json()["data"] if m["id"] == "myopusmodel")["pricing"] is None
+    assert client.get("/v1/pricing/myopusmodel", headers=HEADERS).status_code == 404
+
+
+def test_pricing_the_alias_target_is_still_accepted(client: TestClient) -> None:
+    # The rejection is scoped to alias names only; the target it points at is the
+    # supported way to price an aliased model.
+    resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "anthropic:claude-opus-4",
+            "input_price_per_million": 15.0,
+            "output_price_per_million": 75.0,
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+
+
 def test_pricing_on_alias_target_does_not_expose_it(client: TestClient) -> None:
     # Aliasing a model forces a pricing entry on the real target (billing keys
     # there), and that entry must not put the hidden name back in the listing.
