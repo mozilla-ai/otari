@@ -148,6 +148,78 @@ async def _discover_for_provider(
     return provider_name, list(models)
 
 
+@dataclass
+class ProviderDiscovery:
+    """One instance's discovery result, including why it came back empty."""
+
+    provider: str
+    models: list[Model]
+    error: str | None = None
+
+
+# A provider error is echoed to a master-key caller, who already holds more
+# authority than anything it could reveal; it is capped so a stack-trace-sized
+# message cannot fill the response.
+_ERROR_MAX_CHARS = 300
+
+
+def _short_error(exc: BaseException) -> str:
+    message = str(exc).strip() or exc.__class__.__name__
+    if len(message) > _ERROR_MAX_CHARS:
+        return message[: _ERROR_MAX_CHARS - 1] + "…"
+    return message
+
+
+async def discover_provider_models(config: GatewayConfig, instance: str) -> ProviderDiscovery:
+    """Discover one instance's models, reporting failure rather than raising.
+
+    ``discover_all_models`` drops a failing provider and logs it, which is right
+    for a catalog served to API callers: one broken provider should not blank the
+    listing. An operator choosing a model needs the opposite, because an empty
+    dropdown and a provider whose key is wrong look identical.
+    """
+    cache = get_model_cache()
+    cached = cache.get(instance, config.model_cache_ttl_seconds)
+    if cached is not None:
+        return ProviderDiscovery(provider=instance, models=cached)
+
+    impl = config.provider_instance_type(instance)
+    if not _supports_list_models(impl):
+        declared = _declared_models(config, instance)
+        if declared:
+            cache.set(instance, declared)
+            return ProviderDiscovery(provider=instance, models=declared)
+        return ProviderDiscovery(
+            provider=instance,
+            models=[],
+            error=(
+                f"Provider '{impl}' cannot list models. Declare the model ids this instance "
+                "serves under its 'models:' key in config.yml."
+            ),
+        )
+
+    try:
+        _, models = await _discover_for_provider(instance, config)
+    except Exception as exc:
+        logger.info("Model discovery failed for instance '%s': %s", instance, exc)
+        return ProviderDiscovery(provider=instance, models=[], error=_short_error(exc))
+
+    cache.set(instance, models)
+    return ProviderDiscovery(provider=instance, models=models)
+
+
+async def discover_models_with_status(config: GatewayConfig) -> list[ProviderDiscovery]:
+    """Discover every configured instance's models concurrently, keeping errors.
+
+    Deliberately not gated on ``config.model_discovery``: that flag governs what
+    GET /v1/models publishes to API callers, and an operator who curates that
+    listing still has to be able to see what their own credentials can reach.
+    """
+    instances = list(config.providers)
+    results = await asyncio.gather(*(discover_provider_models(config, name) for name in instances))
+    return list(results)
+
+
 async def discover_all_models(
     config: GatewayConfig,
     provider_filter: str | None = None,
