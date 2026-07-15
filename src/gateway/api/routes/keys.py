@@ -216,6 +216,50 @@ async def update_key(
     return KeyInfo.from_model(key)
 
 
+@router.post("/{key_id}/rotate", dependencies=[Depends(verify_master_key)])
+async def rotate_key(
+    key_id: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CreateKeyResponse:
+    """Rotate an API key's secret in place.
+
+    Requires master key authentication.
+
+    Generates a new secret for the same key row (id, user, name, expiry, and
+    metadata are preserved) and returns the new raw key once, using the same
+    response shape as key creation. The previous secret stops authenticating
+    immediately; there is no grace window.
+    """
+    result = await db.execute(select(APIKey).where(APIKey.id == key_id))
+    key = result.scalar_one_or_none()
+
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"API key with id '{key_id}' not found",
+        )
+
+    new_api_key = generate_api_key()
+    key.key_hash = hash_key(new_api_key)
+    key.last_used_at = None
+
+    try:
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error",
+        ) from None
+    await db.refresh(key)
+
+    key_info = KeyInfo.from_model(key)
+    return CreateKeyResponse(
+        **key_info.model_dump(exclude={"last_used_at"}),
+        key=new_api_key,
+    )
+
+
 @router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_master_key)])
 async def delete_key(
     key_id: str,
