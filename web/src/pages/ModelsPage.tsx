@@ -2,7 +2,10 @@ import { Button, Card, Chip } from "@heroui/react";
 import { useMemo, useState } from "react";
 
 import {
+  useAliases,
   useBackfillUsageCost,
+  useCreateAlias,
+  useDeleteAlias,
   useDeletePricing,
   useModels,
   usePricing,
@@ -12,6 +15,7 @@ import {
   useUsageSummary,
 } from "@/api/hooks";
 import { Field } from "@/components/Field";
+import { ModelComboBox } from "@/components/ModelComboBox";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/components/ui";
 import { formatCost, formatNumber } from "@/lib/format";
@@ -34,6 +38,9 @@ interface ModelRow {
   key: string;
   model: string;
   provider: string;
+  // Set only for alias rows. A config.yml alias lives in a file this UI cannot
+  // edit, so it is shown but not deletable.
+  aliasSource?: "config" | "stored";
   inputPrice: number | null;
   outputPrice: number | null;
   source: PriceSource;
@@ -132,6 +139,7 @@ function BackfillPrompt({ modelKey, onDone }: { modelKey: string; onDone: () => 
 function ModelTableRow({ row, onPriced }: { row: ModelRow; onPriced: (modelKey: string) => void }) {
   const setPricing = useSetPricing();
   const deletePricing = useDeletePricing();
+  const deleteAlias = useDeleteAlias();
   const [editing, setEditing] = useState(false);
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
@@ -196,8 +204,23 @@ function ModelTableRow({ row, onPriced }: { row: ModelRow; onPriced: (modelKey: 
       <Td className="text-right whitespace-nowrap">
         {row.source === "alias" ? (
           // An alias is priced through its target, and the API rejects a price
-          // posted against the alias name, so there is nothing to offer here.
-          <span className="text-xs text-[var(--otari-muted)]">priced by its target</span>
+          // posted against the alias name, so pricing is never offered here.
+          // A stored alias can still be removed; one from config.yml cannot,
+          // because this UI does not own that file.
+          row.aliasSource === "stored" ? (
+            <span className="inline-flex items-center gap-2">
+              <ConfirmButton
+                confirmLabel="Delete"
+                isPending={deleteAlias.isPending}
+                onConfirm={() => deleteAlias.mutate(row.key)}
+              >
+                Delete
+              </ConfirmButton>
+              {deleteAlias.error ? <span className="text-xs text-red-700">{errorMessage(deleteAlias.error)}</span> : null}
+            </span>
+          ) : (
+            <span className="text-xs text-[var(--otari-muted)]">set in config.yml</span>
+          )
         ) : editing ? (
           <span className="inline-flex items-center gap-2">
             <Button
@@ -236,9 +259,9 @@ function ModelTableRow({ row, onPriced }: { row: ModelRow; onPriced: (modelKey: 
   );
 }
 
-// Prices a model the catalog does not list: an unconfigured provider, or a
-// model discovery cannot see.
-function AddModelForm({ onClose, onPriced }: { onClose: () => void; onPriced: (modelKey: string) => void }) {
+// Prices a model: one discovery lists, or one it cannot see (an unconfigured
+// provider, a brand-new release), which is why the key stays free text.
+function PriceModelForm({ onClose, onPriced }: { onClose: () => void; onPriced: (modelKey: string) => void }) {
   const setPricing = useSetPricing();
   const [modelKey, setModelKey] = useState("");
   const [input, setInput] = useState("");
@@ -267,39 +290,129 @@ function AddModelForm({ onClose, onPriced }: { onClose: () => void; onPriced: (m
   };
 
   return (
+    <div className="flex flex-col gap-4">
+      <ErrorBanner error={setPricing.error} />
+      <div className="grid gap-4 sm:grid-cols-3">
+        <ModelComboBox
+          label="Model"
+          value={modelKey}
+          onChange={setModelKey}
+          isRequired
+          autoFocus
+          description="Pick one your providers report, or type any provider:model key."
+        />
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-[var(--otari-ink)]">Input $ / 1M</span>
+          <MoneyInput value={input} onChange={setInput} ariaLabel="Input price per million" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-[var(--otari-ink)]">Output $ / 1M</span>
+          <MoneyInput value={output} onChange={setOutput} ariaLabel="Output price per million" />
+        </div>
+      </div>
+      <div>
+        <Button variant="primary" isDisabled={!canSubmit || setPricing.isPending} onPress={submit}>
+          {setPricing.isPending ? "Saving…" : "Save price"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// Creates a stored alias: a display name callers send as `model`, resolved to a
+// real target. Pricing, budgets, and usage all key on the target, so an alias is
+// never priced here.
+function AddAliasForm({ onClose }: { onClose: () => void }) {
+  const createAlias = useCreateAlias();
+  const [name, setName] = useState("");
+  const [target, setTarget] = useState("");
+
+  // The gateway rejects a name carrying a selector delimiter, since it could
+  // never be told apart from a real provider:model. Say so before the round trip.
+  const nameHasDelimiter = /[:/]/.test(name);
+  const canSubmit = name.trim() !== "" && target.trim() !== "" && !nameHasDelimiter;
+
+  const submit = () => {
+    if (!canSubmit) {
+      return;
+    }
+    createAlias.mutate({ name: name.trim(), target: target.trim() }, { onSuccess: onClose });
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <ErrorBanner error={createAlias.error} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Alias name"
+          value={name}
+          onChange={setName}
+          placeholder="fast-model"
+          isRequired
+          autoFocus
+          description={
+            nameHasDelimiter ? (
+              <span className="text-red-700">
+                An alias name cannot contain “:” or “/”, which would make it look like a provider:model key.
+              </span>
+            ) : (
+              "What callers send as `model`."
+            )
+          }
+        />
+        <ModelComboBox
+          label="Target"
+          value={target}
+          onChange={setTarget}
+          isRequired
+          description="The real model this resolves to. Callers never see it."
+        />
+      </div>
+      <div>
+        <Button variant="primary" isDisabled={!canSubmit || createAlias.isPending} onPress={submit}>
+          {createAlias.isPending ? "Creating…" : "Create alias"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+type AddTab = "model" | "alias";
+
+function AddForm({ onClose, onPriced }: { onClose: () => void; onPriced: (modelKey: string) => void }) {
+  const [tab, setTab] = useState<AddTab>("model");
+
+  return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-[var(--otari-ink)]">Add a model</h2>
+          <div className="flex items-center gap-1 rounded-lg bg-[var(--otari-bg)] p-1">
+            {(
+              [
+                ["model", "Price a model"],
+                ["alias", "Add an alias"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={tab === id}
+                onClick={() => setTab(id)}
+                className={
+                  tab === id
+                    ? "rounded-md bg-white px-3 py-1.5 text-sm font-medium text-[var(--otari-ink)] shadow-sm"
+                    : "rounded-md px-3 py-1.5 text-sm text-[var(--otari-muted)] hover:text-[var(--otari-ink)]"
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <Button size="sm" variant="ghost" onPress={onClose}>
             Close
           </Button>
         </div>
-        <ErrorBanner error={setPricing.error} />
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field
-            label="Model key"
-            value={modelKey}
-            onChange={setModelKey}
-            placeholder="provider:model"
-            isRequired
-            autoFocus
-            description="e.g. openai:gpt-4o"
-          />
-          <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-[var(--otari-ink)]">Input $ / 1M</span>
-            <MoneyInput value={input} onChange={setInput} ariaLabel="Input price per million" />
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-[var(--otari-ink)]">Output $ / 1M</span>
-            <MoneyInput value={output} onChange={setOutput} ariaLabel="Output price per million" />
-          </div>
-        </div>
-        <div>
-          <Button variant="primary" isDisabled={!canSubmit || setPricing.isPending} onPress={submit}>
-            {setPricing.isPending ? "Saving…" : "Save price"}
-          </Button>
-        </div>
+        {tab === "model" ? <PriceModelForm onClose={onClose} onPriced={onPriced} /> : <AddAliasForm onClose={onClose} />}
       </Card.Content>
     </Card>
   );
@@ -332,6 +445,9 @@ export function ModelsPage() {
   const models = useModels();
   const usage = useUsageSummary();
   const pricing = usePricing();
+  // The catalog marks a row as an alias but not where it came from, and only a
+  // stored one can be deleted from here.
+  const aliases = useAliases();
   const [showForm, setShowForm] = useState(false);
   const [backfillFor, setBackfillFor] = useState<string | null>(null);
 
@@ -357,6 +473,8 @@ export function ModelsPage() {
     const result: ModelRow[] = [];
     const seen = new Set<string>();
 
+    const aliasSourceByName = new Map((aliases.data ?? []).map((alias) => [alias.name, alias.source]));
+
     const add = (key: string, model: string, provider: string, catalogRow?: ModelRow) => {
       if (seen.has(key)) {
         return;
@@ -372,6 +490,7 @@ export function ModelsPage() {
         key,
         model,
         provider,
+        aliasSource: isAlias ? aliasSourceByName.get(key) : undefined,
         inputPrice: priced ? priced.input_price_per_million : (catalogRow?.inputPrice ?? null),
         outputPrice: priced ? priced.output_price_per_million : (catalogRow?.outputPrice ?? null),
         source: priced ? "configured" : (catalogRow?.source ?? "none"),
@@ -436,7 +555,7 @@ export function ModelsPage() {
     }
 
     return result.sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model));
-  }, [models.data, usage.data, pricing.data, unlisted]);
+  }, [models.data, usage.data, pricing.data, unlisted, aliases.data]);
 
   const isLoading = models.isLoading || usage.isLoading || pricing.isLoading;
 
@@ -454,7 +573,7 @@ export function ModelsPage() {
 
       <DefaultPricingBanner />
 
-      {showForm ? <AddModelForm onClose={() => setShowForm(false)} onPriced={setBackfillFor} /> : null}
+      {showForm ? <AddForm onClose={() => setShowForm(false)} onPriced={setBackfillFor} /> : null}
 
       {backfillFor ? <BackfillPrompt modelKey={backfillFor} onDone={() => setBackfillFor(null)} /> : null}
 

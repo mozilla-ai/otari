@@ -84,6 +84,42 @@ export interface ModelListResponse {
   data: ModelObject[];
 }
 
+// One model a provider reports as available. `key` is the selector to send as
+// `model`; `id` is the bare id the provider uses.
+export interface DiscoverableModel {
+  id: string;
+  key: string;
+}
+
+// A provider's discovery result. `ok` false means the instance could not be
+// queried at all, so an empty list is a failure to report rather than a provider
+// that genuinely serves nothing.
+export interface DiscoverableProvider {
+  provider: string;
+  ok: boolean;
+  error: string | null;
+  models: DiscoverableModel[];
+}
+
+export interface DiscoverableModelsResponse {
+  providers: DiscoverableProvider[];
+}
+
+// A model alias. "config" aliases come from config.yml and are read-only here;
+// "stored" ones live in the database and can be created and deleted.
+export interface AliasResponse {
+  name: string;
+  target: string;
+  source: "config" | "stored";
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface CreateAliasRequest {
+  name: string;
+  target: string;
+}
+
 export interface PricingResponse {
   model_key: string;
   effective_at: string;

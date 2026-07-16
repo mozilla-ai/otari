@@ -2,7 +2,10 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 
 import { ApiError, apiFetch } from "@/api/client";
 import type {
+  AliasResponse,
+  CreateAliasRequest,
   DashboardBuild,
+  DiscoverableModelsResponse,
   GatewaySettings,
   HealthResponse,
   ModelListResponse,
@@ -18,6 +21,11 @@ const HEALTH = "health";
 const MODELS = "models";
 const PRICING = "pricing";
 const SETTINGS = "settings";
+const ALIASES = "aliases";
+// Deliberately not nested under MODELS: pricing mutations invalidate that key,
+// and a price change cannot alter which models a provider serves. Sharing the
+// key would fire a live provider call on every save.
+const DISCOVERABLE = "discoverable";
 const BUILD = "build";
 
 // How often an open tab asks whether the app it is running is still the one the
@@ -122,6 +130,55 @@ export function useDashboardBuild() {
     // A failed check is not worth reporting: the tab keeps working, and the next
     // poll retries anyway.
     retry: false,
+  });
+}
+
+// Every model the configured credentials can reach, per provider. Distinct from
+// useModels: that is the catalog served to API callers (curated by
+// model_discovery, aliases listed, targets withheld), while this is what an
+// operator could pick from. A provider that failed is reported rather than
+// dropped, so the picker can say why a list is empty.
+//
+// Live provider calls, cached gateway-side; kept fresh for the length of a
+// session rather than refetched per open, since the set of models a key can
+// reach does not move minute to minute.
+export function useDiscoverableModels() {
+  return useQuery({
+    queryKey: [DISCOVERABLE],
+    queryFn: () => apiFetch<DiscoverableModelsResponse>("/v1/models/discoverable"),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useAliases() {
+  return useQuery({
+    queryKey: [ALIASES],
+    queryFn: () => apiFetch<AliasResponse[]>("/v1/aliases"),
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateAlias() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateAliasRequest) =>
+      apiFetch<AliasResponse>("/v1/aliases", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ALIASES] });
+      // An alias is listed as a model, so the catalog changes too.
+      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+    },
+  });
+}
+
+export function useDeleteAlias() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => apiFetch<void>(`/v1/aliases/${encodeURIComponent(name)}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ALIASES] });
+      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+    },
   });
 }
 

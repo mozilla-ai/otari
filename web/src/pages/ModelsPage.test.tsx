@@ -1,11 +1,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
-import type { GatewaySettings, ModelListResponse, ModelUsage, PricingResponse, UsageSummary } from "@/api/types";
+import type {
+  AliasResponse,
+  DiscoverableModelsResponse,
+  GatewaySettings,
+  ModelListResponse,
+  ModelUsage,
+  PricingResponse,
+  UsageSummary,
+} from "@/api/types";
 import { ModelsPage } from "@/pages/ModelsPage";
 
 const PRICED: PricingResponse = {
@@ -57,6 +65,27 @@ const CATALOG: ModelListResponse = {
   ],
 };
 
+// What the picker offers, and one provider that could not be listed.
+const DISCOVERABLE: DiscoverableModelsResponse = {
+  providers: [
+    {
+      provider: "openai",
+      ok: true,
+      error: null,
+      models: [
+        { id: "gpt-4o", key: "openai:gpt-4o" },
+        { id: "gpt-4o-mini", key: "openai:gpt-4o-mini" },
+      ],
+    },
+    { provider: "anthropic", ok: false, error: "401 authentication_error", models: [] },
+  ],
+};
+
+// "fast-model" is the config.yml alias the catalog reports above.
+const ALIASES: AliasResponse[] = [
+  { name: "fast-model", target: "openai:gpt-4o-mini", source: "config", created_at: null, updated_at: null },
+];
+
 const EMPTY_SUMMARY: UsageSummary = {
   totals: { requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost: 0, errors: 0 },
   by_model: [],
@@ -77,6 +106,12 @@ function modelUsage(provider: string, model: string, requests = 1): ModelUsage {
   };
 }
 
+// The row for the "fast-model" alias, so assertions about its actions cannot
+// accidentally match a button belonging to some other model.
+function aliasRow(): HTMLElement {
+  return screen.getByText("fast-model").closest("tr") as HTMLElement;
+}
+
 function renderWithClient(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
@@ -94,7 +129,13 @@ function jsonResponse(body: unknown): Response {
 }
 
 function mockApi(
-  opts: { byModel?: ModelUsage[]; post?: (url: string) => Response; unlisted?: (url: string) => Response } = {},
+  opts: {
+    byModel?: ModelUsage[];
+    post?: (url: string) => Response;
+    unlisted?: (url: string) => Response;
+    aliases?: AliasResponse[];
+    discoverable?: DiscoverableModelsResponse;
+  } = {},
 ) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
@@ -102,8 +143,19 @@ function mockApi(
     if (method === "POST") {
       return opts.post ? opts.post(url) : jsonResponse(PRICED);
     }
+    if (method === "DELETE") {
+      return jsonResponse(null);
+    }
     if (url.includes("/v1/settings")) {
       return jsonResponse(SETTINGS);
+    }
+    // Before the /v1/models/ catch-all, which would answer it with a 404 the
+    // same way the real route order matters server-side.
+    if (url.includes("/v1/models/discoverable")) {
+      return jsonResponse(opts.discoverable ?? DISCOVERABLE);
+    }
+    if (url.includes("/v1/aliases")) {
+      return jsonResponse(opts.aliases ?? ALIASES);
     }
     if (url.includes("/v1/models/")) {
       return opts.unlisted ? opts.unlisted(url) : notFound();
@@ -238,7 +290,9 @@ describe("ModelsPage", () => {
     expect(screen.getByText("alias")).toBeInTheDocument();
     expect(screen.getByText("$0.15")).toBeInTheDocument();
     // The API rejects a price posted against an alias name, so none is offered.
-    expect(screen.getByText("priced by its target")).toBeInTheDocument();
+    // This one comes from config.yml, which the dashboard cannot edit.
+    expect(screen.getByText("set in config.yml")).toBeInTheDocument();
+    expect(within(aliasRow()).queryByRole("button", { name: /set price/i })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Input price for fast-model")).not.toBeInTheDocument();
   });
 
@@ -270,7 +324,7 @@ describe("ModelsPage", () => {
 
     expect(screen.queryByText("$99.00")).not.toBeInTheDocument();
     expect(screen.getByText("$0.15")).toBeInTheDocument();
-    expect(screen.getByText("priced by its target")).toBeInTheDocument();
+    expect(screen.getByText("set in config.yml")).toBeInTheDocument();
   });
 
   it("does not offer a backfill for a model with no traffic", async () => {
@@ -284,5 +338,137 @@ describe("ModelsPage", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     expect(screen.queryByRole("button", { name: "Backfill past usage" })).not.toBeInTheDocument();
+  });
+
+  it("offers discovered models in the picker and posts the one chosen", async () => {
+    mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+    await user.click(screen.getByRole("button", { name: "Add a model" }));
+
+    const picker = screen.getByRole("combobox");
+    await user.type(picker, "4o-mini");
+    // Offered as the full selector, which is what /v1/pricing keys on: picking
+    // "gpt-4o-mini" alone would store a price nothing ever reads.
+    const option = await screen.findByRole("option", { name: "openai:gpt-4o-mini" });
+    expect(option).toBeInTheDocument();
+
+    await user.click(option);
+    expect(picker).toHaveValue("openai:gpt-4o-mini");
+  });
+
+  it("keeps a model the picker never offered typeable", async () => {
+    // Discovery only sees configured providers. A model behind an unconfigured
+    // one still has to be priceable, so the field is not a whitelist.
+    mockApi();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+    await user.click(screen.getByRole("button", { name: "Add a model" }));
+
+    const picker = screen.getByRole("combobox");
+    await user.type(picker, "bedrock:claude-3-sonnet");
+    expect(picker).toHaveValue("bedrock:claude-3-sonnet");
+    // The open popover aria-hides the rest of the form, so dismiss it the way a
+    // user would before reaching the price fields.
+    await user.keyboard("{Escape}");
+
+    await user.type(screen.getByLabelText(/input price per million/i), "1");
+    await user.type(screen.getByLabelText(/output price per million/i), "2");
+    await user.click(screen.getByRole("button", { name: /save price/i }));
+
+    const post = fetchSpy.mock.calls.find(([url, init]) => String(url).includes("/v1/pricing") && init?.method === "POST");
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+      model_key: "bedrock:claude-3-sonnet",
+      input_price_per_million: 1,
+      output_price_per_million: 2,
+    });
+  });
+
+  it("says which provider could not be listed rather than showing an empty picker", async () => {
+    // An unreachable provider contributes no models. Without this the list just
+    // looks short, and a bad key is indistinguishable from a provider with
+    // nothing to offer.
+    mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+    await user.click(screen.getByRole("button", { name: "Add a model" }));
+
+    expect(await screen.findByText(/Could not list models for anthropic/)).toBeInTheDocument();
+  });
+
+  it("creates an alias against the target chosen in the picker", async () => {
+    mockApi({
+      post: (url) => {
+        if (url.includes("/v1/aliases")) {
+          return jsonResponse(ALIASES[0]);
+        }
+        return jsonResponse(PRICED);
+      },
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+    await user.click(screen.getByRole("button", { name: "Add a model" }));
+    await user.click(screen.getByRole("button", { name: "Add an alias" }));
+
+    await user.type(screen.getByRole("textbox", { name: /alias name/i }), "smart");
+    await user.type(screen.getByRole("combobox"), "openai:gpt-4o-mini");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /create alias/i }));
+
+    const aliasPost = fetchSpy.mock.calls.find(
+      ([url, init]) => String(url).includes("/v1/aliases") && (init?.method ?? "") === "POST",
+    );
+    expect(aliasPost).toBeDefined();
+    expect(JSON.parse(String(aliasPost?.[1]?.body))).toEqual({ name: "smart", target: "openai:gpt-4o-mini" });
+  });
+
+  it("refuses an alias name that could be mistaken for a model key", async () => {
+    // The gateway rejects a name carrying ":" or "/", since it could never be
+    // told apart from a real provider:model selector.
+    mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+    await user.click(screen.getByRole("button", { name: "Add a model" }));
+    await user.click(screen.getByRole("button", { name: "Add an alias" }));
+
+    await user.type(screen.getByRole("textbox", { name: /alias name/i }), "openai:fast");
+
+    expect(screen.getByText(/cannot contain/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create alias/i })).toBeDisabled();
+  });
+
+  it("deletes a stored alias but not one from config.yml", async () => {
+    mockApi({
+      aliases: [
+        { name: "fast-model", target: "openai:gpt-4o-mini", source: "stored", created_at: null, updated_at: null },
+      ],
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("fast-model");
+
+    // Stored, so it is removable from here.
+    expect(screen.queryByText("set in config.yml")).not.toBeInTheDocument();
+    const del = within(aliasRow()).getByRole("button", { name: "Delete" });
+    await user.click(del);
+    // ConfirmButton asks once before acting.
+    await user.click(within(aliasRow()).getByRole("button", { name: "Delete" }));
+
+    const call = fetchSpy.mock.calls.find(([, init]) => (init?.method ?? "") === "DELETE");
+    expect(String(call?.[0])).toContain("/v1/aliases/fast-model");
   });
 });
