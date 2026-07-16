@@ -744,6 +744,36 @@ def test_list_batches_filters_foreign_batches(
     assert "batch_foreign" not in ids
 
 
+def test_retrieve_batch_results_master_key_logs_batch_owner(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Master-key results retrieval attributes usage to the stamped batch owner."""
+    resp = client.post(
+        "/v1/users",
+        json={"user_id": "batch-owner-user"},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+
+    stamped = _mock_batch(status="completed", metadata={"otari_user_id": "batch-owner-user"})
+    mock_result = BatchResult(results=[])
+
+    with (
+        patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=stamped),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
+    ):
+        resp = client.get("/v1/batches/batch_abc123/results?provider=openai", headers=master_key_header)
+
+    assert resp.status_code == 200
+
+    usage_resp = client.get("/v1/users/batch-owner-user/usage", headers=master_key_header)
+    assert usage_resp.status_code == 200
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) == 1
+    assert results_logs[0]["status"] == "success"
+
+
 def test_retrieve_batch_results_records_tokens_and_cost(
     client: TestClient,
     master_key_header: dict[str, str],

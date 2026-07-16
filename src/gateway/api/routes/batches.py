@@ -447,12 +447,17 @@ async def retrieve_batch_results(
     """Retrieve the results of a completed batch."""
     api_key, is_master_key = auth_result
     api_key_id = api_key.id if api_key else None
-    user_id = api_key.user_id if api_key else None
 
     provider_enum, provider_kwargs = _resolve_batch_provider(config, provider)
 
     batch = await _retrieve_batch_or_502(provider_enum, batch_id, provider, provider_kwargs)
     _check_batch_ownership(batch, api_key, is_master_key, batch_id)
+
+    # Attribute usage to the batch owner stamped at creation time (so a
+    # master-key retrieval bills the owner, not user_id=None), falling back to
+    # the key's user for legacy batches without the marker.
+    owner = (batch.metadata or {}).get(_OWNER_METADATA_KEY)
+    user_id = owner or (api_key.user_id if api_key else None)
 
     try:
         result = await aretrieve_batch_results(
