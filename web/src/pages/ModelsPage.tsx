@@ -12,8 +12,6 @@ import {
   usePricing,
   useSetPricing,
   useSettings,
-  useUnlistedModels,
-  useUsageSummary,
 } from "@/api/hooks";
 import { Field } from "@/components/Field";
 import { ModelComboBox } from "@/components/ModelComboBox";
@@ -29,10 +27,10 @@ import { currentPricing, providerFromModelKey } from "@/lib/pricing";
 // against an alias name.
 const ALIAS_OWNED_BY = "otari";
 
-// Where a row's price comes from. "configured" is a price in the database and
-// is the only kind that can be edited or cleared; "default" is the bundled
-// genai-prices fallback; "alias" is inherited from the alias's target;
-// "none" means the model is metered at no cost.
+// Where a row's price comes from. "configured" is a price in the database and is
+// the only kind that can be edited or cleared; "default" is the bundled
+// genai-prices fallback; "alias" is inherited from the alias's target; "none"
+// means the model is metered at no cost.
 type PriceSource = "configured" | "default" | "alias" | "none";
 
 interface ModelRow {
@@ -47,14 +45,11 @@ interface ModelRow {
   // to a configured or default-priced model.
   aliasPriceSource?: PriceSource;
   // True when a provider currently reports this model via discovery. Drives the
-  // Discovered tab regardless of whether the model is also priced or has traffic.
+  // Discovered tab regardless of whether the model is also priced.
   isDiscovered?: boolean;
   inputPrice: number | null;
   outputPrice: number | null;
   source: PriceSource;
-  requests: number;
-  totalTokens: number;
-  cost: number;
 }
 
 function isValidPrice(value: string): boolean {
@@ -110,8 +105,10 @@ function SourceChip({ source }: { source: PriceSource }) {
   return <span className="text-xs text-[var(--otari-muted)]">not priced</span>;
 }
 
-// Offered only after pricing a model that already has traffic: those requests
-// were metered at the old (or no) price, so their cost is stale until recomputed.
+// Offered after setting a price: earlier requests for the model were metered at
+// the old (or no) price, so their recorded cost is stale until recomputed. It is
+// the one place the config page reaches into usage, as a direct consequence of a
+// price change; the prompt reports "0 requests" harmlessly when there is none.
 function BackfillPrompt({ modelKey, onDone }: { modelKey: string; onDone: () => void }) {
   const backfill = useBackfillUsageCost();
 
@@ -125,8 +122,8 @@ function BackfillPrompt({ modelKey, onDone }: { modelKey: string; onDone: () => 
         </p>
       ) : (
         <p className="text-sm text-[var(--otari-muted)]">
-          <code className="rounded bg-white px-1">{modelKey}</code> ran before this price. Recompute the cost of those
-          past requests?
+          Recompute the cost of past requests for <code className="rounded bg-white px-1">{modelKey}</code> at this
+          price?
         </p>
       )}
       <ErrorBanner error={backfill.error} />
@@ -173,9 +170,7 @@ function ModelTableRow({ row, onPriced }: { row: ModelRow; onPriced: (modelKey: 
       {
         onSuccess: () => {
           setEditing(false);
-          if (row.requests > 0) {
-            onPriced(row.key);
-          }
+          onPriced(row.key);
         },
       },
     );
@@ -206,14 +201,11 @@ function ModelTableRow({ row, onPriced }: { row: ModelRow; onPriced: (modelKey: 
           formatCost(row.outputPrice)
         )}
       </Td>
-      <Td className="text-right">{formatNumber(row.requests)}</Td>
-      <Td className="text-right text-[var(--otari-muted)]">{formatNumber(row.totalTokens)}</Td>
-      <Td className="text-right">{formatCost(row.cost)}</Td>
       <Td className="text-right whitespace-nowrap">
         {row.source === "alias" ? (
           // An alias is priced through its target, and the API rejects a price
-          // posted against the alias name, so pricing is never offered here.
-          // A stored alias can still be removed; one from config.yml cannot,
+          // posted against the alias name, so pricing is never offered here. A
+          // stored alias can still be removed; one from config.yml cannot,
           // because this UI does not own that file.
           row.aliasSource === "stored" ? (
             <span className="inline-flex items-center gap-2">
@@ -458,9 +450,8 @@ function DefaultPricingBanner() {
 }
 
 const TAB_ITEMS = [
-  { id: "in-use", label: "In use" },
-  { id: "priced", label: "Priced" },
   { id: "discovered", label: "Discovered" },
+  { id: "priced", label: "Priced" },
   { id: "aliases", label: "Aliases" },
 ] as const;
 
@@ -531,8 +522,8 @@ function Pagination({ page, pageCount, total, onPage }: { page: number; pageCoun
   );
 }
 
-// Header shared by the In use, Priced, and Discovered tabs; those three carry
-// the same columns, so one row renderer (ModelTableRow) serves all of them.
+// Header shared by the Discovered and Priced tabs; both carry the same columns,
+// so one row renderer (ModelTableRow) serves them.
 function ModelTable({
   rows,
   isLoading,
@@ -553,19 +544,16 @@ function ModelTable({
           <Th>Price</Th>
           <Th className="text-right">Input $ / 1M</Th>
           <Th className="text-right">Output $ / 1M</Th>
-          <Th className="text-right">Requests</Th>
-          <Th className="text-right">Tokens</Th>
-          <Th className="text-right">Cost</Th>
           <Th className="text-right">Actions</Th>
         </Tr>
       </THead>
       <tbody>
         {isLoading ? (
-          <LoadingRow colSpan={9} />
+          <LoadingRow colSpan={6} />
         ) : rows.length > 0 ? (
           rows.map((row) => <ModelTableRow key={row.key} row={row} onPriced={onPriced} />)
         ) : (
-          <TableMessage colSpan={9}>{empty}</TableMessage>
+          <TableMessage colSpan={6}>{empty}</TableMessage>
         )}
       </tbody>
     </Table>
@@ -595,8 +583,6 @@ function AliasTableRow({ entry }: { entry: AliasEntry }) {
       </Td>
       <Td className="text-right">{row?.inputPrice != null ? formatCost(row.inputPrice) : "—"}</Td>
       <Td className="text-right">{row?.outputPrice != null ? formatCost(row.outputPrice) : "—"}</Td>
-      <Td className="text-right">{formatNumber(row?.requests ?? 0)}</Td>
-      <Td className="text-right">{formatCost(row?.cost ?? 0)}</Td>
       <Td className="text-right whitespace-nowrap">
         {entry.source === "stored" ? (
           <span className="inline-flex items-center gap-2">
@@ -627,18 +613,16 @@ function AliasTable({ entries, isLoading }: { entries: AliasEntry[]; isLoading: 
           <Th>Resolves to</Th>
           <Th className="text-right">Input $ / 1M</Th>
           <Th className="text-right">Output $ / 1M</Th>
-          <Th className="text-right">Requests</Th>
-          <Th className="text-right">Cost</Th>
           <Th className="text-right">Actions</Th>
         </Tr>
       </THead>
       <tbody>
         {isLoading ? (
-          <LoadingRow colSpan={8} />
+          <LoadingRow colSpan={6} />
         ) : entries.length > 0 ? (
           entries.map((entry) => <AliasTableRow key={entry.name} entry={entry} />)
         ) : (
-          <TableMessage colSpan={8}>No aliases yet. Use “Add” to create one.</TableMessage>
+          <TableMessage colSpan={6}>No aliases yet. Use “Add” to create one.</TableMessage>
         )}
       </tbody>
     </Table>
@@ -662,20 +646,17 @@ function DiscoveredErrors({ providers }: { providers: { provider: string; error:
 
 export function ModelsPage() {
   const models = useModels();
-  const usage = useUsageSummary();
   const pricing = usePricing();
-  // The catalog marks a row as an alias but not where it came from, and only a
-  // stored one can be deleted from here.
   const aliases = useAliases();
   const discoverable = useDiscoverableModels();
-  const [tab, setTab] = useState<Tab>("in-use");
+  const [tab, setTab] = useState<Tab>("discovered");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [backfillFor, setBackfillFor] = useState<string | null>(null);
 
   // Keys a provider currently reports, so a row can be tagged as discovered
-  // regardless of whether it is also priced or has traffic.
+  // regardless of whether it is also priced.
   const discoverableKeys = useMemo(
     () => new Set((discoverable.data?.providers ?? []).flatMap((provider) => provider.models.map((model) => model.key))),
     [discoverable.data],
@@ -693,39 +674,22 @@ export function ModelsPage() {
     setPage(0);
   };
 
-  // Models with traffic that the catalog does not describe: an alias's target
-  // (withheld on purpose), or anything undiscoverable and unpriced. They are
-  // still being billed, so their rate has to be fetched by name.
-  const unlistedKeys = useMemo(() => {
-    const catalogIds = new Set((models.data?.data ?? []).map((model) => model.id));
-    const configuredKeys = new Set(currentPricing(pricing.data ?? []).map((row) => row.model_key));
-    return (usage.data?.by_model ?? [])
-      .map((row) => row.key)
-      .filter((key) => !catalogIds.has(key) && !configuredKeys.has(key));
-  }, [models.data, pricing.data, usage.data]);
-  const unlisted = useUnlistedModels(unlistedKeys);
-
   const rows = useMemo<ModelRow[]>(() => {
-    // Aggregated server-side over the whole log, so these counts do not drift
-    // once the usage table outgrows a single page.
-    const usageByKey = new Map((usage.data?.by_model ?? []).map((row) => [row.key, row]));
-    // A configured price wins over whatever the catalog reports, and is the
-    // only thing this page can edit or clear.
+    // A configured price wins over whatever the catalog reports, and is the only
+    // thing this page can edit or clear.
     const configured = new Map(currentPricing(pricing.data ?? []).map((row) => [row.model_key, row]));
+    const aliasSourceByName = new Map((aliases.data ?? []).map((alias) => [alias.name, alias.source]));
     const result: ModelRow[] = [];
     const seen = new Set<string>();
-
-    const aliasSourceByName = new Map((aliases.data ?? []).map((alias) => [alias.name, alias.source]));
 
     const add = (key: string, model: string, provider: string, catalogRow?: ModelRow) => {
       if (seen.has(key)) {
         return;
       }
       seen.add(key);
-      const used = usageByKey.get(key);
       // An alias reports the price of whatever it resolves to. A pricing row
-      // stored under the alias's own name is dead (nothing reads it), so it
-      // must not be shown as this row's price.
+      // stored under the alias's own name is dead (nothing reads it), so it must
+      // not be shown as this row's price.
       const isAlias = catalogRow?.source === "alias";
       const priced = isAlias ? undefined : configured.get(key);
       result.push({
@@ -738,18 +702,11 @@ export function ModelsPage() {
         inputPrice: priced ? priced.input_price_per_million : (catalogRow?.inputPrice ?? null),
         outputPrice: priced ? priced.output_price_per_million : (catalogRow?.outputPrice ?? null),
         source: priced ? "configured" : (catalogRow?.source ?? "none"),
-        requests: used?.requests ?? 0,
-        totalTokens: used?.total_tokens ?? 0,
-        cost: used?.cost ?? 0,
       });
     };
 
-    // The catalog first, so every configured/discovered model shows even with
-    // no traffic.
+    // The catalog first, so every configured/discovered/aliased model shows.
     for (const model of models.data?.data ?? []) {
-      // pricing_source says where an alias's price came from (its target's DB
-      // row, or the default fallback), not that it is an alias, so identity
-      // comes from owned_by.
       const isAlias = model.owned_by === ALIAS_OWNED_BY;
       // The genai-prices/DB pricing status of the model, computed the same way
       // for a real model (its own price) and an alias (its target's price, kept
@@ -764,54 +721,22 @@ export function ModelsPage() {
         inputPrice: model.pricing?.input_price_per_million ?? null,
         outputPrice: model.pricing?.output_price_per_million ?? null,
         source: isAlias ? "alias" : priceStatus,
-        requests: 0,
-        totalTokens: 0,
-        cost: 0,
       });
     }
-    // Then anything priced or used that the catalog does not list.
+    // Then any configured price the catalog did not list (e.g. an alias target
+    // the catalog withholds), so the Priced tab is complete.
     for (const key of configured.keys()) {
       add(key, key, providerFromModelKey(key));
     }
-    for (const used of usageByKey.values()) {
-      // The gateway's effective rate for this model, if it could name one.
-      // Without it the row would claim "not priced" while showing real spend.
-      const priced = unlisted.get(used.key);
-      add(
-        used.key,
-        used.model,
-        used.provider ?? "—",
-        priced
-          ? {
-              key: used.key,
-              model: used.model,
-              provider: used.provider ?? "—",
-              inputPrice: priced.pricing?.input_price_per_million ?? null,
-              outputPrice: priced.pricing?.output_price_per_million ?? null,
-              source: priced.pricing_source === "default" ? "default" : priced.pricing ? "configured" : "none",
-              requests: 0,
-              totalTokens: 0,
-              cost: 0,
-            }
-          : undefined,
-      );
-    }
 
-    return result.sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model));
-  }, [models.data, usage.data, pricing.data, unlisted, aliases.data, discoverableKeys]);
+    return result.sort((a, b) => a.model.localeCompare(b.model));
+  }, [models.data, pricing.data, aliases.data, discoverableKeys]);
 
   const rowsByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);
 
-  // Each tab is a lens over the same enriched rows: a discovered model with a
-  // configured price and traffic shows in In use, Priced, and Discovered alike.
-  const inUse = useMemo(
-    () => rows.filter((row) => row.requests > 0).sort((a, b) => b.cost - a.cost || a.model.localeCompare(b.model)),
-    [rows],
-  );
-  const priced = useMemo(
-    () => rows.filter((row) => row.source === "configured").sort((a, b) => a.model.localeCompare(b.model)),
-    [rows],
-  );
+  // Each tab is a lens over the same rows: a discovered model with a configured
+  // price shows in both Discovered and Priced.
+  const priced = useMemo(() => rows.filter((row) => row.source === "configured"), [rows]);
   const discovered = useMemo(() => {
     const seen = new Set<string>();
     const out: ModelRow[] = [];
@@ -821,9 +746,8 @@ export function ModelsPage() {
           continue;
         }
         seen.add(model.key);
-        // Use the enriched row (price + usage) when the catalog produced one;
-        // otherwise a bare discovered model the catalog did not enrich, which
-        // happens when model_discovery is off.
+        // Use the enriched row (price) when the catalog produced one; otherwise a
+        // bare discovered model the catalog did not enrich (model_discovery off).
         out.push(
           rowsByKey.get(model.key) ?? {
             key: model.key,
@@ -834,9 +758,6 @@ export function ModelsPage() {
             inputPrice: null,
             outputPrice: null,
             source: "none",
-            requests: 0,
-            totalTokens: 0,
-            cost: 0,
           },
         );
       }
@@ -859,16 +780,15 @@ export function ModelsPage() {
   );
 
   const counts: Record<Tab, number> = {
-    "in-use": inUse.length,
-    priced: priced.length,
     discovered: discovered.length,
+    priced: priced.length,
     aliases: aliasEntries.length,
   };
 
   const query = search.trim().toLowerCase();
   const modelMatches = (row: ModelRow) =>
     !query || row.key.toLowerCase().includes(query) || row.provider.toLowerCase().includes(query);
-  const filteredModels = (tab === "in-use" ? inUse : tab === "priced" ? priced : discovered).filter(modelMatches);
+  const filteredModels = (tab === "priced" ? priced : discovered).filter(modelMatches);
   const filteredAliases = aliasEntries.filter(
     (entry) => !query || entry.name.toLowerCase().includes(query) || entry.target.toLowerCase().includes(query),
   );
@@ -880,20 +800,19 @@ export function ModelsPage() {
   const pageModels = filteredModels.slice(start, start + PAGE_SIZE);
   const pageAliases = filteredAliases.slice(start, start + PAGE_SIZE);
 
-  const rowsLoading = models.isLoading || usage.isLoading || pricing.isLoading;
+  const rowsLoading = models.isLoading || pricing.isLoading;
   const emptyMessage: Record<Exclude<Tab, "aliases">, ReactNode> = {
-    "in-use": query ? "No models match your search." : "No traffic yet. Requests appear here as models are used.",
-    priced: query ? "No priced models match your search." : "No prices set. Use “Add” to price a model.",
     discovered: query
       ? "No discovered models match your search."
       : "No models discovered. Check provider credentials in config.yml, or add one under “Add”.",
+    priced: query ? "No priced models match your search." : "No prices set. Use “Add” to price a model.",
   };
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Models"
-        description="Discovered, priced, and aliased models, with per-model spend. Saving a price records it as effective now."
+        description="Configure model pricing: set rates for discovered models, review what you have priced, and manage aliases."
         action={
           <Button variant="primary" onPress={() => setShowForm((open) => !open)}>
             {showForm ? "Hide form" : "Add"}
@@ -913,7 +832,7 @@ export function ModelsPage() {
 
       {backfillFor ? <BackfillPrompt modelKey={backfillFor} onDone={() => setBackfillFor(null)} /> : null}
 
-      <ErrorBanner error={models.error ?? usage.error ?? pricing.error ?? aliases.error} />
+      <ErrorBanner error={models.error ?? pricing.error ?? aliases.error} />
 
       <TabBar tab={tab} counts={counts} onSelect={selectTab} />
 

@@ -11,9 +11,7 @@ import type {
   GatewaySettings,
   ModelListResponse,
   ModelObject,
-  ModelUsage,
   PricingResponse,
-  UsageSummary,
 } from "@/api/types";
 import { ModelsPage } from "@/pages/ModelsPage";
 
@@ -93,26 +91,6 @@ const ALIASES: AliasResponse[] = [
   { name: "fast-model", target: "openai:gpt-4o-mini", source: "config", created_at: null, updated_at: null },
 ];
 
-const EMPTY_SUMMARY: UsageSummary = {
-  totals: { requests: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost: 0, errors: 0 },
-  by_model: [],
-};
-
-// The gateway groups usage by (provider, model) and keys it as "provider:model",
-// the same identity the catalog and pricing keys use.
-function modelUsage(provider: string, model: string, requests = 1, cost = 0): ModelUsage {
-  return {
-    key: `${provider}:${model}`,
-    model,
-    provider,
-    requests,
-    prompt_tokens: 10 * requests,
-    completion_tokens: 5 * requests,
-    total_tokens: 15 * requests,
-    cost,
-  };
-}
-
 // The row for the "fast-model" alias, so assertions about its actions cannot
 // accidentally match a button belonging to some other model.
 function aliasRow(): HTMLElement {
@@ -137,9 +115,7 @@ function jsonResponse(body: unknown): Response {
 
 function mockApi(
   opts: {
-    byModel?: ModelUsage[];
     post?: (url: string) => Response;
-    unlisted?: (url: string) => Response;
     catalog?: ModelListResponse;
     pricing?: PricingResponse[];
     aliases?: AliasResponse[];
@@ -167,13 +143,10 @@ function mockApi(
       return jsonResponse(opts.aliases ?? ALIASES);
     }
     if (url.includes("/v1/models/")) {
-      return opts.unlisted ? opts.unlisted(url) : notFound();
+      return notFound();
     }
     if (url.includes("/v1/models")) {
       return jsonResponse(opts.catalog ?? CATALOG);
-    }
-    if (url.includes("/v1/usage/summary")) {
-      return jsonResponse({ ...EMPTY_SUMMARY, by_model: opts.byModel ?? [] });
     }
     if (url.includes("/v1/pricing")) {
       return jsonResponse(opts.pricing ?? [PRICED]);
@@ -200,47 +173,42 @@ describe("ModelsPage", () => {
 
   // -- tab structure -------------------------------------------------------
 
-  it("opens on the In use tab and shows only models with traffic, costliest first", async () => {
-    mockApi({
-      byModel: [modelUsage("openai", "gpt-4o", 10, 2), modelUsage("anthropic", "claude-sonnet-4", 40, 9)],
-    });
-
-    renderWithClient(<ModelsPage />);
-    // Wait for data before reading the rows, so the loading row is gone.
-    await screen.findByText("anthropic:claude-sonnet-4");
-
-    const rows = screen.getAllByRole("row");
-    const modelCells = rows.slice(1).map((row) => row.querySelector("td")?.textContent);
-    // Costliest first: claude ($9) before gpt-4o ($2). Untrafficked models absent.
-    expect(modelCells).toEqual(["anthropic:claude-sonnet-4", "openai:gpt-4o"]);
-    expect(screen.queryByText("openai:gpt-4o-mini")).not.toBeInTheDocument();
-  });
-
-  it("splits models across tabs, each counting its own category", async () => {
-    mockApi({ byModel: [modelUsage("openai", "gpt-4o", 5, 1)] });
+  it("opens on Discovered and splits models across config tabs, each with its count", async () => {
+    mockApi();
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
-    // Counts fill in as each query resolves; wait for the priced count to land.
-    await screen.findByRole("tab", { name: /Priced 1/ });
-    // Discovered: the three real models discovery reports.
+    // Discovered is the default; wait for its models before checking counts.
+    await screen.findByText("openai:gpt-4o");
+
     expect(screen.getByRole("tab", { name: /Discovered 3/ })).toBeInTheDocument();
-    // Aliases: the single config alias.
+    expect(screen.getByRole("tab", { name: /Priced 1/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Aliases 1/ })).toBeInTheDocument();
 
     await goToTab(user, "Priced");
     expect(screen.getByText("openai:gpt-4o")).toBeInTheDocument();
+    // claude is default-priced, not configured, so it is not in the Priced tab.
     expect(screen.queryByText("anthropic:claude-sonnet-4")).not.toBeInTheDocument();
+  });
+
+  it("shows no usage columns anywhere", async () => {
+    mockApi();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    // The page is about configuration, not usage.
+    for (const heading of ["Requests", "Tokens", "Cost"]) {
+      expect(screen.queryByRole("columnheader", { name: heading })).not.toBeInTheDocument();
+    }
   });
 
   // -- Discovered tab ------------------------------------------------------
 
   it("lists discovered models with their price source", async () => {
     mockApi();
-    const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
-    await goToTab(user, "Discovered");
 
     expect(await screen.findByText("openai:gpt-4o")).toBeInTheDocument();
     expect(screen.getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
@@ -254,7 +222,6 @@ describe("ModelsPage", () => {
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
-    await goToTab(user, "Discovered");
     await screen.findByText("anthropic:claude-sonnet-4");
 
     await user.type(screen.getByRole("searchbox"), "gpt-4o-mini");
@@ -275,7 +242,6 @@ describe("ModelsPage", () => {
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
-    await goToTab(user, "Discovered");
     await screen.findByText("openai:m00");
 
     // 25 per page: m00-m24 on page one, m25 on page two.
@@ -296,80 +262,10 @@ describe("ModelsPage", () => {
         ],
       },
     });
-    const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
-    await goToTab(user, "Discovered");
 
     expect(await screen.findByText(/Could not list anthropic/)).toBeInTheDocument();
-  });
-
-  // -- In use tab: spend + pricing -----------------------------------------
-
-  it("reports traffic beyond a single usage page", async () => {
-    // Counts come from the server-side aggregate, so they are not bounded by
-    // the row limit /v1/usage would impose on a client-side tally.
-    mockApi({ byModel: [modelUsage("openai", "gpt-4o", 4200, 5)] });
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("openai:gpt-4o");
-
-    expect(screen.getByText("4,200")).toBeInTheDocument();
-    expect(screen.getByText("63,000")).toBeInTheDocument();
-  });
-
-  it("prices a used model the catalog does not list", async () => {
-    // A model with traffic that discovery and the catalog never surfaced is still
-    // billed by name, so its rate is fetched per-key rather than shown as unpriced.
-    mockApi({
-      byModel: [modelUsage("openai", "o1-preview", 1250, 3)],
-      unlisted: () =>
-        jsonResponse({
-          id: "openai:o1-preview",
-          object: "model",
-          created: 0,
-          owned_by: "openai",
-          pricing: { input_price_per_million: 0.99, output_price_per_million: 1.99 },
-          pricing_source: "default",
-        }),
-    });
-
-    renderWithClient(<ModelsPage />);
-
-    expect(await screen.findByText("$0.99")).toBeInTheDocument();
-    expect(screen.getByText("$1.99")).toBeInTheDocument();
-    expect(screen.getByText("1,250")).toBeInTheDocument();
-  });
-
-  it("leaves a used model unpriced when the gateway cannot price it either", async () => {
-    // 404 means nothing can name a rate for it, which is what "not priced" says.
-    mockApi({ byModel: [modelUsage("mystery", "unknown-model", 3, 0)] });
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("unknown-model");
-
-    expect(screen.getByText("not priced")).toBeInTheDocument();
-  });
-
-  it("offers a backfill after pricing a used model", async () => {
-    mockApi({
-      byModel: [modelUsage("anthropic", "claude-sonnet-4", 4, 1)],
-      post: (url) =>
-        url.includes("/v1/usage/backfill")
-          ? jsonResponse({ model_key: "anthropic:claude-sonnet-4", rows_updated: 3, cost_added: 0.12, users_updated: 1 })
-          : jsonResponse(PRICED),
-    });
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("anthropic:claude-sonnet-4");
-
-    // Default-priced with traffic, so it offers "Set price".
-    await user.click(screen.getByRole("button", { name: "Set price" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
-
-    await user.click(await screen.findByRole("button", { name: "Backfill past usage" }));
-    expect(await screen.findByText(/Backfilled 3 requests/)).toBeInTheDocument();
   });
 
   // -- Priced tab ----------------------------------------------------------
@@ -397,8 +293,15 @@ describe("ModelsPage", () => {
     });
   });
 
-  it("does not offer a backfill for a model with no traffic", async () => {
-    mockApi({ byModel: [] });
+  it("offers a backfill after setting a price", async () => {
+    // Setting a price makes earlier usage cost stale, so a recompute is offered
+    // as a direct consequence of the price change.
+    mockApi({
+      post: (url) =>
+        url.includes("/v1/usage/backfill")
+          ? jsonResponse({ model_key: "openai:gpt-4o", rows_updated: 3, cost_added: 0.12, users_updated: 1 })
+          : jsonResponse(PRICED),
+    });
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
@@ -408,7 +311,8 @@ describe("ModelsPage", () => {
     await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(screen.queryByRole("button", { name: "Backfill past usage" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Backfill past usage" }));
+    expect(await screen.findByText(/Backfilled 3 requests/)).toBeInTheDocument();
   });
 
   // -- Aliases tab ---------------------------------------------------------
@@ -478,7 +382,7 @@ describe("ModelsPage", () => {
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
-    await screen.findByRole("tab", { name: /In use/ });
+    await screen.findByText("openai:gpt-4o");
     await openAdd(user);
 
     const picker = screen.getByRole("combobox");
@@ -498,7 +402,7 @@ describe("ModelsPage", () => {
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
-    await screen.findByRole("tab", { name: /In use/ });
+    await screen.findByText("openai:gpt-4o");
     await openAdd(user);
 
     const picker = screen.getByRole("combobox");
