@@ -172,6 +172,112 @@ def test_delete_nonexistent_api_key(client: TestClient, master_key_header: dict[
     assert response.status_code == 404
 
 
+def test_rotate_api_key_returns_new_working_key_same_id(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Rotating a key returns a new secret for the same id, and the new key authenticates."""
+    create_response = client.post(
+        "/v1/keys",
+        json={"key_name": "rotate-me", "metadata": {"team": "eng"}},
+        headers=master_key_header,
+    )
+    assert create_response.status_code == 200
+    original = create_response.json()
+
+    rotate_response = client.post(
+        f"/v1/keys/{original['id']}/rotate",
+        headers=master_key_header,
+    )
+    assert rotate_response.status_code == 200
+    rotated = rotate_response.json()
+
+    assert rotated["id"] == original["id"]
+    assert rotated["key"].startswith("gw-")
+    assert rotated["key"] != original["key"]
+    assert rotated["key_name"] == original["key_name"]
+    assert rotated["user_id"] == original["user_id"]
+    assert rotated["metadata"] == {"team": "eng"}
+    assert rotated["is_active"] is True
+
+    # The new secret authenticates.
+    response = client.get(
+        "/v1/models",
+        headers={API_KEY_HEADER: f"Bearer {rotated['key']}"},
+    )
+    assert response.status_code == 200
+
+
+def test_rotate_api_key_old_secret_stops_working(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """After rotation the previous secret no longer authenticates."""
+    create_response = client.post(
+        "/v1/keys",
+        json={"key_name": "rotate-invalidate"},
+        headers=master_key_header,
+    )
+    assert create_response.status_code == 200
+    original = create_response.json()
+
+    # Old secret works before rotation.
+    before = client.get(
+        "/v1/models",
+        headers={API_KEY_HEADER: f"Bearer {original['key']}"},
+    )
+    assert before.status_code == 200
+
+    rotate_response = client.post(
+        f"/v1/keys/{original['id']}/rotate",
+        headers=master_key_header,
+    )
+    assert rotate_response.status_code == 200
+
+    # Old secret is rejected immediately, with no grace window.
+    after = client.get(
+        "/v1/models",
+        headers={API_KEY_HEADER: f"Bearer {original['key']}"},
+    )
+    assert after.status_code == 401
+
+
+def test_rotate_api_key_resets_last_used_at(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Rotation clears last_used_at since the new secret has never been used."""
+    create_response = client.post(
+        "/v1/keys",
+        json={"key_name": "rotate-last-used"},
+        headers=master_key_header,
+    )
+    api_key = create_response.json()
+
+    # Exercise the key so last_used_at is populated.
+    client.get("/v1/models", headers={API_KEY_HEADER: f"Bearer {api_key['key']}"})
+    used_state = client.get(f"/v1/keys/{api_key['id']}", headers=master_key_header)
+    assert used_state.json()["last_used_at"] is not None
+
+    client.post(f"/v1/keys/{api_key['id']}/rotate", headers=master_key_header)
+
+    rotated_state = client.get(f"/v1/keys/{api_key['id']}", headers=master_key_header)
+    assert rotated_state.json()["last_used_at"] is None
+
+
+def test_rotate_nonexistent_api_key(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """Rotating a non-existent key returns 404."""
+    response = client.post("/v1/keys/nonexistent-id/rotate", headers=master_key_header)
+
+    assert response.status_code == 404
+
+
+def test_rotate_api_key_without_master_key_fails(
+    client: TestClient, api_key_obj: dict[str, Any]
+) -> None:
+    """Rotation without master key authentication is rejected."""
+    response = client.post(f"/v1/keys/{api_key_obj['id']}/rotate")
+
+    assert response.status_code in [401, 422]
+
+
 def test_api_key_last_used_tracking(
     client: TestClient, master_key_header: dict[str, str], test_config: GatewayConfig
 ) -> None:

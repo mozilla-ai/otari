@@ -79,7 +79,7 @@ For a full client setup example, see [Use with Claude Code](use-with-claude-code
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/models` | List available models from pricing entries. | API key or master key |
+| `GET` | `/v1/models` | List available models: auto-discovered from configured providers (when `model_discovery` is on, the default), plus configured pricing entries and aliases. | API key or master key |
 | `GET` | `/v1/models/{model_id}` | Get a specific model. | API key or master key |
 
 ### Moderations

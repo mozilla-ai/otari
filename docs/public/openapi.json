@@ -748,6 +748,17 @@
             "minItems": 1,
             "title": "Requests",
             "type": "array"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User"
           }
         },
         "required": [
@@ -3110,7 +3121,7 @@
     },
     "/v1/batches": {
       "get": {
-        "description": "List batches for a provider.",
+        "description": "List batches for a provider.\n\nNon-master keys only see batches they own (plus legacy batches without an\nownership marker); the page is filtered after the provider call, so a page\nmay contain fewer than ``limit`` items.",
         "operationId": "list_batches_v1_batches_get",
         "parameters": [
           {
@@ -3186,7 +3197,7 @@
         ]
       },
       "post": {
-        "description": "Create a batch of LLM requests for asynchronous processing.",
+        "description": "Create a batch of LLM requests for asynchronous processing.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
         "operationId": "create_batch_v1_batches_post",
         "requestBody": {
           "content": {
@@ -4355,9 +4366,57 @@
         ]
       }
     },
+    "/v1/keys/{key_id}/rotate": {
+      "post": {
+        "description": "Rotate an API key's secret in place.\n\nRequires master key authentication.\n\nGenerates a new secret for the same key row (id, user, name, expiry, and\nmetadata are preserved) and returns the new raw key once, using the same\nresponse shape as key creation. The previous secret stops authenticating\nimmediately; there is no grace window.",
+        "operationId": "rotate_key_v1_keys__key_id__rotate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateKeyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Rotate Key",
+        "tags": [
+          "keys"
+        ]
+      }
+    },
     "/v1/messages": {
       "post": {
-        "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode\nrequests resolve credentials via the platform service and (for\nnon-tool-loop requests) get multi-attempt fallback across the resolved\nroute. Tool-loop requests collapse to a single attempt \u2014 once\n``on_first_response`` lock-in plumbing lands across the codebase, a\nfollow-up will enable pre-lock-in fallback for tool-loop requests too.",
+        "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
         "operationId": "create_message_v1_messages_post",
         "requestBody": {
           "content": {
@@ -4946,7 +5005,7 @@
     },
     "/v1/responses": {
       "post": {
-        "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode\nrequests resolve credentials via the platform service and (for\nnon-tool-loop requests) get multi-attempt fallback across the resolved\nroute. Tool-loop requests collapse to a single attempt \u2014 once\n``on_first_response`` lock-in plumbing lands across the codebase, a\nfollow-up will enable pre-lock-in fallback for tool-loop requests too.",
+        "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
         "operationId": "create_response_v1_responses_post",
         "requestBody": {
           "content": {

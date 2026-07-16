@@ -2,7 +2,7 @@
 
 Deploy Otari and Render Postgres from a Blueprint ([`render.yaml`](./render.yaml)). Render pulls the published Otari image rather than building this repository. For hybrid mode instead, connected to otari.ai, see [Hybrid mode](#hybrid-mode) below.
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&blueprintPath=deploy/render/render.yaml)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&path=deploy/render/render.yaml)
 
 ## What gets deployed
 
@@ -55,7 +55,7 @@ The Blueprint sets `OTARI_REQUIRE_PRICING=true` (fail closed) and
 
 ## Deploy
 
-1. Click **Deploy to Render** above. The button passes `blueprintPath=deploy/render/render.yaml` so Render loads this Blueprint instead of looking for a root `render.yaml`.
+1. Click **Deploy to Render** above. The button passes `path=deploy/render/render.yaml` so Render loads this Blueprint instead of looking for a root `render.yaml`.
 2. If you create the Blueprint from the Dashboard instead (**New → Blueprint**), set **Blueprint Path** to:
 
    ```text
@@ -105,7 +105,7 @@ The Blueprint above deploys Otari in standalone mode with its own database. Otar
 
 A separate Blueprint, [`render.hybrid.yaml`](./render.hybrid.yaml), deploys hybrid mode:
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&blueprintPath=deploy/render/render.hybrid.yaml)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&path=deploy/render/render.hybrid.yaml)
 
 ### What gets deployed
 
@@ -127,7 +127,7 @@ No database is created. Otari keeps no local state in hybrid mode: users, budget
 
 ### Deploy
 
-1. Click **Deploy to Render** above. The button passes `blueprintPath=deploy/render/render.hybrid.yaml`.
+1. Click **Deploy to Render** above. The button passes `path=deploy/render/render.hybrid.yaml`.
 2. Enter your `OTARI_AI_TOKEN`.
 3. Review the single free web service, then apply the Blueprint.
 4. Wait for `otari-hybrid` to become live, then copy its `*.onrender.com` URL from the Dashboard.
