@@ -13,6 +13,30 @@ from gateway.core.config import load_config
 from gateway.log_config import setup_logger
 from gateway.main import create_app
 
+_LOG_LEVEL_NAMES: dict[str, int] = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+
+
+def _parse_log_level(ctx: click.Context, param: click.Parameter, value: str | None) -> int:
+    """Map a symbolic (DEBUG/INFO/...) or numeric log level to its numeric value."""
+    if value is None:
+        return logging.INFO
+    normalized = value.strip().upper()
+    if normalized in _LOG_LEVEL_NAMES:
+        return _LOG_LEVEL_NAMES[normalized]
+    if normalized.isdigit():
+        return int(normalized)
+    choices = ", ".join(_LOG_LEVEL_NAMES)
+    raise click.BadParameter(
+        f"{value!r} is not a valid log level. Choose one of {choices} (case-insensitive) "
+        "or a numeric level such as 20."
+    )
+
 
 @click.group()
 def cli() -> None:
@@ -40,12 +64,17 @@ def cli() -> None:
     default=None,
     help="Automatically run database migrations on startup",
 )
-@click.option("--workers", default=1, type=int, help="Number of worker processes")
+@click.option(
+    "--workers",
+    default=1,
+    type=int,
+    help="Number of worker processes. Only 1 is supported today; values greater than 1 are rejected.",
+)
 @click.option(
     "--log-level",
-    default=logging.INFO,
-    type=click.Choice([logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL]),
-    help="Logging level",
+    default="INFO",
+    callback=_parse_log_level,
+    help="Logging level (case-insensitive): DEBUG, INFO, WARNING, ERROR, CRITICAL. Numeric levels are also accepted.",
 )
 def serve(
     config: str | None,
@@ -58,6 +87,15 @@ def serve(
     log_level: int,
 ) -> None:
     """Start the Otari server."""
+    if workers > 1:
+        raise click.ClickException(
+            "Otari does not support running more than one worker process yet. "
+            "uvicorn only honors workers greater than 1 when it is given an import string, "
+            "but Otari builds the app in-process from your resolved config, and its startup "
+            "hooks (schema init and bootstrap key creation) are not safe to run once per worker. "
+            "To scale out, run several otari processes behind a load balancer or process manager. "
+            "Re-run with --workers 1 (the default)."
+        )
     try:
         gateway_config = load_config(config)
     except ValueError as e:
@@ -109,7 +147,6 @@ def serve(
             app,
             host=gateway_config.host,
             port=gateway_config.port,
-            workers=workers,
         )
     except KeyboardInterrupt:
         logger.info("\nShutting down Otari...")

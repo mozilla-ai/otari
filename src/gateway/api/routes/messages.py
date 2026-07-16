@@ -1,10 +1,8 @@
-import asyncio
 import math
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-import httpx
 from any_llm import LLMProvider, amessages
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.messages import (
@@ -23,17 +21,13 @@ from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verif
 from gateway.api.routes._helpers import latest_user_text
 from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
-    ALL_PROVIDERS_FAILED_DETAIL,
-    ALL_PROVIDERS_TIMED_OUT_DETAIL,
     DB_UNAVAILABLE_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
-    SANDBOX_UNREACHABLE_DETAIL,
-    WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
     classify_provider_error,
     default_attempt_kwargs,
     prepare_gateway_tools,
-    rate_limit_headers,
+    raise_all_streaming_attempts_failed,
     resolve_dispatch_provider,
     resolve_request_context,
     run_platform_non_stream,
@@ -60,9 +54,7 @@ from gateway.services.mcp_loop_messages import (
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
-from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
-from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
 
 router = APIRouter(prefix="/v1", tags=["messages"])
@@ -326,12 +318,10 @@ async def create_message(
     """Anthropic Messages API-compatible endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-    web_search in both standalone mode and hybrid mode. Hybrid-mode
-    requests resolve credentials via the platform service and (for
-    non-tool-loop requests) get multi-attempt fallback across the resolved
-    route. Tool-loop requests collapse to a single attempt — once
-    ``on_first_response`` lock-in plumbing lands across the codebase, a
-    follow-up will enable pre-lock-in fallback for tool-loop requests too.
+    web_search in both standalone mode and hybrid mode. Hybrid-mode requests
+    resolve credentials via the platform service and get multi-attempt
+    fallback across the resolved route, tool-loop requests included (fallback
+    applies up to the pre-lock-in point, same as chat).
     """
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
 
@@ -403,10 +393,7 @@ async def create_message(
     # Streaming path
     # ------------------------------------------------------------------
     if request.stream:
-        # Tool-loop streaming collapses to a single attempt for this format
-        # (chat already runs tool loops through the multi-attempt fallback;
-        # wiring the same here is a planned follow-up).
-        if ctx.hybrid_mode and not tool_ctx.use_tool_loop:
+        if ctx.hybrid_mode:
             route = ctx.route
             assert route is not None  # guaranteed by the hybrid-mode preamble
             if not route.attempts:
@@ -436,68 +423,20 @@ async def create_message(
                     raise
                 raise converted from exc
             except Exception as exc:
-                logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
-                # Classify when there is a single attempt, or when the failure is
-                # a non-retryable invalid request (400/422): that short-circuits
-                # the fallback and is definitive regardless of attempt count, so
-                # it matches the non-streaming path. Otherwise surface the
-                # multi-attempt aggregate.
-                mapping = classify_provider_error(exc)
-                invalid_request = mapping is not None and mapping.status_code == status.HTTP_400_BAD_REQUEST
-                if invalid_request or len(route.attempts) <= 1:
-                    raise _ADAPTER.provider_error(exc) from exc
-                if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
-                    raise _anthropic_error(
-                        _ERR_API,
-                        ALL_PROVIDERS_TIMED_OUT_DETAIL,
-                        status.HTTP_504_GATEWAY_TIMEOUT,
-                    ) from exc
-                raise _anthropic_error(
-                    _ERR_API,
-                    ALL_PROVIDERS_FAILED_DETAIL,
-                    status.HTTP_502_BAD_GATEWAY,
-                ) from exc
+                raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
 
-        # Standalone (or hybrid + tool-loop): single attempt streaming.
-        platform_correlation_id: str | None = None
-        platform_request_id: str | None = None
-        if ctx.hybrid_mode:
-            # Tool-loop hybrid path: build call_kwargs from the primary
-            # attempt and keep the platform contract (X-Correlation-ID,
-            # X-Otari-Request-ID, usage reported via _report_platform_usage).
-            route = ctx.route
-            assert route is not None  # guaranteed by the hybrid-mode preamble
-            if not route.attempts:
-                raise _anthropic_error(
-                    _ERR_API,
-                    NO_RESOLVABLE_PROVIDER_DETAIL,
-                    status.HTTP_502_BAD_GATEWAY,
-                )
-            attempt = route.attempts[0]
-            model = attempt.model
-            call_kwargs = default_attempt_kwargs(attempt, request_fields)
-            platform_correlation_id = attempt.attempt_id
-            platform_request_id = route.request_id
-            billing_provider: Any = LLMProvider(attempt.provider)
-            display_model: str | None = None
-        else:
-            resolved = resolve_dispatch_provider(ctx, config, request.model)
-            model = resolved.model
-            call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
-            billing_provider = resolved.instance
-            display_model = resolved.alias
-
+        # Standalone: single attempt streaming.
+        resolved = resolve_dispatch_provider(ctx, config, request.model)
+        call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
             ctx=ctx,
             tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
-            provider=billing_provider,
-            model=model,
-            platform_correlation_id=platform_correlation_id,
-            platform_request_id=platform_request_id,
+            provider=resolved.instance,
+            model=resolved.model,
             session_label=request.session_label,
-            display_model=display_model,
+            display_model=resolved.alias,
         )
 
     # ------------------------------------------------------------------
@@ -521,25 +460,12 @@ async def create_message(
         except HTTPException as exc:
             # Hybrid terminal failures arrive as format-agnostic plain-string
             # HTTPExceptions; ensure the Anthropic envelope (dict details pass
-            # through unchanged).
+            # through unchanged, including the sandbox / web_search 502s that
+            # run_platform_non_stream raises via the adapter).
             converted = _ensure_anthropic_error(exc)
             if converted is exc:
                 raise
             raise converted from exc
-        except SandboxNotReachableError as e:
-            logger.error("Sandbox unreachable: %s", e)
-            raise _anthropic_error(
-                _ERR_API,
-                SANDBOX_UNREACHABLE_DETAIL,
-                status.HTTP_502_BAD_GATEWAY,
-            ) from e
-        except WebSearchNotReachableError as e:
-            logger.error("Web search backend unreachable: %s", e)
-            raise _anthropic_error(
-                _ERR_API,
-                WEB_SEARCH_UNREACHABLE_DETAIL,
-                status.HTTP_502_BAD_GATEWAY,
-            ) from e
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
@@ -550,14 +476,11 @@ async def create_message(
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,
+        response=response,
         provider=resolved.instance,
         model=resolved.model,
         display_model=resolved.alias,
     )
-
-    if ctx.rate_limit_info:
-        for key, value in rate_limit_headers(ctx.rate_limit_info).items():
-            response.headers[key] = value
 
     return result.model_dump(exclude_none=True)
 

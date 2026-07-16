@@ -1622,3 +1622,100 @@ def test_platform_mode_sandbox_applies_workspace_max_iterations_cap(
 
     assert response.status_code == 200
     assert captured["max_iterations"] == 2
+
+
+def test_platform_mode_sandbox_unreachable_returns_502(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hybrid non-streaming chat with the sandbox backend down surfaces the
+    backend-specific 502, not a generic provider error or a 500. Regression
+    for the drift where only messages/responses translated this failure: the
+    translation now lives in run_platform_non_stream, so /v1/chat/completions
+    inherits it."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+
+    from gateway.api.routes._pipeline import SANDBOX_UNREACHABLE_DETAIL
+    from gateway.services.sandbox_backend import SandboxNotReachableError
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-down")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": True})
+        return httpx.Response(204)
+
+    class _DownSandboxBackend:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> "_DownSandboxBackend":
+            raise SandboxNotReachableError("failed to create sandbox session at http://sandbox:8080")
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _DownSandboxBackend)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": SANDBOX_UNREACHABLE_DETAIL}
+
+
+def test_platform_mode_web_search_unreachable_returns_502(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hybrid non-streaming chat with the web-search backend down surfaces the
+    backend-specific 502 (same regression as the sandbox variant)."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://search:8080")
+
+    from gateway.api.routes._pipeline import WEB_SEARCH_UNREACHABLE_DETAIL
+    from gateway.services.web_search_backend import WebSearchNotReachableError
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="ws-down")
+        if url.endswith("/gateway/web-search/resolve"):
+            return httpx.Response(200, json={"enabled": True})
+        return httpx.Response(204)
+
+    class _DownWebSearchBackend:
+        async def __aenter__(self) -> "_DownWebSearchBackend":
+            raise WebSearchNotReachableError("web_search failed against http://search:8080")
+
+        async def __aexit__(self, *exc: object) -> None:
+            return None
+
+    def fake_build_web_search_backend(**kwargs: Any) -> _DownWebSearchBackend:
+        return _DownWebSearchBackend()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline._build_web_search_backend", fake_build_web_search_backend)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_web_search"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": WEB_SEARCH_UNREACHABLE_DETAIL}

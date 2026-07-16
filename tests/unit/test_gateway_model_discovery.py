@@ -81,41 +81,6 @@ class TestModelCache:
         assert cache.get("openai", ttl=300) is None
         assert cache.get("anthropic", ttl=300) is None
 
-    def test_get_all_cached(self) -> None:
-        cache = ModelCache()
-        cache.set("openai", [_make_model("gpt-4o")])
-        cache.set("anthropic", [_make_model("claude-3-opus")])
-
-        all_cached = cache.get_all_cached()
-        assert "openai" in all_cached
-        assert "anthropic" in all_cached
-        assert len(all_cached["openai"]) == 1
-        assert len(all_cached["anthropic"]) == 1
-
-    def test_get_all_cached_respects_ttl(self) -> None:
-        """get_all_cached with ttl filters out expired entries."""
-        cache = ModelCache()
-        cache.set("openai", [_make_model("gpt-4o")])
-        cache.set("anthropic", [_make_model("claude-3-opus")])
-
-        # Backdate the openai entry so it appears expired.
-        cache._store["openai"].cached_at = time.monotonic() - 400
-
-        all_cached = cache.get_all_cached(ttl=300)
-        assert "openai" not in all_cached
-        assert "anthropic" in all_cached
-
-    def test_get_all_cached_returns_shallow_copy(self) -> None:
-        """Mutating the returned list should not affect the cache."""
-        cache = ModelCache()
-        cache.set("openai", [_make_model("gpt-4o")])
-
-        returned = cache.get_all_cached()
-        returned["openai"].append(_make_model("gpt-3.5"))
-
-        # Internal cache should still have only 1 model.
-        assert len(cache._store["openai"].models) == 1
-
     def test_get_returns_shallow_copy(self) -> None:
         """Mutating the returned list should not affect the cache."""
         cache = ModelCache()

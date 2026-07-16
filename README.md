@@ -165,7 +165,7 @@ This starts Otari on port 8000 backed by a Postgres container, so keys, budgets,
 
 Deploy Otari with fully managed Postgres on Render for free. Just add your provider credentials; Render provisions and connects your services automatically.
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&blueprintPath=deploy/render/render.yaml)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&path=deploy/render/render.yaml)
 
 Read [`the docs`](deploy/render/README.md) for more details, including a hybrid-mode Blueprint connected to otari.ai.
 
@@ -213,7 +213,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 export OTARI_AI_TOKEN=gw_xxx
 ```
 
-`OTARI_MODE` is optional and derived from `OTARI_AI_TOKEN`. See [Modes](docs/modes.md) for the full comparison, and [`docs/hybrid-mode-protocol.md`](docs/hybrid-mode-protocol.md) for the wire contract.
+`OTARI_MODE` is optional: when unset, the mode is derived from `OTARI_AI_TOKEN`; when set, it is enforced at startup (`hybrid` requires the token, `standalone` conflicts with it). See [Modes](docs/modes.md) for the full comparison, and [`docs/hybrid-mode-protocol.md`](docs/hybrid-mode-protocol.md) for the wire contract.
 
 ## Built-in tools
 
