@@ -1,5 +1,5 @@
 import { Button, Card, Chip } from "@heroui/react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 import {
   useAliases,
@@ -7,6 +7,7 @@ import {
   useCreateAlias,
   useDeleteAlias,
   useDeletePricing,
+  useDiscoverableModels,
   useModels,
   usePricing,
   useSetPricing,
@@ -41,6 +42,13 @@ interface ModelRow {
   // Set only for alias rows. A config.yml alias lives in a file this UI cannot
   // edit, so it is shown but not deletable.
   aliasSource?: "config" | "stored";
+  // For an alias row, where its target's price comes from. The row's own
+  // ``source`` is "alias", which would otherwise hide whether the alias resolves
+  // to a configured or default-priced model.
+  aliasPriceSource?: PriceSource;
+  // True when a provider currently reports this model via discovery. Drives the
+  // Discovered tab regardless of whether the model is also priced or has traffic.
+  isDiscovered?: boolean;
   inputPrice: number | null;
   outputPrice: number | null;
   source: PriceSource;
@@ -379,8 +387,16 @@ function AddAliasForm({ onClose }: { onClose: () => void }) {
 
 type AddTab = "model" | "alias";
 
-function AddForm({ onClose, onPriced }: { onClose: () => void; onPriced: (modelKey: string) => void }) {
-  const [tab, setTab] = useState<AddTab>("model");
+function AddForm({
+  onClose,
+  onPriced,
+  initialMode = "model",
+}: {
+  onClose: () => void;
+  onPriced: (modelKey: string) => void;
+  initialMode?: AddTab;
+}) {
+  const [tab, setTab] = useState<AddTab>(initialMode);
 
   return (
     <Card>
@@ -441,6 +457,209 @@ function DefaultPricingBanner() {
   );
 }
 
+const TAB_ITEMS = [
+  { id: "in-use", label: "In use" },
+  { id: "priced", label: "Priced" },
+  { id: "discovered", label: "Discovered" },
+  { id: "aliases", label: "Aliases" },
+] as const;
+
+type Tab = (typeof TAB_ITEMS)[number]["id"];
+
+// One page of rows. The Discovered tab alone can run past a hundred models, so
+// every tab paginates at the same size rather than rendering an unbounded list.
+const PAGE_SIZE = 25;
+
+function TabBar({ tab, counts, onSelect }: { tab: Tab; counts: Record<Tab, number>; onSelect: (tab: Tab) => void }) {
+  return (
+    <div role="tablist" aria-label="Model categories" className="flex items-center gap-1 border-b border-[var(--otari-line)]">
+      {TAB_ITEMS.map((item) => {
+        const active = item.id === tab;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onSelect(item.id)}
+            className={
+              active
+                ? "-mb-px border-b-2 border-[var(--otari-brand)] px-3 py-2 text-sm font-medium text-[var(--otari-ink)]"
+                : "-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-[var(--otari-muted)] hover:text-[var(--otari-ink)]"
+            }
+          >
+            {item.label}
+            <span className="ml-1.5 text-xs text-[var(--otari-muted)] tabular-nums">{counts[item.id]}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SearchInput({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
+  return (
+    <input
+      type="search"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      aria-label={placeholder}
+      className="w-full max-w-xs rounded-md border border-[var(--otari-line)] bg-white px-3 py-1.5 text-sm focus:border-[var(--otari-brand)] focus:outline-none"
+    />
+  );
+}
+
+function Pagination({ page, pageCount, total, onPage }: { page: number; pageCount: number; total: number; onPage: (page: number) => void }) {
+  if (pageCount <= 1) {
+    return null;
+  }
+  return (
+    <div className="flex items-center justify-between px-1 pt-1 text-sm text-[var(--otari-muted)]">
+      <span>
+        Page {page + 1} of {pageCount} · {formatNumber(total)} model{total === 1 ? "" : "s"}
+      </span>
+      <span className="inline-flex gap-2">
+        <Button size="sm" variant="outline" isDisabled={page === 0} onPress={() => onPage(page - 1)}>
+          Prev
+        </Button>
+        <Button size="sm" variant="outline" isDisabled={page >= pageCount - 1} onPress={() => onPage(page + 1)}>
+          Next
+        </Button>
+      </span>
+    </div>
+  );
+}
+
+// Header shared by the In use, Priced, and Discovered tabs; those three carry
+// the same columns, so one row renderer (ModelTableRow) serves all of them.
+function ModelTable({
+  rows,
+  isLoading,
+  empty,
+  onPriced,
+}: {
+  rows: ModelRow[];
+  isLoading: boolean;
+  empty: ReactNode;
+  onPriced: (key: string) => void;
+}) {
+  return (
+    <Table>
+      <THead>
+        <Tr>
+          <Th>Model</Th>
+          <Th>Provider</Th>
+          <Th>Price</Th>
+          <Th className="text-right">Input $ / 1M</Th>
+          <Th className="text-right">Output $ / 1M</Th>
+          <Th className="text-right">Requests</Th>
+          <Th className="text-right">Tokens</Th>
+          <Th className="text-right">Cost</Th>
+          <Th className="text-right">Actions</Th>
+        </Tr>
+      </THead>
+      <tbody>
+        {isLoading ? (
+          <LoadingRow colSpan={9} />
+        ) : rows.length > 0 ? (
+          rows.map((row) => <ModelTableRow key={row.key} row={row} onPriced={onPriced} />)
+        ) : (
+          <TableMessage colSpan={9}>{empty}</TableMessage>
+        )}
+      </tbody>
+    </Table>
+  );
+}
+
+interface AliasEntry {
+  name: string;
+  target: string;
+  source: "config" | "stored";
+  row?: ModelRow;
+}
+
+function AliasTableRow({ entry }: { entry: AliasEntry }) {
+  const deleteAlias = useDeleteAlias();
+  const row = entry.row;
+  return (
+    <Tr>
+      <Td className="font-medium break-all">{entry.name}</Td>
+      <Td className="break-all text-[var(--otari-muted)]">{entry.target}</Td>
+      <Td>
+        {row?.aliasPriceSource ? (
+          <SourceChip source={row.aliasPriceSource} />
+        ) : (
+          <span className="text-xs text-[var(--otari-muted)]">—</span>
+        )}
+      </Td>
+      <Td className="text-right">{row?.inputPrice != null ? formatCost(row.inputPrice) : "—"}</Td>
+      <Td className="text-right">{row?.outputPrice != null ? formatCost(row.outputPrice) : "—"}</Td>
+      <Td className="text-right">{formatNumber(row?.requests ?? 0)}</Td>
+      <Td className="text-right">{formatCost(row?.cost ?? 0)}</Td>
+      <Td className="text-right whitespace-nowrap">
+        {entry.source === "stored" ? (
+          <span className="inline-flex items-center gap-2">
+            <ConfirmButton
+              confirmLabel="Delete"
+              isPending={deleteAlias.isPending}
+              onConfirm={() => deleteAlias.mutate(entry.name)}
+            >
+              Delete
+            </ConfirmButton>
+            {deleteAlias.error ? <span className="text-xs text-red-700">{errorMessage(deleteAlias.error)}</span> : null}
+          </span>
+        ) : (
+          <span className="text-xs text-[var(--otari-muted)]">set in config.yml</span>
+        )}
+      </Td>
+    </Tr>
+  );
+}
+
+function AliasTable({ entries, isLoading }: { entries: AliasEntry[]; isLoading: boolean }) {
+  return (
+    <Table>
+      <THead>
+        <Tr>
+          <Th>Alias</Th>
+          <Th>Target</Th>
+          <Th>Resolves to</Th>
+          <Th className="text-right">Input $ / 1M</Th>
+          <Th className="text-right">Output $ / 1M</Th>
+          <Th className="text-right">Requests</Th>
+          <Th className="text-right">Cost</Th>
+          <Th className="text-right">Actions</Th>
+        </Tr>
+      </THead>
+      <tbody>
+        {isLoading ? (
+          <LoadingRow colSpan={8} />
+        ) : entries.length > 0 ? (
+          entries.map((entry) => <AliasTableRow key={entry.name} entry={entry} />)
+        ) : (
+          <TableMessage colSpan={8}>No aliases yet. Use “Add” to create one.</TableMessage>
+        )}
+      </tbody>
+    </Table>
+  );
+}
+
+// The Discovered tab lists what the credentials can reach; a provider that could
+// not be listed is called out so a short list is not mistaken for "nothing to
+// offer". Mirrors the model picker's hint.
+function DiscoveredErrors({ providers }: { providers: { provider: string; error: string | null }[] }) {
+  if (providers.length === 0) {
+    return null;
+  }
+  return (
+    <InfoBanner tone="warning">
+      Could not list {providers.map((provider) => provider.provider).join(", ")}. Check that provider's credentials in
+      config.yml; its models are missing from the list below.
+    </InfoBanner>
+  );
+}
+
 export function ModelsPage() {
   const models = useModels();
   const usage = useUsageSummary();
@@ -448,8 +667,31 @@ export function ModelsPage() {
   // The catalog marks a row as an alias but not where it came from, and only a
   // stored one can be deleted from here.
   const aliases = useAliases();
+  const discoverable = useDiscoverableModels();
+  const [tab, setTab] = useState<Tab>("in-use");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [backfillFor, setBackfillFor] = useState<string | null>(null);
+
+  // Keys a provider currently reports, so a row can be tagged as discovered
+  // regardless of whether it is also priced or has traffic.
+  const discoverableKeys = useMemo(
+    () => new Set((discoverable.data?.providers ?? []).flatMap((provider) => provider.models.map((model) => model.key))),
+    [discoverable.data],
+  );
+
+  // Changing tab or search resets to the first page; a page index left over from
+  // a longer list would otherwise land past the end of a shorter one.
+  const selectTab = (next: Tab) => {
+    setTab(next);
+    setSearch("");
+    setPage(0);
+  };
+  const changeSearch = (value: string) => {
+    setSearch(value);
+    setPage(0);
+  };
 
   // Models with traffic that the catalog does not describe: an alias's target
   // (withheld on purpose), or anything undiscoverable and unpriced. They are
@@ -491,6 +733,8 @@ export function ModelsPage() {
         model,
         provider,
         aliasSource: isAlias ? aliasSourceByName.get(key) : undefined,
+        aliasPriceSource: catalogRow?.aliasPriceSource,
+        isDiscovered: discoverableKeys.has(key),
         inputPrice: priced ? priced.input_price_per_million : (catalogRow?.inputPrice ?? null),
         outputPrice: priced ? priced.output_price_per_million : (catalogRow?.outputPrice ?? null),
         source: priced ? "configured" : (catalogRow?.source ?? "none"),
@@ -507,20 +751,19 @@ export function ModelsPage() {
       // row, or the default fallback), not that it is an alias, so identity
       // comes from owned_by.
       const isAlias = model.owned_by === ALIAS_OWNED_BY;
-      const source: PriceSource = isAlias
-        ? "alias"
-        : model.pricing_source === "default"
-          ? "default"
-          : model.pricing
-            ? "configured"
-            : "none";
+      // The genai-prices/DB pricing status of the model, computed the same way
+      // for a real model (its own price) and an alias (its target's price, kept
+      // as aliasPriceSource since the row's own source is "alias").
+      const priceStatus: PriceSource =
+        model.pricing_source === "default" ? "default" : model.pricing ? "configured" : "none";
       add(model.id, model.id, model.owned_by || providerFromModelKey(model.id), {
         key: model.id,
         model: model.id,
         provider: model.owned_by,
+        aliasPriceSource: isAlias ? priceStatus : undefined,
         inputPrice: model.pricing?.input_price_per_million ?? null,
         outputPrice: model.pricing?.output_price_per_million ?? null,
-        source,
+        source: isAlias ? "alias" : priceStatus,
         requests: 0,
         totalTokens: 0,
         cost: 0,
@@ -555,54 +798,147 @@ export function ModelsPage() {
     }
 
     return result.sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model));
-  }, [models.data, usage.data, pricing.data, unlisted, aliases.data]);
+  }, [models.data, usage.data, pricing.data, unlisted, aliases.data, discoverableKeys]);
 
-  const isLoading = models.isLoading || usage.isLoading || pricing.isLoading;
+  const rowsByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);
+
+  // Each tab is a lens over the same enriched rows: a discovered model with a
+  // configured price and traffic shows in In use, Priced, and Discovered alike.
+  const inUse = useMemo(
+    () => rows.filter((row) => row.requests > 0).sort((a, b) => b.cost - a.cost || a.model.localeCompare(b.model)),
+    [rows],
+  );
+  const priced = useMemo(
+    () => rows.filter((row) => row.source === "configured").sort((a, b) => a.model.localeCompare(b.model)),
+    [rows],
+  );
+  const discovered = useMemo(() => {
+    const seen = new Set<string>();
+    const out: ModelRow[] = [];
+    for (const provider of discoverable.data?.providers ?? []) {
+      for (const model of provider.models) {
+        if (seen.has(model.key)) {
+          continue;
+        }
+        seen.add(model.key);
+        // Use the enriched row (price + usage) when the catalog produced one;
+        // otherwise a bare discovered model the catalog did not enrich, which
+        // happens when model_discovery is off.
+        out.push(
+          rowsByKey.get(model.key) ?? {
+            key: model.key,
+            // Full selector, matching how enriched rows label the Model column.
+            model: model.key,
+            provider: provider.provider,
+            isDiscovered: true,
+            inputPrice: null,
+            outputPrice: null,
+            source: "none",
+            requests: 0,
+            totalTokens: 0,
+            cost: 0,
+          },
+        );
+      }
+    }
+    return out.sort((a, b) => a.key.localeCompare(b.key));
+  }, [discoverable.data, rowsByKey]);
+  const discoveredErrors = (discoverable.data?.providers ?? []).filter((provider) => !provider.ok);
+
+  const aliasEntries = useMemo<AliasEntry[]>(
+    () =>
+      (aliases.data ?? [])
+        .map((alias) => ({
+          name: alias.name,
+          target: alias.target,
+          source: alias.source,
+          row: rowsByKey.get(alias.name),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [aliases.data, rowsByKey],
+  );
+
+  const counts: Record<Tab, number> = {
+    "in-use": inUse.length,
+    priced: priced.length,
+    discovered: discovered.length,
+    aliases: aliasEntries.length,
+  };
+
+  const query = search.trim().toLowerCase();
+  const modelMatches = (row: ModelRow) =>
+    !query || row.key.toLowerCase().includes(query) || row.provider.toLowerCase().includes(query);
+  const filteredModels = (tab === "in-use" ? inUse : tab === "priced" ? priced : discovered).filter(modelMatches);
+  const filteredAliases = aliasEntries.filter(
+    (entry) => !query || entry.name.toLowerCase().includes(query) || entry.target.toLowerCase().includes(query),
+  );
+
+  const total = tab === "aliases" ? filteredAliases.length : filteredModels.length;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const clampedPage = Math.min(page, pageCount - 1);
+  const start = clampedPage * PAGE_SIZE;
+  const pageModels = filteredModels.slice(start, start + PAGE_SIZE);
+  const pageAliases = filteredAliases.slice(start, start + PAGE_SIZE);
+
+  const rowsLoading = models.isLoading || usage.isLoading || pricing.isLoading;
+  const emptyMessage: Record<Exclude<Tab, "aliases">, ReactNode> = {
+    "in-use": query ? "No models match your search." : "No traffic yet. Requests appear here as models are used.",
+    priced: query ? "No priced models match your search." : "No prices set. Use “Add” to price a model.",
+    discovered: query
+      ? "No discovered models match your search."
+      : "No models discovered. Check provider credentials in config.yml, or add one under “Add”.",
+  };
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Models"
-        description="Every configured and discovered model, its token price, and recent usage. Saving a price records it as effective now."
+        description="Discovered, priced, and aliased models, with per-model spend. Saving a price records it as effective now."
         action={
           <Button variant="primary" onPress={() => setShowForm((open) => !open)}>
-            {showForm ? "Hide form" : "Add a model"}
+            {showForm ? "Hide form" : "Add"}
           </Button>
         }
       />
 
       <DefaultPricingBanner />
 
-      {showForm ? <AddForm onClose={() => setShowForm(false)} onPriced={setBackfillFor} /> : null}
+      {showForm ? (
+        <AddForm
+          onClose={() => setShowForm(false)}
+          onPriced={setBackfillFor}
+          initialMode={tab === "aliases" ? "alias" : "model"}
+        />
+      ) : null}
 
       {backfillFor ? <BackfillPrompt modelKey={backfillFor} onDone={() => setBackfillFor(null)} /> : null}
 
-      <ErrorBanner error={models.error ?? usage.error ?? pricing.error} />
+      <ErrorBanner error={models.error ?? usage.error ?? pricing.error ?? aliases.error} />
 
-      <Table>
-        <THead>
-          <Tr>
-            <Th>Model</Th>
-            <Th>Provider</Th>
-            <Th>Price</Th>
-            <Th className="text-right">Input $ / 1M</Th>
-            <Th className="text-right">Output $ / 1M</Th>
-            <Th className="text-right">Requests</Th>
-            <Th className="text-right">Tokens</Th>
-            <Th className="text-right">Cost</Th>
-            <Th className="text-right">Actions</Th>
-          </Tr>
-        </THead>
-        <tbody>
-          {isLoading ? (
-            <LoadingRow colSpan={9} />
-          ) : rows.length > 0 ? (
-            rows.map((row) => <ModelTableRow key={row.key} row={row} onPriced={setBackfillFor} />)
-          ) : (
-            <TableMessage colSpan={9}>No models yet. Use “Add a model” to price one.</TableMessage>
-          )}
-        </tbody>
-      </Table>
+      <TabBar tab={tab} counts={counts} onSelect={selectTab} />
+
+      <div className="flex flex-col gap-3">
+        <SearchInput
+          value={search}
+          onChange={changeSearch}
+          placeholder={tab === "aliases" ? "Search aliases…" : "Search models…"}
+        />
+
+        {tab === "discovered" ? <DiscoveredErrors providers={discoveredErrors} /> : null}
+
+        {tab === "aliases" ? (
+          <AliasTable entries={pageAliases} isLoading={aliases.isLoading} />
+        ) : (
+          <ModelTable
+            rows={pageModels}
+            isLoading={tab === "discovered" ? discoverable.isLoading : rowsLoading}
+            empty={emptyMessage[tab]}
+            onPriced={setBackfillFor}
+          />
+        )}
+
+        <Pagination page={clampedPage} pageCount={pageCount} total={total} onPage={setPage} />
+      </div>
     </div>
   );
 }
