@@ -288,8 +288,6 @@ async def test_empty_query_returns_error_message(monkeypatch: pytest.MonkeyPatch
     import gateway.services.web_search_backend as wsb_module
 
     exporter, provider = _make_otel_provider()
-    original_provider = otel_trace.get_tracer_provider()
-    otel_trace.set_tracer_provider(provider)  # type: ignore[arg-type]
     wsb_module.tracer = provider.get_tracer(wsb_module.__name__)  # type: ignore[attr-defined]
 
     try:
@@ -302,7 +300,6 @@ async def test_empty_query_returns_error_message(monkeypatch: pytest.MonkeyPatch
         async with WebSearchBackend(base_url="http://searxng:8080") as backend:
             result = await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "   "})
     finally:
-        otel_trace.set_tracer_provider(original_provider)
         wsb_module.tracer = otel_trace.get_tracer(wsb_module.__name__)
 
     assert "[tool error]" in result
