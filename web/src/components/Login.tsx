@@ -41,7 +41,7 @@ export function Login() {
             <div>
               <h1 className="text-lg font-semibold text-[var(--otari-ink)]">Otari Dashboard</h1>
               <p className="mt-1 text-sm text-[var(--otari-muted)]">
-                Sign in with your master key to manage keys, users, and usage.
+                Sign in with your master key to browse models, set pricing, and manage settings.
               </p>
             </div>
           </div>

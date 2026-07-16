@@ -59,7 +59,7 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - Docker local build/run: `docker compose up --build`
 - CI Docker smoke check is implemented in `scripts/docker_liveness_check.sh`.
 ## Web Dashboard (`web/`)
-- The standalone admin dashboard is a React + HeroUI v3 SPA in `web/` (Vite, Tailwind v4, TanStack Query, Recharts). It calls the existing management API (`/v1/keys`, `/v1/users`, `/v1/usage`) with the master key, entered on a sign-in screen and kept only in the browser tab's session storage.
+- The standalone admin dashboard is a React + HeroUI v3 SPA in `web/` (Vite, Tailwind v4, TanStack Query). It browses the model catalogue, sets model pricing, manages aliases, and toggles runtime settings; it calls the management API (`/v1/models`, `/v1/pricing`, `/v1/aliases`, `/v1/settings`) with the master key, entered on a sign-in screen and kept only in the browser tab's session storage.
 - Build: `npm --prefix web ci && npm --prefix web run build`. Output goes to `src/gateway/static/dashboard/` (set in `web/vite.config.ts`), which is committed so the wheel and Docker image ship the dashboard with no Node build stage. Rebuild and commit after any change under `web/src`.
 - Checks: `npm --prefix web run typecheck`, `npm --prefix web test`. CI runs these and fails if the committed bundle is stale (`.github/workflows/otari-dashboard.yml`).
 - Serving: standalone mode serves `index.html` at `/` and hashed assets under `/assets` (`src/gateway/main.py`, `src/gateway/dashboard.py`); the get-started tutorial moved to `/welcome`. Hybrid mode has no local management API, so `/` keeps serving the tutorial. Navigation is client-side section switching, so no server catch-all route is needed.

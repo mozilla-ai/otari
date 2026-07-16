@@ -42,12 +42,14 @@ async function extractErrorMessage(response: Response): Promise<string> {
 }
 
 // Validate a candidate master key against a cheap master-key-gated endpoint
-// before we treat the operator as signed in. Returns false on 401 (wrong key)
-// and throws ApiError for network/other failures so the UI can explain them.
+// before we treat the operator as signed in. GET /v1/settings is a small,
+// always-present management read, so it works regardless of which management
+// pages the dashboard ships. Returns false on 401/403 (wrong key) and throws
+// ApiError for network/other failures so the UI can explain them.
 export async function validateMasterKey(key: string): Promise<boolean> {
   let response: Response;
   try {
-    response = await fetch("/v1/usage?limit=1", {
+    response = await fetch("/v1/settings", {
       headers: { Accept: "application/json", Authorization: `Bearer ${key}` },
     });
   } catch {

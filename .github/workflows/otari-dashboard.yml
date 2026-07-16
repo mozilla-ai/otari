@@ -49,9 +49,11 @@ jobs:
 
     - name: Verify committed bundle is up to date
       run: |
-        if ! git diff --quiet -- ../src/gateway/static/dashboard; then
+        # --porcelain catches untracked files too, so a new hashed asset that the
+        # build added but nobody committed still fails the check (git diff would miss it).
+        if [ -n "$(git status --porcelain -- ../src/gateway/static/dashboard)" ]; then
           echo "::error::The committed dashboard bundle in src/gateway/static/dashboard is stale."
           echo "Run 'npm --prefix web run build' and commit the result."
-          git --no-pager diff --stat -- ../src/gateway/static/dashboard
+          git --no-pager status --porcelain -- ../src/gateway/static/dashboard
           exit 1
         fi

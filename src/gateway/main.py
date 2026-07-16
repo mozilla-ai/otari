@@ -30,10 +30,13 @@ from gateway.services.runtime_settings_service import apply_overrides_from_db
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
-# Public, unauthenticated static assets that are safe for shared caches and set
-# their own Cache-Control; the middleware leaves their caching headers alone.
+# Public, unauthenticated static assets that shared caches may keep. Paths here
+# set their own Cache-Control at the route (favicon.svg), so the middleware only
+# fills one in when it is missing.
 _CACHEABLE_PATHS = ("/favicon.svg",)
-# Hashed dashboard bundles under /assets are immutable; let them be cached too.
+# Vite stamps a content hash into every /assets filename, so a given URL is
+# immutable; the middleware marks these public and cacheable for a year, since
+# StaticFiles does not set Cache-Control on its own.
 _CACHEABLE_PREFIXES = ("/assets/",)
 
 
@@ -52,8 +55,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         path = request.url.path
-        is_cacheable = path in _CACHEABLE_PATHS or path.startswith(_CACHEABLE_PREFIXES)
-        if not path.startswith(_PUBLIC_PREFIXES) and not is_cacheable:
+        if path.startswith(_PUBLIC_PREFIXES):
+            return response
+        if path.startswith(_CACHEABLE_PREFIXES):
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+        elif path in _CACHEABLE_PATHS:
+            response.headers.setdefault("Cache-Control", "public, max-age=86400")
+        else:
             response.headers["Cache-Control"] = "private, no-store, no-cache"
             vary_values = {part.strip() for part in response.headers.get("Vary", "").split(",") if part.strip()}
             vary_values.add("Authorization")
@@ -179,10 +187,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
-    # The admin dashboard manages local keys/users/usage, which only exist in
-    # standalone mode; in hybrid mode the root keeps serving the tutorial. The
-    # dashboard is a single-page app, so a static mount for /assets plus an
-    # index.html at / is all it needs (navigation is client-side).
+    # The admin dashboard drives the standalone-only management API (models,
+    # pricing, aliases, settings); in hybrid mode there is none, so the root keeps
+    # serving the tutorial. The dashboard is a single-page app, so a static mount
+    # for /assets plus an index.html at / is all it needs (navigation is client-side).
     dashboard_dir = get_dashboard_dir() if not config.is_hybrid_mode else None
     if dashboard_dir is not None:
         index_file = dashboard_dir / "index.html"

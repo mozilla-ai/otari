@@ -55,9 +55,9 @@ Notes:
 - `OTARI_DEFAULT_PRICING=true` is also pre-set so that, paired with the above,
   common models are metered using community-maintained rates (the bundled
   genai-prices dataset) instead of being served unpriced. These are estimates
-  and can lag real provider rates, so set explicit prices in the dashboard
-  (Pricing page) or via `/v1/pricing` for anything you bill on; database prices
-  always win over the fallback. The dashboard's Pricing page shows whether this
+  and can lag real provider rates, so set explicit prices on the dashboard's
+  Models page or via `/v1/pricing` for anything you bill on; database prices
+  always win over the fallback. The Models page shows, per model, whether this
   fallback is active.
 
 ## Deploy

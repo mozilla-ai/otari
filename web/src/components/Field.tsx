@@ -1,4 +1,4 @@
-import { Input, Label, TextField } from "@heroui/react";
+import { Description, Input, Label, TextField } from "@heroui/react";
 import type { ReactNode } from "react";
 
 interface FieldProps {
@@ -29,7 +29,11 @@ export function Field({
           ([data-required=true] > .label::after), so adding one renders two. */}
       <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>
       <Input type={type} placeholder={placeholder} autoFocus={autoFocus} />
-      {description ? <span className="text-xs text-[var(--otari-muted)]">{description}</span> : null}
+      {description ? (
+        // HeroUI's Description renders through the TextField's "description" slot,
+        // so it is wired to the input via aria-describedby (a raw span is not).
+        <Description className="text-xs text-[var(--otari-muted)]">{description}</Description>
+      ) : null}
     </TextField>
   );
 }

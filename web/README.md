@@ -1,17 +1,18 @@
 # Otari admin dashboard
 
 A React + [HeroUI v3](https://www.heroui.com) single-page app for the Otari
-gateway's standalone admin panel: create and revoke virtual API keys, manage
-users, and observe usage and traffic. It talks to the gateway's existing
-management API (`/v1/keys`, `/v1/users`, `/v1/usage`) using the master key,
-which the operator enters on the sign-in screen and which is held only in the
-browser tab's session storage.
+gateway's standalone admin panel: browse the model catalogue, set model pricing,
+manage aliases, and toggle runtime settings (model discovery and default
+pricing). It talks to the gateway's management API (`/v1/models`, `/v1/pricing`,
+`/v1/aliases`, `/v1/settings`) using the master key, which the operator enters
+on the sign-in screen and which is held only in the browser tab's session
+storage.
 
 ## Stack
 
 - React 19 + TypeScript, built with Vite
 - HeroUI v3 (`@heroui/react`, `@heroui/styles`) on Tailwind CSS v4
-- TanStack Query for data fetching, Recharts for usage charts
+- TanStack Query for data fetching
 - Vitest + Testing Library for tests
 
 ## Develop
