@@ -2,7 +2,7 @@
 name: "Docs: add a provider guide"
 about: "Write a setup guide for one LLM provider, following the OpenAI exemplar"
 title: "docs: add provider guide for <Provider>"
-labels: "good first issue, documentation"
+labels: ["good first issue", "documentation"]
 ---
 
 ## What
@@ -19,12 +19,12 @@ Each provider has its own auth, base URL, and model-naming quirks. A per-provide
 
 1. Copy `docs/providers/openai.md` to `docs/providers/<provider-key>.md`. Use the config key from `docs/models.md` (for example `anthropic`, `mistral`, `groq`).
 2. Fill in each section for this provider:
-   - [ ] **Prerequisites** — where to get an API key (link the provider's console)
-   - [ ] **Configure** — the `providers:` block; note if this provider needs `api_base` or extra fields (check `config.example.yml` and `docs/configuration.md`)
-   - [ ] **Choose a model** — 2 to 3 real `provider:model` examples
-   - [ ] **Verify** — point readers to the Quickstart for starting Otari and creating a client key, then keep a provider-specific request example and swap the model name
-   - [ ] **Troubleshooting** — at least one provider-specific gotcha
-   - [ ] **Pricing** — optional, only if you have real numbers
+   - [ ] **Prerequisites**: where to get an API key (link the provider's console)
+   - [ ] **Configure**: the `providers:` block; note if this provider needs `api_base` or extra fields (check `config.example.yml` and `docs/configuration.md`)
+   - [ ] **Choose a model**: 2 to 3 real `provider:model` examples
+   - [ ] **Verify**: point readers to the Quickstart for starting Otari and creating a client key, then keep a provider-specific request example and swap the model name
+   - [ ] **Troubleshooting**: at least one provider-specific gotcha
+   - [ ] **Pricing**: optional, only if you have real numbers
 3. Test it end to end against a running Otari.
 4. Link the new page from the docs navigation (`docs/index.md`) and any provider index (`docs/providers/README.md` or `docs/models.md`) if one exists.
 

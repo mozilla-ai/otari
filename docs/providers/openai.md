@@ -8,7 +8,7 @@ An OpenAI provider entry in your `config.yml` (or a single environment variable)
 
 ## Prerequisites
 
-- Otari running locally — see the [Quickstart](../quickstart.md)
+- Otari running locally (see the [Quickstart](../quickstart.md))
 - An OpenAI account and an API key from <https://platform.openai.com/api-keys>
 
 ## Configure
@@ -91,9 +91,9 @@ Hello, nice to meet you!
 
 | Symptom | Likely cause |
 |---------|--------------|
-| HTTP 502 `The provider rejected the gateway's credentials` | The `api_key` Otari sent to OpenAI is missing, invalid, or lacks access. Check the `api_key` (or `OPENAI_API_KEY`) configured on the gateway. |
+| HTTP 502 `The provider rejected the gateway's credentials` | The `api_key` Otari sent to OpenAI is invalid or lacks access. Check the `api_key` (or `OPENAI_API_KEY`) configured on the gateway. |
 | HTTP 404 `The requested model was not found on the provider` | The name after `openai:` is not a model your key can access, or the model name is misspelled. |
-| HTTP 502 `LLM provider error` | Generic fallback: Otari reached the provider but the upstream call failed in a way it could not classify (for example a provider-side 5xx or a connection error). |
+| HTTP 502 `LLM provider error` | Generic fallback: Otari reached the provider but the upstream call failed in a way it could not classify (for example a missing provider key, a provider-side 5xx, or a connection error). |
 | HTTP 402 `No pricing configured for model ...` | Otari could not resolve pricing for that model and `require_pricing` rejected the request. Add a `pricing:` entry, enable `default_pricing: true` for bundled fallback pricing, or use a model that already has pricing coverage. |
 | HTTP 401 `Invalid master key` on `/v1/keys` | You passed a client (`gw-...`) key, or the wrong master key, instead of the configured master key. |
 
