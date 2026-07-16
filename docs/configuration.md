@@ -100,7 +100,7 @@ pricing:
 | `web_search_allow_private_hosts` | bool | `false` | SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. Also settable via `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`. |
 | `mcp_allow_loopback` | bool | `true` | SSRF gate: allow MCP server URLs that resolve to loopback (same-host sidecars). Also settable via `OTARI_MCP_ALLOW_LOOPBACK`. |
 | `mcp_allow_private_hosts` | bool | `false` | SSRF gate: allow MCP server URLs that resolve to private/reserved hosts (and accept hostnames that fail to resolve at validation time). Also settable via `OTARI_MCP_ALLOW_PRIVATE_HOSTS`. |
-| `mode` | string | `"standalone"` | Configured mode (`"standalone"` or `"hybrid"`; the legacy value `"platform"` is still accepted). Effective behavior is driven by presence of `OTARI_AI_TOKEN`. |
+| `mode` | string | none | Operating mode (`"standalone"` or `"hybrid"`; the legacy value `"platform"` means hybrid): when unset, the mode is derived from the presence of `OTARI_AI_TOKEN`; when set explicitly it is enforced at startup, so `"hybrid"` without a token and `"standalone"` with a token both fail as conflicting configuration. |
 | `platform` | dict | `{}` | otari.ai integration settings (`base_url`, timeouts, retries) |
 
 ## Environment variables

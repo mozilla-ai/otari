@@ -1,11 +1,14 @@
 import base64
 import os
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 import gateway.core.config as config_module
 from gateway.core.config import load_config
+from gateway.core.env import otari_env
+from gateway.services.url_safety import UnsafeURLError, validate_mcp_url, validate_outbound_fetch_url
 
 
 def test_load_config_loads_provider_env_vars_from_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -204,6 +207,105 @@ def test_load_config_rejects_invalid_service_level_field(
 
     with pytest.raises(ValueError):
         load_config(str(config_file))
+
+
+def test_load_config_bridges_yaml_service_fields_into_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The otari_env() read sites only see environment variables, so load_config
+    # bridges YAML-set promoted fields into the process env; without this a
+    # YAML-set sandbox_url would validate at startup and be ignored at request
+    # time.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text(
+        "sandbox_url: http://yaml-sandbox:9000\nmcp_allow_loopback: false\nweb_search_max_results: 5\n",
+        encoding="utf-8",
+    )
+    for var in (
+        "OTARI_SANDBOX_URL",
+        "GATEWAY_SANDBOX_URL",
+        "OTARI_MCP_ALLOW_LOOPBACK",
+        "GATEWAY_MCP_ALLOW_LOOPBACK",
+        "OTARI_WEB_SEARCH_MAX_RESULTS",
+        "GATEWAY_WEB_SEARCH_MAX_RESULTS",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+    with mock.patch.dict(os.environ):
+        config = load_config(str(config_file))
+
+        assert config.sandbox_url == "http://yaml-sandbox:9000"
+        assert otari_env("SANDBOX_URL") == "http://yaml-sandbox:9000"
+        assert otari_env("MCP_ALLOW_LOOPBACK") == "false"
+        assert otari_env("WEB_SEARCH_MAX_RESULTS") == "5"
+
+
+def test_load_config_env_wins_over_yaml_for_bridged_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The bridge uses setdefault: an OTARI_ variable that is already set keeps
+    # its value (and also wins in the field, via the env override machinery).
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("sandbox_url: http://yaml-sandbox:9000\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://env-sandbox:9000")
+
+    config = load_config(str(config_file))
+
+    assert config.sandbox_url == "http://env-sandbox:9000"
+    assert otari_env("SANDBOX_URL") == "http://env-sandbox:9000"
+
+
+def test_load_config_does_not_bridge_fields_absent_from_yaml(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A field populated only from the legacy GATEWAY_ env var is not bridged:
+    # the read sites already see that variable, and leaving it alone keeps
+    # env-only deployments byte-for-byte identical (including nonstandard
+    # boolean spellings the strict gate parsers treat differently).
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
+    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://legacy-sandbox:9000")
+
+    with mock.patch.dict(os.environ):
+        config = load_config(str(config_file))
+
+        assert config.sandbox_url == "http://legacy-sandbox:9000"
+        assert "OTARI_SANDBOX_URL" not in os.environ
+        assert otari_env("SANDBOX_URL") == "http://legacy-sandbox:9000"
+
+
+@pytest.mark.asyncio
+async def test_yaml_ssrf_gates_round_trip_through_env_bridge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A YAML-set SSRF gate boolean must reach the url_safety gate parsers with
+    # the spelling they accept: `true` opens the private-host gates for both
+    # the MCP and web-search fetch paths.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text(
+        "mcp_allow_private_hosts: true\nweb_search_allow_private_hosts: true\n",
+        encoding="utf-8",
+    )
+    for var in (
+        "OTARI_MCP_ALLOW_PRIVATE_HOSTS",
+        "GATEWAY_MCP_ALLOW_PRIVATE_HOSTS",
+        "OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS",
+        "GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+    with mock.patch.dict(os.environ):
+        load_config(str(config_file))
+
+        await validate_mcp_url("https://10.0.0.5/mcp", has_authorization_token=False)
+        await validate_outbound_fetch_url("https://10.0.0.5/page")
+
+    # Outside the bridged environment the gates are closed again.
+    with pytest.raises(UnsafeURLError, match="private"):
+        await validate_outbound_fetch_url("https://10.0.0.5/page")
 
 
 def test_load_config_otari_env_overrides_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
