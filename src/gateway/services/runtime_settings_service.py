@@ -58,10 +58,16 @@ async def apply_overrides_from_db(config: GatewayConfig, session: AsyncSession) 
         logger.info("Applied runtime setting override %s=%s", key, value)
 
 
-async def set_override(session: AsyncSession, config: GatewayConfig, key: str, value: bool) -> None:
-    """Persist an override and apply it to the running gateway.
+async def stage_override(session: AsyncSession, key: str, value: bool) -> None:
+    """Stage an override for persistence, without applying it yet.
 
-    Caller is responsible for committing the session.
+    Persistence and application are deliberately separate: the caller commits
+    first and only applies the override (mutating in-memory config and the
+    process-wide pricing flag, which affects the billing path) once the write
+    has succeeded. Applying before the commit would leave this worker metering
+    or listing against a value that was never persisted if the commit failed.
+    Caller is responsible for committing the session, then calling
+    ``apply_override``.
     """
     if key not in SETTABLE_KEYS:
         msg = f"Unknown runtime setting: {key!r}"
@@ -71,4 +77,3 @@ async def set_override(session: AsyncSession, config: GatewayConfig, key: str, v
         session.add(RuntimeSetting(key=key, value=_to_str(value)))
     else:
         row.value = _to_str(value)
-    apply_override(config, key, value)

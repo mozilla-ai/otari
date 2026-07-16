@@ -16,7 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.services.runtime_settings_service import DEFAULT_PRICING, MODEL_DISCOVERY, set_override
+from gateway.services.runtime_settings_service import (
+    DEFAULT_PRICING,
+    MODEL_DISCOVERY,
+    apply_override,
+    stage_override,
+)
 from gateway.version import __version__
 
 router = APIRouter(prefix="/v1/settings", tags=["settings"])
@@ -78,10 +83,14 @@ async def update_settings(
     if updates:
         try:
             for key, value in updates.items():
-                await set_override(db, config, key, value)
+                await stage_override(db, key, value)
             await db.commit()
         except SQLAlchemyError:
             await db.rollback()
             raise
+        # Apply only after the write has committed, so a failed commit never
+        # leaves this worker metering or listing against an unpersisted value.
+        for key, value in updates.items():
+            apply_override(config, key, value)
 
     return _current_settings(config)
