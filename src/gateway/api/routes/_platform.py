@@ -97,6 +97,11 @@ class ResolvedRoute(BaseModel):
     request_id: str
     fallback_enabled: bool
     attempts: list[ResolvedAttempt]
+    # Whether the workspace has persistent memory enabled. The platform is authoritative;
+    # the gateway uses this to decide whether to make the hot-path recall call at all.
+    # Defaults to True so a gateway pointed at an older platform (which omits the field)
+    # still attempts recall, relying on the platform's empty-when-off short-circuit.
+    memory_enabled: bool = True
 
 
 class _AttemptFailure(NamedTuple):
@@ -439,6 +444,8 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
             request_id=str(payload["request_id"]),
             fallback_enabled=bool(payload.get("fallback_enabled", False)),
             attempts=attempts,
+            # Absent on older platforms; default True so recall still runs (see ResolvedRoute).
+            memory_enabled=bool(payload.get("memory_enabled", True)),
         )
 
     correlation_id = str(payload["correlation_id"])
@@ -456,6 +463,7 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
                 managed=bool(payload.get("managed", False)),
             )
         ],
+        memory_enabled=bool(payload.get("memory_enabled", True)),
     )
 
 
@@ -673,6 +681,85 @@ async def _resolve_platform_code_execution(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail="Authorization service unavailable",
     )
+
+
+def _coerce_timeout_ms(value: Any, default_ms: int) -> int:
+    """Parse a configured timeout (milliseconds) into a positive int, falling
+    back to ``default_ms`` for missing, non-numeric, or non-positive values so a
+    misconfigured timeout never breaks a best-effort memory call."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default_ms
+    return parsed if parsed > 0 else default_ms
+
+
+async def _recall_platform_memory(
+    config: GatewayConfig,
+    user_token: str,
+    query: str,
+) -> list[str]:
+    """Recall relevant memory facts for the user-token's workspace.
+
+    Best-effort and on the hot path: any failure (misconfigured platform, timeout,
+    network error, non-200, or a malformed body) returns no facts so a slow or
+    unavailable memory service never breaks the completion. The platform also
+    returns an empty list when the workspace has memory disabled.
+    """
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url or not query.strip():
+        return []
+
+    timeout_ms = _coerce_timeout_ms(config.platform.get("memory_recall_timeout_ms", 8000), 8000)
+    url = _platform_url(platform_base_url, "/gateway/memory/recall")
+    headers = {
+        "X-Gateway-Token": config.platform_token or "",
+        "X-User-Token": user_token,
+    }
+
+    try:
+        response = await _post_platform(
+            url=url, headers=headers, body={"query": query}, timeout_seconds=timeout_ms / 1000
+        )
+    except httpx.HTTPError:
+        return []
+
+    if response.status_code != 200:
+        return []
+    try:
+        payload = response.json()
+    except ValueError:
+        return []
+    facts = payload.get("facts") if isinstance(payload, dict) else None
+    if not isinstance(facts, list):
+        return []
+    return [fact for fact in facts if isinstance(fact, str)]
+
+
+async def _remember_platform_memory(
+    config: GatewayConfig,
+    user_token: str,
+    messages: list[dict[str, Any]],
+) -> None:
+    """Store durable facts from a completed exchange. Best-effort and fire-and-forget:
+    failures are swallowed so they never affect the user's response path."""
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url or not messages:
+        return
+
+    timeout_ms = _coerce_timeout_ms(config.platform.get("memory_remember_timeout_ms", 10000), 10000)
+    url = _platform_url(platform_base_url, "/gateway/memory/remember")
+    headers = {
+        "X-Gateway-Token": config.platform_token or "",
+        "X-User-Token": user_token,
+    }
+
+    try:
+        await _post_platform(
+            url=url, headers=headers, body={"messages": messages}, timeout_seconds=timeout_ms / 1000
+        )
+    except httpx.HTTPError:
+        return
 
 
 async def _report_platform_usage(
