@@ -20,14 +20,24 @@ const clampSidebar = (width: number) => Math.min(MAX_SIDEBAR, Math.max(MIN_SIDEB
 
 function readStoredSidebarWidth(): number {
   if (typeof window === "undefined") return DEFAULT_SIDEBAR;
-  const raw = window.localStorage.getItem(SIDEBAR_WIDTH_KEY);
-  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
-  return Number.isNaN(parsed) ? DEFAULT_SIDEBAR : clampSidebar(parsed);
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_WIDTH_KEY);
+    const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+    return Number.isNaN(parsed) ? DEFAULT_SIDEBAR : clampSidebar(parsed);
+  } catch {
+    // Storage can throw when disabled (e.g. blocked cookies / private mode);
+    // fall back to the default rather than white-screening the shell.
+    return DEFAULT_SIDEBAR;
+  }
 }
 
 function readStoredCollapsed(): boolean {
   if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
 }
 
 interface NavItem {
@@ -80,13 +90,21 @@ export function AppShell({
 
   useEffect(() => {
     const id = window.setTimeout(() => {
-      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(sidebarWidth)));
+      try {
+        window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(sidebarWidth)));
+      } catch {
+        // Ignore storage errors; the width still applies for this session.
+      }
     }, 200);
     return () => window.clearTimeout(id);
   }, [sidebarWidth]);
 
   useEffect(() => {
-    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+    try {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+    } catch {
+      // Ignore storage errors; the collapse state still applies for this session.
+    }
   }, [collapsed]);
 
   const startResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {

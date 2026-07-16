@@ -82,9 +82,11 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     throw new ApiError(0, "Network error: could not reach the gateway.");
   }
 
-  if (response.status === 401) {
+  // 401 (bad/absent key) or 403 (a valid key that isn't the master key) both mean
+  // this session can't use the management API: drop it and bounce to sign-in.
+  if (response.status === 401 || response.status === 403) {
     unauthorizedHandler?.();
-    throw new ApiError(401, await extractErrorMessage(response));
+    throw new ApiError(response.status, await extractErrorMessage(response));
   }
 
   if (!response.ok) {

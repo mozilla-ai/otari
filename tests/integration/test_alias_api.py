@@ -59,6 +59,7 @@ def client(alias_config: GatewayConfig) -> Generator[TestClient]:
         with engine.connect() as conn:
             conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
             conn.commit()
+        engine.dispose()
 
 
 def _create(client: TestClient, name: str, target: str) -> None:
@@ -95,6 +96,38 @@ def _post_chat_capture(client: TestClient, model: str) -> dict[str, object]:
 def test_alias_routes_require_master_key(client: TestClient) -> None:
     assert client.get(ALIASES).status_code == 401
     assert client.post(ALIASES, json={"name": "a", "target": "anthropic:claude-opus-4"}).status_code == 401
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "json_body"),
+    [
+        ("POST", "/v1/aliases", {"name": "probe", "target": "anthropic:claude-opus-4"}),
+        ("DELETE", "/v1/aliases/probe", None),
+        ("PATCH", "/v1/settings", {"model_discovery": False}),
+        ("GET", "/v1/providers", None),
+        ("GET", "/v1/models/metadata", None),
+    ],
+)
+def test_management_endpoints_reject_a_valid_non_master_key(
+    client: TestClient, method: str, path: str, json_body: dict[str, object] | None
+) -> None:
+    """A working tenant key must not reach any master-gated management surface.
+
+    ``verify_master_key`` treats a non-master key as unauthenticated (401), so a
+    one-token swap to ``verify_api_key_or_master_key`` on any of these routes,
+    which would hand a tenant key control of routing and billing toggles, would
+    fail here.
+    """
+    created = client.post("/v1/keys", json={"key_name": "probe"}, headers=HEADERS)
+    assert created.status_code == 200
+    key_header = {API_KEY_HEADER: f"Bearer {created.json()['key']}"}
+
+    resp = client.request(method, path, json=json_body, headers=key_header)
+    assert resp.status_code == 401
+
+    # The same key still works on the caller-facing listing, so the 401 above is
+    # the master-key gate, not a broken key.
+    assert client.get("/v1/models", headers=key_header).status_code == 200
 
 
 def test_create_and_list(client: TestClient) -> None:

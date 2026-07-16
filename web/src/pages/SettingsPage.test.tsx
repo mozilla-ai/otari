@@ -64,7 +64,9 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
 
     renderWithClient(<SettingsPage />);
-    await screen.findByRole("switch", { name: "Model discovery" });
+    // Wait for settings to load: the switch renders disabled until then, so
+    // clicking too early is ignored.
+    await screen.findByText(/Version 1.2.3/);
 
     await user.click(screen.getByRole("switch", { name: "Model discovery" }));
 
@@ -82,7 +84,8 @@ describe("SettingsPage", () => {
     const user = userEvent.setup();
 
     renderWithClient(<SettingsPage />);
-    await screen.findByRole("switch", { name: "Default pricing" });
+    // Wait for settings to load before toggling (the switch is disabled until then).
+    await screen.findByText(/Version 1.2.3/);
 
     await user.click(screen.getByRole("switch", { name: "Default pricing" }));
 

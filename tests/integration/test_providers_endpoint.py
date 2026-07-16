@@ -6,10 +6,12 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.core.config import GatewayConfig
 from gateway.core.database import get_db
+from gateway.db import Base
 from gateway.main import create_app
 
 from .conftest import _run_alembic_migrations, _to_async_url
@@ -33,6 +35,7 @@ def providers_config(postgres_url: str) -> GatewayConfig:
 @pytest.fixture
 def providers_client(providers_config: GatewayConfig) -> Generator[TestClient]:
     _run_alembic_migrations(providers_config.database_url)
+    engine = create_engine(providers_config.database_url, pool_pre_ping=True)
     async_engine = create_async_engine(_to_async_url(providers_config.database_url), pool_pre_ping=True)
     async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
     app = create_app(providers_config)
@@ -52,6 +55,13 @@ def providers_client(providers_config: GatewayConfig) -> Generator[TestClient]:
             loop = asyncio.new_event_loop()
             loop.run_until_complete(async_engine.dispose())
             loop.close()
+        # Drop all tables so bootstrap and pricing rows (e.g. openai:gpt-4o) do not
+        # leak into the shared session-scoped Postgres and become an ordering hazard.
+        Base.metadata.drop_all(bind=engine)
+        with engine.connect() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
+            conn.commit()
+        engine.dispose()
 
 
 @pytest.fixture

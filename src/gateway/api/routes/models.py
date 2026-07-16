@@ -324,6 +324,11 @@ async def list_models(
     # Read once: phase 2 withholds these targets and phase 3 lists the names, and
     # the two must agree even if a write lands between them.
     aliases = effective_aliases(config)
+    # Alias targets are withheld from every phase that could surface the real
+    # model, discovery (phase 1) as well as pricing-only (phase 2): publishing the
+    # target under either would expose the provider:model name the alias exists to
+    # hide. Computed before phase 1 so discovery honors it too.
+    alias_targets = _alias_target_keys(config, aliases)
 
     merged: dict[str, ModelObject] = {}
 
@@ -337,6 +342,8 @@ async def list_models(
 
         for provider_name, model in discovered:
             model_key = f"{provider_name}:{model.id}"
+            if normalize_pricing_key(config, model_key) in alias_targets:
+                continue
             pricing = pricing_map.pop(model_key, None)
             merged[model_key] = ModelObject(
                 id=model_key,
@@ -357,7 +364,6 @@ async def list_models(
     # forces a pricing entry for it, and publishing that entry here would expose
     # the very name the alias exists to hide. Whether real models are listed is
     # governed by ``model_discovery`` (phase 1), never by pricing config.
-    alias_targets = _alias_target_keys(config, aliases)
     for model_key, pricing in pricing_map.items():
         if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
             continue

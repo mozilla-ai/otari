@@ -30,7 +30,10 @@ export function formatContext(value: number | null | undefined): string {
     return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
   }
   if (value >= 1000) {
-    return `${Math.round(value / 1000)}K`;
+    // Promote to "1M" rather than "1000K" when rounding lands on a thousand-K
+    // (e.g. 999999 rounds to 1000K).
+    const thousands = Math.round(value / 1000);
+    return thousands >= 1000 ? "1M" : `${thousands}K`;
   }
   return String(value);
 }

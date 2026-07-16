@@ -861,7 +861,10 @@ function SortableTh({
 }) {
   const active = sort.col === col;
   return (
-    <Th className={align === "right" ? "text-right" : undefined}>
+    <Th
+      className={align === "right" ? "text-right" : undefined}
+      ariaSort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+    >
       <span className={`inline-flex items-center gap-1.5 ${align === "right" ? "flex-row-reverse" : ""}`}>
         <button
           type="button"
@@ -1042,7 +1045,11 @@ export function ModelsPage() {
   const [sort, setSort] = useState<Sort>(readStoredSort);
 
   useEffect(() => {
-    window.localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(sort));
+    try {
+      window.localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(sort));
+    } catch {
+      // Ignore storage errors (e.g. disabled localStorage); sort still applies.
+    }
   }, [sort]);
 
   const [providerFilter, setProviderFilter] = useState("all");
@@ -1356,9 +1363,28 @@ export function ModelsPage() {
         }
       />
 
-      {showForm ? <AddForm onClose={() => setShowForm(false)} initialMode={addMode} initialTarget={addTarget} /> : null}
+      {showForm ? (
+        // Remount when the requested mode/target changes so "Alias to this model"
+        // re-seeds the form's tab and target even while the form is already open
+        // (AddForm copies these props into state only on mount).
+        <AddForm
+          key={`${addMode}:${addTarget}`}
+          onClose={() => setShowForm(false)}
+          initialMode={addMode}
+          initialTarget={addTarget}
+        />
+      ) : null}
 
-      <ErrorBanner error={models.error ?? pricing.error ?? aliases.error} />
+      <ErrorBanner
+        error={
+          models.error ??
+          pricing.error ??
+          aliases.error ??
+          discoverable.error ??
+          providers.error ??
+          metadata.error
+        }
+      />
 
       <TabBar tab={tab} counts={counts} onSelect={selectTab} />
 

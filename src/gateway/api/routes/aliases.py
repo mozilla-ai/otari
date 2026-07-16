@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
+from gateway.log_config import logger
 from gateway.models.entities import ModelAlias
 from gateway.services.alias_service import refresh_alias_cache
 
@@ -118,9 +119,13 @@ async def set_alias(
             detail="Database error",
         ) from None
     await db.refresh(alias)
-    # This worker serves the new alias immediately; others pick it up on their
-    # next refresh.
-    await refresh_alias_cache(db)
+    # The write is committed; a cache-refresh failure must not turn it into a 500.
+    # This worker serves the new alias on its next background refresh, others
+    # within the TTL.
+    try:
+        await refresh_alias_cache(db)
+    except SQLAlchemyError:
+        logger.warning("Alias cache refresh failed after storing '%s'; converges within TTL", alias.name)
     return AliasResponse.from_model(alias)
 
 
@@ -147,4 +152,8 @@ async def delete_alias(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error",
         ) from None
-    await refresh_alias_cache(db)
+    # The delete is committed; a cache-refresh failure must not turn it into a 500.
+    try:
+        await refresh_alias_cache(db)
+    except SQLAlchemyError:
+        logger.warning("Alias cache refresh failed after deleting '%s'; converges within TTL", name)

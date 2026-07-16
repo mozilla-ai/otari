@@ -9,7 +9,7 @@ genai-prices default fallback is active. The two toggleable flags are persisted
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,7 +87,10 @@ async def update_settings(
             await db.commit()
         except SQLAlchemyError:
             await db.rollback()
-            raise
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error",
+            ) from None
         # Apply only after the write has committed, so a failed commit never
         # leaves this worker metering or listing against an unpersisted value.
         for key, value in updates.items():

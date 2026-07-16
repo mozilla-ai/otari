@@ -153,15 +153,23 @@ export function useUpdateSettings() {
 // have older rows silently vanish from the models table.
 const PRICING_PAGE_SIZE = 1000;
 
+// Cap the walk so a backend or proxy that ignores `skip` (returning a full page
+// every time) can't spin this into an unbounded request loop. 100 pages is 100k
+// rows, far beyond any realistic price history.
+const PRICING_MAX_PAGES = 100;
+
 async function fetchAllPricing(): Promise<PricingResponse[]> {
   const all: PricingResponse[] = [];
-  for (let skip = 0; ; skip += PRICING_PAGE_SIZE) {
-    const page = await apiFetch<PricingResponse[]>(`/v1/pricing?skip=${skip}&limit=${PRICING_PAGE_SIZE}`);
-    all.push(...page);
-    if (page.length < PRICING_PAGE_SIZE) {
-      return all;
+  for (let page = 0; page < PRICING_MAX_PAGES; page += 1) {
+    const rows = await apiFetch<PricingResponse[]>(
+      `/v1/pricing?skip=${page * PRICING_PAGE_SIZE}&limit=${PRICING_PAGE_SIZE}`,
+    );
+    all.push(...rows);
+    if (rows.length < PRICING_PAGE_SIZE) {
+      break;
     }
   }
+  return all;
 }
 
 export function usePricing() {

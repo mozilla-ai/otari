@@ -80,6 +80,7 @@ def _build_client(config: GatewayConfig) -> Generator[TestClient]:
         with engine.connect() as conn:
             conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
             conn.commit()
+        engine.dispose()
 
 
 @pytest.fixture
@@ -333,6 +334,29 @@ def test_pricing_on_alias_target_does_not_expose_it(client: TestClient) -> None:
     assert resp.status_code == 200
     ids = {m["id"] for m in resp.json()["data"]}
     assert ids == {"myopusmodel", "housemodel"}
+
+
+def test_discovered_alias_target_is_hidden_from_the_listing(alias_config: GatewayConfig) -> None:
+    # With discovery on, a provider genuinely returns the alias target
+    # (anthropic:claude-opus-4). It must still be withheld from the listing:
+    # publishing a discovered target would expose the exact provider:model name
+    # the alias exists to hide, the same leak the pricing-only phase guards.
+    from any_llm.types.model import Model
+
+    discovered = [("anthropic", Model(id="claude-opus-4", created=1_700_000_000, object="model", owned_by="anthropic"))]
+    with patch("gateway.api.routes.models.discover_all_models", new=AsyncMock(return_value=discovered)):
+        client_gen = _build_client(alias_config.model_copy(update={"model_discovery": True}))
+        discovery_client = next(client_gen)
+        try:
+            resp = discovery_client.get("/v1/models", headers=HEADERS)
+        finally:
+            client_gen.close()
+
+    assert resp.status_code == 200
+    ids = {m["id"] for m in resp.json()["data"]}
+    # The alias display name is listed; the discovered target it points at is not.
+    assert "myopusmodel" in ids
+    assert "anthropic:claude-opus-4" not in ids
 
 
 def test_pricing_on_unaliased_model_still_lists_it(client: TestClient) -> None:

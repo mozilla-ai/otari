@@ -35,6 +35,10 @@ async function waitForLoadedBuild(client: QueryClient, build: string) {
 }
 
 describe("UpdatePrompt", () => {
+  // Object.defineProperty on window.location is not undone by restoreAllMocks, so
+  // capture and restore the original descriptor to keep the mock from leaking.
+  let originalLocation: PropertyDescriptor | undefined;
+
   beforeEach(() => {
     servedBuild = "build-a";
     setMasterKey("test-master-key");
@@ -42,6 +46,10 @@ describe("UpdatePrompt", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     setMasterKey(null);
+    if (originalLocation) {
+      Object.defineProperty(window, "location", originalLocation);
+      originalLocation = undefined;
+    }
   });
 
   it("stays quiet while the served build matches the loaded one", async () => {
@@ -57,6 +65,7 @@ describe("UpdatePrompt", () => {
   it("offers a reload once the gateway serves a different build", async () => {
     const reload = vi.fn();
     // jsdom's location.reload cannot be spied on directly.
+    originalLocation = Object.getOwnPropertyDescriptor(window, "location");
     Object.defineProperty(window, "location", {
       configurable: true,
       value: { ...window.location, reload },

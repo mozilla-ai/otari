@@ -71,6 +71,18 @@ _PRICE_CACHE_MAX = 16384
 _price_cache: dict[tuple[str | None, str, date], PriceCalculation | None] = {}
 
 
+class _TransientFailure:
+    """A genai-prices lookup raised rather than missing cleanly.
+
+    Distinguishes a transient dataset/API hiccup from a genuine ``LookupError``
+    miss: a miss is cached for the day, but a transient failure must be retried on
+    the next request instead of pinning the model to unpriced until the date rolls.
+    """
+
+
+_TRANSIENT_FAILURE = _TransientFailure()
+
+
 def reset_price_cache() -> None:
     """Clear the memoized genai-prices resolutions (used by tests)."""
 
@@ -87,13 +99,19 @@ def _resolve_genai_price(provider: str | None, model: str, as_of: datetime) -> P
     if key in _price_cache:
         return _price_cache[key]
     result = _resolve_genai_price_uncached(provider, model, as_of)
+    if isinstance(result, _TransientFailure):
+        # A transient failure is not memoized: the next request retries rather
+        # than inheriting a stale "unpriced" for the rest of the day.
+        return None
     if len(_price_cache) >= _PRICE_CACHE_MAX:
         _price_cache.clear()
     _price_cache[key] = result
     return result
 
 
-def _resolve_genai_price_uncached(provider: str | None, model: str, as_of: datetime) -> PriceCalculation | None:
+def _resolve_genai_price_uncached(
+    provider: str | None, model: str, as_of: datetime
+) -> PriceCalculation | None | _TransientFailure:
     """Resolve a genai-prices calculation for a model, or ``None`` on a miss.
 
     Shared by pricing and by metadata lookups (e.g. context window) so both apply
@@ -126,9 +144,10 @@ def _resolve_genai_price_uncached(provider: str | None, model: str, as_of: datet
         except Exception:
             # genai-prices runs on the per-request hot path; a data/API hiccup
             # must degrade to "unpriced"/"unknown" rather than turn into a request
-            # error for that model.
+            # error for that model. Signal a transient failure so the caller does
+            # not memoize it (the next request retries).
             logger.warning("genai-prices lookup failed for model_ref=%r provider_id=%r", model_ref, provider_id)
-            return None
+            return _TRANSIENT_FAILURE
 
     return None
 

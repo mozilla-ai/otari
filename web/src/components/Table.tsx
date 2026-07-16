@@ -21,9 +21,21 @@ export function THead({ children }: { children: ReactNode }) {
   );
 }
 
-export function Th({ children, className = "" }: { children: ReactNode; className?: string }) {
+export function Th({
+  children,
+  className = "",
+  ariaSort,
+}: {
+  children: ReactNode;
+  className?: string;
+  // Announces sort state to assistive tech on a sortable column header.
+  ariaSort?: "ascending" | "descending" | "none";
+}) {
   return (
-    <th className={`px-4 py-2.5 font-semibold text-[var(--otari-ink)] whitespace-nowrap ${className}`}>
+    <th
+      aria-sort={ariaSort}
+      className={`px-4 py-2.5 font-semibold text-[var(--otari-ink)] whitespace-nowrap ${className}`}
+    >
       {children}
     </th>
   );
@@ -48,10 +60,25 @@ export function Tr({
   return (
     <tr
       onClick={onClick}
+      // A clickable row is the only path to the detail panel, so it must be
+      // reachable and operable by keyboard (WCAG 2.1.1), not just the mouse.
+      onKeyDown={
+        onClick
+          ? (event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      tabIndex={onClick ? 0 : undefined}
       aria-selected={selected}
-      className={`border-b border-[var(--otari-line)] last:border-b-0 ${onClick ? "cursor-pointer" : ""} ${
-        selected ? "bg-[var(--otari-brand-tint)]" : "hover:bg-[var(--otari-bg)]"
-      } ${className}`}
+      className={`border-b border-[var(--otari-line)] last:border-b-0 ${
+        onClick
+          ? "cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--otari-brand)]"
+          : ""
+      } ${selected ? "bg-[var(--otari-brand-tint)]" : "hover:bg-[var(--otari-bg)]"} ${className}`}
     >
       {children}
     </tr>
