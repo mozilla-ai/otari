@@ -19,7 +19,7 @@ import { Field } from "@/components/Field";
 import { ModelComboBox } from "@/components/ModelComboBox";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/components/ui";
-import { formatContext, formatCost, formatNumber } from "@/lib/format";
+import { formatContext, formatCost, formatNumber, formatReleaseDate } from "@/lib/format";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
 
 // `owned_by` the gateway stamps on a configured alias (ALIAS_OWNED_BY in
@@ -46,14 +46,18 @@ const CAPABILITY_LABELS: Record<keyof ProviderCapabilities, string> = {
   list_models: "Lists models",
 };
 
-const FILTERABLE_CAPABILITIES: (keyof ProviderCapabilities)[] = [
-  "vision",
-  "reasoning",
-  "embeddings",
-  "audio",
-  "image_generation",
-  "pdf",
-  "rerank",
+// Capability filter options. These test the model's own metadata (models.dev),
+// so they line up with the per-model Features chips shown in the table, not the
+// coarser provider-level capabilities. Picking "Vision" narrows to models whose
+// metadata actually reports image input, matching what the chips display.
+const MODEL_FILTER_CAPABILITIES: { value: string; label: string; test: (metadata: ModelMetadata) => boolean }[] = [
+  { value: "vision", label: "Vision", test: (m) => m.input_modalities.includes("image") },
+  { value: "tool_call", label: "Tool calling", test: (m) => Boolean(m.tool_call) },
+  { value: "reasoning", label: "Reasoning", test: (m) => Boolean(m.reasoning) },
+  { value: "structured_output", label: "Structured output", test: (m) => Boolean(m.structured_output) },
+  { value: "attachment", label: "Attachments", test: (m) => Boolean(m.attachment) },
+  { value: "audio", label: "Audio", test: (m) => m.input_modalities.includes("audio") },
+  { value: "pdf", label: "PDF", test: (m) => m.input_modalities.includes("pdf") },
 ];
 
 // Per-model capability flags from models.dev, labelled for the detail panel.
@@ -90,6 +94,16 @@ const PRICE_OPTIONS = [
   { value: "30", label: "≤ $30 / 1M in" },
 ];
 
+// Newness windows for the release-date filter, in days back from today. Rows
+// with no known release date are excluded once a window is active.
+const RELEASE_OPTIONS = [
+  { value: "all", label: "Any release date" },
+  { value: "365", label: "Past year" },
+  { value: "730", label: "Past 2 years" },
+  { value: "1095", label: "Past 3 years" },
+];
+const RELEASE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 interface ModelRow {
   key: string;
   model: string;
@@ -98,6 +112,7 @@ interface ModelRow {
   aliasPriceSource?: PriceSource;
   isDiscovered?: boolean;
   contextWindow: number | null;
+  releaseDate?: string | null;
   inputPrice: number | null;
   outputPrice: number | null;
   source: PriceSource;
@@ -341,26 +356,65 @@ function AddForm({
   );
 }
 
-function DefaultPricingBanner() {
+// A small info affordance: an "i" bubble that reveals a tooltip on hover or
+// keyboard focus. Hand-rolled to match the dashboard's other bare primitives
+// (HeroUI v3 ships no tooltip we use here).
+function InfoTooltip({
+  label,
+  tone = "info",
+  children,
+}: {
+  label: string;
+  tone?: "info" | "warning";
+  children: ReactNode;
+}) {
+  return (
+    <span className="group relative inline-flex items-center font-normal normal-case">
+      <button
+        type="button"
+        aria-label={label}
+        aria-describedby="pricing-info-tip"
+        className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] leading-none ${
+          tone === "warning"
+            ? "border-[#c2843a] text-[#b45309]"
+            : "border-[var(--otari-line)] text-[var(--otari-muted)] hover:border-[var(--otari-brand)] hover:text-[var(--otari-brand)]"
+        }`}
+      >
+        i
+      </button>
+      <span
+        id="pricing-info-tip"
+        role="tooltip"
+        className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 rounded-lg border border-[var(--otari-line)] bg-[var(--otari-surface)] px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-[var(--otari-ink)] opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {children}
+      </span>
+    </span>
+  );
+}
+
+// The default-pricing explanation, surfaced from the pricing column headers
+// instead of a persistent banner. Tone shifts to a warning when metering is off.
+function PricingInfo() {
   const settings = useSettings();
   if (!settings.data) {
     return null;
   }
   if (settings.data.default_pricing) {
     return (
-      <InfoBanner tone="info">
-        Default pricing is <strong>on</strong>: models without a configured price are metered using
-        community-maintained rates (the bundled genai-prices dataset). Set a price to override the fallback.
-      </InfoBanner>
+      <InfoTooltip label="How unpriced models are metered" tone="info">
+        Default pricing is on: models without a configured price are metered using community-maintained rates (the
+        bundled genai-prices dataset). Set a price to override the fallback.
+      </InfoTooltip>
     );
   }
   return (
-    <InfoBanner tone="warning">
-      Default pricing is <strong>off</strong>: only models with a configured price are metered.
+    <InfoTooltip label="How unpriced models are metered" tone="warning">
+      Default pricing is off: only models with a configured price are metered.
       {settings.data.require_pricing
         ? " Requests for any other model are rejected (HTTP 402) because require_pricing is on."
         : " Other models are served without cost tracking."}
-    </InfoBanner>
+    </InfoTooltip>
   );
 }
 
@@ -553,10 +607,6 @@ function ModelDetailPanel({
   providerInfo,
   providerModelCount,
   providerDiscoveryError,
-  onPrev,
-  onNext,
-  hasPrev,
-  hasNext,
   onAliasTo,
 }: {
   row: ModelRow | null;
@@ -565,10 +615,6 @@ function ModelDetailPanel({
   providerInfo: ProviderInfo | undefined;
   providerModelCount: number;
   providerDiscoveryError: string | null;
-  onPrev: () => void;
-  onNext: () => void;
-  hasPrev: boolean;
-  hasNext: boolean;
   onAliasTo: (key: string) => void;
 }) {
   if (!row) {
@@ -600,14 +646,6 @@ function ModelDetailPanel({
             </div>
             {metadata?.family ? <p className="text-xs text-[var(--otari-muted)]">{metadata.family}</p> : null}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <Button size="sm" variant="ghost" isDisabled={!hasPrev} onPress={onPrev} aria-label="Previous model">
-              ‹
-            </Button>
-            <Button size="sm" variant="ghost" isDisabled={!hasNext} onPress={onNext} aria-label="Next model">
-              ›
-            </Button>
-          </div>
         </div>
 
         {metadata?.description ? <p className="text-sm text-[var(--otari-ink)]">{metadata.description}</p> : null}
@@ -627,7 +665,7 @@ function ModelDetailPanel({
           <Spec label="Context window" value={formatContext(row.contextWindow)} />
           <Spec label="Max output" value={formatContext(metadata?.max_output_tokens ?? null)} />
           <Spec label="Knowledge cutoff" value={metadata?.knowledge_cutoff ?? "—"} />
-          <Spec label="Released" value={metadata?.release_date ?? "—"} />
+          <Spec label="Released" value={formatReleaseDate(metadata?.release_date)} />
           <Spec label="Open weights" value={metadata ? (metadata.open_weights ? "Yes" : "No") : "—"} />
         </PanelSection>
 
@@ -686,7 +724,7 @@ function ModelDetailPanel({
 }
 
 const TAB_ITEMS = [
-  { id: "models", label: "Models" },
+  { id: "models", label: "All models" },
   { id: "aliases", label: "Aliases" },
 ] as const;
 
@@ -782,7 +820,7 @@ function Pagination({ page, pageCount, total, onPage }: { page: number; pageCoun
   );
 }
 
-type SortCol = "model" | "context" | "input" | "output";
+type SortCol = "model" | "context" | "released" | "input" | "output";
 type SortDir = "asc" | "desc";
 
 function SortableTh({
@@ -791,24 +829,31 @@ function SortableTh({
   sort,
   onSort,
   align = "left",
+  info,
 }: {
   label: string;
   col: SortCol;
   sort: { col: SortCol; dir: SortDir };
   onSort: (col: SortCol) => void;
   align?: "left" | "right";
+  info?: ReactNode;
 }) {
   const active = sort.col === col;
   return (
     <Th className={align === "right" ? "text-right" : undefined}>
-      <button
-        type="button"
-        onClick={() => onSort(col)}
-        className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""} hover:text-[var(--otari-ink)]`}
-      >
-        {label}
-        <span className="text-[10px] text-[var(--otari-muted)]">{active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
-      </button>
+      <span className={`inline-flex items-center gap-1.5 ${align === "right" ? "flex-row-reverse" : ""}`}>
+        <button
+          type="button"
+          onClick={() => onSort(col)}
+          className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""} hover:text-[var(--otari-ink)]`}
+        >
+          {label}
+          <span className="text-[10px] text-[var(--otari-muted)]">
+            {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
+          </span>
+        </button>
+        {info}
+      </span>
     </Th>
   );
 }
@@ -839,20 +884,29 @@ function ModelTable({
           <SortableTh label="Model" col="model" sort={sort} onSort={onSort} />
           <Th>Provider</Th>
           <SortableTh label="Context" col="context" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="Released" col="released" sort={sort} onSort={onSort} />
           <Th>Features</Th>
-          <SortableTh label="Input $ / 1M" col="input" sort={sort} onSort={onSort} align="right" />
+          <SortableTh
+            label="Input $ / 1M"
+            col="input"
+            sort={sort}
+            onSort={onSort}
+            align="right"
+            info={<PricingInfo />}
+          />
           <SortableTh label="Output $ / 1M" col="output" sort={sort} onSort={onSort} align="right" />
         </Tr>
       </THead>
       <tbody>
         {isLoading ? (
-          <LoadingRow colSpan={6} />
+          <LoadingRow colSpan={7} />
         ) : rows.length > 0 ? (
           rows.map((row) => (
             <Tr key={row.key} onClick={() => onSelect(row.key)} selected={row.key === selectedKey}>
               <Td className="font-medium break-all">{row.model}</Td>
               <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
               <Td className="text-right tabular-nums text-[var(--otari-muted)]">{formatContext(row.contextWindow)}</Td>
+              <Td className="whitespace-nowrap text-[var(--otari-muted)]">{formatReleaseDate(row.releaseDate)}</Td>
               <Td>
                 <FeatureChips metadata={metadataByKey[row.key]} />
               </Td>
@@ -861,7 +915,7 @@ function ModelTable({
             </Tr>
           ))
         ) : (
-          <TableMessage colSpan={6}>{empty}</TableMessage>
+          <TableMessage colSpan={7}>{empty}</TableMessage>
         )}
       </tbody>
     </Table>
@@ -972,6 +1026,7 @@ export function ModelsPage() {
   const [capabilityFilter, setCapabilityFilter] = useState("all");
   const [minContext, setMinContext] = useState("0");
   const [maxInput, setMaxInput] = useState("");
+  const [releaseFilter, setReleaseFilter] = useState("all");
 
   const metadataByKey = metadata.data?.models ?? {};
   const metadataAvailable = metadata.data?.available ?? false;
@@ -979,11 +1034,6 @@ export function ModelsPage() {
   const discoverableKeys = useMemo(
     () => new Set((discoverable.data?.providers ?? []).flatMap((provider) => provider.models.map((model) => model.key))),
     [discoverable.data],
-  );
-
-  const providerCapabilities = useMemo(
-    () => new Map((providers.data?.providers ?? []).map((info) => [info.instance, info.capabilities])),
-    [providers.data],
   );
 
   const selectTab = (next: Tab) => {
@@ -1001,7 +1051,9 @@ export function ModelsPage() {
   };
   const onSort = (col: SortCol) => {
     setSort((current) =>
-      current.col === col ? { col, dir: current.dir === "asc" ? "desc" : "asc" } : { col, dir: "asc" },
+      current.col === col
+        ? { col, dir: current.dir === "asc" ? "desc" : "asc" }
+        : { col, dir: col === "released" ? "desc" : "asc" },
     );
     setPage(0);
   };
@@ -1075,6 +1127,7 @@ export function ModelsPage() {
       .map((row) => ({
         ...row,
         contextWindow: row.contextWindow ?? (metadataByKey[row.key]?.context_window ?? null),
+        releaseDate: metadataByKey[row.key]?.release_date ?? null,
       }));
     const seen = new Set(out.map((row) => row.key));
     for (const provider of discoverable.data?.providers ?? []) {
@@ -1089,6 +1142,7 @@ export function ModelsPage() {
           provider: provider.provider,
           isDiscovered: true,
           contextWindow: metadataByKey[model.key]?.context_window ?? null,
+          releaseDate: metadataByKey[model.key]?.release_date ?? null,
           inputPrice: null,
           outputPrice: null,
           source: "none",
@@ -1121,6 +1175,7 @@ export function ModelsPage() {
   const query = search.trim().toLowerCase();
   const minContextValue = Number(minContext) || 0;
   const maxInputValue = maxInput === "" ? Number.POSITIVE_INFINITY : Number(maxInput);
+  const releaseCutoff = releaseFilter === "all" ? null : Date.now() - Number(releaseFilter) * RELEASE_WINDOW_MS;
 
   const filteredModels = useMemo(() => {
     const matches = (row: ModelRow): boolean => {
@@ -1149,8 +1204,9 @@ export function ModelsPage() {
         return false;
       }
       if (capabilityFilter !== "all") {
-        const caps = providerCapabilities.get(row.provider);
-        if (!caps || !caps[capabilityFilter as keyof ProviderCapabilities]) {
+        const capability = MODEL_FILTER_CAPABILITIES.find((entry) => entry.value === capabilityFilter);
+        const meta = metadataByKey[row.key];
+        if (!capability || !meta || !capability.test(meta)) {
           return false;
         }
       }
@@ -1160,6 +1216,12 @@ export function ModelsPage() {
       if (maxInputValue !== Number.POSITIVE_INFINITY && (row.inputPrice == null || row.inputPrice > maxInputValue)) {
         return false;
       }
+      if (releaseCutoff != null) {
+        const released = row.releaseDate ? Date.parse(row.releaseDate) : Number.NaN;
+        if (Number.isNaN(released) || released < releaseCutoff) {
+          return false;
+        }
+      }
       return true;
     };
 
@@ -1167,6 +1229,21 @@ export function ModelsPage() {
       const dir = sort.dir === "asc" ? 1 : -1;
       if (sort.col === "model") {
         return a.model.localeCompare(b.model) * dir;
+      }
+      if (sort.col === "released") {
+        // models.dev dates are ISO (YYYY-MM-DD), so lexical order is chronological.
+        const ad = a.releaseDate ?? null;
+        const bd = b.releaseDate ?? null;
+        if (!ad && !bd) {
+          return a.model.localeCompare(b.model);
+        }
+        if (!ad) {
+          return 1;
+        }
+        if (!bd) {
+          return -1;
+        }
+        return (ad < bd ? -1 : ad > bd ? 1 : 0) * dir || a.model.localeCompare(b.model);
       }
       const pick = (row: ModelRow) =>
         sort.col === "context" ? row.contextWindow : sort.col === "input" ? row.inputPrice : row.outputPrice;
@@ -1194,7 +1271,8 @@ export function ModelsPage() {
     capabilityFilter,
     minContextValue,
     maxInputValue,
-    providerCapabilities,
+    releaseCutoff,
+    metadataByKey,
     sort,
   ]);
 
@@ -1215,24 +1293,24 @@ export function ModelsPage() {
   const pageAliases = filteredAliases.slice(start, start + PAGE_SIZE);
 
   const modelsLoading = models.isLoading || pricing.isLoading || discoverable.isLoading;
-  const emptyModels = query
+  const hasActiveFilters =
+    query !== "" ||
+    providerFilter !== "all" ||
+    pricingFilter !== "all" ||
+    sourceFilter !== "all" ||
+    capabilityFilter !== "all" ||
+    minContext !== "0" ||
+    maxInput !== "" ||
+    releaseFilter !== "all";
+  const emptyModels = hasActiveFilters
     ? "No models match your filters."
     : "No models yet. Check provider credentials in config.yml, or use “Add” to price one.";
 
-  // Selection + browse. Prev/next step through the filtered list and bring the
-  // selected row's page into view.
+  // The row selected in the table, resolved against the filtered list (falling
+  // back to any known row) to fill the detail panel.
   const selectedRow = selectedKey
     ? (filteredModels.find((row) => row.key === selectedKey) ?? rowsByKey.get(selectedKey) ?? null)
     : null;
-  const selectedIndex = selectedKey ? filteredModels.findIndex((row) => row.key === selectedKey) : -1;
-  const selectByIndex = (index: number) => {
-    if (index < 0 || index >= filteredModels.length) {
-      return;
-    }
-    setSelectedKey(filteredModels[index].key);
-    setPage(Math.floor(index / PAGE_SIZE));
-  };
-
   const selectedProvider = selectedRow?.provider;
   const selectedProviderInfo = selectedProvider
     ? providers.data?.providers.find((info) => info.instance === selectedProvider)
@@ -1252,8 +1330,6 @@ export function ModelsPage() {
           </Button>
         }
       />
-
-      <DefaultPricingBanner />
 
       {showForm ? <AddForm onClose={() => setShowForm(false)} initialMode={addMode} initialTarget={addTarget} /> : null}
 
@@ -1306,7 +1382,7 @@ export function ModelsPage() {
                 onChange={changeFilter(setCapabilityFilter)}
                 options={[
                   { value: "all", label: "Any capability" },
-                  ...FILTERABLE_CAPABILITIES.map((key) => ({ value: key, label: CAPABILITY_LABELS[key] })),
+                  ...MODEL_FILTER_CAPABILITIES.map((entry) => ({ value: entry.value, label: entry.label })),
                 ]}
               />
               <FilterSelect
@@ -1320,6 +1396,12 @@ export function ModelsPage() {
                 value={maxInput}
                 onChange={changeFilter(setMaxInput)}
                 options={PRICE_OPTIONS}
+              />
+              <FilterSelect
+                ariaLabel="Filter by release date"
+                value={releaseFilter}
+                onChange={changeFilter(setReleaseFilter)}
+                options={RELEASE_OPTIONS}
               />
             </div>
 
@@ -1349,10 +1431,6 @@ export function ModelsPage() {
               providerDiscoveryError={
                 selectedProviderDiscovery && !selectedProviderDiscovery.ok ? selectedProviderDiscovery.error : null
               }
-              onPrev={() => selectByIndex(selectedIndex - 1)}
-              onNext={() => selectByIndex(selectedIndex + 1)}
-              hasPrev={selectedIndex > 0}
-              hasNext={selectedIndex >= 0 && selectedIndex < filteredModels.length - 1}
               onAliasTo={openAliasTo}
             />
           </aside>

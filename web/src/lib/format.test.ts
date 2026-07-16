@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatCost, formatNumber, formatRelative } from "@/lib/format";
+import { formatCost, formatNumber, formatRelative, formatReleaseDate } from "@/lib/format";
 
 describe("formatNumber", () => {
   it("groups thousands and handles nullish values", () => {
@@ -18,6 +18,21 @@ describe("formatCost", () => {
   it("uses two decimals for normal amounts", () => {
     expect(formatCost(12.5)).toBe("$12.50");
     expect(formatCost(null)).toBe("$0.00");
+  });
+});
+
+describe("formatReleaseDate", () => {
+  it("renders a compact month and year without timezone drift", () => {
+    expect(formatReleaseDate("2024-05-13")).toBe("May 2024");
+    expect(formatReleaseDate("2025-01-01")).toBe("Jan 2025");
+    expect(formatReleaseDate("2023-12")).toBe("Dec 2023");
+  });
+
+  it("falls back gracefully for missing or unparseable values", () => {
+    expect(formatReleaseDate(null)).toBe("—");
+    expect(formatReleaseDate(undefined)).toBe("—");
+    expect(formatReleaseDate("someday")).toBe("someday");
+    expect(formatReleaseDate("2024-13")).toBe("2024");
   });
 });
 

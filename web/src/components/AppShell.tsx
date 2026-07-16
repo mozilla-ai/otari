@@ -1,12 +1,28 @@
 import { Button } from "@heroui/react";
 import { clsx } from "clsx";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
 import { useAuth } from "@/auth/AuthContext";
 import { useHealth } from "@/api/hooks";
 import { UpdatePrompt } from "@/components/UpdatePrompt";
 
 export type PageKey = "overview" | "usage" | "models" | "settings";
+
+const MIN_SIDEBAR = 200;
+const MAX_SIDEBAR = 480;
+const DEFAULT_SIDEBAR = 240;
+const SIDEBAR_WIDTH_KEY = "otari.dashboard.sidebarWidth";
+const SIDEBAR_STEP = 16;
+
+const clampSidebar = (width: number) => Math.min(MAX_SIDEBAR, Math.max(MIN_SIDEBAR, width));
+
+function readStoredSidebarWidth(): number {
+  if (typeof window === "undefined") return DEFAULT_SIDEBAR;
+  const raw = window.localStorage.getItem(SIDEBAR_WIDTH_KEY);
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isNaN(parsed) ? DEFAULT_SIDEBAR : clampSidebar(parsed);
+}
 
 interface NavItem {
   key: PageKey;
@@ -74,9 +90,53 @@ export function AppShell({
   const { logout } = useAuth();
   const health = useHealth();
 
+  const asideRef = useRef<HTMLElement>(null);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredSidebarWidth);
+  const [resizing, setResizing] = useState(false);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(sidebarWidth)));
+    }, 200);
+    return () => window.clearTimeout(id);
+  }, [sidebarWidth]);
+
+  const startResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setResizing(true);
+  }, []);
+
+  const moveResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const left = asideRef.current?.getBoundingClientRect().left ?? 0;
+    setSidebarWidth(clampSidebar(event.clientX - left));
+  }, []);
+
+  const endResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    setResizing(false);
+  }, []);
+
+  const nudgeResize = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      setSidebarWidth((width) => clampSidebar(width - SIDEBAR_STEP));
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      setSidebarWidth((width) => clampSidebar(width + SIDEBAR_STEP));
+    }
+  }, []);
+
   return (
-    <div className="flex min-h-full">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-[var(--otari-line)] bg-[var(--otari-surface)]">
+    <div className={clsx("flex min-h-full", resizing && "cursor-col-resize select-none")}>
+      <aside
+        ref={asideRef}
+        style={{ width: sidebarWidth }}
+        className="relative flex shrink-0 flex-col border-r border-[var(--otari-line)] bg-[var(--otari-surface)]"
+      >
         <div className="flex items-center gap-2.5 px-5 py-5">
           <img src="/favicon.svg" alt="" className="h-7 w-7" />
           <span className="text-base font-semibold text-[var(--otari-ink)]">Otari</span>
@@ -109,9 +169,27 @@ export function AppShell({
             Sign out
           </Button>
         </div>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuenow={Math.round(sidebarWidth)}
+          aria-valuemin={MIN_SIDEBAR}
+          aria-valuemax={MAX_SIDEBAR}
+          tabIndex={0}
+          onPointerDown={startResize}
+          onPointerMove={moveResize}
+          onPointerUp={endResize}
+          onKeyDown={nudgeResize}
+          className={clsx(
+            "absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize touch-none transition-colors",
+            "hover:bg-[var(--otari-brand)] focus-visible:bg-[var(--otari-brand)] focus:outline-none",
+            resizing ? "bg-[var(--otari-brand)]" : "bg-transparent",
+          )}
+        />
       </aside>
       <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 p-8">
+        <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-6 py-6">
           <UpdatePrompt />
           {children}
         </div>

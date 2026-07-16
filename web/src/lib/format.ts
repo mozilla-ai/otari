@@ -35,6 +35,39 @@ export function formatContext(value: number | null | undefined): string {
   return String(value);
 }
 
+const MONTH_ABBREVIATIONS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+// models.dev release dates arrive as "YYYY-MM-DD" (occasionally just "YYYY-MM").
+// Render a compact "Mon YYYY" for the table without pulling the value through a
+// timezone-shifting Date parse. Returns an em-dash placeholder when unknown.
+export function formatReleaseDate(value: string | null | undefined): string {
+  if (!value) {
+    return "—";
+  }
+  const match = /^(\d{4})-(\d{2})/.exec(value);
+  if (!match) {
+    return value;
+  }
+  const monthIndex = Number(match[2]) - 1;
+  if (monthIndex < 0 || monthIndex > 11) {
+    return match[1];
+  }
+  return `${MONTH_ABBREVIATIONS[monthIndex]} ${match[1]}`;
+}
+
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) {
     return "—";

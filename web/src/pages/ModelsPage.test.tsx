@@ -160,14 +160,21 @@ const METADATA: ModelMetadataResponse = {
       tool_call: true,
       context_window: 128000,
       knowledge_cutoff: "2023-09",
+      release_date: "2024-05-13",
       description: "GPT-4o multimodal model.",
     }),
-    "openai:gpt-4o-mini": meta({ input_modalities: ["text", "image"], tool_call: true, context_window: 128000 }),
+    "openai:gpt-4o-mini": meta({
+      input_modalities: ["text", "image"],
+      tool_call: true,
+      context_window: 128000,
+      release_date: "2024-07-18",
+    }),
     "anthropic:claude-sonnet-4": meta({
       input_modalities: ["text", "image"],
       tool_call: true,
       reasoning: true,
       context_window: 200000,
+      release_date: "2025-05-14",
     }),
   },
 };
@@ -295,7 +302,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    expect(screen.getByRole("tab", { name: /Models 3/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /All models 3/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Aliases 1/ })).toBeInTheDocument();
     expect(within(table()).queryByText("fast-model")).not.toBeInTheDocument();
   });
@@ -326,6 +333,20 @@ describe("ModelsPage", () => {
     expect(within(tableRow("openai:gpt-4o")).getByText("Tools")).toBeInTheDocument();
   });
 
+  it("surfaces the default-pricing note as a tooltip on the pricing column, not a banner", async () => {
+    mockApi();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    // The explanation lives in a tooltip anchored to the pricing header, reached
+    // via a labelled info trigger, rather than a persistent banner.
+    expect(within(table()).getByRole("button", { name: /How unpriced models are metered/ })).toBeInTheDocument();
+    const tip = within(table()).getByRole("tooltip");
+    expect(tip).toHaveTextContent(/Default pricing is on/);
+    expect(tip).toHaveTextContent(/genai-prices/);
+  });
+
   it("starts with an empty detail panel until a model is selected", async () => {
     mockApi();
 
@@ -352,20 +373,6 @@ describe("ModelsPage", () => {
     expect(within(detail).getByText("OpenAI")).toBeInTheDocument();
     expect(within(detail).getByText("Vision")).toBeInTheDocument();
     expect(within(detail).getByText(/2 models reported/)).toBeInTheDocument();
-  });
-
-  it("browses to the next model with the panel's Next button", async () => {
-    mockApi();
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("openai:gpt-4o");
-
-    // Default sort is by name: claude, gpt-4o, gpt-4o-mini. Select gpt-4o, then next.
-    const detail = await selectModel(user, "openai:gpt-4o");
-    await user.click(within(detail).getByRole("button", { name: "Next model" }));
-
-    expect(within(panel()).getByRole("heading", { name: "openai:gpt-4o-mini" })).toBeInTheDocument();
   });
 
   it("filters the model list by search", async () => {
@@ -423,17 +430,33 @@ describe("ModelsPage", () => {
     expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
   });
 
-  it("filters by provider capability", async () => {
+  it("filters by a per-model capability, matching the Features chips", async () => {
     mockApi();
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("anthropic:claude-sonnet-4");
 
-    await user.selectOptions(screen.getByLabelText("Filter by capability"), "Vision");
+    // Reasoning is a model-level flag (models.dev), not a provider capability:
+    // only claude-sonnet-4 reports it, so the two gpt-4o models drop out.
+    await user.selectOptions(screen.getByLabelText("Filter by capability"), "Reasoning");
 
-    expect(within(table()).getByText("openai:gpt-4o")).toBeInTheDocument();
-    expect(within(table()).queryByText("anthropic:claude-sonnet-4")).not.toBeInTheDocument();
+    expect(within(table()).getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
+    expect(within(table()).queryByText("openai:gpt-4o-mini")).not.toBeInTheDocument();
+  });
+
+  it("explains an empty list is due to filters, not missing credentials", async () => {
+    mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    // No mock model reports PDF input, so the list empties for a filter reason.
+    await user.selectOptions(screen.getByLabelText("Filter by capability"), "PDF");
+
+    expect(within(table()).getByText("No models match your filters.")).toBeInTheDocument();
   });
 
   it("filters by minimum context window", async () => {
@@ -462,6 +485,27 @@ describe("ModelsPage", () => {
     const miniIndex = order.findIndex((text) => text.includes("gpt-4o-mini"));
     const claudeIndex = order.findIndex((text) => text.includes("claude-sonnet-4"));
     expect(miniIndex).toBeLessThan(claudeIndex);
+  });
+
+  it("shows a compact release date and sorts newest-first from the header", async () => {
+    mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    // models.dev "2025-05-14" renders as a compact "May 2025".
+    expect(within(tableRow("anthropic:claude-sonnet-4")).getByText("May 2025")).toBeInTheDocument();
+    expect(within(tableRow("openai:gpt-4o")).getByText("May 2024")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Released/ }));
+
+    const order = modelOrder();
+    const claude = order.findIndex((text) => text.includes("claude-sonnet-4"));
+    const mini = order.findIndex((text) => text.includes("gpt-4o-mini"));
+    const base = order.findIndex((text) => text.includes("openai:gpt-4o") && !text.includes("mini"));
+    expect(claude).toBeLessThan(mini);
+    expect(mini).toBeLessThan(base);
   });
 
   it("paginates a long model list", async () => {
