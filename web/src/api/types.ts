@@ -1,67 +1,11 @@
 // Response shapes mirror the gateway's Pydantic models in
-// src/gateway/api/routes/{models,pricing,usage,health}.py. Keep them in sync.
-
-export interface UsageEntry {
-  id: string;
-  user_id: string | null;
-  api_key_id: string | null;
-  timestamp: string;
-  model: string;
-  provider: string | null;
-  endpoint: string;
-  prompt_tokens: number | null;
-  completion_tokens: number | null;
-  total_tokens: number | null;
-  cache_read_tokens: number | null;
-  cache_write_tokens: number | null;
-  cost: number | null;
-  status: string;
-  error_message: string | null;
-}
-
-// Aggregates computed in the database, so they cover every matching row rather
-// than the page /v1/usage returns. Summing a page under-reports as soon as the
-// log outgrows the limit, which is why these totals do not come from the client.
-export interface UsageTotals {
-  requests: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  cost: number;
-  errors: number;
-}
-
-export interface ModelUsage {
-  // "provider:model", or the bare model when no provider was recorded. Matches
-  // how /v1/models ids and pricing keys are formed, so callers can join on it.
-  key: string;
-  model: string;
-  provider: string | null;
-  requests: number;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  cost: number;
-}
-
-export interface UsageSummary {
-  totals: UsageTotals;
-  // Busiest model first.
-  by_model: ModelUsage[];
-}
+// src/gateway/api/routes/{models,pricing}.py. Keep them in sync.
 
 // Identity of the dashboard bundle the gateway is currently serving. Changes
 // when the built app changes, so a tab can tell its own code went stale.
 export interface DashboardBuild {
   build: string;
   version: string;
-}
-
-export interface HealthResponse {
-  status: string;
-  mode?: string;
-  version?: string;
-  [key: string]: unknown;
 }
 
 export interface ModelPricingInfo {

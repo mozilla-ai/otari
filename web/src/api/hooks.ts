@@ -7,7 +7,6 @@ import type {
   DashboardBuild,
   DiscoverableModelsResponse,
   GatewaySettings,
-  HealthResponse,
   ModelListResponse,
   ModelMetadataResponse,
   ModelObject,
@@ -15,12 +14,8 @@ import type {
   ProvidersResponse,
   SetPricingRequest,
   UpdateSettingsRequest,
-  UsageEntry,
-  UsageSummary,
 } from "@/api/types";
 
-const USAGE = "usage";
-const HEALTH = "health";
 const MODELS = "models";
 const PRICING = "pricing";
 const SETTINGS = "settings";
@@ -37,33 +32,6 @@ const BUILD = "build";
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
 const BUILD_POLL_MS = 60_000;
-
-export function useHealth() {
-  return useQuery({
-    queryKey: [HEALTH],
-    queryFn: () => apiFetch<HealthResponse>("/health"),
-    staleTime: 60_000,
-  });
-}
-
-// A page of raw log rows, for the per-request log view. Anything reporting a
-// count or a total wants useUsageSummary instead: this is capped server-side, so
-// summing it under-reports as soon as the log outgrows `limit`.
-export function useUsage(limit = 500) {
-  return useQuery({
-    queryKey: [USAGE, limit],
-    queryFn: () => apiFetch<UsageEntry[]>(`/v1/usage?limit=${limit}`),
-  });
-}
-
-// Totals and a per-model breakdown over the whole usage log, aggregated in the
-// database rather than from a page of rows.
-export function useUsageSummary() {
-  return useQuery({
-    queryKey: [USAGE, "summary"],
-    queryFn: () => apiFetch<UsageSummary>("/v1/usage/summary"),
-  });
-}
 
 export function useModels() {
   return useQuery({
