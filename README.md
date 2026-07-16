@@ -163,19 +163,13 @@ This starts Otari on port 8000 backed by a Postgres container, so keys, budgets,
 
 ### Render
 
-Deploy Otari with fully managed Postgres on Render for free. Just add your provider credentials; Render provisions and connects your services automatically.
-
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&path=deploy/render/render.yaml)
-
-Read [`the docs`](deploy/render/README.md) for more details, including a hybrid-mode Blueprint connected to otari.ai.
 
 ### Railway
 
-Want a hosted gateway with no local setup? Deploy Otari plus a managed Postgres on [Railway](https://railway.com) in one click. Bring a provider key (OpenAI, Anthropic, Mistral, or Gemini) and you get a running gateway with virtual keys, budgets, and usage tracking.
-
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
 
-The two-service template, its environment inputs, and how to publish it are documented in [`deploy/railway/`](deploy/railway/README.md).
+See [Deployment](docs/deployment.md) for setup details on both platforms, including hybrid mode connected to otari.ai.
 
 ### From source (development)
 
