@@ -50,7 +50,6 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop,
     mcp_tool_loop_stream,
 )
-from gateway.services.provider_kwargs import get_provider_kwargs as get_provider_kwargs  # noqa: F401
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
@@ -58,7 +57,6 @@ router = APIRouter(prefix="/v1/chat", tags=["chat"])
 __all__ = [
     "ChatCompletionRequest",
     "chat_completions",
-    "get_provider_kwargs",
     "log_usage",
     "rate_limit_headers",
     "router",
