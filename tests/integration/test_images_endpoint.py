@@ -89,7 +89,7 @@ def test_images_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/images/generations returns 500 when the provider fails."""
+    """POST /v1/images/generations returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.images.aimage_generation",
         new_callable=AsyncMock,
@@ -100,7 +100,7 @@ def test_images_provider_error(
             json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
     assert "provider" in resp.json()["detail"].lower()
 
 
@@ -151,7 +151,7 @@ def test_images_logs_error_on_failure(
             json={"model": "openai:dall-e-3", "prompt": "a cute cat"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
 
     usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
