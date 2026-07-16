@@ -36,11 +36,13 @@ from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from opentelemetry import trace
 
 if TYPE_CHECKING:
     from types import TracebackType
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 CODE_EXECUTION_TOOL_NAME = "code_execution"
 _DEFAULT_TIMEOUT_S = 60.0
@@ -167,24 +169,41 @@ class SandboxBackend:
             "input": {"code": code},
             "timeout_seconds": int(self._timeout_s),
         }
-        try:
-            response = await self._client.post(
-                f"{self._sandbox_url}/sessions/{self._session_id}/exec",
-                json=payload,
-                # Override the client default (which equals the exec budget) so the
-                # sandbox always gets to answer before the client read timeout fires.
-                timeout=self._timeout_s + _EXEC_TIMEOUT_BUFFER_S,
-            )
-            response.raise_for_status()
-            body = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise SandboxNotReachableError(f"sandbox exec failed: {exc}") from exc
+        with tracer.start_as_current_span(
+            CODE_EXECUTION_TOOL_NAME,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            span.set_attribute("tool.name", CODE_EXECUTION_TOOL_NAME)
+            span.set_attribute("tool.type", "otari_code_execution")
+            span.set_attribute("code_execution.code_size", len(code))
+            span.set_attribute("code_execution.backend_url", self._sandbox_url)
+            try:
+                response = await self._client.post(
+                    f"{self._sandbox_url}/sessions/{self._session_id}/exec",
+                    json=payload,
+                    # Override the client default (which equals the exec budget) so the
+                    # sandbox always gets to answer before the client read timeout fires.
+                    timeout=self._timeout_s + _EXEC_TIMEOUT_BUFFER_S,
+                )
+                response.raise_for_status()
+                body = response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                span.record_exception(exc)
+                span.set_status(trace.StatusCode.ERROR, str(exc))
+                raise SandboxNotReachableError(f"sandbox exec failed: {exc}") from exc
 
-        result_block = body.get("result_block")
-        if not isinstance(result_block, dict):
-            raise SandboxNotReachableError(f"sandbox returned malformed result: {body!r}")
+            result_block = body.get("result_block")
+            if not isinstance(result_block, dict):
+                err = SandboxNotReachableError(f"sandbox returned malformed result: {body!r}")
+                span.record_exception(err)
+                span.set_status(trace.StatusCode.ERROR, str(err))
+                raise err
 
-        return _flatten_result_block(result_block)
+            result = _flatten_result_block(result_block)
+            if result.startswith("[tool error]"):
+                span.set_status(trace.StatusCode.ERROR, result)
+            return result
 
 
 def _flatten_result_block(block: dict[str, Any]) -> str:

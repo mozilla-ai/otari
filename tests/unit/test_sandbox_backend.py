@@ -287,3 +287,164 @@ async def test_no_auth_header_when_auth_token_unset(monkeypatch: pytest.MonkeyPa
     assert transport.captured, "expected at least one request"
     for request in transport.captured:
         assert "Authorization" not in request.headers
+
+
+# --- OTel tracing ------------------------------------------------------------
+
+
+def _make_otel_provider() -> tuple[object, object]:
+    """Return an (exporter, provider) pair with an in-memory span exporter."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    return exporter, provider
+
+
+@pytest.mark.asyncio
+async def test_call_tool_emits_span_with_code_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful code_execution call must emit a span named 'code_execution'
+    with the code attribute set."""
+    from opentelemetry import trace as otel_trace
+
+    import gateway.services.sandbox_backend as sb_module
+
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {"type": "code_execution_result", "stdout": "42\n", "stderr": "", "return_code": 0, "content": []},
+    }
+    exporter, provider = _make_otel_provider()
+    original_provider = otel_trace.get_tracer_provider()
+    otel_trace.set_tracer_provider(provider)  # type: ignore[arg-type]
+    sb_module.tracer = provider.get_tracer(sb_module.__name__)  # type: ignore[attr-defined]
+
+    try:
+        _patched_async_client(
+            {
+                ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+                ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+                ("DELETE", "/sessions/s1"): httpx.Response(204),
+            },
+            monkeypatch,
+        )
+
+        async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(6 * 7)"})
+    finally:
+        otel_trace.set_tracer_provider(original_provider)
+        sb_module.tracer = otel_trace.get_tracer(sb_module.__name__)
+
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    assert isinstance(exporter, InMemorySpanExporter)
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    assert span.name == CODE_EXECUTION_TOOL_NAME
+    assert span.attributes is not None
+    assert span.attributes["tool.type"] == "otari_code_execution"
+    assert span.attributes["code_execution.code_size"] == len("print(6 * 7)")
+    assert span.attributes["code_execution.backend_url"] == "http://sandbox:8080"
+
+
+@pytest.mark.asyncio
+async def test_call_tool_span_records_error_on_sandbox_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the sandbox exec endpoint fails the span must record the exception
+    and have an ERROR status."""
+    from opentelemetry import trace as otel_trace
+    from opentelemetry.trace import StatusCode
+
+    import gateway.services.sandbox_backend as sb_module
+
+    exporter, provider = _make_otel_provider()
+    original_provider = otel_trace.get_tracer_provider()
+    otel_trace.set_tracer_provider(provider)  # type: ignore[arg-type]
+    sb_module.tracer = provider.get_tracer(sb_module.__name__)  # type: ignore[attr-defined]
+
+    try:
+        _patched_async_client(
+            {
+                ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+                ("POST", "/sessions/s1/exec"): httpx.ConnectError("connection refused"),
+                ("DELETE", "/sessions/s1"): httpx.Response(204),
+            },
+            monkeypatch,
+        )
+
+        from gateway.services.sandbox_backend import SandboxNotReachableError
+
+        async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+            with pytest.raises(SandboxNotReachableError):
+                await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "x"})
+    finally:
+        otel_trace.set_tracer_provider(original_provider)
+        sb_module.tracer = otel_trace.get_tracer(sb_module.__name__)
+
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    assert isinstance(exporter, InMemorySpanExporter)
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    assert span.name == CODE_EXECUTION_TOOL_NAME
+    assert span.status.status_code == StatusCode.ERROR
+    exception_events = [e for e in span.events if e.name == "exception"]
+    assert len(exception_events) == 1
+    attrs = exception_events[0].attributes
+    assert attrs is not None
+    assert attrs["exception.type"] == "httpx.ConnectError"
+
+
+@pytest.mark.asyncio
+async def test_call_tool_span_error_status_on_tool_error_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the sandbox returns a non-zero return_code the span status must be ERROR."""
+    from opentelemetry import trace as otel_trace
+    from opentelemetry.trace import StatusCode
+
+    import gateway.services.sandbox_backend as sb_module
+
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {
+            "type": "code_execution_result",
+            "stdout": "",
+            "stderr": "NameError: name 'foo' is not defined\n",
+            "return_code": 1,
+            "content": [],
+        },
+    }
+    exporter, provider = _make_otel_provider()
+    original_provider = otel_trace.get_tracer_provider()
+    otel_trace.set_tracer_provider(provider)  # type: ignore[arg-type]
+    sb_module.tracer = provider.get_tracer(sb_module.__name__)  # type: ignore[attr-defined]
+
+    try:
+        _patched_async_client(
+            {
+                ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+                ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+                ("DELETE", "/sessions/s1"): httpx.Response(204),
+            },
+            monkeypatch,
+        )
+
+        async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+            result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(foo)"})
+    finally:
+        otel_trace.set_tracer_provider(original_provider)
+        sb_module.tracer = otel_trace.get_tracer(sb_module.__name__)
+
+    assert result.startswith("[tool error]")
+
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    assert isinstance(exporter, InMemorySpanExporter)
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    assert spans[0].status.status_code == StatusCode.ERROR
+
