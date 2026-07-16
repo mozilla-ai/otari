@@ -12,7 +12,7 @@ version = "0.0.0"
 description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
-    "any-llm-sdk[all]>=1.17.0",
+    "any-llm-sdk[all]>=1.21.0",
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
