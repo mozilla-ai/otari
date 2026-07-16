@@ -898,6 +898,33 @@
               ]
             }
           }
+        },
+        {
+          "name": "Rotate Key",
+          "request": {
+            "description": "Rotate an API key's secret in place.\n\nRequires master key authentication.\n\nGenerates a new secret for the same key row (id, user, name, expiry, and\nmetadata are preserved) and returns the new raw key once, using the same\nresponse shape as key creation. The previous secret stops authenticating\nimmediately; there is no grace window.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "keys",
+                ":key_id",
+                "rotate"
+              ],
+              "raw": "{{baseUrl}}/v1/keys/:key_id/rotate",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
         }
       ],
       "name": "keys"
