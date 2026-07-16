@@ -14,6 +14,7 @@ import type {
   PricingResponse,
   ProvidersResponse,
   SetPricingRequest,
+  UpdateSettingsRequest,
   UsageEntry,
   UsageSummary,
 } from "@/api/types";
@@ -194,6 +195,20 @@ export function useSettings() {
     queryKey: [SETTINGS],
     queryFn: () => apiFetch<GatewaySettings>("/v1/settings"),
     staleTime: 60_000,
+  });
+}
+
+export function useUpdateSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateSettingsRequest) =>
+      apiFetch<GatewaySettings>("/v1/settings", { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: (data) => {
+      queryClient.setQueryData([SETTINGS], data);
+      // Toggling discovery changes which models the catalog and picker report.
+      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+      void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] });
+    },
   });
 }
 

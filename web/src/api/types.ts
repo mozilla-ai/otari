@@ -209,6 +209,13 @@ export interface SetPricingRequest {
 export interface GatewaySettings {
   mode: string;
   version: string;
+  model_discovery: boolean;
   default_pricing: boolean;
   require_pricing: boolean;
+}
+
+// Toggle one or more runtime settings. Omitted fields are left unchanged.
+export interface UpdateSettingsRequest {
+  model_discovery?: boolean;
+  default_pricing?: boolean;
 }

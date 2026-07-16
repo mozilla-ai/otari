@@ -31,6 +31,7 @@ const PRICED: PricingResponse = {
 const SETTINGS: GatewaySettings = {
   mode: "standalone",
   version: "1.0.0",
+  model_discovery: true,
   default_pricing: true,
   require_pricing: false,
 };

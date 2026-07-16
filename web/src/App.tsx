@@ -6,6 +6,7 @@ import type { PageKey } from "@/components/AppShell";
 import { Login } from "@/components/Login";
 import { ModelsPage } from "@/pages/ModelsPage";
 import { OverviewPage } from "@/pages/OverviewPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import { UsagePage } from "@/pages/UsagePage";
 
 export default function App() {
@@ -21,6 +22,7 @@ export default function App() {
       {page === "overview" ? <OverviewPage /> : null}
       {page === "usage" ? <UsagePage /> : null}
       {page === "models" ? <ModelsPage /> : null}
+      {page === "settings" ? <SettingsPage /> : null}
     </AppShell>
   );
 }
