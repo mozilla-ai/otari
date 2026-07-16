@@ -14,6 +14,11 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing
 from gateway.services.alias_service import effective_aliases
+from gateway.services.model_catalog_service import (
+    ModelCatalogEntry,
+    build_metadata_map,
+    load_models_dev_catalog,
+)
 from gateway.services.model_discovery_service import (
     discover_all_models,
     discover_models_with_status,
@@ -107,6 +112,64 @@ class DiscoverableModelsResponse(BaseModel):
     """Per-provider discovery results for operator model selection."""
 
     providers: list[DiscoverableProvider]
+
+
+class ModelMetadata(BaseModel):
+    """models.dev metadata for one model, for the dashboard's detail view."""
+
+    name: str | None = None
+    description: str | None = None
+    family: str | None = None
+    input_modalities: list[str] = Field(default_factory=list)
+    output_modalities: list[str] = Field(default_factory=list)
+    reasoning: bool = False
+    tool_call: bool = False
+    structured_output: bool = False
+    attachment: bool = False
+    temperature: bool = False
+    context_window: int | None = None
+    max_output_tokens: int | None = None
+    knowledge_cutoff: str | None = None
+    release_date: str | None = None
+    last_updated: str | None = None
+    open_weights: bool = False
+    deprecated: bool = False
+    cost_input: float | None = None
+    cost_output: float | None = None
+
+
+class ModelMetadataResponse(BaseModel):
+    """models.dev metadata keyed by ``provider:model``."""
+
+    source: str = "models.dev"
+    available: bool = Field(
+        description="False when metadata could not be loaded (enrichment disabled or models.dev unreachable).",
+    )
+    models: dict[str, ModelMetadata] = Field(default_factory=dict)
+
+
+def _to_metadata_schema(entry: ModelCatalogEntry) -> ModelMetadata:
+    return ModelMetadata(
+        name=entry.name,
+        description=entry.description,
+        family=entry.family,
+        input_modalities=entry.input_modalities,
+        output_modalities=entry.output_modalities,
+        reasoning=entry.reasoning,
+        tool_call=entry.tool_call,
+        structured_output=entry.structured_output,
+        attachment=entry.attachment,
+        temperature=entry.temperature,
+        context_window=entry.context_window,
+        max_output_tokens=entry.max_output_tokens,
+        knowledge_cutoff=entry.knowledge_cutoff,
+        release_date=entry.release_date,
+        last_updated=entry.last_updated,
+        open_weights=entry.open_weights,
+        deprecated=entry.deprecated,
+        cost_input=entry.cost_input,
+        cost_output=entry.cost_output,
+    )
 
 
 def _model_from_pricing(pricing: ModelPricing) -> ModelObject:
@@ -355,6 +418,28 @@ async def list_discoverable_models(
         for discovery in discoveries
     ]
     return DiscoverableModelsResponse(providers=sorted(providers, key=lambda p: p.provider))
+
+
+# Declared before GET /models/{model_id:path} for the same route-order reason as
+# /models/discoverable above.
+@router.get("/models/metadata", dependencies=[Depends(verify_master_key)])
+async def list_model_metadata(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> ModelMetadataResponse:
+    """Per-model metadata for the dashboard's detail view, from models.dev.
+
+    Covers every model models.dev lists under a configured provider, keyed by the
+    ``instance:model`` selector the dashboard uses. ``available`` is false when
+    enrichment is disabled (``models_dev_metadata``) or models.dev could not be
+    reached; the response is then empty and the UI falls back to bundled data.
+    Master-key gated: it describes the gateway's configured providers.
+    """
+    catalog = await load_models_dev_catalog(config)
+    entries = build_metadata_map(config, catalog)
+    return ModelMetadataResponse(
+        available=catalog is not None,
+        models={key: _to_metadata_schema(entry) for key, entry in entries.items()},
+    )
 
 
 @router.get("/models/{model_id:path}", dependencies=[Depends(verify_api_key_or_master_key)])

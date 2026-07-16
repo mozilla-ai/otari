@@ -1796,6 +1796,199 @@
         "title": "ModelListResponse",
         "type": "object"
       },
+      "ModelMetadata": {
+        "description": "models.dev metadata for one model, for the dashboard's detail view.",
+        "properties": {
+          "attachment": {
+            "default": false,
+            "title": "Attachment",
+            "type": "boolean"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
+          "cost_input": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Input"
+          },
+          "cost_output": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Output"
+          },
+          "deprecated": {
+            "default": false,
+            "title": "Deprecated",
+            "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family"
+          },
+          "input_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Modalities",
+            "type": "array"
+          },
+          "knowledge_cutoff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Cutoff"
+          },
+          "last_updated": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "open_weights": {
+            "default": false,
+            "title": "Open Weights",
+            "type": "boolean"
+          },
+          "output_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Modalities",
+            "type": "array"
+          },
+          "reasoning": {
+            "default": false,
+            "title": "Reasoning",
+            "type": "boolean"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "structured_output": {
+            "default": false,
+            "title": "Structured Output",
+            "type": "boolean"
+          },
+          "temperature": {
+            "default": false,
+            "title": "Temperature",
+            "type": "boolean"
+          },
+          "tool_call": {
+            "default": false,
+            "title": "Tool Call",
+            "type": "boolean"
+          }
+        },
+        "title": "ModelMetadata",
+        "type": "object"
+      },
+      "ModelMetadataResponse": {
+        "description": "models.dev metadata keyed by ``provider:model``.",
+        "properties": {
+          "available": {
+            "description": "False when metadata could not be loaded (enrichment disabled or models.dev unreachable).",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "models": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelMetadata"
+            },
+            "title": "Models",
+            "type": "object"
+          },
+          "source": {
+            "default": "models.dev",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "title": "ModelMetadataResponse",
+        "type": "object"
+      },
       "ModelObject": {
         "description": "OpenAI-compatible model object.",
         "properties": {
@@ -5148,6 +5341,33 @@
           }
         ],
         "summary": "List Discoverable Models",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/v1/models/metadata": {
+      "get": {
+        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nMaster-key gated: it describes the gateway's configured providers.",
+        "operationId": "list_model_metadata_v1_models_metadata_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelMetadataResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List Model Metadata",
         "tags": [
           "models"
         ]

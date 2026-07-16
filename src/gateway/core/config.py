@@ -234,6 +234,20 @@ class GatewayConfig(BaseSettings):
         ge=0,
         description="TTL in seconds for the in-memory model discovery cache (0 disables caching)",
     )
+    models_dev_metadata: bool = Field(
+        default=True,
+        description=(
+            "Enrich the dashboard's model detail with metadata (modalities, "
+            "capabilities, knowledge cutoff) fetched from the public models.dev "
+            "catalog. Set false to disable the outbound call; the gateway then "
+            "falls back to the bundled genai-prices data."
+        ),
+    )
+    models_dev_cache_ttl_seconds: int = Field(
+        default=86400,
+        ge=0,
+        description="TTL in seconds for the cached models.dev catalog (0 disables caching).",
+    )
     files_enabled: bool = Field(
         default=True,
         description="Enable the /v1/files upload/storage endpoints (standalone mode).",
