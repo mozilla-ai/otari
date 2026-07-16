@@ -1799,6 +1799,17 @@
       "ModelObject": {
         "description": "OpenAI-compatible model object.",
         "properties": {
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
           "created": {
             "title": "Created",
             "type": "integer"
@@ -2085,6 +2096,159 @@
           "updated_at"
         ],
         "title": "PricingResponse",
+        "type": "object"
+      },
+      "ProviderCapabilitiesSchema": {
+        "description": "Curated capability flags for a provider.",
+        "properties": {
+          "audio": {
+            "title": "Audio",
+            "type": "boolean"
+          },
+          "embeddings": {
+            "title": "Embeddings",
+            "type": "boolean"
+          },
+          "image_generation": {
+            "title": "Image Generation",
+            "type": "boolean"
+          },
+          "list_models": {
+            "title": "List Models",
+            "type": "boolean"
+          },
+          "moderation": {
+            "title": "Moderation",
+            "type": "boolean"
+          },
+          "pdf": {
+            "title": "Pdf",
+            "type": "boolean"
+          },
+          "reasoning": {
+            "title": "Reasoning",
+            "type": "boolean"
+          },
+          "rerank": {
+            "title": "Rerank",
+            "type": "boolean"
+          },
+          "responses_api": {
+            "title": "Responses Api",
+            "type": "boolean"
+          },
+          "streaming": {
+            "title": "Streaming",
+            "type": "boolean"
+          },
+          "vision": {
+            "title": "Vision",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "streaming",
+          "reasoning",
+          "vision",
+          "pdf",
+          "embeddings",
+          "image_generation",
+          "audio",
+          "rerank",
+          "responses_api",
+          "moderation",
+          "list_models"
+        ],
+        "title": "ProviderCapabilitiesSchema",
+        "type": "object"
+      },
+      "ProviderInfoSchema": {
+        "description": "Static, network-free metadata for one configured provider instance.",
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/ProviderCapabilitiesSchema"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "doc_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doc Url"
+          },
+          "env_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Env var the credential is read from.",
+            "title": "Env Key"
+          },
+          "instance": {
+            "description": "Configured provider key (may differ from the type).",
+            "title": "Instance",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-friendly provider name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "pricing_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pricing Urls",
+            "type": "array"
+          },
+          "provider_type": {
+            "description": "Underlying any-llm provider type.",
+            "title": "Provider Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance",
+          "provider_type",
+          "name",
+          "capabilities"
+        ],
+        "title": "ProviderInfoSchema",
+        "type": "object"
+      },
+      "ProvidersResponse": {
+        "description": "Metadata for every configured provider.",
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderInfoSchema"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "title": "ProvidersResponse",
         "type": "object"
       },
       "RerankRequest": {
@@ -5381,6 +5545,33 @@
         "summary": "Get Pricing History",
         "tags": [
           "pricing"
+        ]
+      }
+    },
+    "/v1/providers": {
+      "get": {
+        "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.\nMaster-key gated because it describes the gateway's own configuration.",
+        "operationId": "list_providers_v1_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List Providers",
+        "tags": [
+          "providers"
         ]
       }
     },

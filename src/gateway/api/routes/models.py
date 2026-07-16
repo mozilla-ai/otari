@@ -19,7 +19,12 @@ from gateway.services.model_discovery_service import (
     discover_models_with_status,
     get_model_cache,
 )
-from gateway.services.pricing_service import default_model_pricing, default_pricing_enabled, normalize_effective_at
+from gateway.services.pricing_service import (
+    default_model_pricing,
+    default_pricing_enabled,
+    model_context_window,
+    normalize_effective_at,
+)
 from gateway.services.provider_kwargs import normalize_pricing_key
 
 router = APIRouter(prefix="/v1", tags=["models"])
@@ -48,6 +53,10 @@ class ModelObject(BaseModel):
     # Where ``pricing`` came from: "configured" (DB), "default" (genai-prices
     # fallback, only when default_pricing is enabled), or "none".
     pricing_source: str = "none"
+    # Context-window token limit from the bundled genai-prices dataset, when it
+    # knows the model. Metadata only (independent of the default_pricing toggle);
+    # ``None`` when the dataset has no value for the model.
+    context_window: int | None = None
 
 
 class ModelListResponse(BaseModel):
@@ -61,6 +70,18 @@ def _owner_from_key(model_key: str) -> str:
     """The provider a ``provider:model`` key names, or "unknown" for a bare name."""
     provider, separator, _ = model_key.partition(":")
     return provider if separator else "unknown"
+
+
+def _context_window_for_key(model_key: str) -> int | None:
+    """genai-prices context-window for a ``provider:model`` (or bare) key.
+
+    Metadata, so it is filled whether or not the default-pricing fallback is on;
+    ``None`` when the dataset does not know the model or lists no window for it.
+    """
+    provider_part, separator, model_part = model_key.partition(":")
+    provider = provider_part if separator else None
+    model_name = model_part if separator else model_key
+    return model_context_window(provider, model_name)
 
 
 class DiscoverableModel(BaseModel):
@@ -100,6 +121,7 @@ def _model_from_pricing(pricing: ModelPricing) -> ModelObject:
             output_price_per_million=pricing.output_price_per_million,
         ),
         pricing_source="configured",
+        context_window=_context_window_for_key(pricing.model_key),
     )
 
 
@@ -127,6 +149,9 @@ def _alias_model(
         if pricing
         else None,
         pricing_source="configured" if pricing else "none",
+        # From the resolved target, like pricing: an alias's display name is not a
+        # model the dataset knows. Exposing the window does not reveal the target.
+        context_window=_context_window_for_key(canonical_target),
     )
     # Priced from the target, never from the alias's display name: the fallback
     # keys on a real provider/model, and the display name is neither. Without
@@ -261,6 +286,7 @@ async def list_models(
                 if pricing
                 else None,
                 pricing_source="configured" if pricing else "none",
+                context_window=_context_window_for_key(model_key),
             )
 
     # Phase 2: pricing-only models (not discovered but have pricing entries).
@@ -378,7 +404,12 @@ async def get_model(
         # consults the same fallback. Reporting 404 for a model that is being
         # charged for is the lie phase 3 of the listing exists to avoid, so
         # answer with the effective rate when there is one.
-        fallback = ModelObject(id=model_id, created=0, owned_by=_owner_from_key(model_id))
+        fallback = ModelObject(
+            id=model_id,
+            created=0,
+            owned_by=_owner_from_key(model_id),
+            context_window=_context_window_for_key(model_id),
+        )
         _apply_default_pricing(fallback)
         if fallback.pricing is not None:
             return fallback
@@ -402,6 +433,7 @@ async def get_model(
             if pricing
             else None,
             pricing_source="configured" if pricing else "none",
+            context_window=_context_window_for_key(model_key),
         )
         _apply_default_pricing(obj)
         return obj

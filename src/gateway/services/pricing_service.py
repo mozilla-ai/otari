@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 from genai_prices import Usage, calc_price
-from genai_prices.types import TieredPrices
+from genai_prices.types import PriceCalculation, TieredPrices
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,22 +60,12 @@ def normalize_effective_at(value: datetime | None) -> datetime:
     return normalized.astimezone(UTC)
 
 
-def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> ModelPricing | None:
-    """Resolve community-maintained default pricing for a model via genai-prices.
+def _resolve_genai_price(provider: str | None, model: str, as_of: datetime) -> PriceCalculation | None:
+    """Resolve a genai-prices calculation for a model, or ``None`` on a miss.
 
-    Returns a *transient* (unpersisted) ``ModelPricing`` carrying the per-million
-    input/output rates from the bundled ``genai-prices`` dataset, or ``None`` when
-    no matching model is found. The returned object is never added to a session:
-    it is a lookup result, not a stored price, so explicit config/API pricing
-    always wins (the DB is consulted first) and ``require_pricing`` still fails
-    closed for genuinely unknown models.
-
-    Whether this fallback runs at all is the caller's decision (the
-    ``default_pricing`` config field, gating ``find_model_pricing``).
-
-    Caveats: a model with tiered ("cliff") pricing is billed at its base rate, and
-    a provider-agnostic match (below) may resolve an ambiguous model *name* to a
-    different provider's rate.
+    Shared by pricing and by metadata lookups (e.g. context window) so both apply
+    the same model matching: HuggingFace pinned-backend selectors, a
+    provider-scoped lookup, then a provider-agnostic fallback.
     """
 
     # Build the genai-prices lookups to try, most specific first:
@@ -97,40 +87,77 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
 
     for provider_id, model_ref in attempts:
         try:
-            calc = calc_price(
+            return calc_price(
                 _ZERO_USAGE, model_ref=model_ref, provider_id=provider_id, genai_request_timestamp=as_of
             )
         except LookupError:
             continue
         except Exception:
             # genai-prices runs on the per-request hot path; a data/API hiccup
-            # must degrade to "unpriced" (require_pricing decides) rather than
-            # turn into a request error for that model.
+            # must degrade to "unpriced"/"unknown" rather than turn into a request
+            # error for that model.
             logger.warning("genai-prices lookup failed for model_ref=%r provider_id=%r", model_ref, provider_id)
             return None
 
-        price = calc.model_price
-        if price.input_mtok is None:
-            return None
-        # Input-only models (embeddings, rerank) legitimately have no output
-        # rate; price output at 0 rather than rejecting the whole model.
-        output_rate = _flat_rate(price.output_mtok) if price.output_mtok is not None else 0.0
-
-        model_key = f"{provider}:{model}" if provider else model
-        logger.debug(
-            "Using genai-prices default pricing for '%s' (matched %s/%s)",
-            model_key,
-            getattr(calc.provider, "id", None),
-            getattr(calc.model, "id", None),
-        )
-        return ModelPricing(
-            model_key=model_key,
-            effective_at=as_of,
-            input_price_per_million=_flat_rate(price.input_mtok),
-            output_price_per_million=output_rate,
-        )
-
     return None
+
+
+def model_context_window(provider: str | None, model: str, as_of: datetime | None = None) -> int | None:
+    """Context-window token limit for a model from genai-prices, or ``None``.
+
+    Metadata, not pricing: this is resolved regardless of the ``default_pricing``
+    toggle (a context window is not a cost), and many models in the dataset simply
+    have no value, in which case ``None`` is returned.
+    """
+
+    calc = _resolve_genai_price(provider, model, normalize_effective_at(as_of))
+    if calc is None:
+        return None
+    return calc.model.context_window
+
+
+def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> ModelPricing | None:
+    """Resolve community-maintained default pricing for a model via genai-prices.
+
+    Returns a *transient* (unpersisted) ``ModelPricing`` carrying the per-million
+    input/output rates from the bundled ``genai-prices`` dataset, or ``None`` when
+    no matching model is found. The returned object is never added to a session:
+    it is a lookup result, not a stored price, so explicit config/API pricing
+    always wins (the DB is consulted first) and ``require_pricing`` still fails
+    closed for genuinely unknown models.
+
+    Whether this fallback runs at all is the caller's decision (the
+    ``default_pricing`` config field, gating ``find_model_pricing``).
+
+    Caveats: a model with tiered ("cliff") pricing is billed at its base rate, and
+    a provider-agnostic match (below) may resolve an ambiguous model *name* to a
+    different provider's rate.
+    """
+
+    calc = _resolve_genai_price(provider, model, as_of)
+    if calc is None:
+        return None
+
+    price = calc.model_price
+    if price.input_mtok is None:
+        return None
+    # Input-only models (embeddings, rerank) legitimately have no output rate;
+    # price output at 0 rather than rejecting the whole model.
+    output_rate = _flat_rate(price.output_mtok) if price.output_mtok is not None else 0.0
+
+    model_key = f"{provider}:{model}" if provider else model
+    logger.debug(
+        "Using genai-prices default pricing for '%s' (matched %s/%s)",
+        model_key,
+        getattr(calc.provider, "id", None),
+        getattr(calc.model, "id", None),
+    )
+    return ModelPricing(
+        model_key=model_key,
+        effective_at=as_of,
+        input_price_per_million=_flat_rate(price.input_mtok),
+        output_price_per_million=output_rate,
+    )
 
 
 async def _find_by_model_key(db: AsyncSession, model_key: str, as_of: datetime) -> ModelPricing | None:
