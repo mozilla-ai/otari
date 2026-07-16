@@ -144,6 +144,38 @@ def test_middleware_tracks_error_status_codes() -> None:
     assert _sample("gateway_requests_total", labels) - before == 1.0
 
 
+def test_middleware_labels_parameterized_route_with_template() -> None:
+    """Different path params collapse to one series; unknown paths bucket as 'unmatched'."""
+    app = FastAPI()
+
+    @app.get("/v1/files/{file_id}")
+    async def get_file(file_id: str) -> dict[str, str]:
+        return {"id": file_id}
+
+    app.add_middleware(MetricsMiddleware)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    template_labels = {"method": "GET", "endpoint": "/v1/files/{file_id}", "status": "200"}
+    raw_labels_a = {"method": "GET", "endpoint": "/v1/files/aaa", "status": "200"}
+    raw_labels_b = {"method": "GET", "endpoint": "/v1/files/bbb", "status": "200"}
+    unmatched_labels = {"method": "GET", "endpoint": "unmatched", "status": "404"}
+
+    before_template = _sample("gateway_requests_total", template_labels)
+    before_unmatched = _sample("gateway_requests_total", unmatched_labels)
+
+    assert client.get("/v1/files/aaa").status_code == 200
+    assert client.get("/v1/files/bbb").status_code == 200
+    assert client.get("/no/such/route").status_code == 404
+
+    # Two distinct ids produce a single labeled series keyed by the route template.
+    assert _sample("gateway_requests_total", template_labels) - before_template == 2.0
+    # The raw per-id paths must never appear as their own series.
+    assert _sample("gateway_requests_total", raw_labels_a) == 0.0
+    assert _sample("gateway_requests_total", raw_labels_b) == 0.0
+    # Paths that match no route land in the bounded fallback bucket.
+    assert _sample("gateway_requests_total", unmatched_labels) - before_unmatched == 1.0
+
+
 def test_middleware_skips_metrics_endpoint() -> None:
     app = _make_test_app()
     client = TestClient(app)

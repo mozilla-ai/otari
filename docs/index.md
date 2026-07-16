@@ -29,5 +29,6 @@ Start with the [Quickstart](quickstart.md). It gets Otari running locally and wa
 - [Use with Claude Code](use-with-claude-code.md) — point the Claude Code CLI at Otari.
 - [Use with opencode](use-with-opencode.md) — point the opencode CLI at Otari.
 - [Supported models](models.md) — providers, model format, and capabilities.
+- [OpenAI provider guide](providers/openai.md). Configure OpenAI and route your first request through Otari.
 - [Hybrid-mode protocol](hybrid-mode-protocol.md) — Otari/platform wire contract, for platform builders.
 - [SDK compatibility](sdk-compatibility.md) — how the language SDKs are released and which SDK version works with which Otari version.

@@ -120,14 +120,14 @@ def test_rerank_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/rerank returns 500 when the provider fails."""
+    """POST /v1/rerank returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.rerank.arerank",
         new_callable=AsyncMock,
         side_effect=RuntimeError("provider down"),
     ):
         resp = client.post("/v1/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
-    assert resp.status_code == 500
+    assert resp.status_code == 502
     assert "provider" in resp.json()["detail"].lower()
 
 
@@ -173,7 +173,7 @@ def test_rerank_logs_error_on_failure(
         side_effect=RuntimeError("provider down"),
     ):
         resp = client.post("/v1/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
-    assert resp.status_code == 500
+    assert resp.status_code == 502
 
     usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200

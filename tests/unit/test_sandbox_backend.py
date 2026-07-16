@@ -5,6 +5,7 @@ Mocks the HTTP layer with `respx` so the suite needs no sandbox container.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -99,6 +100,41 @@ async def test_call_tool_dispatches_code_to_sandbox(monkeypatch: pytest.MonkeyPa
     exec_request = next(r for r in transport.captured if r.url.path == "/sessions/s1/exec")
     body = exec_request.read().decode()
     assert "print(6 * 7)" in body
+
+
+@pytest.mark.asyncio
+async def test_exec_read_timeout_exceeds_execution_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The exec POST's read timeout must be larger than the sandbox's exec budget.
+
+    Regression test for #269: the client default equals ``timeout_seconds``, so a
+    legitimate near-max execution would trip the client read timeout at the same
+    instant the sandbox finishes, surfacing as a spurious ``SandboxNotReachableError``
+    instead of a result. The exec request carries its own longer timeout as headroom.
+    """
+    result_block = {
+        "type": "code_execution_tool_result",
+        "tool_use_id": "t1",
+        "content": {"type": "code_execution_result", "stdout": "ok\n", "stderr": "", "return_code": 0, "content": []},
+    }
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    timeout_s = 30.0
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", timeout_s=timeout_s) as backend:
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(1)"})
+
+    exec_request = next(r for r in transport.captured if r.url.path == "/sessions/s1/exec")
+    granted_budget = json.loads(exec_request.read().decode())["timeout_seconds"]
+    read_timeout = exec_request.extensions["timeout"]["read"]
+    assert read_timeout > granted_budget, (
+        f"exec read timeout {read_timeout} must exceed the granted budget {granted_budget}"
+    )
 
 
 @pytest.mark.asyncio

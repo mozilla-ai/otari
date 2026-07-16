@@ -46,6 +46,12 @@ tracer = trace.get_tracer(__name__)
 
 CODE_EXECUTION_TOOL_NAME = "code_execution"
 _DEFAULT_TIMEOUT_S = 60.0
+# Headroom added on top of the execution budget for the exec POST's own read
+# timeout. The sandbox is granted ``timeout_seconds`` to run the code; the HTTP
+# client must wait longer than that (network + serialization + the sandbox's own
+# teardown) so a legitimate near-max execution returns its result instead of
+# tripping the client read timeout as a spurious ``SandboxNotReachableError``.
+_EXEC_TIMEOUT_BUFFER_S = 10.0
 _DEFAULT_PURPOSE_HINT = (
     "Prefer `code_execution` for any computation, data analysis, date "
     "arithmetic, statistics, or anything that benefits from exact output. "
@@ -176,6 +182,9 @@ class SandboxBackend:
                 response = await self._client.post(
                     f"{self._sandbox_url}/sessions/{self._session_id}/exec",
                     json=payload,
+                    # Override the client default (which equals the exec budget) so the
+                    # sandbox always gets to answer before the client read timeout fires.
+                    timeout=self._timeout_s + _EXEC_TIMEOUT_BUFFER_S,
                 )
                 response.raise_for_status()
                 body = response.json()
