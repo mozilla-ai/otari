@@ -3,7 +3,6 @@ import { type ReactNode, useMemo, useState } from "react";
 
 import {
   useAliases,
-  useBackfillUsageCost,
   useCreateAlias,
   useDeleteAlias,
   useDeletePricing,
@@ -105,43 +104,7 @@ function SourceChip({ source }: { source: PriceSource }) {
   return <span className="text-xs text-[var(--otari-muted)]">not priced</span>;
 }
 
-// Offered after setting a price: earlier requests for the model were metered at
-// the old (or no) price, so their recorded cost is stale until recomputed. It is
-// the one place the config page reaches into usage, as a direct consequence of a
-// price change; the prompt reports "0 requests" harmlessly when there is none.
-function BackfillPrompt({ modelKey, onDone }: { modelKey: string; onDone: () => void }) {
-  const backfill = useBackfillUsageCost();
-
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] p-3">
-      {backfill.data ? (
-        <p className="text-sm text-[var(--otari-brand-dark)]">
-          Backfilled {formatNumber(backfill.data.rows_updated)} request
-          {backfill.data.rows_updated === 1 ? "" : "s"}, adding {formatCost(backfill.data.cost_added)} of spend across{" "}
-          {formatNumber(backfill.data.users_updated)} user{backfill.data.users_updated === 1 ? "" : "s"}.
-        </p>
-      ) : (
-        <p className="text-sm text-[var(--otari-muted)]">
-          Recompute the cost of past requests for <code className="rounded bg-white px-1">{modelKey}</code> at this
-          price?
-        </p>
-      )}
-      <ErrorBanner error={backfill.error} />
-      <div className="flex items-center gap-2">
-        {backfill.data ? null : (
-          <Button size="sm" variant="primary" isDisabled={backfill.isPending} onPress={() => backfill.mutate(modelKey)}>
-            {backfill.isPending ? "Backfilling…" : "Backfill past usage"}
-          </Button>
-        )}
-        <Button size="sm" variant="ghost" onPress={onDone}>
-          {backfill.data ? "Done" : "Dismiss"}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function ModelTableRow({ row, onPriced }: { row: ModelRow; onPriced: (modelKey: string) => void }) {
+function ModelTableRow({ row }: { row: ModelRow }) {
   const setPricing = useSetPricing();
   const deletePricing = useDeletePricing();
   const deleteAlias = useDeleteAlias();
@@ -170,7 +133,6 @@ function ModelTableRow({ row, onPriced }: { row: ModelRow; onPriced: (modelKey: 
       {
         onSuccess: () => {
           setEditing(false);
-          onPriced(row.key);
         },
       },
     );
@@ -261,7 +223,7 @@ function ModelTableRow({ row, onPriced }: { row: ModelRow; onPriced: (modelKey: 
 
 // Prices a model: one discovery lists, or one it cannot see (an unconfigured
 // provider, a brand-new release), which is why the key stays free text.
-function PriceModelForm({ onClose, onPriced }: { onClose: () => void; onPriced: (modelKey: string) => void }) {
+function PriceModelForm({ onClose }: { onClose: () => void }) {
   const setPricing = useSetPricing();
   const [modelKey, setModelKey] = useState("");
   const [input, setInput] = useState("");
@@ -282,7 +244,6 @@ function PriceModelForm({ onClose, onPriced }: { onClose: () => void; onPriced: 
       },
       {
         onSuccess: () => {
-          onPriced(key);
           onClose();
         },
       },
@@ -381,11 +342,9 @@ type AddTab = "model" | "alias";
 
 function AddForm({
   onClose,
-  onPriced,
   initialMode = "model",
 }: {
   onClose: () => void;
-  onPriced: (modelKey: string) => void;
   initialMode?: AddTab;
 }) {
   const [tab, setTab] = useState<AddTab>(initialMode);
@@ -420,7 +379,7 @@ function AddForm({
             Close
           </Button>
         </div>
-        {tab === "model" ? <PriceModelForm onClose={onClose} onPriced={onPriced} /> : <AddAliasForm onClose={onClose} />}
+        {tab === "model" ? <PriceModelForm onClose={onClose} /> : <AddAliasForm onClose={onClose} />}
       </Card.Content>
     </Card>
   );
@@ -528,12 +487,10 @@ function ModelTable({
   rows,
   isLoading,
   empty,
-  onPriced,
 }: {
   rows: ModelRow[];
   isLoading: boolean;
   empty: ReactNode;
-  onPriced: (key: string) => void;
 }) {
   return (
     <Table>
@@ -551,7 +508,7 @@ function ModelTable({
         {isLoading ? (
           <LoadingRow colSpan={6} />
         ) : rows.length > 0 ? (
-          rows.map((row) => <ModelTableRow key={row.key} row={row} onPriced={onPriced} />)
+          rows.map((row) => <ModelTableRow key={row.key} row={row} />)
         ) : (
           <TableMessage colSpan={6}>{empty}</TableMessage>
         )}
@@ -653,7 +610,6 @@ export function ModelsPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [showForm, setShowForm] = useState(false);
-  const [backfillFor, setBackfillFor] = useState<string | null>(null);
 
   // Keys a provider currently reports, so a row can be tagged as discovered
   // regardless of whether it is also priced.
@@ -823,14 +779,8 @@ export function ModelsPage() {
       <DefaultPricingBanner />
 
       {showForm ? (
-        <AddForm
-          onClose={() => setShowForm(false)}
-          onPriced={setBackfillFor}
-          initialMode={tab === "aliases" ? "alias" : "model"}
-        />
+        <AddForm onClose={() => setShowForm(false)} initialMode={tab === "aliases" ? "alias" : "model"} />
       ) : null}
-
-      {backfillFor ? <BackfillPrompt modelKey={backfillFor} onDone={() => setBackfillFor(null)} /> : null}
 
       <ErrorBanner error={models.error ?? pricing.error ?? aliases.error} />
 
@@ -852,7 +802,6 @@ export function ModelsPage() {
             rows={pageModels}
             isLoading={tab === "discovered" ? discoverable.isLoading : rowsLoading}
             empty={emptyMessage[tab]}
-            onPriced={setBackfillFor}
           />
         )}
 

@@ -293,15 +293,9 @@ describe("ModelsPage", () => {
     });
   });
 
-  it("offers a backfill after setting a price", async () => {
-    // Setting a price makes earlier usage cost stale, so a recompute is offered
-    // as a direct consequence of the price change.
-    mockApi({
-      post: (url) =>
-        url.includes("/v1/usage/backfill")
-          ? jsonResponse({ model_key: "openai:gpt-4o", rows_updated: 3, cost_added: 0.12, users_updated: 1 })
-          : jsonResponse(PRICED),
-    });
+  it("does not prompt to backfill usage after setting a price", async () => {
+    // Backfill is a usage concern; the config page no longer offers it.
+    mockApi();
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
@@ -311,8 +305,9 @@ describe("ModelsPage", () => {
     await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await user.click(await screen.findByRole("button", { name: "Backfill past usage" }));
-    expect(await screen.findByText(/Backfilled 3 requests/)).toBeInTheDocument();
+    // The editor closes back to an Edit action, and nothing usage-related appears.
+    expect(await screen.findByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /backfill/i })).not.toBeInTheDocument();
   });
 
   // -- Aliases tab ---------------------------------------------------------

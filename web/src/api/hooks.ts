@@ -60,25 +60,6 @@ export function useUsageSummary() {
   });
 }
 
-export interface BackfillResult {
-  model_key: string;
-  rows_updated: number;
-  cost_added: number;
-  users_updated: number;
-}
-
-export function useBackfillUsageCost() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (modelKey: string) =>
-      apiFetch<BackfillResult>("/v1/usage/backfill", {
-        method: "POST",
-        body: JSON.stringify({ model_key: modelKey }),
-      }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [USAGE] }),
-  });
-}
-
 export function useModels() {
   return useQuery({
     queryKey: [MODELS],
