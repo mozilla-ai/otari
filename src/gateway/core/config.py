@@ -39,6 +39,25 @@ OTARI_ENV_PREFIX = "OTARI_"
 # scalar fields reachable via OTARI_<FIELD>. Raw YAML wins when both are set.
 OTARI_CONFIG_YAML_ENV = "OTARI_CONFIG_YAML"
 OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
+# GatewayConfig fields promoted from ad hoc otari_env() reads in route/service
+# code. The read sites still consult otari_env() (they have no config object in
+# scope), so load_config bridges values set in the YAML config into the process
+# environment for these fields; without the bridge a YAML-set value would
+# validate at startup and then be silently ignored at request time. Each field
+# name maps onto its OTARI_<FIELD> environment variable.
+ENV_BRIDGED_FIELDS = (
+    "sandbox_url",
+    "guardrails_url",
+    "tools_header",
+    "sandbox_purpose_hint",
+    "web_search_purpose_hint",
+    "web_search_engines",
+    "web_search_max_results",
+    "web_search_extract",
+    "web_search_allow_private_hosts",
+    "mcp_allow_loopback",
+    "mcp_allow_private_hosts",
+)
 
 
 class _NonScalarField(Exception):
@@ -298,6 +317,91 @@ class GatewayConfig(BaseSettings):
             "Per-model multimodal capability overrides (provider/model -> {supports_image, "
             "supports_pdf}). Authoritative over any-llm's provider-level flags; needed for text-only "
             "local models behind OpenAI-compatible servers."
+        ),
+    )
+    sandbox_url: str | None = Field(
+        default=None,
+        description=(
+            "Base URL of the code-execution sandbox backend for otari_code_execution tools. "
+            "Legacy env alias: GATEWAY_SANDBOX_URL. When unset, otari_code_execution requests "
+            "are rejected with 400."
+        ),
+    )
+    guardrails_url: str | None = Field(
+        default=None,
+        description=(
+            "Default URL of the input-guardrails service used when a request does not pass its "
+            "own guardrail `url`. Legacy env alias: GATEWAY_GUARDRAILS_URL. docker-compose sets "
+            "this to the bundled guardrails container."
+        ),
+    )
+    tools_header: str | None = Field(
+        default=None,
+        description=(
+            "Per-deployment override for the purpose-hint preamble header injected ahead of "
+            "gateway-managed tool hints. Legacy env alias: GATEWAY_TOOLS_HEADER. When unset, a "
+            "built-in default header is used."
+        ),
+    )
+    sandbox_purpose_hint: str | None = Field(
+        default=None,
+        description=(
+            "Default purpose hint forwarded to the sandbox backend when an otari_code_execution "
+            "tool entry does not supply its own. Legacy env alias: GATEWAY_SANDBOX_PURPOSE_HINT."
+        ),
+    )
+    web_search_purpose_hint: str | None = Field(
+        default=None,
+        description=(
+            "Default purpose hint for the web-search backend when an otari_web_search tool entry "
+            "does not supply its own. Legacy env alias: GATEWAY_WEB_SEARCH_PURPOSE_HINT."
+        ),
+    )
+    web_search_engines: str | None = Field(
+        default=None,
+        description=(
+            "Comma-separated SearXNG engine list for the web-search backend (e.g. 'google,bing'). "
+            "Legacy env alias: GATEWAY_WEB_SEARCH_ENGINES. When unset, the backend default engines "
+            "are used."
+        ),
+    )
+    web_search_max_results: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Default cap on the number of hits returned by the web-search backend (a per-tool "
+            "max_results still overrides it). Legacy env alias: GATEWAY_WEB_SEARCH_MAX_RESULTS."
+        ),
+    )
+    web_search_extract: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the web-search backend extracts page content in-process (True) or returns "
+            "snippet-only results (False). Legacy env alias: GATEWAY_WEB_SEARCH_EXTRACT. When "
+            "unset, the backend default (extraction on) applies."
+        ),
+    )
+    web_search_allow_private_hosts: bool = Field(
+        default=False,
+        description=(
+            "SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. "
+            "Off by default. Legacy env alias: GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS. Only enable "
+            "for unusual setups such as a private search index."
+        ),
+    )
+    mcp_allow_loopback: bool = Field(
+        default=True,
+        description=(
+            "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host "
+            "sidecars). On by default. Legacy env alias: GATEWAY_MCP_ALLOW_LOOPBACK."
+        ),
+    )
+    mcp_allow_private_hosts: bool = Field(
+        default=False,
+        description=(
+            "SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept "
+            "hostnames that fail to resolve at validation time. Off by default. Legacy env alias: "
+            "GATEWAY_MCP_ALLOW_PRIVATE_HOSTS."
         ),
     )
     mode: str | None = Field(
@@ -599,6 +703,12 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     if structured_env_config:
         config_dict.update(structured_env_config)
 
+    # Snapshot which bridged fields the YAML config set, before the env
+    # overrides below inject OTARI_ values into the same dict: only YAML-set
+    # values need bridging into the environment (env-set values are already
+    # visible to the otari_env() read sites, with unchanged semantics).
+    yaml_bridged_fields = {name for name in ENV_BRIDGED_FIELDS if config_dict.get(name) is not None}
+
     _apply_otari_env_overrides(config_dict)
     _apply_platform_env_overrides(config_dict)
 
@@ -610,6 +720,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_mode_selection()
     config.validate_provider_instances()
     config.validate_aliases()
+    _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
 
 
@@ -643,6 +754,26 @@ def _coerce_scalar_env(value: str, annotation: Any) -> Any:
     if annotation is str:
         return value
     raise _NonScalarField
+
+
+def _bridge_yaml_fields_to_env(config: GatewayConfig, yaml_set_fields: set[str]) -> None:
+    """Bridge YAML-set promoted fields into the process env for otari_env() readers.
+
+    The runtime read sites for ENV_BRIDGED_FIELDS call ``otari_env()``, which
+    only sees environment variables. ``os.environ.setdefault`` keeps env
+    precedence intact: an ``OTARI_<FIELD>`` variable that is already set always
+    wins, and fields not set in YAML are left untouched, so pure-env
+    deployments (including legacy ``GATEWAY_`` names and their exact string
+    spellings) behave byte-for-byte as before. Values are serialized from the
+    validated field, with booleans lowercased to ``true``/``false``, the
+    spellings every otari_env() consumer parses.
+    """
+    for field_name in yaml_set_fields:
+        value = getattr(config, field_name)
+        if value is None:
+            continue
+        serialized = ("true" if value else "false") if isinstance(value, bool) else str(value)
+        os.environ.setdefault(f"{OTARI_ENV_PREFIX}{field_name.upper()}", serialized)
 
 
 def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
