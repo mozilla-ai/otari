@@ -153,7 +153,7 @@ def test_moderations_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/moderations returns 500 when the provider fails."""
+    """POST /v1/moderations returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.moderations.amoderation",
         new_callable=AsyncMock,
@@ -164,7 +164,7 @@ def test_moderations_provider_error(
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
     assert "could not be completed" in resp.json()["detail"].lower()
 
 
@@ -188,11 +188,11 @@ def test_moderations_unsupported_provider_returns_400(
     assert resp.json() == {"detail": "Provider anthropic does not support moderation"}
 
 
-def test_moderations_generic_not_implemented_returns_500(
+def test_moderations_generic_not_implemented_returns_502(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """Generic NotImplementedError (without locked phrasing) returns 500."""
+    """Generic NotImplementedError (without locked phrasing) returns 502."""
     with patch(
         "gateway.api.routes.moderations.amoderation",
         new_callable=AsyncMock,
@@ -203,7 +203,7 @@ def test_moderations_generic_not_implemented_returns_500(
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
     assert "could not be completed" in resp.json()["detail"].lower()
 
 
@@ -263,7 +263,7 @@ def test_moderations_logs_error_on_failure(
             json={"model": "openai:omni-moderation-latest", "input": "hello"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
 
     usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200

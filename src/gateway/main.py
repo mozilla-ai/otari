@@ -183,6 +183,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     else:
         app.state.rate_limiter = None
 
+    app.state.config = config
     app.state.gateway_mode = config.effective_mode
 
     register_routers(app, config)
