@@ -13,6 +13,7 @@ back to what genai-prices already provides.
 """
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -27,6 +28,12 @@ MODELS_DEV_URL = "https://models.dev/api.json"
 # The catalog is a few MB; a short read timeout keeps a slow models.dev from
 # stalling a dashboard load, and a failure just means "no enrichment this time".
 _FETCH_TIMEOUT_SECONDS = 15.0
+
+# Read the body incrementally and stop if it exceeds this, so a misbehaving or
+# compromised models.dev cannot force the gateway to buffer an unbounded response
+# into memory. Generous relative to the few-MB real catalog; overflow degrades to
+# "no enrichment", the same as any other fetch failure.
+_MAX_CATALOG_BYTES = 64 * 1024 * 1024
 
 # A failed fetch is cached briefly so an offline gateway does not re-attempt (and
 # re-wait the timeout) on every request, without pinning the failure for the full
@@ -96,10 +103,20 @@ def _read_cache(ttl: int) -> object:
 
 async def _fetch() -> dict[str, Any] | None:
     try:
-        async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT_SECONDS) as client:
-            resp = await client.get(MODELS_DEV_URL, headers={"User-Agent": "otari-gateway"})
+        async with (
+            httpx.AsyncClient(timeout=_FETCH_TIMEOUT_SECONDS) as client,
+            client.stream("GET", MODELS_DEV_URL, headers={"User-Agent": "otari-gateway"}) as resp,
+        ):
             resp.raise_for_status()
-            data = resp.json()
+            chunks: list[bytes] = []
+            total = 0
+            async for chunk in resp.aiter_bytes():
+                total += len(chunk)
+                if total > _MAX_CATALOG_BYTES:
+                    logger.warning("models.dev catalog exceeded %d bytes; ignoring", _MAX_CATALOG_BYTES)
+                    return None
+                chunks.append(chunk)
+        data = json.loads(b"".join(chunks))
     except Exception as exc:
         logger.warning("models.dev catalog fetch failed: %s", exc)
         return None

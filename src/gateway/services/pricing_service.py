@@ -1,6 +1,6 @@
 """Shared pricing lookup utilities."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from genai_prices import Usage, calc_price
@@ -60,7 +60,40 @@ def normalize_effective_at(value: datetime | None) -> datetime:
     return normalized.astimezone(UTC)
 
 
+# genai-prices rates and metadata are date-granular (period boundaries fall on
+# dates, not times), so a model resolves to the same calculation for any instant
+# within a day. Memoize by (provider, model, day) so a single GET /v1/models,
+# which resolves each model twice (context window in one phase, default price in
+# another), and repeated same-day billing lookups do not re-walk the dataset each
+# time. Bounded by clearing at a cap; the distinct key count is roughly
+# providers x models x recent days, so the cap is a backstop, not a normal path.
+_PRICE_CACHE_MAX = 16384
+_price_cache: dict[tuple[str | None, str, date], PriceCalculation | None] = {}
+
+
+def reset_price_cache() -> None:
+    """Clear the memoized genai-prices resolutions (used by tests)."""
+
+    _price_cache.clear()
+
+
 def _resolve_genai_price(provider: str | None, model: str, as_of: datetime) -> PriceCalculation | None:
+    """Resolve a genai-prices calculation for a model, or ``None`` on a miss.
+
+    Memoized per (provider, model, day); see ``_resolve_genai_price_uncached``
+    for the matching rules.
+    """
+    key = (provider, model, as_of.date())
+    if key in _price_cache:
+        return _price_cache[key]
+    result = _resolve_genai_price_uncached(provider, model, as_of)
+    if len(_price_cache) >= _PRICE_CACHE_MAX:
+        _price_cache.clear()
+    _price_cache[key] = result
+    return result
+
+
+def _resolve_genai_price_uncached(provider: str | None, model: str, as_of: datetime) -> PriceCalculation | None:
     """Resolve a genai-prices calculation for a model, or ``None`` on a miss.
 
     Shared by pricing and by metadata lookups (e.g. context window) so both apply
@@ -87,9 +120,7 @@ def _resolve_genai_price(provider: str | None, model: str, as_of: datetime) -> P
 
     for provider_id, model_ref in attempts:
         try:
-            return calc_price(
-                _ZERO_USAGE, model_ref=model_ref, provider_id=provider_id, genai_request_timestamp=as_of
-            )
+            return calc_price(_ZERO_USAGE, model_ref=model_ref, provider_id=provider_id, genai_request_timestamp=as_of)
         except LookupError:
             continue
         except Exception:

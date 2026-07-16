@@ -148,10 +148,26 @@ export function useUpdateSettings() {
   });
 }
 
+// The pricing endpoint caps `limit` at 1000 server-side, so page through it
+// rather than truncating: a gateway with a long price history could otherwise
+// have older rows silently vanish from the models table.
+const PRICING_PAGE_SIZE = 1000;
+
+async function fetchAllPricing(): Promise<PricingResponse[]> {
+  const all: PricingResponse[] = [];
+  for (let skip = 0; ; skip += PRICING_PAGE_SIZE) {
+    const page = await apiFetch<PricingResponse[]>(`/v1/pricing?skip=${skip}&limit=${PRICING_PAGE_SIZE}`);
+    all.push(...page);
+    if (page.length < PRICING_PAGE_SIZE) {
+      return all;
+    }
+  }
+}
+
 export function usePricing() {
   return useQuery({
     queryKey: [PRICING],
-    queryFn: () => apiFetch<PricingResponse[]>("/v1/pricing?limit=1000"),
+    queryFn: fetchAllPricing,
   });
 }
 

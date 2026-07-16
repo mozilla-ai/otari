@@ -1,5 +1,5 @@
 // Thin fetch wrapper for the gateway's management API. The dashboard is served
-// from the same origin as the API, so paths are relative ("/v1/keys"). Every
+// from the same origin as the API, so paths are relative ("/v1/models"). Every
 // management endpoint requires the master key, sent as a Bearer token.
 
 export class ApiError extends Error {

@@ -59,6 +59,28 @@ def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.Mon
     reset_db()
 
 
+def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The admin-dashboard management surface is standalone-only; in hybrid mode
+    # it must be unavailable (owned by the platform), with the same helpful hint.
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+
+    config = GatewayConfig(
+        mode="hybrid",
+        platform={"base_url": "http://localhost:8100/api/v1"},
+    )
+    app = create_app(config)
+
+    expected = {"detail": "This endpoint is not available in hybrid mode. Manage this resource via the platform UI."}
+    with TestClient(app) as client:
+        for path in ("/v1/settings", "/v1/aliases", "/v1/providers", "/v1/pricing"):
+            response = client.get(path)
+            assert response.status_code == 404, path
+            assert response.json() == expected, path
+
+    reset_config()
+    reset_db()
+
+
 def test_hybrid_mode_health_reports_reachability(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
 
