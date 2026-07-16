@@ -206,7 +206,10 @@ class WebSearchBackend:
 
         with tracer.start_as_current_span(WEB_SEARCH_TOOL_NAME) as span:
             span.set_attribute("tool.name", WEB_SEARCH_TOOL_NAME)
+            span.set_attribute("tool.type", "otari_web_search")
             span.set_attribute("web_search.query", query)
+            span.set_attribute("web_search.provider", ",".join(self._engines))
+            span.set_attribute("web_search.backend_url", self._base_url)
             try:
                 raw_results = await self._search(query)
             except (httpx.HTTPError, ValueError, KeyError) as exc:

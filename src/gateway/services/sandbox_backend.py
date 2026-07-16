@@ -165,7 +165,9 @@ class SandboxBackend:
         }
         with tracer.start_as_current_span(CODE_EXECUTION_TOOL_NAME) as span:
             span.set_attribute("tool.name", CODE_EXECUTION_TOOL_NAME)
+            span.set_attribute("tool.type", "otari_code_execution")
             span.set_attribute("code_execution.code", code)
+            span.set_attribute("code_execution.backend_url", self._sandbox_url)
             try:
                 response = await self._client.post(
                     f"{self._sandbox_url}/sessions/{self._session_id}/exec",

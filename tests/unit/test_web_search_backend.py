@@ -663,7 +663,10 @@ async def test_call_tool_emits_span_with_query_and_result_count(monkeypatch: pyt
     span = spans[0]
     assert span.name == WEB_SEARCH_TOOL_NAME
     assert span.attributes is not None
+    assert span.attributes["tool.type"] == "otari_web_search"
     assert span.attributes["web_search.query"] == "claude code"
+    assert span.attributes["web_search.provider"] == "duckduckgo,mojeek,qwant,wikipedia"
+    assert span.attributes["web_search.backend_url"] == "http://searxng:8080"
     assert span.attributes["web_search.result_count"] == 2
 
 
