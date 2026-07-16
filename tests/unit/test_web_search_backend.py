@@ -282,18 +282,44 @@ async def test_backend_unreachable_raises(monkeypatch: pytest.MonkeyPatch) -> No
 
 @pytest.mark.asyncio
 async def test_empty_query_returns_error_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    # No HTTP call should be made for an empty query — backend short-circuits.
-    transport = _patched_async_client(
-        {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
-        monkeypatch,
-    )
+    from opentelemetry import trace as otel_trace
+    from opentelemetry.trace import StatusCode
 
-    async with WebSearchBackend(base_url="http://searxng:8080") as backend:
-        result = await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "   "})
+    import gateway.services.web_search_backend as wsb_module
+
+    exporter, provider = _make_otel_provider()
+    original_provider = otel_trace.get_tracer_provider()
+    otel_trace.set_tracer_provider(provider)  # type: ignore[arg-type]
+    wsb_module.tracer = provider.get_tracer(wsb_module.__name__)  # type: ignore[attr-defined]
+
+    try:
+        # No HTTP call should be made for an empty query — backend short-circuits.
+        transport = _patched_async_client(
+            {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
+            monkeypatch,
+        )
+
+        async with WebSearchBackend(base_url="http://searxng:8080") as backend:
+            result = await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "   "})
+    finally:
+        otel_trace.set_tracer_provider(original_provider)
+        wsb_module.tracer = otel_trace.get_tracer(wsb_module.__name__)
 
     assert "[tool error]" in result
     # Should not have hit /search.
     assert not any(r.url.path == "/search" for r in transport.captured)
+
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    assert isinstance(exporter, InMemorySpanExporter)
+    spans = exporter.get_finished_spans()
+    assert len(spans) == 1
+    span = spans[0]
+    assert span.name == WEB_SEARCH_TOOL_NAME
+    assert span.status.status_code == StatusCode.ERROR
+    assert span.status.description == "empty query"
+    assert span.attributes is not None
+    assert span.attributes["web_search.query"] == ""
 
 
 @pytest.mark.asyncio
@@ -705,6 +731,9 @@ async def test_call_tool_span_records_error_when_backend_unreachable(monkeypatch
     span = spans[0]
     assert span.name == WEB_SEARCH_TOOL_NAME
     assert span.status.status_code == StatusCode.ERROR
-    assert len(span.events) >= 1
-    assert any(e.name == "exception" for e in span.events)
+    exception_events = [e for e in span.events if e.name == "exception"]
+    assert len(exception_events) == 1
+    attrs = exception_events[0].attributes
+    assert attrs is not None
+    assert attrs["exception.type"] == "httpx.ConnectError"
 

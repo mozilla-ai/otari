@@ -356,8 +356,11 @@ async def test_call_tool_span_records_error_on_sandbox_unreachable(monkeypatch: 
     span = spans[0]
     assert span.name == CODE_EXECUTION_TOOL_NAME
     assert span.status.status_code == StatusCode.ERROR
-    assert len(span.events) >= 1
-    assert any(e.name == "exception" for e in span.events)
+    exception_events = [e for e in span.events if e.name == "exception"]
+    assert len(exception_events) == 1
+    attrs = exception_events[0].attributes
+    assert attrs is not None
+    assert attrs["exception.type"] == "httpx.ConnectError"
 
 
 @pytest.mark.asyncio

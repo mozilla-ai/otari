@@ -163,7 +163,11 @@ class SandboxBackend:
             "input": {"code": code},
             "timeout_seconds": int(self._timeout_s),
         }
-        with tracer.start_as_current_span(CODE_EXECUTION_TOOL_NAME) as span:
+        with tracer.start_as_current_span(
+            CODE_EXECUTION_TOOL_NAME,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
             span.set_attribute("tool.name", CODE_EXECUTION_TOOL_NAME)
             span.set_attribute("tool.type", "otari_code_execution")
             span.set_attribute("code_execution.code_size", len(code))

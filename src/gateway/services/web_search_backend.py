@@ -200,16 +200,20 @@ class WebSearchBackend:
         if self._client is None:
             raise RuntimeError("WebSearchBackend not entered as an async context manager")
 
-        query = (arguments.get("query") or "").strip()
-        if not query:
-            return "[tool error] empty query"
-
-        with tracer.start_as_current_span(WEB_SEARCH_TOOL_NAME) as span:
+        with tracer.start_as_current_span(
+            WEB_SEARCH_TOOL_NAME,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
             span.set_attribute("tool.name", WEB_SEARCH_TOOL_NAME)
             span.set_attribute("tool.type", "otari_web_search")
+            query = (arguments.get("query") or "").strip()
             span.set_attribute("web_search.query", query)
             span.set_attribute("web_search.provider", ",".join(self._engines))
             span.set_attribute("web_search.backend_url", self._base_url)
+            if not query:
+                span.set_status(trace.StatusCode.ERROR, "empty query")
+                return "[tool error] empty query"
             try:
                 raw_results = await self._search(query)
             except (httpx.HTTPError, ValueError, KeyError) as exc:
