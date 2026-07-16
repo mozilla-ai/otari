@@ -236,7 +236,7 @@ async def run_platform_attempts(
             report_attempt_outcome(attempt, "error", None, error_class)
             logger.warning(
                 "Provider call failed request_id=%s position=%d provider=%s model=%s "
-                "error=%s retryable=%s locked_in=%s",
+                "error=%s retryable=%s locked_in=%s raw=%r",
                 route.request_id,
                 attempt.position,
                 attempt.provider,
@@ -244,6 +244,7 @@ async def run_platform_attempts(
                 error_class,
                 retryable,
                 locked_in,
+                exc,
             )
             last_exc = exc
             # Locked-in: at least one tool-loop round produced an assistant

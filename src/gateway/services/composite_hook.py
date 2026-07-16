@@ -47,6 +47,11 @@ _backend: CompositeBackend | None = None
 
 
 _DEFAULT_T1_MODEL = "claude-haiku-4-5-20251001"
+# A below-frontier judgment emits a small output (a tool call or a short decision),
+# so cap max_tokens well under the point where the provider requires streaming for
+# "operations that may take longer than 10 minutes". Forwarding the tenant's large
+# max_tokens verbatim on this non-streaming self-call made the provider reject it.
+_T1_MAX_TOKENS = 4096
 
 
 def composites_enabled() -> bool:
@@ -255,7 +260,7 @@ async def _serve_t1(
     self_url = otari_env("T1_SELF_URL", "http://localhost:8000").rstrip("/")
     payload: dict[str, Any] = {
         "model": cheap,
-        "max_tokens": int(getattr(request, "max_tokens", 0) or 1024),
+        "max_tokens": min(int(getattr(request, "max_tokens", 0) or 1024), _T1_MAX_TOKENS),
         "messages": _sanitize_t1_messages(request.messages),
     }
     system = getattr(request, "system", None)
