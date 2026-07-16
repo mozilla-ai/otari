@@ -311,7 +311,7 @@ async def test_call_tool_emits_span_with_code_attribute(monkeypatch: pytest.Monk
     assert span.name == CODE_EXECUTION_TOOL_NAME
     assert span.attributes is not None
     assert span.attributes["tool.type"] == "otari_code_execution"
-    assert span.attributes["code_execution.code"] == "print(6 * 7)"
+    assert span.attributes["code_execution.code_size"] == len("print(6 * 7)")
     assert span.attributes["code_execution.backend_url"] == "http://sandbox:8080"
 
 
