@@ -155,17 +155,16 @@ def test_billable_route_rejects_over_budget_user(
     assert "budget" in response.json()["detail"].lower()
 
 
-@pytest.mark.xfail(reason="batches enforcement lands with #258", strict=False)
 def test_batches_rejects_blocked_user(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """``/v1/batches`` should reject a blocked user, but ``create_batch`` does not
-    yet run the budget/blocked gate (issue #258). Batches bills the API key's own
-    virtual user rather than a ``user`` body field, so we block that virtual user
-    and drive the route with the API key. Marked xfail until #258 wires
-    enforcement in; it will xpass (and this marker can be removed) once it does.
+    """``/v1/batches`` rejects a blocked user with 403 before the provider.
+
+    Batches bills the API key's own virtual user when no ``user`` body field is
+    sent, so we block that virtual user and drive the route with the API key.
+    Enforcement landed with issue #258.
     """
     api_key_header = {API_KEY_HEADER: f"Bearer {api_key_obj['key']}"}
     virtual_user_id = f"apikey-{api_key_obj['id']}"
