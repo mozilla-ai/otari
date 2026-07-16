@@ -288,10 +288,16 @@ function modelOrder(): string[] {
 }
 
 describe("ModelsPage", () => {
-  beforeEach(() => setMasterKey("test-master-key"));
+  beforeEach(() => {
+    setMasterKey("test-master-key");
+    // The page persists sort choice in localStorage; start each test clean so
+    // one test's sort does not leak into the next.
+    window.localStorage.clear();
+  });
   afterEach(() => {
     vi.restoreAllMocks();
     setMasterKey(null);
+    window.localStorage.clear();
   });
 
   // -- tab structure -------------------------------------------------------
@@ -487,25 +493,46 @@ describe("ModelsPage", () => {
     expect(miniIndex).toBeLessThan(claudeIndex);
   });
 
-  it("shows a compact release date and sorts newest-first from the header", async () => {
+  it("defaults to newest models first with a compact release date", async () => {
     mockApi();
-    const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
-    await screen.findByText("openai:gpt-4o");
-
-    // models.dev "2025-05-14" renders as a compact "May 2025".
-    expect(within(tableRow("anthropic:claude-sonnet-4")).getByText("May 2025")).toBeInTheDocument();
+    // Wait for models.dev metadata (release dates) to land; "2025-05-14" -> "May 2025".
+    await screen.findByText("May 2025");
     expect(within(tableRow("openai:gpt-4o")).getByText("May 2024")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Released/ }));
-
+    // No header click needed: the default sort is newest-first.
     const order = modelOrder();
     const claude = order.findIndex((text) => text.includes("claude-sonnet-4"));
     const mini = order.findIndex((text) => text.includes("gpt-4o-mini"));
     const base = order.findIndex((text) => text.includes("openai:gpt-4o") && !text.includes("mini"));
     expect(claude).toBeLessThan(mini);
     expect(mini).toBeLessThan(base);
+  });
+
+  it("remembers the chosen sort across a remount", async () => {
+    mockApi();
+    const user = userEvent.setup();
+
+    const { unmount } = renderWithClient(<ModelsPage />);
+    await screen.findByText("May 2025");
+
+    // Flip the Released column to oldest-first and confirm it is persisted.
+    await user.click(screen.getByRole("button", { name: /Released/ }));
+    expect(JSON.parse(window.localStorage.getItem("otari.dashboard.modelsSort") ?? "{}")).toEqual({
+      col: "released",
+      dir: "asc",
+    });
+
+    unmount();
+
+    // A fresh mount restores oldest-first rather than the newest-first default.
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("May 2025");
+    const order = modelOrder();
+    const base = order.findIndex((text) => text.includes("openai:gpt-4o") && !text.includes("mini"));
+    const claude = order.findIndex((text) => text.includes("claude-sonnet-4"));
+    expect(base).toBeLessThan(claude);
   });
 
   it("paginates a long model list", async () => {

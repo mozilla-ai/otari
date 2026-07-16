@@ -1,5 +1,5 @@
 import { Button, Card, Chip } from "@heroui/react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 
 import {
   useAliases,
@@ -822,6 +822,27 @@ function Pagination({ page, pageCount, total, onPage }: { page: number; pageCoun
 
 type SortCol = "model" | "context" | "released" | "input" | "output";
 type SortDir = "asc" | "desc";
+type Sort = { col: SortCol; dir: SortDir };
+
+// Newest models first by default; the choice is remembered across refreshes.
+const SORT_STORAGE_KEY = "otari.dashboard.modelsSort";
+const DEFAULT_SORT: Sort = { col: "released", dir: "desc" };
+const SORT_COLS: SortCol[] = ["model", "context", "released", "input", "output"];
+
+function readStoredSort(): Sort {
+  if (typeof window === "undefined") return DEFAULT_SORT;
+  try {
+    const raw = window.localStorage.getItem(SORT_STORAGE_KEY);
+    if (!raw) return DEFAULT_SORT;
+    const parsed = JSON.parse(raw) as { col?: unknown; dir?: unknown };
+    if (SORT_COLS.includes(parsed.col as SortCol) && (parsed.dir === "asc" || parsed.dir === "desc")) {
+      return { col: parsed.col as SortCol, dir: parsed.dir };
+    }
+  } catch {
+    // Ignore malformed storage and fall back to the default.
+  }
+  return DEFAULT_SORT;
+}
 
 function SortableTh({
   label,
@@ -1018,7 +1039,11 @@ export function ModelsPage() {
   const [addMode, setAddMode] = useState<AddTab>("model");
   const [addTarget, setAddTarget] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const [sort, setSort] = useState<{ col: SortCol; dir: SortDir }>({ col: "model", dir: "asc" });
+  const [sort, setSort] = useState<Sort>(readStoredSort);
+
+  useEffect(() => {
+    window.localStorage.setItem(SORT_STORAGE_KEY, JSON.stringify(sort));
+  }, [sort]);
 
   const [providerFilter, setProviderFilter] = useState("all");
   const [pricingFilter, setPricingFilter] = useState("all");
