@@ -1225,6 +1225,10 @@
             "title": "Mode",
             "type": "string"
           },
+          "model_discovery": {
+            "title": "Model Discovery",
+            "type": "boolean"
+          },
           "require_pricing": {
             "title": "Require Pricing",
             "type": "boolean"
@@ -1237,6 +1241,7 @@
         "required": [
           "mode",
           "version",
+          "model_discovery",
           "default_pricing",
           "require_pricing"
         ],
@@ -3058,6 +3063,35 @@
           }
         },
         "title": "UpdateKeyRequest",
+        "type": "object"
+      },
+      "UpdateSettingsRequest": {
+        "description": "Toggle one or more runtime settings. Omitted fields are left unchanged.",
+        "properties": {
+          "default_pricing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Pricing"
+          },
+          "model_discovery": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Discovery"
+          }
+        },
+        "title": "UpdateSettingsRequest",
         "type": "object"
       },
       "UpdateUserRequest": {
@@ -5907,6 +5941,51 @@
           }
         ],
         "summary": "Get Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "description": "Persist and apply runtime setting toggles.\n\nEach provided flag is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Master-key gated: these change\nhow the gateway meters and lists models.",
+        "operationId": "update_settings_v1_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewaySettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Settings",
         "tags": [
           "settings"
         ]

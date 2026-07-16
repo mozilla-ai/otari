@@ -26,6 +26,7 @@ from gateway.services.pricing_init_service import (
     warn_if_require_pricing_without_pricing,
 )
 from gateway.services.pricing_service import configure_default_pricing
+from gateway.services.runtime_settings_service import apply_overrides_from_db
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
@@ -83,6 +84,9 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         else:
             init_db(config)
             async with create_session() as session:
+                # Persisted dashboard overrides win over config/env; apply them
+                # before pricing init so default-pricing behavior is consistent.
+                await apply_overrides_from_db(config, session)
                 await bootstrap_first_api_key(config, session)
                 await initialize_pricing_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
