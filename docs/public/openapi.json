@@ -1425,6 +1425,18 @@
             "title": "Model",
             "type": "string"
           },
+          "output_format": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Format"
+          },
           "session_label": {
             "anyOf": [
               {
