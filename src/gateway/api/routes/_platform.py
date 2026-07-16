@@ -580,6 +580,58 @@ async def _resolve_platform_web_search(
     return payload if isinstance(payload, dict) else {}
 
 
+async def _resolve_platform_memory(
+    config: GatewayConfig,
+    user_token: str,
+) -> dict[str, Any]:
+    """Resolve the workspace's memory policy via the platform.
+
+    Mirrors `_resolve_platform_web_search`: same base_url guard, timeout, dual-auth headers,
+    `_post_platform` call, and status-code handling. POSTs an empty body to
+    `/gateway/memory/resolve` and returns the parsed JSON dict on 200
+    (``{enabled, scope, recall_limit}``). Client errors forward verbatim; the platform's
+    server-side or unexpected responses collapse to 502.
+    """
+    platform_base_url = config.platform.get("base_url")
+    if not platform_base_url:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Hybrid mode is misconfigured",
+        )
+
+    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
+    resolve_url = _platform_url(platform_base_url, "/gateway/memory/resolve")
+    headers = {
+        "X-Gateway-Token": config.platform_token or "",
+        "X-User-Token": user_token,
+    }
+    body: dict[str, Any] = {}
+
+    try:
+        response = await _post_platform(url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000)
+    except (httpx.TimeoutException, httpx.NetworkError):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Authorization service unavailable",
+        ) from None
+
+    if response.status_code == 200:
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
+    if response.status_code in {401, 402, 403, 404, 429}:
+        detail = _safe_detail_from_platform(response, "Memory resolution failed")
+        response_headers: dict[str, str] | None = None
+        if response.status_code == 429 and response.headers.get("Retry-After"):
+            response_headers = {"Retry-After": response.headers["Retry-After"]}
+        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
+
+    raise HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Authorization service unavailable",
+    )
+
+
 async def _resolve_platform_code_execution(
     config: GatewayConfig,
     user_token: str,

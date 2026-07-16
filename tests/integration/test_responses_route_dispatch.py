@@ -18,7 +18,16 @@ from fastapi.testclient import TestClient
 from openai.types.responses import ResponseCompletedEvent, ResponseTextDeltaEvent, ResponseUsage
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
+from gateway.services.composite_backend import CompositeToolBackend
+
 _MODEL = "openai:gpt-4o-mini"
+
+
+def _assert_pool_wraps(pool_seen: list[Any], backend: Any) -> None:
+    assert len(pool_seen) == 1
+    pool = pool_seen[0]
+    assert isinstance(pool, CompositeToolBackend)
+    assert pool._entered == [backend]
 
 
 def _response(*, output: list[Any] | None = None, status: str = "completed") -> Response:
@@ -257,7 +266,7 @@ def test_code_execution_dispatches_through_sandbox_backend(
         )
 
     assert resp.status_code == 200, resp.text
-    assert pool_seen == [fake_backend]
+    _assert_pool_wraps(pool_seen, fake_backend)
 
 
 def test_web_search_dispatches_through_web_search_backend(
@@ -296,7 +305,7 @@ def test_web_search_dispatches_through_web_search_backend(
         )
 
     assert resp.status_code == 200, resp.text
-    assert pool_seen == [fake_backend]
+    _assert_pool_wraps(pool_seen, fake_backend)
 
 
 # ---------- provider-named keyword passthrough ----------
@@ -664,7 +673,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
 
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("text/event-stream")
-    assert pool_seen == [fake_backend], "tool loop didn't receive the SandboxBackend"
+    _assert_pool_wraps(pool_seen, fake_backend)
 
 
 def test_stream_sandbox_unreachable_returns_502(
