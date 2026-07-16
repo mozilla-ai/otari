@@ -77,6 +77,9 @@ export interface ModelObject {
   pricing: ModelPricingInfo | null;
   // "configured" (DB price), "default" (genai-prices fallback), or "none".
   pricing_source: string;
+  // Context-window token limit from the bundled genai-prices dataset, or null
+  // when the dataset does not know the model or lists no window for it.
+  context_window: number | null;
 }
 
 export interface ModelListResponse {
@@ -118,6 +121,39 @@ export interface AliasResponse {
 export interface CreateAliasRequest {
   name: string;
   target: string;
+}
+
+// Curated capability flags for a provider, from the bundled any-llm metadata.
+// True means the provider (not necessarily every model it serves) supports it.
+export interface ProviderCapabilities {
+  streaming: boolean;
+  reasoning: boolean;
+  vision: boolean;
+  pdf: boolean;
+  embeddings: boolean;
+  image_generation: boolean;
+  audio: boolean;
+  rerank: boolean;
+  responses_api: boolean;
+  moderation: boolean;
+  list_models: boolean;
+}
+
+// Static, network-free metadata for one configured provider instance. `instance`
+// is the configured key (may differ from `provider_type`, the any-llm backend).
+export interface ProviderInfo {
+  instance: string;
+  provider_type: string;
+  name: string;
+  doc_url: string | null;
+  description: string | null;
+  env_key: string | null;
+  pricing_urls: string[];
+  capabilities: ProviderCapabilities;
+}
+
+export interface ProvidersResponse {
+  providers: ProviderInfo[];
 }
 
 export interface PricingResponse {

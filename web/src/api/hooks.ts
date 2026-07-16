@@ -11,6 +11,7 @@ import type {
   ModelListResponse,
   ModelObject,
   PricingResponse,
+  ProvidersResponse,
   SetPricingRequest,
   UsageEntry,
   UsageSummary,
@@ -26,6 +27,7 @@ const ALIASES = "aliases";
 // and a price change cannot alter which models a provider serves. Sharing the
 // key would fire a live provider call on every save.
 const DISCOVERABLE = "discoverable";
+const PROVIDERS = "providers";
 const BUILD = "build";
 
 // How often an open tab asks whether the app it is running is still the one the
@@ -127,6 +129,17 @@ export function useDiscoverableModels() {
   return useQuery({
     queryKey: [DISCOVERABLE],
     queryFn: () => apiFetch<DiscoverableModelsResponse>("/v1/models/discoverable"),
+    staleTime: 5 * 60_000,
+  });
+}
+
+// Static metadata for every configured provider: capabilities, doc and pricing
+// links, display name. Network-free gateway-side (bundled datasets), so it does
+// not move within a session; kept fresh for a few minutes like discovery.
+export function useProviders() {
+  return useQuery({
+    queryKey: [PROVIDERS],
+    queryFn: () => apiFetch<ProvidersResponse>("/v1/providers"),
     staleTime: 5 * 60_000,
   });
 }

@@ -19,6 +19,22 @@ export function formatCost(value: number | null | undefined): string {
   }).format(value);
 }
 
+// Compact token counts for context windows: 128000 -> "128K", 1000000 -> "1M".
+// Returns an em-dash placeholder when unknown so table cells stay aligned.
+export function formatContext(value: number | null | undefined): string {
+  if (value == null) {
+    return "—";
+  }
+  if (value >= 1_000_000) {
+    const millions = value / 1_000_000;
+    return `${Number.isInteger(millions) ? millions : millions.toFixed(1)}M`;
+  }
+  if (value >= 1000) {
+    return `${Math.round(value / 1000)}K`;
+  }
+  return String(value);
+}
+
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) {
     return "—";
