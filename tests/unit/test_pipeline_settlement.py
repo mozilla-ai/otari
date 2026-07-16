@@ -14,6 +14,7 @@ platform-fallback streaming paths. These tests pin that contract:
 * a pre-stream dispatch failure refunds the reservation for every format.
 """
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -304,6 +305,102 @@ async def test_client_disconnect_refunds(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert settlement.refunded == 1
     assert settlement.reconciled == []
+
+
+# ---------------------------------------------------------------------------
+# Platform usage reports scheduled from streaming callbacks are not lost
+# ---------------------------------------------------------------------------
+
+
+def _build_platform(stream: AsyncIterator[ChatCompletionChunk]) -> Any:
+    return build_streaming_response(
+        adapter=chat._ADAPTER,
+        stream=stream,
+        provider=LLMProvider.OPENAI,
+        model="gpt-4",
+        config=GatewayConfig(),
+        db=None,
+        log_writer=None,
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+        platform_correlation_id="corr-1",
+        platform_request_id="req-1",
+    )
+
+
+@pytest.mark.asyncio
+async def test_platform_usage_report_task_is_tracked_until_done(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scheduled report task must be strongly referenced while in flight
+    (a bare fire-and-forget task can be garbage collected mid-run) and
+    discarded once it completes.
+    """
+    tracked: set[asyncio.Task[None]] = set()
+    monkeypatch.setattr(pipeline, "_USAGE_REPORT_TASKS", tracked)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_report(**kwargs: Any) -> None:
+        started.set()
+        await release.wait()
+
+    monkeypatch.setattr(pipeline, "_report_platform_usage", slow_report)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+
+    await _drain(_build_platform(stream()))
+    await asyncio.wait_for(started.wait(), timeout=2)
+
+    assert len(tracked) == 1
+    task = next(iter(tracked))
+    release.set()
+    await asyncio.wait_for(task, timeout=2)
+    for _ in range(10):
+        if not tracked:
+            break
+        await asyncio.sleep(0)
+    assert not tracked
+
+
+@pytest.mark.asyncio
+async def test_failed_platform_usage_report_logs_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A report that raises must surface in the logs instead of vanishing
+    with the unreferenced task.
+    """
+    monkeypatch.setattr(pipeline, "_USAGE_REPORT_TASKS", set(), raising=False)
+    warnings: list[tuple[str, tuple[Any, ...]]] = []
+
+    class _LoggerRecorder:
+        def warning(self, msg: str, *args: Any) -> None:
+            warnings.append((msg, args))
+
+        def __getattr__(self, name: str) -> Any:
+            return lambda *args, **kwargs: None
+
+    monkeypatch.setattr(pipeline, "logger", _LoggerRecorder())
+
+    async def failing_report(**kwargs: Any) -> None:
+        raise RuntimeError("usage endpoint down")
+
+    monkeypatch.setattr(pipeline, "_report_platform_usage", failing_report)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+
+    await _drain(_build_platform(stream()))
+    for _ in range(20):
+        if warnings:
+            break
+        await asyncio.sleep(0)
+
+    assert warnings, "failed usage report was not logged"
+    assert "corr-1" in warnings[0][1]
 
 
 # ---------------------------------------------------------------------------

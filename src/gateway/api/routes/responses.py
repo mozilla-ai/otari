@@ -1,9 +1,7 @@
-import asyncio
 import uuid
 from collections.abc import AsyncIterator, Callable
 from typing import Annotated, Any
 
-import httpx
 from any_llm import AnyLLM, LLMProvider, aresponses
 from any_llm.types.completion import CompletionUsage
 from any_llm.types.responses import Response as ResponsesResponse
@@ -20,16 +18,12 @@ from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
 from gateway.api.routes._helpers import latest_user_text, text_from_content
 from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
-    ALL_PROVIDERS_FAILED_DETAIL,
-    ALL_PROVIDERS_TIMED_OUT_DETAIL,
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
-    SANDBOX_UNREACHABLE_DETAIL,
-    WEB_SEARCH_UNREACHABLE_DETAIL,
     ErrorKind,
     classify_provider_error,
     prepare_gateway_tools,
-    rate_limit_headers,
+    raise_all_streaming_attempts_failed,
     release_reservation,
     resolve_dispatch_provider,
     resolve_request_context,
@@ -43,7 +37,6 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
-from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.services.log_writer import LogWriter
@@ -53,9 +46,7 @@ from gateway.services.mcp_loop_responses import (
     responses_tool_loop,
     responses_tool_loop_stream,
 )
-from gateway.services.sandbox_backend import SandboxNotReachableError
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
-from gateway.services.web_search_backend import WebSearchNotReachableError
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
 
 router = APIRouter(prefix="/v1", tags=["responses"])
@@ -266,12 +257,10 @@ async def create_response(
     """OpenAI-compatible Responses endpoint.
 
     Supports MCP tool-use loops, sandboxed code execution, and SearXNG
-    web_search in both standalone mode and hybrid mode. Hybrid-mode
-    requests resolve credentials via the platform service and (for
-    non-tool-loop requests) get multi-attempt fallback across the resolved
-    route. Tool-loop requests collapse to a single attempt — once
-    ``on_first_response`` lock-in plumbing lands across the codebase, a
-    follow-up will enable pre-lock-in fallback for tool-loop requests too.
+    web_search in both standalone mode and hybrid mode. Hybrid-mode requests
+    resolve credentials via the platform service and get multi-attempt
+    fallback across the resolved route, tool-loop requests included (fallback
+    applies up to the pre-lock-in point, same as chat).
     """
     # max_output_tokens comes from an extra="allow" body, so it may be absent,
     # non-int, or negative — only trust a non-negative int for the estimate.
@@ -385,7 +374,7 @@ async def create_response(
     # Streaming path
     # ------------------------------------------------------------------
     if stream:
-        if ctx.hybrid_mode and not tool_ctx.use_tool_loop:
+        if ctx.hybrid_mode:
             route = ctx.route
             assert route is not None  # guaranteed by the hybrid-mode preamble
             if not route.attempts:
@@ -407,61 +396,19 @@ async def create_response(
             except HTTPException:
                 raise
             except Exception as exc:
-                logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
-                # Classify when there is a single attempt, or when the failure is
-                # a non-retryable invalid request (400/422): that short-circuits
-                # the fallback and is definitive regardless of attempt count, so
-                # it matches the non-streaming path. Otherwise surface the
-                # multi-attempt aggregate.
-                mapping = classify_provider_error(exc)
-                invalid_request = mapping is not None and mapping.status_code == status.HTTP_400_BAD_REQUEST
-                if invalid_request or len(route.attempts) <= 1:
-                    raise _ADAPTER.provider_error(exc) from exc
-                if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
-                    raise HTTPException(
-                        status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                        detail=ALL_PROVIDERS_TIMED_OUT_DETAIL,
-                    ) from exc
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=ALL_PROVIDERS_FAILED_DETAIL,
-                ) from exc
+                raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
 
-        # Single-attempt streaming (standalone, or hybrid + tool-loop).
-        platform_correlation_id: str | None = None
-        platform_request_id: str | None = None
-        if ctx.hybrid_mode:
-            route = ctx.route
-            assert route is not None  # guaranteed by the hybrid-mode preamble
-            if not route.attempts:
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=NO_RESOLVABLE_PROVIDER_DETAIL,
-                )
-            attempt = route.attempts[0]
-            provider = LLMProvider(attempt.provider)
-            model = attempt.model
-            call_kwargs = _ADAPTER.attempt_kwargs(attempt, base_request_fields)
-            platform_correlation_id = attempt.attempt_id
-            platform_request_id = route.request_id
-            stream_billing: Any = provider
-            display_model: str | None = None
-        else:
-            call_kwargs = {**provider_kwargs, **base_request_fields, "model": model}
-            stream_billing = billing_instance
-            display_model = resolved.alias
-
+        # Standalone: single attempt streaming.
+        call_kwargs = {**provider_kwargs, **base_request_fields, "model": model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
             ctx=ctx,
             tool_ctx=tool_ctx,
             call_kwargs=call_kwargs,
-            provider=stream_billing,
+            provider=billing_instance,
             model=model,
-            platform_correlation_id=platform_correlation_id,
-            platform_request_id=platform_request_id,
             session_label=request_body.session_label,
-            display_model=display_model,
+            display_model=resolved.alias,
         )
 
     # ------------------------------------------------------------------
@@ -470,32 +417,17 @@ async def create_response(
     if ctx.hybrid_mode:
         route = ctx.route
         assert route is not None  # guaranteed by the hybrid-mode preamble
-        try:
-            result = await run_platform_non_stream(
-                adapter=_ADAPTER,
-                route=route,
-                base_request_fields=base_request_fields,
-                tool_ctx=tool_ctx,
-                response=response,
-                background_tasks=background_tasks,
-                config=config,
-                rate_limit_info=ctx.rate_limit_info,
-                session_label=request_body.session_label,
-            )
-        except HTTPException:
-            raise
-        except SandboxNotReachableError as e:
-            logger.error("Sandbox unreachable: %s", e)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=SANDBOX_UNREACHABLE_DETAIL,
-            ) from e
-        except WebSearchNotReachableError as e:
-            logger.error("Web search backend unreachable: %s", e)
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=WEB_SEARCH_UNREACHABLE_DETAIL,
-            ) from e
+        result = await run_platform_non_stream(
+            adapter=_ADAPTER,
+            route=route,
+            base_request_fields=base_request_fields,
+            tool_ctx=tool_ctx,
+            response=response,
+            background_tasks=background_tasks,
+            config=config,
+            rate_limit_info=ctx.rate_limit_info,
+            session_label=request_body.session_label,
+        )
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
@@ -505,13 +437,10 @@ async def create_response(
         ctx=ctx,
         tool_ctx=tool_ctx,
         call_kwargs=call_kwargs,
+        response=response,
         provider=billing_instance,
         model=model,
         display_model=resolved.alias,
     )
-
-    if ctx.rate_limit_info:
-        for key, value in rate_limit_headers(ctx.rate_limit_info).items():
-            response.headers[key] = value
 
     return result.model_dump(exclude_none=True)

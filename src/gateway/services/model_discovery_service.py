@@ -47,24 +47,6 @@ class ModelCache:
         """Store a provider's model list with the current timestamp."""
         self._store[provider] = _CacheEntry(models=list(models), cached_at=time.monotonic())
 
-    def get_all_cached(self, ttl: int | None = None) -> dict[str, list[Model]]:
-        """Return stored entries, optionally filtering by TTL.
-
-        Returns shallow copies so callers cannot mutate the internal cache.
-
-        Args:
-            ttl: If set, only return entries that are still valid. If None, return all.
-        """
-        result: dict[str, list[Model]] = {}
-        now = time.monotonic()
-        for provider, entry in list(self._store.items()):
-            if ttl is not None:
-                elapsed = now - entry.cached_at
-                if ttl <= 0 or elapsed >= ttl:
-                    continue
-            result[provider] = list(entry.models)
-        return result
-
     def clear(self, provider: str | None = None) -> None:
         """Invalidate one or all providers."""
         if provider is None:

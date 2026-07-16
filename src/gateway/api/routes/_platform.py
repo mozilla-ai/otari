@@ -27,6 +27,8 @@ from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
 from gateway.models.mcp import McpServerConfig
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
+from gateway.services.sandbox_backend import SandboxNotReachableError
+from gateway.services.web_search_backend import WebSearchNotReachableError
 
 T = TypeVar("T")
 
@@ -104,6 +106,22 @@ class _AttemptFailure(NamedTuple):
     provider: str
     model: str
     error_class: str
+
+
+def default_attempt_kwargs(
+    attempt: ResolvedAttempt,
+    base_request_fields: dict[str, Any],
+) -> dict[str, Any]:
+    """Standard platform-attempt kwargs: credentials + ``provider:model`` selector."""
+    attempt_provider = LLMProvider(attempt.provider)
+    kwargs: dict[str, Any] = {"api_key": attempt.api_key}
+    if attempt.api_base:
+        kwargs["api_base"] = attempt.api_base
+    return {
+        **kwargs,
+        **base_request_fields,
+        "model": f"{attempt_provider.value}:{attempt.model}",
+    }
 
 
 def _provider_failure_http_exc(exc: BaseException, *, fallback_detail: str) -> HTTPException:
@@ -188,16 +206,7 @@ async def run_platform_attempts(
     last_exc: BaseException | None = None
 
     for attempt in attempts:
-        attempt_provider = LLMProvider(attempt.provider)
-        attempt_kwargs: dict[str, Any] = {"api_key": attempt.api_key}
-        if attempt.api_base:
-            attempt_kwargs["api_base"] = attempt.api_base
-
-        completion_kwargs = {
-            **attempt_kwargs,
-            **base_request_fields,
-            "model": f"{attempt_provider.value}:{attempt.model}",
-        }
+        completion_kwargs = default_attempt_kwargs(attempt, base_request_fields)
 
         # Per-attempt lock-in flag. Flipped the moment the upstream returns
         # its first assistant message via the ``_mark_locked_in`` callback
@@ -231,6 +240,13 @@ async def run_platform_attempts(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=str(exc),
             ) from exc
+        except (SandboxNotReachableError, WebSearchNotReachableError):
+            # Gateway-side backend failure, not an upstream provider error:
+            # the same backend serves every attempt, so falling through cannot
+            # help, and reporting it as a provider attempt error would be
+            # wrong. Propagate raw so ``run_platform_non_stream`` maps it to a
+            # 502 with the backend-specific detail.
+            raise
         except BaseException as exc:
             retryable, error_class = classify_error(exc)
             report_attempt_outcome(attempt, "error", None, error_class)
@@ -349,13 +365,23 @@ async def _post_platform(
         return await client.post(url, headers=headers, json=body)
 
 
-async def _resolve_platform_credentials(
+async def _post_resolve(
     config: GatewayConfig,
+    *,
     user_token: str,
-    model_selector: str,
-) -> ResolvedRoute:
-    """Call the platform's ``/gateway/provider-keys/resolve`` to get the
-    routing plan (one or more ``ResolvedAttempt`` entries).
+    path: str,
+    body: dict[str, Any],
+    client_error_detail: str,
+) -> Any:
+    """POST ``body`` to a platform resolve endpoint and return the parsed JSON.
+
+    Owns the pieces every resolve helper shares: the base_url guard, the
+    gateway/user token headers, the bounded POST, and the status-code ladder.
+    A 200 returns the parsed payload; client errors (401/402/403/404/429) are
+    forwarded with the platform's detail when it is a safe string (falling back
+    to ``client_error_detail``), keeping Retry-After on a 429; timeouts,
+    network errors, the platform's server-side failures, and any unexpected
+    status collapse to a 502.
     """
     platform_base_url = config.platform.get("base_url")
     if not platform_base_url:
@@ -364,22 +390,18 @@ async def _resolve_platform_credentials(
             detail="Hybrid mode is misconfigured",
         )
 
-    provider, model_name = _split_model_selector(model_selector)
     timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
-    resolve_url = _platform_url(platform_base_url, "/gateway/provider-keys/resolve")
-    resolve_headers = {
+    resolve_url = _platform_url(platform_base_url, path)
+    headers = {
         "X-Gateway-Token": config.platform_token or "",
         "X-User-Token": user_token,
     }
-    resolve_body: dict[str, Any] = {"model": model_name}
-    if provider:
-        resolve_body["provider"] = provider
 
     try:
         response = await _post_platform(
             url=resolve_url,
-            headers=resolve_headers,
-            body=resolve_body,
+            headers=headers,
+            body=body,
             timeout_seconds=timeout_ms / 1000,
         )
     except (httpx.TimeoutException, httpx.NetworkError):
@@ -389,26 +411,42 @@ async def _resolve_platform_credentials(
         ) from None
 
     if response.status_code == 200:
-        payload = response.json()
-        return _parse_resolve_payload(payload)
+        return response.json()
 
     if response.status_code in {401, 402, 403, 404, 429}:
-        detail = _safe_detail_from_platform(response, "Authorization request rejected")
-        headers: dict[str, str] | None = None
+        detail = _safe_detail_from_platform(response, client_error_detail)
+        response_headers: dict[str, str] | None = None
         if response.status_code == 429 and response.headers.get("Retry-After"):
-            headers = {"Retry-After": response.headers["Retry-After"]}
-        raise HTTPException(status_code=response.status_code, detail=detail, headers=headers)
-
-    if response.status_code == 422 or response.status_code >= 500:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Authorization service unavailable",
-        )
+            response_headers = {"Retry-After": response.headers["Retry-After"]}
+        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
 
     raise HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail="Authorization service unavailable",
     )
+
+
+async def _resolve_platform_credentials(
+    config: GatewayConfig,
+    user_token: str,
+    model_selector: str,
+) -> ResolvedRoute:
+    """Call the platform's ``/gateway/provider-keys/resolve`` to get the
+    routing plan (one or more ``ResolvedAttempt`` entries).
+    """
+    provider, model_name = _split_model_selector(model_selector)
+    resolve_body: dict[str, Any] = {"model": model_name}
+    if provider:
+        resolve_body["provider"] = provider
+
+    payload = await _post_resolve(
+        config,
+        user_token=user_token,
+        path="/gateway/provider-keys/resolve",
+        body=resolve_body,
+        client_error_detail="Authorization request rejected",
+    )
+    return _parse_resolve_payload(payload)
 
 
 def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
@@ -493,63 +531,23 @@ async def _resolve_platform_mcp_servers(
     mcp_server_ids: list[uuid.UUID],
 ) -> list[McpServerConfig]:
     """Swap workspace-scoped MCP server ids for inline configs by calling the platform."""
-    platform_base_url = config.platform.get("base_url")
-    if not platform_base_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Hybrid mode is misconfigured",
-        )
-
-    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
-    resolve_url = _platform_url(platform_base_url, "/gateway/mcp-servers/resolve")
-    headers = {
-        "X-Gateway-Token": config.platform_token or "",
-        "X-User-Token": user_token,
-    }
-    body: dict[str, Any] = {"mcp_server_ids": [str(uid) for uid in mcp_server_ids]}
-
-    try:
-        response = await _post_platform(url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000)
-    except (httpx.TimeoutException, httpx.NetworkError):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Authorization service unavailable",
-        ) from None
-
-    if response.status_code == 200:
-        payload = response.json()
-        return [
-            McpServerConfig(
-                name=s["name"],
-                url=s["url"],
-                authorization_token=s.get("authorization_token"),
-                purpose_hint=s.get("purpose_hint"),
-                allowed_tools=s.get("allowed_tools"),
-            )
-            for s in payload.get("servers", [])
-        ]
-
-    # Mirror the status-code semantics of `_resolve_platform_credentials`:
-    # client errors (auth/quota/not-found/rate-limit) are forwarded so the
-    # caller sees the real status (and can honour Retry-After on 429), while
-    # the platform's server-side or unexpected responses collapse to 502.
-    if response.status_code in {401, 402, 403, 404, 429}:
-        detail = _safe_detail_from_platform(response, "MCP server resolution failed")
-        response_headers: dict[str, str] | None = None
-        if response.status_code == 429 and response.headers.get("Retry-After"):
-            response_headers = {"Retry-After": response.headers["Retry-After"]}
-        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
-
-    if response.status_code == 422 or response.status_code >= 500:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Authorization service unavailable",
-        )
-
-    raise HTTPException(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        detail="Authorization service unavailable",
+    payload = await _post_resolve(
+        config,
+        user_token=user_token,
+        path="/gateway/mcp-servers/resolve",
+        body={"mcp_server_ids": [str(uid) for uid in mcp_server_ids]},
+        client_error_detail="MCP server resolution failed",
     )
+    return [
+        McpServerConfig(
+            name=s["name"],
+            url=s["url"],
+            authorization_token=s.get("authorization_token"),
+            purpose_hint=s.get("purpose_hint"),
+            allowed_tools=s.get("allowed_tools"),
+        )
+        for s in payload.get("servers", [])
+    ]
 
 
 async def _resolve_platform_web_search(
@@ -558,62 +556,19 @@ async def _resolve_platform_web_search(
 ) -> dict[str, Any]:
     """Resolve the workspace's web-search policy via the platform.
 
-    Mirrors `_resolve_platform_mcp_servers`: same base_url guard, timeout,
-    headers, `_post_platform` call, and status-code handling. POSTs an empty
-    body to `/gateway/web-search/resolve` and returns the parsed JSON dict on
-    200 (``{enabled, provider, max_results, purpose_hint, allowed_domains,
-    blocked_domains, provider_options}``). Client errors (auth/quota/not-found/
-    rate-limit) forward verbatim; the platform's server-side or unexpected
-    responses collapse to 502.
+    POSTs an empty body to `/gateway/web-search/resolve` (via `_post_resolve`,
+    which owns the shared guard/headers/status-code ladder) and returns the
+    parsed JSON dict on 200 (``{enabled, provider, max_results, purpose_hint,
+    allowed_domains, blocked_domains, provider_options}``).
     """
-    platform_base_url = config.platform.get("base_url")
-    if not platform_base_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Hybrid mode is misconfigured",
-        )
-
-    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
-    resolve_url = _platform_url(platform_base_url, "/gateway/web-search/resolve")
-    headers = {
-        "X-Gateway-Token": config.platform_token or "",
-        "X-User-Token": user_token,
-    }
-    body: dict[str, Any] = {}
-
-    try:
-        response = await _post_platform(url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000)
-    except (httpx.TimeoutException, httpx.NetworkError):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Authorization service unavailable",
-        ) from None
-
-    if response.status_code == 200:
-        payload = response.json()
-        return payload if isinstance(payload, dict) else {}
-
-    # Mirror the status-code semantics of `_resolve_platform_mcp_servers`:
-    # client errors (auth/quota/not-found/rate-limit) are forwarded so the
-    # caller sees the real status (and can honour Retry-After on 429), while
-    # the platform's server-side or unexpected responses collapse to 502.
-    if response.status_code in {401, 402, 403, 404, 429}:
-        detail = _safe_detail_from_platform(response, "Web search resolution failed")
-        response_headers: dict[str, str] | None = None
-        if response.status_code == 429 and response.headers.get("Retry-After"):
-            response_headers = {"Retry-After": response.headers["Retry-After"]}
-        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
-
-    if response.status_code == 422 or response.status_code >= 500:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Authorization service unavailable",
-        )
-
-    raise HTTPException(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        detail="Authorization service unavailable",
+    payload = await _post_resolve(
+        config,
+        user_token=user_token,
+        path="/gateway/web-search/resolve",
+        body={},
+        client_error_detail="Web search resolution failed",
     )
+    return payload if isinstance(payload, dict) else {}
 
 
 async def _resolve_platform_code_execution(
@@ -622,57 +577,20 @@ async def _resolve_platform_code_execution(
 ) -> dict[str, Any]:
     """Resolve the workspace's code-execution policy via the platform.
 
-    Mirrors `_resolve_platform_web_search`: same base_url guard, timeout, headers,
-    `_post_platform` call, and status-code handling. POSTs an empty body to
-    `/gateway/code-execution/resolve` and returns the parsed JSON dict on 200
-    (``{enabled, tools, default_purpose_hint, max_iterations, exec_timeout_s}``,
-    soft limits already clamped to operator ceilings platform-side). Client errors
-    forward verbatim; server-side/unexpected responses collapse to 502.
+    POSTs an empty body to `/gateway/code-execution/resolve` (via
+    `_post_resolve`, which owns the shared guard/headers/status-code ladder)
+    and returns the parsed JSON dict on 200 (``{enabled, tools,
+    default_purpose_hint, max_iterations, exec_timeout_s}``, soft limits
+    already clamped to operator ceilings platform-side).
     """
-    platform_base_url = config.platform.get("base_url")
-    if not platform_base_url:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Platform mode is misconfigured",
-        )
-
-    timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
-    resolve_url = _platform_url(platform_base_url, "/gateway/code-execution/resolve")
-    headers = {
-        "X-Gateway-Token": config.platform_token or "",
-        "X-User-Token": user_token,
-    }
-    body: dict[str, Any] = {}
-
-    try:
-        response = await _post_platform(url=resolve_url, headers=headers, body=body, timeout_seconds=timeout_ms / 1000)
-    except (httpx.TimeoutException, httpx.NetworkError):
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Authorization service unavailable",
-        ) from None
-
-    if response.status_code == 200:
-        payload = response.json()
-        return payload if isinstance(payload, dict) else {}
-
-    if response.status_code in {401, 402, 403, 404, 429}:
-        detail = _safe_detail_from_platform(response, "Code execution resolution failed")
-        response_headers: dict[str, str] | None = None
-        if response.status_code == 429 and response.headers.get("Retry-After"):
-            response_headers = {"Retry-After": response.headers["Retry-After"]}
-        raise HTTPException(status_code=response.status_code, detail=detail, headers=response_headers)
-
-    if response.status_code == 422 or response.status_code >= 500:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Authorization service unavailable",
-        )
-
-    raise HTTPException(
-        status_code=status.HTTP_502_BAD_GATEWAY,
-        detail="Authorization service unavailable",
+    payload = await _post_resolve(
+        config,
+        user_token=user_token,
+        path="/gateway/code-execution/resolve",
+        body={},
+        client_error_detail="Code execution resolution failed",
     )
+    return payload if isinstance(payload, dict) else {}
 
 
 async def _report_platform_usage(

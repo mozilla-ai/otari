@@ -43,7 +43,7 @@ def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.Mon
         users_response = client.post("/v1/users", json={"user_id": "u1"})
         keys_response = client.get("/v1/keys")
         budgets_response = client.get("/v1/budgets")
-        spend_response = client.get("/v1/spend")
+        usage_response = client.get("/v1/usage")
 
     expected = {"detail": "This endpoint is not available in hybrid mode. Manage this resource via the platform UI."}
     assert users_response.status_code == 404
@@ -52,8 +52,8 @@ def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.Mon
     assert keys_response.json() == expected
     assert budgets_response.status_code == 404
     assert budgets_response.json() == expected
-    assert spend_response.status_code == 404
-    assert spend_response.json() == expected
+    assert usage_response.status_code == 404
+    assert usage_response.json() == expected
 
     reset_config()
     reset_db()

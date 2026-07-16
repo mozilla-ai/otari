@@ -36,6 +36,7 @@ _DEFAULT_PURPOSE = "user_data"
 def _resolve_user(
     auth_result: tuple[APIKey | None, bool],
     user: str | None,
+    config: GatewayConfig,
 ) -> str:
     api_key, is_master_key = auth_result
     return resolve_user_id(
@@ -58,6 +59,7 @@ def _resolve_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="'user' field does not match the authenticated API key's user",
         ),
+        reject_mismatch=config.reject_user_mismatch,
     )
 
 
@@ -123,7 +125,7 @@ async def create_file(
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
-    user_id = _resolve_user(auth_result, user)
+    user_id = _resolve_user(auth_result, user, config)
 
     data = await _read_capped(file, config.files_max_bytes)
     if not data:
@@ -177,7 +179,7 @@ async def list_files(
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
-    user_id = _resolve_user(auth_result, user)
+    user_id = _resolve_user(auth_result, user, config)
     stmt = select(FileObject).where(
         FileObject.user_id == user_id,
         FileObject.deleted_at.is_(None),
@@ -203,7 +205,7 @@ async def get_file(
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
-    user_id = _resolve_user(auth_result, user)
+    user_id = _resolve_user(auth_result, user, config)
     record = await fetch_file(db, file_id, user_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
@@ -223,7 +225,7 @@ async def get_file_content(
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
-    user_id = _resolve_user(auth_result, user)
+    user_id = _resolve_user(auth_result, user, config)
     record = await fetch_file(db, file_id, user_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
@@ -249,7 +251,7 @@ async def delete_file(
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
-    user_id = _resolve_user(auth_result, user)
+    user_id = _resolve_user(auth_result, user, config)
     record = await fetch_file(db, file_id, user_id)
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")

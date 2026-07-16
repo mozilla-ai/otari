@@ -203,6 +203,44 @@ async def find_model_pricing(
     return pricing
 
 
+# ``ModelPricing`` only has per-million-token rate columns, so endpoints whose
+# billable unit is not a token overload ``input_price_per_million`` with a
+# different unit convention. Each convention gets a named helper below so the
+# unit is visible at the call site instead of an anonymous expression that can
+# be miscopied into a new route and misbill by a factor of a million. Dedicated
+# per-unit columns would need a schema migration (deferred; see issue #259).
+
+
+def input_token_cost(tokens: int, pricing: ModelPricing) -> float:
+    """USD cost of ``tokens`` input tokens at the per-million-token rate.
+
+    The standard convention: ``input_price_per_million`` is USD per million
+    input tokens. Used by embeddings and rerank, which bill input tokens only.
+    """
+    return (tokens / 1_000_000) * pricing.input_price_per_million
+
+
+def flat_request_cost(pricing: ModelPricing | None) -> float:
+    """Flat USD cost of one request for a model priced per request.
+
+    Moderations convention: ``input_price_per_million`` stores the per-request
+    rate scaled by 1e6 (USD per million requests), so one request costs the
+    stored rate divided by 1e6. Unpriced models are treated as free.
+    """
+    if pricing is None or not pricing.input_price_per_million:
+        return 0.0
+    return pricing.input_price_per_million / 1_000_000
+
+
+def per_image_cost(n_images: int, pricing: ModelPricing) -> float:
+    """USD cost of ``n_images`` generated images.
+
+    Images convention: despite the name, ``input_price_per_million`` stores raw
+    USD per image (no scaling, no division).
+    """
+    return n_images * pricing.input_price_per_million
+
+
 def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricing: bool) -> bool:
     """Return True when the request must be rejected for lacking pricing.
 

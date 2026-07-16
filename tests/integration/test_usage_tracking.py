@@ -1,16 +1,15 @@
 import asyncio
 import json
 import os
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session
 
-from gateway.core.config import GatewayConfig
 from gateway.models.entities import UsageLog, User
 
 from .conftest import MODEL_NAME
@@ -24,16 +23,13 @@ async def test_completion_accuracy(
     client: TestClient,
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
-    test_config: GatewayConfig,
     test_user: dict[str, Any],
     test_messages: list[dict[str, str]],
     model_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
 ) -> None:
-    engine = create_engine(test_config.database_url)
-    session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
     # Capture initial user spend
-    db = session_local()
+    db = db_session_factory()
     try:
         user = db.query(User).filter(User.user_id == test_user["user_id"]).first()
         initial_spend = float(user.spend) if user else 0.0
@@ -68,7 +64,7 @@ async def test_completion_accuracy(
     output_price = model_pricing["output_price_per_million"]
     expected_cost = (prompt_tokens / 1_000_000) * input_price + (completion_tokens / 1_000_000) * output_price
 
-    db = session_local()
+    db = db_session_factory()
     try:
         # Check usage log
         usage_logs = db.query(UsageLog).filter(UsageLog.api_key_id == api_key_obj["id"]).all()
@@ -121,17 +117,14 @@ async def test_streaming_completion_accuracy(
     client: TestClient,
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
-    test_config: GatewayConfig,
     test_user: dict[str, Any],
     test_messages_with_longer_response: list[dict[str, str]],
     model_pricing: dict[str, Any],
+    db_session_factory: Callable[[], Session],
 ) -> None:
     """Test that streaming requests correctly aggregate usage, calculate costs, and update user spend."""
-    engine = create_engine(test_config.database_url)
-    session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
     # Capture initial user spend
-    db = session_local()
+    db = db_session_factory()
     try:
         user = db.query(User).filter(User.user_id == test_user["user_id"]).first()
         initial_spend = float(user.spend) if user else 0.0
@@ -195,7 +188,7 @@ async def test_streaming_completion_accuracy(
     await asyncio.sleep(1)
 
     # Verify usage log and user spend
-    db = session_local()
+    db = db_session_factory()
     try:
         # Check usage log
         usage_logs = db.query(UsageLog).filter(UsageLog.api_key_id == api_key_obj["id"]).all()
@@ -257,9 +250,9 @@ async def test_failed_request_logs_error(
     client: TestClient,
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
-    test_config: GatewayConfig,
     test_user: dict[str, Any],
     test_messages: list[dict[str, str]],
+    db_session: Session,
 ) -> None:
     """Test that failed requests are logged with error status."""
     response = client.post(
@@ -273,27 +266,20 @@ async def test_failed_request_logs_error(
 
     assert response.status_code == 502
 
-    engine = create_engine(test_config.database_url)
-    session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    db = session_local()
+    usage_logs = db_session.query(UsageLog).filter(UsageLog.api_key_id == api_key_obj["id"]).all()
 
-    try:
-        usage_logs = db.query(UsageLog).filter(UsageLog.api_key_id == api_key_obj["id"]).all()
+    assert len(usage_logs) > 0
+    log = usage_logs[0]
 
-        assert len(usage_logs) > 0
-        log = usage_logs[0]
-
-        assert log.status == "error"
-        assert log.error_message is not None
-    finally:
-        db.close()
+    assert log.status == "error"
+    assert log.error_message is not None
 
 
 def test_spend_incremented_via_reconciliation(
     client: TestClient,
     master_key_header: dict[str, str],
-    test_config: GatewayConfig,
     test_messages: list[dict[str, str]],
+    db_session: Session,
 ) -> None:
     """End-to-end: a successful billable request reserves then reconciles, so
     users.spend increases by the actual cost (the reconcile path is the sole
@@ -333,13 +319,7 @@ def test_spend_incremented_via_reconciliation(
     assert response.status_code == 200
 
     # Expected cost: 1M/1M * 2.5 + 0.5M/1M * 10 = 2.5 + 5.0 = 7.5
-    engine = create_engine(test_config.database_url)
-    session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    db = session_local()
-    try:
-        user = db.query(User).filter(User.user_id == "spend-user").first()
-        assert user is not None
-        assert user.spend == pytest.approx(7.5)
-        assert float(user.reserved) == pytest.approx(0.0)  # hold released
-    finally:
-        db.close()
+    user = db_session.query(User).filter(User.user_id == "spend-user").first()
+    assert user is not None
+    assert user.spend == pytest.approx(7.5)
+    assert float(user.reserved) == pytest.approx(0.0)  # hold released

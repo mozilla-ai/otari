@@ -19,12 +19,21 @@ All endpoints are available. On first startup, Otari bootstraps an API key and l
 
 When connected to [otari.ai](https://otari.ai), Otari delegates provider routing, authentication, and usage tracking to the platform.
 
-This mode activates automatically when `OTARI_AI_TOKEN` is set.
+This mode activates automatically when `OTARI_AI_TOKEN` is set. You can also set
+`OTARI_MODE` explicitly to assert the intended mode: `OTARI_MODE=hybrid` requires
+a token (startup fails without one), and `OTARI_MODE=standalone` with a token set
+is rejected at startup as conflicting configuration (the token would otherwise
+select hybrid). Leave `OTARI_MODE` unset to let the token decide.
 
-`OTARI_AI_TOKEN` is the gateway token (`gw-...`) you create in otari.ai for
+`OTARI_AI_TOKEN` is the gateway token (`gw_...`) you create in otari.ai for
 this Otari instance. In otari.ai, go to `Organisation > Gateways`, create or
 open a gateway, then click `Create token`. It is not the per-request user token
 (`tk_...`) that clients send in `Authorization: Bearer ...`.
+
+Note the prefix: the platform gateway token uses an underscore (`gw_...`),
+whereas a locally issued Otari API key (standalone mode) uses a hyphen
+(`gw-...`). They are different credential types that differ by one character,
+so take care not to confuse them.
 
 ### What otari.ai handles
 
@@ -37,14 +46,14 @@ open a gateway, then click `Create token`. It is not the per-request user token
 
 - No local database is used for keys, users, budgets, or usage logs.
 - The `providers` block in `config.yml` must be empty (or absent).
-- Only these routes are exposed: `/health`, `/health/liveness`, `/health/readiness`, `/v1/chat/completions`, `/v1/messages`, and `/v1/responses`.
+- Only these routes are exposed: `/health`, `/health/liveness`, `/health/readiness`, `/v1/chat/completions`, `/v1/messages`, `/v1/messages/count_tokens`, and `/v1/responses`.
 - Chat requests use `Authorization: Bearer <otari-user-token>`.
 - The `/health` endpoint includes platform reachability status.
 
 ### Setup
 
 ```bash
-export OTARI_AI_TOKEN=gw-your-token-here
+export OTARI_AI_TOKEN=gw_your_token_here
 ```
 
 See [Deployment](deployment.md) for the full Docker setup.

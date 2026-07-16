@@ -27,7 +27,7 @@ async def budgets_disabled() -> None:
     _raise_disabled()
 
 
-@router.api_route("/v1/spend/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
-@router.api_route("/v1/spend", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
-async def spend_disabled() -> None:
+@router.api_route("/v1/usage/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@router.api_route("/v1/usage", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def usage_disabled() -> None:
     _raise_disabled()
