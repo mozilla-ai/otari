@@ -9,6 +9,7 @@ import type {
   GatewaySettings,
   HealthResponse,
   ModelListResponse,
+  ModelMetadataResponse,
   ModelObject,
   PricingResponse,
   ProvidersResponse,
@@ -28,6 +29,7 @@ const ALIASES = "aliases";
 // key would fire a live provider call on every save.
 const DISCOVERABLE = "discoverable";
 const PROVIDERS = "providers";
+const METADATA = "model-metadata";
 const BUILD = "build";
 
 // How often an open tab asks whether the app it is running is still the one the
@@ -141,6 +143,17 @@ export function useProviders() {
     queryKey: [PROVIDERS],
     queryFn: () => apiFetch<ProvidersResponse>("/v1/providers"),
     staleTime: 5 * 60_000,
+  });
+}
+
+// Per-model metadata (modalities, capabilities, knowledge cutoff) from the
+// models.dev catalog, keyed by `provider:model`. The gateway fetches and caches
+// it, so this is cheap; kept fresh for a session since the catalog barely moves.
+export function useModelMetadata() {
+  return useQuery({
+    queryKey: [METADATA],
+    queryFn: () => apiFetch<ModelMetadataResponse>("/v1/models/metadata"),
+    staleTime: 10 * 60_000,
   });
 }
 

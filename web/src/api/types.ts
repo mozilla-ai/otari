@@ -156,6 +156,40 @@ export interface ProvidersResponse {
   providers: ProviderInfo[];
 }
 
+// Per-model metadata from the public models.dev catalog, for the detail panel.
+// Fields are best-effort: models.dev does not know every model, and unknown
+// values come back null/false/[].
+export interface ModelMetadata {
+  name: string | null;
+  description: string | null;
+  family: string | null;
+  input_modalities: string[];
+  output_modalities: string[];
+  reasoning: boolean;
+  tool_call: boolean;
+  structured_output: boolean;
+  attachment: boolean;
+  temperature: boolean;
+  context_window: number | null;
+  max_output_tokens: number | null;
+  knowledge_cutoff: string | null;
+  release_date: string | null;
+  last_updated: string | null;
+  open_weights: boolean;
+  deprecated: boolean;
+  cost_input: number | null;
+  cost_output: number | null;
+}
+
+export interface ModelMetadataResponse {
+  source: string;
+  // False when enrichment is disabled or models.dev could not be reached; the
+  // map is then empty and the UI shows only what the catalog provides.
+  available: boolean;
+  // Keyed by `provider:model`.
+  models: Record<string, ModelMetadata>;
+}
+
 export interface PricingResponse {
   model_key: string;
   effective_at: string;

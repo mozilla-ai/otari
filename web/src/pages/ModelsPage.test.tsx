@@ -10,6 +10,8 @@ import type {
   DiscoverableModelsResponse,
   GatewaySettings,
   ModelListResponse,
+  ModelMetadata,
+  ModelMetadataResponse,
   ModelObject,
   PricingResponse,
   ProviderCapabilities,
@@ -17,8 +19,6 @@ import type {
 } from "@/api/types";
 import { ModelsPage } from "@/pages/ModelsPage";
 
-// The one model with a configured DB price. Its catalog pricing_source is
-// "configured" to match, so the two sources stay consistent.
 const PRICED: PricingResponse = {
   model_key: "openai:gpt-4o",
   effective_at: "2026-01-01T00:00:00Z",
@@ -53,23 +53,16 @@ function catalogModel(
   };
 }
 
-// The catalog GET /v1/models serves. Kept consistent with DISCOVERABLE below:
-// every real (non-alias) model here is also reported by discovery, since a model
-// only lands in the catalog with a default price by having been discovered.
 const CATALOG: ModelListResponse = {
   object: "list",
   data: [
     catalogModel("openai:gpt-4o", "openai", "configured", [2.5, 10], 128000),
     catalogModel("openai:gpt-4o-mini", "openai", "default", [0.15, 0.6], 128000),
     catalogModel("anthropic:claude-sonnet-4", "anthropic", "default", [3, 15], 200000),
-    // A config.yml alias as the gateway reports one: owned_by "otari", carrying
-    // its target's price (gpt-4o-mini, default-rated).
     catalogModel("fast-model", "otari", "default", [0.15, 0.6], 128000),
   ],
 };
 
-// What discovery reports, consistent with the catalog. Every provider succeeds
-// here; a specific test overrides this to exercise a failed provider.
 const DISCOVERABLE: DiscoverableModelsResponse = {
   providers: [
     {
@@ -132,19 +125,71 @@ const PROVIDERS: ProvidersResponse = {
   ],
 };
 
-// "fast-model" is the config.yml alias the catalog reports above.
+function meta(overrides: Partial<ModelMetadata>): ModelMetadata {
+  return {
+    name: null,
+    description: null,
+    family: null,
+    input_modalities: ["text"],
+    output_modalities: ["text"],
+    reasoning: false,
+    tool_call: false,
+    structured_output: false,
+    attachment: false,
+    temperature: false,
+    context_window: null,
+    max_output_tokens: null,
+    knowledge_cutoff: null,
+    release_date: null,
+    last_updated: null,
+    open_weights: false,
+    deprecated: false,
+    cost_input: null,
+    cost_output: null,
+    ...overrides,
+  };
+}
+
+const METADATA: ModelMetadataResponse = {
+  source: "models.dev",
+  available: true,
+  models: {
+    "openai:gpt-4o": meta({
+      input_modalities: ["text", "image"],
+      tool_call: true,
+      context_window: 128000,
+      knowledge_cutoff: "2023-09",
+      description: "GPT-4o multimodal model.",
+    }),
+    "openai:gpt-4o-mini": meta({ input_modalities: ["text", "image"], tool_call: true, context_window: 128000 }),
+    "anthropic:claude-sonnet-4": meta({
+      input_modalities: ["text", "image"],
+      tool_call: true,
+      reasoning: true,
+      context_window: 200000,
+    }),
+  },
+};
+
 const ALIASES: AliasResponse[] = [
   { name: "fast-model", target: "openai:gpt-4o-mini", source: "config", created_at: null, updated_at: null },
 ];
 
-function rowFor(text: string): HTMLElement {
-  return screen.getByText(text).closest("tr") as HTMLElement;
+function table(): HTMLElement {
+  return screen.getByRole("table");
 }
 
-// The row for the "fast-model" alias, so assertions about its actions cannot
-// accidentally match a button belonging to some other model.
+function tableRow(text: string): HTMLElement {
+  return within(table()).getByText(text).closest("tr") as HTMLElement;
+}
+
+// The persistent detail panel is the page's <aside> (role complementary).
+function panel(): HTMLElement {
+  return screen.getByRole("complementary");
+}
+
 function aliasRow(): HTMLElement {
-  return rowFor("fast-model");
+  return within(table()).getByText("fast-model").closest("tr") as HTMLElement;
 }
 
 function renderWithClient(ui: ReactElement) {
@@ -171,6 +216,7 @@ function mockApi(
     aliases?: AliasResponse[];
     discoverable?: DiscoverableModelsResponse;
     providers?: ProvidersResponse;
+    metadata?: ModelMetadataResponse;
   } = {},
 ) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -188,10 +234,13 @@ function mockApi(
     if (url.includes("/v1/providers")) {
       return jsonResponse(opts.providers ?? PROVIDERS);
     }
-    // Before the /v1/models/ catch-all, which would answer it with a 404 the
-    // same way the real route order matters server-side.
+    // Specific /v1/models/* routes before the /v1/models/ catch-all (which 404s,
+    // matching the server's route order).
     if (url.includes("/v1/models/discoverable")) {
       return jsonResponse(opts.discoverable ?? DISCOVERABLE);
+    }
+    if (url.includes("/v1/models/metadata")) {
+      return jsonResponse(opts.metadata ?? METADATA);
     }
     if (url.includes("/v1/aliases")) {
       return jsonResponse(opts.aliases ?? ALIASES);
@@ -209,7 +258,6 @@ function mockApi(
   });
 }
 
-// Tab accessible names carry a trailing count ("Models 3"), so match on a prefix.
 async function goToTab(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(screen.getByRole("tab", { name: new RegExp(`^${name}`) }));
 }
@@ -218,9 +266,14 @@ async function openAdd(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Add" }));
 }
 
-// The row text order in the table body, for asserting sort/filter results.
+// Selects a model row and returns the detail panel scoped for assertions.
+async function selectModel(user: ReturnType<typeof userEvent.setup>, key: string): Promise<HTMLElement> {
+  await user.click(tableRow(key));
+  return panel();
+}
+
 function modelOrder(): string[] {
-  return screen
+  return within(table())
     .getAllByRole("row")
     .map((row) => row.textContent ?? "")
     .filter((text) => text.includes(":"));
@@ -241,10 +294,9 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    // Three real models; the alias is not counted among them.
     expect(screen.getByRole("tab", { name: /Models 3/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Aliases 1/ })).toBeInTheDocument();
-    expect(screen.queryByText("fast-model")).not.toBeInTheDocument();
+    expect(within(table()).queryByText("fast-model")).not.toBeInTheDocument();
   });
 
   it("shows no usage columns anywhere", async () => {
@@ -253,7 +305,6 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    // The page is about configuration, not usage.
     for (const heading of ["Requests", "Tokens", "Cost"]) {
       expect(screen.queryByRole("columnheader", { name: heading })).not.toBeInTheDocument();
     }
@@ -261,19 +312,59 @@ describe("ModelsPage", () => {
 
   // -- model list ----------------------------------------------------------
 
-  it("lists models with their price source and context window", async () => {
+  it("lists models with their context window and feature chips", async () => {
     mockApi();
 
     renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
 
-    expect(await screen.findByText("openai:gpt-4o")).toBeInTheDocument();
-    expect(screen.getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
-    // The configured price shows as configured; the fallback-priced one as default.
-    expect(screen.getByText("configured")).toBeInTheDocument();
-    expect(screen.getAllByText("default").length).toBeGreaterThan(0);
-    // Context windows are pulled from the catalog and shown compactly.
-    expect(within(rowFor("openai:gpt-4o")).getByText("128K")).toBeInTheDocument();
-    expect(within(rowFor("anthropic:claude-sonnet-4")).getByText("200K")).toBeInTheDocument();
+    expect(within(tableRow("openai:gpt-4o")).getByText("128K")).toBeInTheDocument();
+    expect(within(tableRow("anthropic:claude-sonnet-4")).getByText("200K")).toBeInTheDocument();
+    // Feature chips come from models.dev metadata (image input -> Vision, tools).
+    expect(within(tableRow("openai:gpt-4o")).getByText("Vision")).toBeInTheDocument();
+    expect(within(tableRow("openai:gpt-4o")).getByText("Tools")).toBeInTheDocument();
+  });
+
+  it("starts with an empty detail panel until a model is selected", async () => {
+    mockApi();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    expect(within(panel()).getByText(/Select a model/)).toBeInTheDocument();
+  });
+
+  it("fills the detail panel when a model row is selected", async () => {
+    mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    const detail = await selectModel(user, "openai:gpt-4o");
+
+    expect(within(detail).getByText("configured")).toBeInTheDocument();
+    expect(within(detail).getByText("128K")).toBeInTheDocument();
+    expect(within(detail).getByText("2023-09")).toBeInTheDocument();
+    expect(within(detail).getByText("Tool calling")).toBeInTheDocument();
+    // Provider block: name, a provider capability, and the discovered model count.
+    expect(within(detail).getByText("OpenAI")).toBeInTheDocument();
+    expect(within(detail).getByText("Vision")).toBeInTheDocument();
+    expect(within(detail).getByText(/2 models reported/)).toBeInTheDocument();
+  });
+
+  it("browses to the next model with the panel's Next button", async () => {
+    mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    // Default sort is by name: claude, gpt-4o, gpt-4o-mini. Select gpt-4o, then next.
+    const detail = await selectModel(user, "openai:gpt-4o");
+    await user.click(within(detail).getByRole("button", { name: "Next model" }));
+
+    expect(within(panel()).getByRole("heading", { name: "openai:gpt-4o-mini" })).toBeInTheDocument();
   });
 
   it("filters the model list by search", async () => {
@@ -285,8 +376,8 @@ describe("ModelsPage", () => {
 
     await user.type(screen.getByRole("searchbox"), "gpt-4o-mini");
 
-    expect(screen.getByText("openai:gpt-4o-mini")).toBeInTheDocument();
-    expect(screen.queryByText("anthropic:claude-sonnet-4")).not.toBeInTheDocument();
+    expect(within(table()).getByText("openai:gpt-4o-mini")).toBeInTheDocument();
+    expect(within(table()).queryByText("anthropic:claude-sonnet-4")).not.toBeInTheDocument();
   });
 
   it("filters by provider", async () => {
@@ -298,8 +389,8 @@ describe("ModelsPage", () => {
 
     await user.selectOptions(screen.getByLabelText("Filter by provider"), "anthropic");
 
-    expect(screen.getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
-    expect(screen.queryByText("openai:gpt-4o")).not.toBeInTheDocument();
+    expect(within(table()).getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
   });
 
   it("filters to custom prices only", async () => {
@@ -311,14 +402,12 @@ describe("ModelsPage", () => {
 
     await user.selectOptions(screen.getByLabelText("Filter by pricing"), "Custom price");
 
-    // Only gpt-4o carries a configured (custom) price; the default-priced ones drop.
-    expect(screen.getByText("openai:gpt-4o")).toBeInTheDocument();
-    expect(screen.queryByText("openai:gpt-4o-mini")).not.toBeInTheDocument();
-    expect(screen.queryByText("anthropic:claude-sonnet-4")).not.toBeInTheDocument();
+    expect(within(table()).getByText("openai:gpt-4o")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:gpt-4o-mini")).not.toBeInTheDocument();
+    expect(within(table()).queryByText("anthropic:claude-sonnet-4")).not.toBeInTheDocument();
   });
 
   it("filters to custom (not discovered) models", async () => {
-    // A priced model no provider reports: present only because it was priced.
     mockApi({
       pricing: [PRICED, { ...PRICED, model_key: "mistral:large", input_price_per_million: 4, output_price_per_million: 12 }],
     });
@@ -329,8 +418,8 @@ describe("ModelsPage", () => {
 
     await user.selectOptions(screen.getByLabelText("Filter by source"), "Custom (not discovered)");
 
-    expect(screen.getByText("mistral:large")).toBeInTheDocument();
-    expect(screen.queryByText("openai:gpt-4o")).not.toBeInTheDocument();
+    expect(within(table()).getByText("mistral:large")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
   });
 
   it("filters by provider capability", async () => {
@@ -340,11 +429,10 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("anthropic:claude-sonnet-4");
 
-    // Only openai reports vision, so anthropic's model drops.
     await user.selectOptions(screen.getByLabelText("Filter by capability"), "Vision");
 
-    expect(screen.getByText("openai:gpt-4o")).toBeInTheDocument();
-    expect(screen.queryByText("anthropic:claude-sonnet-4")).not.toBeInTheDocument();
+    expect(within(table()).getByText("openai:gpt-4o")).toBeInTheDocument();
+    expect(within(table()).queryByText("anthropic:claude-sonnet-4")).not.toBeInTheDocument();
   });
 
   it("filters by minimum context window", async () => {
@@ -356,9 +444,8 @@ describe("ModelsPage", () => {
 
     await user.selectOptions(screen.getByLabelText("Minimum context window"), "≥ 200K");
 
-    // Only the 200K model clears the bar.
-    expect(screen.getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
-    expect(screen.queryByText("openai:gpt-4o")).not.toBeInTheDocument();
+    expect(within(table()).getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
   });
 
   it("sorts by input price when the column header is clicked", async () => {
@@ -373,7 +460,6 @@ describe("ModelsPage", () => {
     const order = modelOrder();
     const miniIndex = order.findIndex((text) => text.includes("gpt-4o-mini"));
     const claudeIndex = order.findIndex((text) => text.includes("claude-sonnet-4"));
-    // Cheapest input price first: gpt-4o-mini (0.15) ahead of claude (3.00).
     expect(miniIndex).toBeLessThan(claudeIndex);
   });
 
@@ -386,19 +472,19 @@ describe("ModelsPage", () => {
       catalog: { object: "list", data: [] },
       pricing: [],
       discoverable: { providers: [{ provider: "openai", ok: true, error: null, models }] },
+      metadata: { source: "models.dev", available: true, models: {} },
     });
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:m00");
 
-    // 25 per page: m00-m24 on page one, m25 on page two.
-    expect(screen.getByText("openai:m24")).toBeInTheDocument();
-    expect(screen.queryByText("openai:m25")).not.toBeInTheDocument();
+    expect(within(table()).getByText("openai:m24")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:m25")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
-    expect(screen.getByText("openai:m25")).toBeInTheDocument();
-    expect(screen.queryByText("openai:m00")).not.toBeInTheDocument();
+    expect(within(table()).getByText("openai:m25")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:m00")).not.toBeInTheDocument();
   });
 
   it("names a provider discovery could not list", async () => {
@@ -416,40 +502,21 @@ describe("ModelsPage", () => {
     expect(await screen.findByText(/Could not list anthropic/)).toBeInTheDocument();
   });
 
-  // -- provider drawer -----------------------------------------------------
+  // -- inline pricing (in the detail panel) --------------------------------
 
-  it("opens a provider detail drawer with capabilities and model count", async () => {
-    mockApi();
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("openai:gpt-4o");
-
-    // The provider cell is a button; click OpenAI's to open its drawer.
-    await user.click(screen.getAllByRole("button", { name: "openai" })[0]);
-
-    const drawer = screen.getByRole("dialog", { name: /Provider openai/ });
-    expect(within(drawer).getByText("OpenAI")).toBeInTheDocument();
-    expect(within(drawer).getByText("Vision")).toBeInTheDocument();
-    // openai reports two models in DISCOVERABLE.
-    expect(within(drawer).getByText(/2 models reported/)).toBeInTheDocument();
-    expect(within(drawer).getByRole("link", { name: /API documentation/ })).toBeInTheDocument();
-  });
-
-  // -- inline pricing ------------------------------------------------------
-
-  it("edits a configured price inline", async () => {
+  it("edits a configured price from the detail panel", async () => {
     const fetchMock = mockApi();
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    await user.click(within(rowFor("openai:gpt-4o")).getByRole("button", { name: "Edit" }));
-    const input = screen.getByLabelText("Input price for openai:gpt-4o");
+    const detail = await selectModel(user, "openai:gpt-4o");
+    await user.click(within(detail).getByRole("button", { name: "Edit price" }));
+    const input = within(detail).getByLabelText("Input price for openai:gpt-4o");
     await user.clear(input);
     await user.type(input, "4");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(within(detail).getByRole("button", { name: "Save" }));
 
     const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "POST");
     expect(call).toBeDefined();
@@ -461,19 +528,40 @@ describe("ModelsPage", () => {
   });
 
   it("does not prompt to backfill usage after setting a price", async () => {
-    // Backfill is a usage concern; the config page no longer offers it.
     mockApi();
     const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    await user.click(within(rowFor("openai:gpt-4o")).getByRole("button", { name: "Edit" }));
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    const detail = await selectModel(user, "openai:gpt-4o");
+    await user.click(within(detail).getByRole("button", { name: "Edit price" }));
+    await user.click(within(detail).getByRole("button", { name: "Save" }));
 
-    // The editor closes back to an Edit action, and nothing usage-related appears.
-    expect(await within(rowFor("openai:gpt-4o")).findByRole("button", { name: "Edit" })).toBeInTheDocument();
+    expect(await within(panel()).findByRole("button", { name: "Edit price" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /backfill/i })).not.toBeInTheDocument();
+  });
+
+  it("opens the Add form in alias mode with the target prefilled from the panel", async () => {
+    mockApi({
+      post: (url) => (url.includes("/v1/aliases") ? jsonResponse(ALIASES[0]) : jsonResponse(PRICED)),
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    const detail = await selectModel(user, "openai:gpt-4o");
+    await user.click(within(detail).getByRole("button", { name: /Alias to this model/ }));
+
+    await user.type(screen.getByRole("textbox", { name: /alias name/i }), "smart");
+    await user.click(screen.getByRole("button", { name: /create alias/i }));
+
+    const aliasPost = fetchSpy.mock.calls.find(
+      ([url, init]) => String(url).includes("/v1/aliases") && (init?.method ?? "") === "POST",
+    );
+    expect(JSON.parse(String(aliasPost?.[1]?.body))).toEqual({ name: "smart", target: "openai:gpt-4o" });
   });
 
   // -- Aliases tab ---------------------------------------------------------
@@ -486,31 +574,10 @@ describe("ModelsPage", () => {
     await goToTab(user, "Aliases");
     await screen.findByText("fast-model");
 
-    // Target and its default-rated price are shown; a config.yml alias cannot be
-    // deleted or priced from here.
     expect(within(aliasRow()).getByText("openai:gpt-4o-mini")).toBeInTheDocument();
     expect(within(aliasRow()).getByText("$0.15")).toBeInTheDocument();
     expect(within(aliasRow()).getByText("set in config.yml")).toBeInTheDocument();
     expect(within(aliasRow()).queryByRole("button", { name: /price|delete/i })).not.toBeInTheDocument();
-  });
-
-  it("ignores a dead pricing row stored under an alias's own name", async () => {
-    // Nothing reads a price keyed on the alias, so showing it would advertise a
-    // rate the gateway never charges.
-    mockApi({
-      pricing: [
-        PRICED,
-        { ...PRICED, model_key: "fast-model", input_price_per_million: 99, output_price_per_million: 99 },
-      ],
-    });
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await goToTab(user, "Aliases");
-    await screen.findByText("fast-model");
-
-    expect(within(aliasRow()).queryByText("$99.00")).not.toBeInTheDocument();
-    expect(within(aliasRow()).getByText("$0.15")).toBeInTheDocument();
   });
 
   it("deletes a stored alias but not one from config.yml", async () => {
@@ -526,10 +593,8 @@ describe("ModelsPage", () => {
     await goToTab(user, "Aliases");
     await screen.findByText("fast-model");
 
-    // Stored, so it is removable from here.
     expect(screen.queryByText("set in config.yml")).not.toBeInTheDocument();
     await user.click(within(aliasRow()).getByRole("button", { name: "Delete" }));
-    // ConfirmButton asks once before acting.
     await user.click(within(aliasRow()).getByRole("button", { name: "Delete" }));
 
     const call = fetchSpy.mock.calls.find(([, init]) => (init?.method ?? "") === "DELETE");
@@ -546,20 +611,14 @@ describe("ModelsPage", () => {
     await screen.findByText("openai:gpt-4o");
     await openAdd(user);
 
-    // Scope to the picker by its label: the filter <select>s also report the
-    // combobox role, so an unscoped query would be ambiguous.
     const picker = screen.getByRole("combobox", { name: /model/i });
     await user.type(picker, "4o-mini");
-    // Offered as the full selector, which is what /v1/pricing keys on: picking
-    // "gpt-4o-mini" alone would store a price nothing ever reads.
     const option = await screen.findByRole("option", { name: "openai:gpt-4o-mini" });
     await user.click(option);
     expect(picker).toHaveValue("openai:gpt-4o-mini");
   });
 
   it("keeps a model the picker never offered typeable", async () => {
-    // Discovery only sees configured providers. A model behind an unconfigured
-    // one still has to be priceable, so the field is not a whitelist.
     mockApi();
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const user = userEvent.setup();
@@ -571,8 +630,6 @@ describe("ModelsPage", () => {
     const picker = screen.getByRole("combobox", { name: /model/i });
     await user.type(picker, "bedrock:claude-3-sonnet");
     expect(picker).toHaveValue("bedrock:claude-3-sonnet");
-    // The open popover aria-hides the rest of the form, so dismiss it the way a
-    // user would before reaching the price fields.
     await user.keyboard("{Escape}");
 
     await user.type(screen.getByLabelText(/input price per million/i), "1");
@@ -589,33 +646,7 @@ describe("ModelsPage", () => {
     });
   });
 
-  it("opens the Add form in alias mode from the Aliases tab and creates against the picked target", async () => {
-    mockApi({
-      post: (url) => (url.includes("/v1/aliases") ? jsonResponse(ALIASES[0]) : jsonResponse(PRICED)),
-    });
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await goToTab(user, "Aliases");
-    await openAdd(user);
-
-    // Aliases tab opens the form straight to alias creation.
-    await user.type(screen.getByRole("textbox", { name: /alias name/i }), "smart");
-    await user.type(screen.getByRole("combobox"), "openai:gpt-4o-mini");
-    await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: /create alias/i }));
-
-    const aliasPost = fetchSpy.mock.calls.find(
-      ([url, init]) => String(url).includes("/v1/aliases") && (init?.method ?? "") === "POST",
-    );
-    expect(aliasPost).toBeDefined();
-    expect(JSON.parse(String(aliasPost?.[1]?.body))).toEqual({ name: "smart", target: "openai:gpt-4o-mini" });
-  });
-
   it("refuses an alias name that could be mistaken for a model key", async () => {
-    // The gateway rejects a name carrying ":" or "/", since it could never be
-    // told apart from a real provider:model selector.
     mockApi();
     const user = userEvent.setup();
 
