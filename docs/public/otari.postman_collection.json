@@ -943,7 +943,7 @@
               },
               "raw": "{\n  \"model\": \"anthropic:claude-haiku-4-5\",\n  \"max_tokens\": 1024,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Hello from Otari!\"\n    }\n  ]\n}"
             },
-            "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode\nrequests resolve credentials via the platform service and (for\nnon-tool-loop requests) get multi-attempt fallback across the resolved\nroute. Tool-loop requests collapse to a single attempt \u2014 once\n``on_first_response`` lock-in plumbing lands across the codebase, a\nfollow-up will enable pre-lock-in fallback for tool-loop requests too.",
+            "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
             "header": [
               {
                 "key": "Content-Type",
@@ -1316,7 +1316,7 @@
               },
               "raw": "{\n  \"model\": \"openai:gpt-4o-mini\",\n  \"input\": \"Hello from Otari!\"\n}"
             },
-            "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode\nrequests resolve credentials via the platform service and (for\nnon-tool-loop requests) get multi-attempt fallback across the resolved\nroute. Tool-loop requests collapse to a single attempt \u2014 once\n``on_first_response`` lock-in plumbing lands across the codebase, a\nfollow-up will enable pre-lock-in fallback for tool-loop requests too.",
+            "description": "OpenAI-compatible Responses endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
             "header": [
               {
                 "key": "Content-Type",
