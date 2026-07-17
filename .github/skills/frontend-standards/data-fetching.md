@@ -1,8 +1,9 @@
 # Data fetching: TanStack Query
 
-All server state flows through TanStack Query hooks in `web/src/api/hooks.ts`, which call
-`apiFetch` from `web/src/api/client.ts`. Never call `fetch()` for the management API directly
-and never mirror server state into `useState`.
+All *authenticated* server state flows through TanStack Query hooks in `web/src/api/hooks.ts`,
+which call `apiFetch` from `web/src/api/client.ts`. Don't call `fetch()` directly for
+authenticated management requests, and never mirror server state into `useState`. (The one
+exception is pre-auth candidate-key validation, described under "The API boundary" below.)
 
 ## The API boundary
 
@@ -16,6 +17,11 @@ and never mirror server state into `useState`.
 Because 401/403 are handled centrally, hooks don't need to. The query client
 (`web/src/provider.tsx`) also **never retries** an `ApiError` with status 401/403 (they won't
 fix themselves) and retries other failures twice.
+
+The one deliberate raw-`fetch` exception is **pre-auth**: `validateMasterKey` (`client.ts`)
+hits a master-key-gated endpoint to check a *candidate* key before it becomes the stored
+`masterKey`, so it can't use `apiFetch` (which would attach the not-yet-accepted key). Every
+request after sign-in goes through `apiFetch`.
 
 ## Query conventions
 

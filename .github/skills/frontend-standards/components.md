@@ -62,4 +62,6 @@ use it rather than reaching into `error.message` yourself.
 - Space siblings with `gap-*` on the flex/grid parent, not `m-*` on each child.
 - Responsive via Tailwind breakpoints (`sm:`, `md:`, `lg:`) and flex/grid; avoid fixed pixel
   widths for anything that should reflow (`min-w-[180px]` on a wrapping stat card is fine).
-- One component per file, colocated with its test.
+- One component per file for pages and standalone components, colocated with its test. Small
+  shared primitives are the exception: closely related ones live together in
+  `components/ui.tsx` (the primitives listed above), rather than a file each.

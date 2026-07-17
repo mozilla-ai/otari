@@ -54,8 +54,10 @@ Build and check from the repo root:
 - Inline `style={{}}` or `<style>` tags. Use Tailwind utilities or a token.
 - Manual polling with bare `setInterval`/`setTimeout`. Use TanStack Query's `refetchInterval`
   (see `useDashboardBuild`).
-- A raw `fetch()` for the management API. Go through `apiFetch` in `web/src/api/client.ts`, so
-  the Bearer key, error extraction, and 401/403 sign-out handling stay in one place.
+- A raw `fetch()` for **authenticated** management requests. Go through `apiFetch` in
+  `web/src/api/client.ts`, so the Bearer key, error extraction, and 401/403 sign-out handling
+  stay in one place. (The sanctioned exception is `validateMasterKey`, which raw-`fetch`es a
+  master-key-gated endpoint to check a candidate key *before* it becomes the stored `masterKey`.)
 - Client-side filtering/sorting/pagination of large server datasets when the endpoint can do
   it. (Small, already-loaded lists rendered in a `Table` are fine.)
 - `getByTestId` when a semantic query (`getByRole`, `getByLabelText`, `getByText`) works.
