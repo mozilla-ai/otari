@@ -138,7 +138,7 @@ Client SDKs and the platform map gateway status codes to typed errors — keep t
 
 ### SSRF & request forwarding — CWE-918
 otari forwards to upstream providers and optional sandbox / web-search backends.
-- ✅ **Check**: sandbox / web-search backend URLs are **operator-controlled** (`GATEWAY_SANDBOX_URL`, `GATEWAY_WEB_SEARCH_URL`) — a per-request URL override must **not** be honored (it would turn the gateway into an open HTTP client). See the threat-model comment in `api/routes/chat.py`.
+- ✅ **Check**: sandbox / web-search backend URLs are **operator-controlled** (`OTARI_SANDBOX_URL`, `OTARI_WEB_SEARCH_URL`) — a per-request URL override must **not** be honored (it would turn the gateway into an open HTTP client). See the threat-model comment in `api/routes/chat.py`.
 - ✅ **Check**: provider/base-URL selection is not driven by unvalidated request fields.
 - **Severity**: High
 

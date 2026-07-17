@@ -222,7 +222,7 @@ def test_code_execution_dispatches_through_sandbox_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``tools: [{"type": "otari_code_execution"}]`` routes through ``SandboxBackend``."""
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     pool_seen: list[Any] = []
 
@@ -265,7 +265,7 @@ def test_web_search_dispatches_through_web_search_backend(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``tools: [{"type": "otari_web_search"}]`` routes through ``WebSearchBackend``."""
-    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
 
     pool_seen: list[Any] = []
 
@@ -315,7 +315,7 @@ def test_provider_code_execution_passes_through_to_upstream(
     ``tools[]`` and reach ``amessages`` so Anthropic runs the code in its own
     native sandbox — even with no gateway sandbox configured.
     """
-    monkeypatch.delenv("GATEWAY_SANDBOX_URL", raising=False)
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
     captured: dict[str, Any] = {}
 
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
@@ -349,7 +349,7 @@ def test_provider_web_search_passes_through_to_upstream(
 ) -> None:
     """Provider-named web_search keywords pass through to Anthropic even when
     no gateway web_search backend is configured."""
-    monkeypatch.delenv("GATEWAY_WEB_SEARCH_URL", raising=False)
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     captured: dict[str, Any] = {}
 
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
@@ -390,7 +390,7 @@ def test_code_execution_without_sandbox_env_returns_400_anthropic_body(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("GATEWAY_SANDBOX_URL", raising=False)
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
     resp = client.post(
         "/v1/messages",
         json={
@@ -410,7 +410,7 @@ def test_code_execution_combined_with_mcp_servers_returns_400(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
     resp = client.post(
         "/v1/messages",
         json={
@@ -435,8 +435,8 @@ def test_web_search_combined_with_sandbox_returns_400(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
     resp = client.post(
         "/v1/messages",
         json={
@@ -469,7 +469,7 @@ def test_max_tool_iterations_exceeded_returns_422_anthropic_body(
     """The gateway's own iteration cap is distinct from a provider outage —
     422 with the Anthropic error envelope lets callers tell them apart.
     """
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     from gateway.services.mcp_loop_messages import MaxToolIterationsExceeded
 
@@ -514,7 +514,7 @@ def test_sandbox_unreachable_returns_502_anthropic_body(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     from gateway.services.sandbox_backend import SandboxNotReachableError
 
@@ -676,7 +676,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
     """``stream: true`` with ``otari_code_execution`` opens the sandbox backend
     and feeds it to ``anthropic_tool_loop_stream``.
     """
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     pool_seen: list[Any] = []
 
@@ -723,7 +723,7 @@ def test_stream_sandbox_unreachable_returns_502_anthropic_body(
     if the streaming dispatch wasn't wrapped in the error-mapping
     try/except).
     """
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     from gateway.services.sandbox_backend import SandboxNotReachableError
 

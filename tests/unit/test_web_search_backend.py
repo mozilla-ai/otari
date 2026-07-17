@@ -419,7 +419,7 @@ async def test_ssrf_guard_blocks_loopback(monkeypatch: pytest.MonkeyPatch) -> No
 
 @pytest.mark.asyncio
 async def test_ssrf_guard_env_override_allows_private(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS", "true")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS", "true")
     body = {
         "results": [
             {"url": "http://10.0.0.5/page", "title": "internal", "content": "snippet"},
@@ -557,7 +557,7 @@ async def test_fetch_capped_buffer_never_exceeds_max_bytes(monkeypatch: pytest.M
 def test_max_results_clamps_subone_to_one(bad_value: int) -> None:
     """``WebSearchBackend.__init__`` clamps non-positive ``max_results`` to 1.
 
-    Reaches via env var (``GATEWAY_WEB_SEARCH_MAX_RESULTS=-1``) or a
+    Reaches via env var (``OTARI_WEB_SEARCH_MAX_RESULTS=-1``) or a
     malformed per-tool entry; downstream the value reaches
     ``results[: self._max_results]`` and would otherwise produce silently-
     wrong slicing (empty list for 0, drop-last for -1).

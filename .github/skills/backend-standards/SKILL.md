@@ -75,8 +75,8 @@ A reservation that never settles leaks and permanently shrinks the user's budget
 
 ## Config & env
 
-`GatewayConfig` (`core/config.py`) loads `config.yml` then layers env vars, with the
-user-facing `OTARI_` prefix winning over the legacy `GATEWAY_` prefix. New security-relevant
+`GatewayConfig` (`core/config.py`) loads `config.yml` then layers env vars, under the
+user-facing `OTARI_` prefix. New security-relevant
 flags **fail closed by default** and are validated at load (reject unknown values), like the
 `stream_missing_usage_policy` validator. Don't read `os.getenv` directly on a hot path; route
 through the config / `otari_env()`.

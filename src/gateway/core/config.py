@@ -23,16 +23,10 @@ PROVIDER_TYPE_ALIASES = {
     "openai-compatible": "openai",
     "openai_compatible": "openai",
 }
-LEGACY_API_KEY_HEADERS = ("AnyLLM-Key", "X-AnyLLM-Key")  # Back-compat aliases; prefer API_KEY_HEADER.
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
-PLATFORM_TOKEN_ENV_VARS = (
-    "OTARI_AI_TOKEN",
-    "OTARI_PLATFORM_TOKEN",
-    "ANY_LLM_PLATFORM_TOKEN",
-)
+PLATFORM_TOKEN_ENV_VAR = "OTARI_AI_TOKEN"
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
-# OTARI_PORT). The GATEWAY_ prefix below is the legacy native pydantic prefix,
-# still honored for backward compatibility; OTARI_ wins when both are set.
+# OTARI_PORT), which is also the native pydantic prefix below.
 OTARI_ENV_PREFIX = "OTARI_"
 # Full structured config supplied through the environment, for PaaS platforms
 # (Railway, Render, Fly.io, Kubernetes) where mounting a config.yml is awkward.
@@ -66,11 +60,8 @@ class _NonScalarField(Exception):
 
 
 def _get_platform_token_from_env() -> str | None:
-    for env_var in PLATFORM_TOKEN_ENV_VARS:
-        token = os.getenv(env_var, "").strip()
-        if token:
-            return token
-    return None
+    token = os.getenv(PLATFORM_TOKEN_ENV_VAR, "").strip()
+    return token or None
 
 
 class PricingConfig(BaseModel):
@@ -110,7 +101,7 @@ class GatewayConfig(BaseSettings):
     """Gateway configuration with support for YAML files and environment variables."""
 
     model_config = SettingsConfigDict(
-        env_prefix="GATEWAY_",
+        env_prefix="OTARI_",
         env_file=".env",
         case_sensitive=False,
         extra="ignore",
@@ -338,46 +329,42 @@ class GatewayConfig(BaseSettings):
         default=None,
         description=(
             "Base URL of the code-execution sandbox backend for otari_code_execution tools. "
-            "Legacy env alias: GATEWAY_SANDBOX_URL. When unset, otari_code_execution requests "
-            "are rejected with 400."
+            "When unset, otari_code_execution requests are rejected with 400."
         ),
     )
     guardrails_url: str | None = Field(
         default=None,
         description=(
             "Default URL of the input-guardrails service used when a request does not pass its "
-            "own guardrail `url`. Legacy env alias: GATEWAY_GUARDRAILS_URL. docker-compose sets "
-            "this to the bundled guardrails container."
+            "own guardrail `url`. docker-compose sets this to the bundled guardrails container."
         ),
     )
     tools_header: str | None = Field(
         default=None,
         description=(
             "Per-deployment override for the purpose-hint preamble header injected ahead of "
-            "gateway-managed tool hints. Legacy env alias: GATEWAY_TOOLS_HEADER. When unset, a "
-            "built-in default header is used."
+            "gateway-managed tool hints. When unset, a built-in default header is used."
         ),
     )
     sandbox_purpose_hint: str | None = Field(
         default=None,
         description=(
             "Default purpose hint forwarded to the sandbox backend when an otari_code_execution "
-            "tool entry does not supply its own. Legacy env alias: GATEWAY_SANDBOX_PURPOSE_HINT."
+            "tool entry does not supply its own."
         ),
     )
     web_search_purpose_hint: str | None = Field(
         default=None,
         description=(
             "Default purpose hint for the web-search backend when an otari_web_search tool entry "
-            "does not supply its own. Legacy env alias: GATEWAY_WEB_SEARCH_PURPOSE_HINT."
+            "does not supply its own."
         ),
     )
     web_search_engines: str | None = Field(
         default=None,
         description=(
             "Comma-separated SearXNG engine list for the web-search backend (e.g. 'google,bing'). "
-            "Legacy env alias: GATEWAY_WEB_SEARCH_ENGINES. When unset, the backend default engines "
-            "are used."
+            "When unset, the backend default engines are used."
         ),
     )
     web_search_max_results: int | None = Field(
@@ -385,49 +372,45 @@ class GatewayConfig(BaseSettings):
         ge=1,
         description=(
             "Default cap on the number of hits returned by the web-search backend (a per-tool "
-            "max_results still overrides it). Legacy env alias: GATEWAY_WEB_SEARCH_MAX_RESULTS."
+            "max_results still overrides it)."
         ),
     )
     web_search_extract: bool | None = Field(
         default=None,
         description=(
             "Whether the web-search backend extracts page content in-process (True) or returns "
-            "snippet-only results (False). Legacy env alias: GATEWAY_WEB_SEARCH_EXTRACT. When "
-            "unset, the backend default (extraction on) applies."
+            "snippet-only results (False). When unset, the backend default (extraction on) applies."
         ),
     )
     web_search_allow_private_hosts: bool = Field(
         default=False,
         description=(
             "SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. "
-            "Off by default. Legacy env alias: GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS. Only enable "
-            "for unusual setups such as a private search index."
+            "Off by default. Only enable for unusual setups such as a private search index."
         ),
     )
     mcp_allow_loopback: bool = Field(
         default=True,
         description=(
             "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host "
-            "sidecars). On by default. Legacy env alias: GATEWAY_MCP_ALLOW_LOOPBACK."
+            "sidecars). On by default."
         ),
     )
     mcp_allow_private_hosts: bool = Field(
         default=False,
         description=(
             "SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept "
-            "hostnames that fail to resolve at validation time. Off by default. Legacy env alias: "
-            "GATEWAY_MCP_ALLOW_PRIVATE_HOSTS."
+            "hostnames that fail to resolve at validation time. Off by default."
         ),
     )
     mode: str | None = Field(
         default=None,
         description=(
             "Otari operating mode: 'standalone' or 'hybrid'. When unset (the default), the mode is "
-            "derived from the platform token: hybrid if a token is present (OTARI_AI_TOKEN, legacy "
-            "aliases OTARI_PLATFORM_TOKEN / ANY_LLM_PLATFORM_TOKEN), else standalone. Set explicitly "
-            "to assert the intended mode: 'hybrid' requires a token, and 'standalone' with a token "
-            "present is rejected at startup as conflicting configuration. Legacy value 'platform' is "
-            "accepted as an alias for 'hybrid'."
+            "derived from the platform token: hybrid if a token is present (OTARI_AI_TOKEN), else "
+            "standalone. Set explicitly to assert the intended mode: 'hybrid' requires a token, and "
+            "'standalone' with a token present is rejected at startup as conflicting configuration. "
+            "Legacy value 'platform' is accepted as an alias for 'hybrid'."
         ),
     )
     platform: dict[str, Any] = Field(default_factory=dict, description="otari.ai connection settings")
@@ -642,22 +625,18 @@ class GatewayConfig(BaseSettings):
         # "platform" is the legacy alias for "hybrid" (the otari.ai-connected
         # runtime mode); accept it so pre-rename configs keep working.
         if configured_mode not in {"standalone", "hybrid", "platform"}:
-            msg = "Invalid OTARI_MODE value (legacy: GATEWAY_MODE). Expected 'standalone' or 'hybrid'."
+            msg = "Invalid OTARI_MODE value. Expected 'standalone' or 'hybrid'."
             raise ValueError(msg)
 
         token_present = self.platform_token is not None
         if configured_mode in {"hybrid", "platform"} and not token_present:
-            msg = (
-                "OTARI_MODE=hybrid (legacy value: platform) requires OTARI_AI_TOKEN to be set "
-                "(legacy token aliases: OTARI_PLATFORM_TOKEN, ANY_LLM_PLATFORM_TOKEN)."
-            )
+            msg = "OTARI_MODE=hybrid (legacy value: platform) requires OTARI_AI_TOKEN to be set."
             raise ValueError(msg)
         if configured_mode == "standalone" and token_present:
             msg = (
-                "OTARI_MODE=standalone (legacy: GATEWAY_MODE) conflicts with a platform token being set "
-                "(OTARI_AI_TOKEN, legacy aliases OTARI_PLATFORM_TOKEN / ANY_LLM_PLATFORM_TOKEN): the "
-                "token selects hybrid mode. Unset the token to run standalone, or remove OTARI_MODE to "
-                "let the token select hybrid mode."
+                "OTARI_MODE=standalone conflicts with OTARI_AI_TOKEN being set: the token selects "
+                "hybrid mode. Unset the token to run standalone, or remove OTARI_MODE to let the "
+                "token select hybrid mode."
             )
             raise ValueError(msg)
 
@@ -789,8 +768,7 @@ def _bridge_yaml_fields_to_env(config: GatewayConfig, yaml_set_fields: set[str])
     only sees environment variables. ``os.environ.setdefault`` keeps env
     precedence intact: an ``OTARI_<FIELD>`` variable that is already set always
     wins, and fields not set in YAML are left untouched, so pure-env
-    deployments (including legacy ``GATEWAY_`` names and their exact string
-    spellings) behave byte-for-byte as before. Values are serialized from the
+    deployments behave byte-for-byte as before. Values are serialized from the
     validated field, with booleans lowercased to ``true``/``false``, the
     spellings every otari_env() consumer parses.
     """
@@ -805,9 +783,9 @@ def _bridge_yaml_fields_to_env(config: GatewayConfig, yaml_set_fields: set[str])
 def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
     """Layer OTARI_<FIELD> env vars over the config dict for every scalar field.
 
-    Written into the init dict so they take precedence over both YAML and the
-    legacy GATEWAY_ pydantic prefix. Complex fields (lists/dicts) are left to
-    YAML and pydantic's native env handling.
+    Written into the init dict so they take precedence over YAML (which pydantic's
+    native OTARI_ env prefix, applied after init, cannot override). Complex fields
+    (lists/dicts) are left to YAML and pydantic's native env handling.
     """
     for field_name in GatewayConfig.model_fields:
         value = os.getenv(f"{OTARI_ENV_PREFIX}{field_name.upper()}")

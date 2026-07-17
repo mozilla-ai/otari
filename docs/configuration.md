@@ -155,7 +155,7 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 
 ### Built-in tools and guardrails variables
 
-These operator-facing settings configure the gateway-managed tools (`otari_code_execution`, `otari_web_search`), the MCP tool loop, and input guardrails. Each is validated at startup and, where it maps to a scalar `GatewayConfig` field, can also be set in the config file (see the config reference above). Every variable also accepts its legacy `GATEWAY_` prefix; `OTARI_` wins when both are set.
+These operator-facing settings configure the gateway-managed tools (`otari_code_execution`, `otari_web_search`), the MCP tool loop, and input guardrails. Each is validated at startup and, where it maps to a scalar `GatewayConfig` field, can also be set in the config file (see the config reference above).
 
 | Variable | Default | Description |
 |----------|---------|-------------|

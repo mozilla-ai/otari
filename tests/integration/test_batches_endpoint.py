@@ -835,7 +835,7 @@ def test_batch_endpoints_not_in_hybrid_mode(
     from gateway.core.config import GatewayConfig
     from gateway.main import create_app
 
-    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "test-platform-token")
+    monkeypatch.setenv("OTARI_AI_TOKEN", "test-platform-token")
 
     platform_config = GatewayConfig(
         database_url=postgres_url,

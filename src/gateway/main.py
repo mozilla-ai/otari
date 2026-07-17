@@ -12,7 +12,7 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
-from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.dashboard import get_dashboard_build_id, get_dashboard_dir
 from gateway.rate_limit import RateLimiter
@@ -231,7 +231,6 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 "Content-Type",
                 "Authorization",
                 API_KEY_HEADER,
-                *LEGACY_API_KEY_HEADERS,
             ],
         )
 

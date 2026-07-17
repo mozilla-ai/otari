@@ -7,7 +7,7 @@ The gateway's ``WebSearchBackend`` speaks one protocol: it issues
 
 Tavily's API has a different shape and its own auth header, so this thin
 service translates between the two. Point the gateway at it with
-``GATEWAY_WEB_SEARCH_URL=http://tavily-adapter:8080``; the Tavily key lives
+``OTARI_WEB_SEARCH_URL=http://tavily-adapter:8080``; the Tavily key lives
 here, never in the gateway.
 
 The gateway may forward provider-specific knobs as extra query params

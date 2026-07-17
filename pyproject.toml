@@ -58,8 +58,6 @@ dev = [
 
 [project.scripts]
 otari = "gateway.cli:main"
-# Legacy alias: the CLI was named `gateway` before the rename to `otari`.
-gateway = "gateway.cli:main"
 
 [tool.uv]
 # Otari is deployed as a Linux server and developed on Linux / macOS; it is
