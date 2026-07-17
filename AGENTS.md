@@ -58,6 +58,11 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - If you need a local package build artifact, use: `uv build`
 - Docker local build/run: `docker compose up --build`
 - CI Docker smoke check is implemented in `scripts/docker_liveness_check.sh`.
+## Web Dashboard (`web/`)
+- The standalone admin dashboard is a React + HeroUI v3 SPA in `web/` (Vite, Tailwind v4, TanStack Query). It browses the model catalogue, sets model pricing, manages aliases, and toggles runtime settings; it calls the management API (`/v1/models`, `/v1/pricing`, `/v1/aliases`, `/v1/settings`) with the master key, entered on a sign-in screen and kept only in the browser tab's session storage.
+- Build: `npm --prefix web ci && npm --prefix web run build`. Output goes to `src/gateway/static/dashboard/` (set in `web/vite.config.ts`), which is committed so the wheel and Docker image ship the dashboard with no Node build stage. Rebuild and commit after any change under `web/src`.
+- Checks: `npm --prefix web run typecheck`, `npm --prefix web test`. CI runs these and fails if the committed bundle is stale (`.github/workflows/otari-dashboard.yml`).
+- Serving: standalone mode serves `index.html` at `/` and hashed assets under `/assets` (`src/gateway/main.py`, `src/gateway/dashboard.py`); the get-started tutorial moved to `/welcome`. Hybrid mode has no local management API, so `/` keeps serving the tutorial. Navigation is client-side section switching, so no server catch-all route is needed.
 ## Lint / Typecheck Commands
 - Ruff is configured for linting (rules: `E`, `F`, `I`; line length: 120) in `pyproject.toml`.
 - Run lint checks with `make lint` (or `uv run ruff check src tests scripts`).
@@ -179,6 +184,8 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - ORM models: `src/gateway/models/entities.py`
 - Alembic migrations: `alembic/versions/`
 - OpenAPI generator: `scripts/generate_openapi.py`
+- Admin dashboard source: `web/` (built bundle committed at `src/gateway/static/dashboard/`)
+- Dashboard bundle locator: `src/gateway/dashboard.py`
 
 ## Change Validation Checklist
 - If you touched API routes or schemas, run relevant integration tests first.

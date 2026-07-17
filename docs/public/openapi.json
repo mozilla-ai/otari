@@ -1,6 +1,73 @@
 {
   "components": {
     "schemas": {
+      "AliasRequest": {
+        "description": "Request to create or update an alias.",
+        "properties": {
+          "name": {
+            "description": "Display name callers use as the model, e.g. 'fast-model'.",
+            "title": "Name",
+            "type": "string"
+          },
+          "target": {
+            "description": "Selector the alias resolves to, as 'provider:model' or 'instance:model'.",
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "target"
+        ],
+        "title": "AliasRequest",
+        "type": "object"
+      },
+      "AliasResponse": {
+        "description": "A model alias and where it is defined.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "target",
+          "source"
+        ],
+        "title": "AliasResponse",
+        "type": "object"
+      },
       "AudioSpeechRequest": {
         "description": "OpenAI-compatible audio speech (TTS) request.\n\nThe speech fields are derived from any-llm's ``AudioSpeechParams`` (see\n``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. ``user`` is gateway-only (billing / auth scoping); it is not an\nany-llm param and is stripped before the request is forwarded.",
         "properties": {
@@ -973,6 +1040,84 @@
         "title": "CreateUserRequest",
         "type": "object"
       },
+      "DiscoverableModel": {
+        "description": "A model one provider instance reports as available.",
+        "properties": {
+          "id": {
+            "description": "Bare model id as the provider reports it.",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "Selector to send as `model`, in `instance:model` form.",
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "key"
+        ],
+        "title": "DiscoverableModel",
+        "type": "object"
+      },
+      "DiscoverableModelsResponse": {
+        "description": "Per-provider discovery results for operator model selection.",
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverableProvider"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "title": "DiscoverableModelsResponse",
+        "type": "object"
+      },
+      "DiscoverableProvider": {
+        "description": "One provider instance's discovery result.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why discovery failed. Null when `ok` is true.",
+            "title": "Error"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/DiscoverableModel"
+            },
+            "title": "Models",
+            "type": "array"
+          },
+          "ok": {
+            "description": "False when this instance could not be queried.",
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "ok",
+          "models"
+        ],
+        "title": "DiscoverableProvider",
+        "type": "object"
+      },
       "EmbeddingRequest": {
         "description": "OpenAI-compatible embedding request.",
         "properties": {
@@ -1034,6 +1179,40 @@
           "input"
         ],
         "title": "EmbeddingRequest",
+        "type": "object"
+      },
+      "GatewaySettings": {
+        "description": "Operator-facing runtime settings surfaced to the dashboard.",
+        "properties": {
+          "default_pricing": {
+            "title": "Default Pricing",
+            "type": "boolean"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "model_discovery": {
+            "title": "Model Discovery",
+            "type": "boolean"
+          },
+          "require_pricing": {
+            "title": "Require Pricing",
+            "type": "boolean"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "version",
+          "model_discovery",
+          "default_pricing",
+          "require_pricing"
+        ],
+        "title": "GatewaySettings",
         "type": "object"
       },
       "GuardrailConfig": {
@@ -1601,9 +1780,213 @@
         "title": "ModelListResponse",
         "type": "object"
       },
+      "ModelMetadata": {
+        "description": "models.dev metadata for one model, for the dashboard's detail view.",
+        "properties": {
+          "attachment": {
+            "default": false,
+            "title": "Attachment",
+            "type": "boolean"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
+          "cost_input": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Input"
+          },
+          "cost_output": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Output"
+          },
+          "deprecated": {
+            "default": false,
+            "title": "Deprecated",
+            "type": "boolean"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family"
+          },
+          "input_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Input Modalities",
+            "type": "array"
+          },
+          "knowledge_cutoff": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Cutoff"
+          },
+          "last_updated": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Updated"
+          },
+          "max_output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Output Tokens"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "open_weights": {
+            "default": false,
+            "title": "Open Weights",
+            "type": "boolean"
+          },
+          "output_modalities": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Modalities",
+            "type": "array"
+          },
+          "reasoning": {
+            "default": false,
+            "title": "Reasoning",
+            "type": "boolean"
+          },
+          "release_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Release Date"
+          },
+          "structured_output": {
+            "default": false,
+            "title": "Structured Output",
+            "type": "boolean"
+          },
+          "temperature": {
+            "default": false,
+            "title": "Temperature",
+            "type": "boolean"
+          },
+          "tool_call": {
+            "default": false,
+            "title": "Tool Call",
+            "type": "boolean"
+          }
+        },
+        "title": "ModelMetadata",
+        "type": "object"
+      },
+      "ModelMetadataResponse": {
+        "description": "models.dev metadata keyed by ``provider:model``.",
+        "properties": {
+          "available": {
+            "description": "False when metadata could not be loaded (enrichment disabled or models.dev unreachable).",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "models": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ModelMetadata"
+            },
+            "title": "Models",
+            "type": "object"
+          },
+          "source": {
+            "default": "models.dev",
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "title": "ModelMetadataResponse",
+        "type": "object"
+      },
       "ModelObject": {
         "description": "OpenAI-compatible model object.",
         "properties": {
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
           "created": {
             "title": "Created",
             "type": "integer"
@@ -1630,6 +2013,11 @@
                 "type": "null"
               }
             ]
+          },
+          "pricing_source": {
+            "default": "none",
+            "title": "Pricing Source",
+            "type": "string"
           }
         },
         "required": [
@@ -1828,6 +2216,159 @@
           "updated_at"
         ],
         "title": "PricingResponse",
+        "type": "object"
+      },
+      "ProviderCapabilitiesSchema": {
+        "description": "Curated capability flags for a provider.",
+        "properties": {
+          "audio": {
+            "title": "Audio",
+            "type": "boolean"
+          },
+          "embeddings": {
+            "title": "Embeddings",
+            "type": "boolean"
+          },
+          "image_generation": {
+            "title": "Image Generation",
+            "type": "boolean"
+          },
+          "list_models": {
+            "title": "List Models",
+            "type": "boolean"
+          },
+          "moderation": {
+            "title": "Moderation",
+            "type": "boolean"
+          },
+          "pdf": {
+            "title": "Pdf",
+            "type": "boolean"
+          },
+          "reasoning": {
+            "title": "Reasoning",
+            "type": "boolean"
+          },
+          "rerank": {
+            "title": "Rerank",
+            "type": "boolean"
+          },
+          "responses_api": {
+            "title": "Responses Api",
+            "type": "boolean"
+          },
+          "streaming": {
+            "title": "Streaming",
+            "type": "boolean"
+          },
+          "vision": {
+            "title": "Vision",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "streaming",
+          "reasoning",
+          "vision",
+          "pdf",
+          "embeddings",
+          "image_generation",
+          "audio",
+          "rerank",
+          "responses_api",
+          "moderation",
+          "list_models"
+        ],
+        "title": "ProviderCapabilitiesSchema",
+        "type": "object"
+      },
+      "ProviderInfoSchema": {
+        "description": "Static, network-free metadata for one configured provider instance.",
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/ProviderCapabilitiesSchema"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "doc_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doc Url"
+          },
+          "env_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Env var the credential is read from.",
+            "title": "Env Key"
+          },
+          "instance": {
+            "description": "Configured provider key (may differ from the type).",
+            "title": "Instance",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-friendly provider name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "pricing_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Pricing Urls",
+            "type": "array"
+          },
+          "provider_type": {
+            "description": "Underlying any-llm provider type.",
+            "title": "Provider Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance",
+          "provider_type",
+          "name",
+          "capabilities"
+        ],
+        "title": "ProviderInfoSchema",
+        "type": "object"
+      },
+      "ProvidersResponse": {
+        "description": "Metadata for every configured provider.",
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderInfoSchema"
+            },
+            "title": "Providers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "providers"
+        ],
+        "title": "ProvidersResponse",
         "type": "object"
       },
       "RerankRequest": {
@@ -2446,6 +2987,35 @@
         "title": "UpdateKeyRequest",
         "type": "object"
       },
+      "UpdateSettingsRequest": {
+        "description": "Toggle one or more runtime settings. Omitted fields are left unchanged.",
+        "properties": {
+          "default_pricing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Pricing"
+          },
+          "model_discovery": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Discovery"
+          }
+        },
+        "title": "UpdateSettingsRequest",
+        "type": "object"
+      },
       "UpdateUserRequest": {
         "description": "Request model for updating a user.",
         "properties": {
@@ -3002,6 +3572,123 @@
         "summary": "Health Readiness",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/v1/aliases": {
+      "get": {
+        "description": "List every alias in force, from config.yml and from storage.",
+        "operationId": "list_aliases_v1_aliases_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AliasResponse"
+                  },
+                  "title": "Response List Aliases V1 Aliases Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List Aliases",
+        "tags": [
+          "aliases"
+        ]
+      },
+      "post": {
+        "description": "Create or update a stored alias.",
+        "operationId": "set_alias_v1_aliases_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AliasRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AliasResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Alias",
+        "tags": [
+          "aliases"
+        ]
+      }
+    },
+    "/v1/aliases/{name}": {
+      "delete": {
+        "description": "Delete a stored alias.",
+        "operationId": "delete_alias_v1_aliases__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Alias",
+        "tags": [
+          "aliases"
         ]
       }
     },
@@ -4575,6 +5262,60 @@
         ]
       }
     },
+    "/v1/models/discoverable": {
+      "get": {
+        "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\nmaster-key gated because a provider error message describes the gateway's own\nconfiguration.",
+        "operationId": "list_discoverable_models_v1_models_discoverable_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscoverableModelsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List Discoverable Models",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/v1/models/metadata": {
+      "get": {
+        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nMaster-key gated: it describes the gateway's configured providers.",
+        "operationId": "list_model_metadata_v1_models_metadata_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelMetadataResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List Model Metadata",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/v1/models/{model_id}": {
       "get": {
         "description": "Get details for a specific model.",
@@ -4748,7 +5489,7 @@
         ]
       },
       "post": {
-        "description": "Set or update pricing for a model.",
+        "description": "Set or update pricing for a model.\n\nRejects an alias: pricing, budgets, and usage all key on the resolved\ntarget, so a row stored under an alias name would never be read.",
         "operationId": "set_pricing_v1_pricing_post",
         "requestBody": {
           "content": {
@@ -4970,6 +5711,33 @@
         ]
       }
     },
+    "/v1/providers": {
+      "get": {
+        "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.\nMaster-key gated because it describes the gateway's own configuration.",
+        "operationId": "list_providers_v1_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProvidersResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List Providers",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
     "/v1/rerank": {
       "post": {
         "description": "Rerank documents by relevance to a query.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
@@ -5057,6 +5825,78 @@
         "summary": "Create Response",
         "tags": [
           "responses"
+        ]
+      }
+    },
+    "/v1/settings": {
+      "get": {
+        "description": "Return non-secret runtime settings for the admin dashboard.",
+        "operationId": "get_settings_v1_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewaySettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Settings",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "description": "Persist and apply runtime setting toggles.\n\nEach provided flag is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Master-key gated: these change\nhow the gateway meters and lists models.",
+        "operationId": "update_settings_v1_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GatewaySettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Settings",
+        "tags": [
+          "settings"
         ]
       }
     },

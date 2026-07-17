@@ -23,6 +23,14 @@ def _make_app() -> FastAPI:
     def list_budgets() -> list[str]:
         return ["budget-1"]
 
+    @app.get("/assets/app.js")
+    def asset() -> str:
+        return "console.log(1)"
+
+    @app.get("/favicon.svg")
+    def favicon() -> str:
+        return "<svg/>"
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "healthy"}
@@ -50,6 +58,22 @@ def test_authenticated_endpoint_has_vary_authorization() -> None:
     with TestClient(_make_app()) as client:
         response = client.get("/v1/users")
         assert "Authorization" in response.headers.get("Vary", "")
+
+
+def test_hashed_asset_is_cached_immutable() -> None:
+    """Content-hashed bundle assets under /assets are safe to cache forever."""
+    with TestClient(_make_app()) as client:
+        response = client.get("/assets/app.js")
+        assert response.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+        # No per-response Vary: Authorization; the asset is the same for everyone.
+        assert "Authorization" not in response.headers.get("Vary", "")
+
+
+def test_favicon_gets_public_cache_when_route_sets_none() -> None:
+    """A cacheable path that does not set its own Cache-Control gets a public one."""
+    with TestClient(_make_app()) as client:
+        response = client.get("/favicon.svg")
+        assert response.headers["Cache-Control"] == "public, max-age=86400"
 
 
 def test_health_endpoint_no_cache_headers() -> None:

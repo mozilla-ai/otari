@@ -5,6 +5,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from gateway.core.database import to_sync_url
 from gateway.models.entities import Base
 
 logger = logging.getLogger("alembic")
@@ -25,14 +26,17 @@ target_metadata = Base.metadata
 
 # Get database URL from config (if already set programmatically) or environment variables
 # Priority: Programmatically set URL -> OTARI_DATABASE_URL -> GATEWAY_DATABASE_URL -> DATABASE_URL -> default
-if config.get_main_option("sqlalchemy.url") is None:
-    database_url = (
-        os.getenv("OTARI_DATABASE_URL")
-        or os.getenv("GATEWAY_DATABASE_URL")
-        or os.getenv("DATABASE_URL")
-        or "sqlite:///./otari.db"
-    )
-    config.set_main_option("sqlalchemy.url", database_url)
+database_url = config.get_main_option("sqlalchemy.url") or (
+    os.getenv("OTARI_DATABASE_URL")
+    or os.getenv("GATEWAY_DATABASE_URL")
+    or os.getenv("DATABASE_URL")
+    or "sqlite:///./otari.db"
+)
+# Normalized here rather than at each call site so every entry point is covered:
+# `otari migrate`, auto_migrate on startup, and a bare `alembic upgrade head`
+# reading OTARI_DATABASE_URL. Migrations run on a sync engine, so an async URL
+# (the form README documents for SQLite) would otherwise fail with MissingGreenlet.
+config.set_main_option("sqlalchemy.url", to_sync_url(database_url))
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

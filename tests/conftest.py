@@ -14,15 +14,20 @@ if "gateway" in sys.modules:
 
 @pytest.fixture(autouse=True)
 def _reset_default_pricing() -> Generator[None, None, None]:
-    """Restore the process-wide default-pricing flag to its default before each test.
+    """Restore process-wide pricing state to its default before each test.
 
     ``configure_default_pricing`` is set at app startup, so a test that builds an
     app with a different ``default_pricing`` would otherwise leak that state into
     later tests that call ``find_model_pricing`` directly. Reset to off, matching
     the config field's opt-in default; tests that need defaults enable explicitly.
+
+    Also clear the memoized genai-prices resolutions so a real price cached by one
+    test cannot mask another test that patches ``calc_price`` to fail.
     """
-    from gateway.services.pricing_service import configure_default_pricing
+    from gateway.services.pricing_service import configure_default_pricing, reset_price_cache
 
     configure_default_pricing(False)
+    reset_price_cache()
     yield
     configure_default_pricing(False)
+    reset_price_cache()

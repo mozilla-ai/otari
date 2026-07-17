@@ -19,6 +19,7 @@ service_account.json
 gateway.db
 otari-gateway.db
 otari.db
+otari-dev.db
 
 .DS_Store
 

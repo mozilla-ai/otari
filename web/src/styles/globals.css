@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@import "@heroui/styles";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --otari-brand: #4e8295;
+  --otari-brand-dark: #3c6678;
+  --otari-brand-tint: #eaf1f3;
+  --otari-ink: #14242c;
+  --otari-muted: #5b6b73;
+  --otari-line: #dbe5e8;
+  --otari-surface: #ffffff;
+  --otari-bg: #f6f9fa;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--otari-bg);
+  color: var(--otari-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}

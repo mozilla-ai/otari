@@ -376,3 +376,214 @@ def test_list_models_sorted(
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
     assert ids == sorted(ids)
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/models/discoverable
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def two_provider_config(postgres_url: str) -> GatewayConfig:
+    """Config with two live providers and discovery disabled.
+
+    Discovery is off to prove the discoverable endpoint ignores the flag.
+    """
+    return GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        auto_migrate=False,
+        model_discovery=False,
+        model_cache_ttl_seconds=300,
+        providers={
+            "openai": {"api_key": "sk-fake-for-test"},
+            "anthropic": {"api_key": "sk-ant-fake-for-test"},
+        },
+    )
+
+
+@pytest.fixture
+def two_provider_client(two_provider_config: GatewayConfig) -> Generator[TestClient]:
+    get_model_cache().clear()
+    yield from _make_client(two_provider_config)
+
+
+def _alist_models_per_provider(**kwargs: Any) -> list[Any]:
+    """Serve openai, fail anthropic, so one response carries both outcomes."""
+    from any_llm.types.model import Model
+
+    provider = kwargs["provider"]
+    if provider.value == "openai":
+        return [Model(**_make_openai_model("gpt-4o")), Model(**_make_openai_model("gpt-4o-mini"))]
+    raise RuntimeError("authentication failed: invalid x-api-key")
+
+
+def test_discoverable_reports_each_provider_separately(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """A failing provider carries its error without blanking the working one."""
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            side_effect=_alist_models_per_provider,
+        ),
+    ):
+        resp = two_provider_client.get("/v1/models/discoverable", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    providers = {p["provider"]: p for p in resp.json()["providers"]}
+    assert set(providers) == {"anthropic", "openai"}
+
+    assert providers["openai"]["ok"] is True
+    assert providers["openai"]["error"] is None
+    assert [m["id"] for m in providers["openai"]["models"]] == ["gpt-4o", "gpt-4o-mini"]
+    # The selector is what the dashboard must send back as `model`.
+    assert [m["key"] for m in providers["openai"]["models"]] == ["openai:gpt-4o", "openai:gpt-4o-mini"]
+
+    assert providers["anthropic"]["ok"] is False
+    assert providers["anthropic"]["models"] == []
+    assert "authentication failed" in providers["anthropic"]["error"]
+
+
+def test_discoverable_queries_providers_when_discovery_disabled(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """model_discovery is a listing policy for /v1/models, not a query switch.
+
+    The fixture config sets model_discovery=False; the operator still gets the
+    models their credentials can reach.
+    """
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            side_effect=_alist_models_per_provider,
+        ),
+    ):
+        discoverable = two_provider_client.get("/v1/models/discoverable", headers=discovery_master_header)
+        listed = two_provider_client.get("/v1/models", headers=discovery_master_header)
+
+    openai_models = next(p for p in discoverable.json()["providers"] if p["provider"] == "openai")
+    assert [m["id"] for m in openai_models["models"]] == ["gpt-4o", "gpt-4o-mini"]
+    # Same config, same call: /v1/models still publishes nothing, as configured.
+    assert listed.json()["data"] == []
+
+
+def test_discoverable_falls_back_to_declared_models(
+    postgres_url: str,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """A backend with no /v1/models reports the operator's declared models."""
+    get_model_cache().clear()
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        auto_migrate=False,
+        model_cache_ttl_seconds=300,
+        providers={
+            "local": {
+                "provider_type": "openai",
+                "api_key": "unused",
+                "api_base": "http://127.0.0.1:9/v1",
+                "models": ["llama-3.1-8b"],
+            },
+        },
+    )
+
+    client_gen = _make_client(config)
+    client = next(client_gen)
+    try:
+        with patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=False,
+        ):
+            resp = client.get("/v1/models/discoverable", headers=discovery_master_header)
+
+        assert resp.status_code == 200
+        provider = resp.json()["providers"][0]
+        assert provider["provider"] == "local"
+        assert provider["ok"] is True
+        assert provider["models"] == [{"id": "llama-3.1-8b", "key": "local:llama-3.1-8b"}]
+    finally:
+        client_gen.close()
+
+
+def test_discoverable_explains_a_provider_that_cannot_list(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """No listing support and no declared models is reported, not silently empty."""
+    with patch(
+        "gateway.services.model_discovery_service._supports_list_models",
+        return_value=False,
+    ):
+        resp = two_provider_client.get("/v1/models/discoverable", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    for provider in resp.json()["providers"]:
+        assert provider["ok"] is False
+        assert provider["models"] == []
+        assert "cannot list models" in provider["error"]
+        assert "config.yml" in provider["error"]
+
+
+def test_discoverable_requires_master_key(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """A working non-master API key is rejected: errors describe the config."""
+    created = two_provider_client.post(
+        "/v1/keys",
+        json={"key_name": "discoverable-probe"},
+        headers=discovery_master_header,
+    )
+    assert created.status_code == 200
+    api_key = created.json()["key"]
+
+    resp = two_provider_client.get(
+        "/v1/models/discoverable",
+        headers={API_KEY_HEADER: f"Bearer {api_key}"},
+    )
+    # 401 rather than 403: verify_master_key treats a non-master key as
+    # unauthenticated, matching every other master-key-gated route.
+    assert resp.status_code == 401
+
+    # Same key on the caller-facing listing still works, so the 401 is the gate
+    # and not a broken key.
+    assert two_provider_client.get("/v1/models", headers={API_KEY_HEADER: f"Bearer {api_key}"}).status_code == 200
+
+
+def test_discoverable_is_not_shadowed_by_get_model(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """The path must not be captured by GET /v1/models/{model_id:path}.
+
+    Registration order decides this, so a reordering would silently turn the
+    response into a 404 ModelObject lookup for a model named "discoverable".
+    """
+    with patch(
+        "gateway.services.model_discovery_service._supports_list_models",
+        return_value=False,
+    ):
+        resp = two_provider_client.get("/v1/models/discoverable", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "providers" in body
+    assert "object" not in body

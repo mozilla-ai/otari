@@ -188,6 +188,17 @@ uv run otari serve --config config.yml
 
 For hot reload against a local `.env`, use `make dev`.
 
+### Admin dashboard
+
+In standalone mode the gateway serves a web admin dashboard at the root URL
+(`http://localhost:8000`). Sign in with your master key (`OTARI_MASTER_KEY`) to
+browse the model catalogue, set model pricing, manage aliases, and toggle
+runtime settings (model discovery and default pricing). The get-started
+tutorial page moved to `/welcome`. The dashboard is a React +
+HeroUI app that lives in `web/`; its built bundle is committed under
+`src/gateway/static/dashboard`, so the published package and Docker image serve
+it with no extra build step. See [`web/README.md`](web/README.md) to work on it.
+
 To build and run the container from your local code instead of pulling the published image, layer in the build file:
 
 ```bash

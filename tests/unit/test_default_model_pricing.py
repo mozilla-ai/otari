@@ -81,6 +81,31 @@ def test_default_pricing_fails_safe_on_unexpected_error(monkeypatch: pytest.Monk
     assert default_model_pricing("openai", "gpt-4o", datetime.now(UTC)) is None
 
 
+def test_transient_failure_is_not_cached_and_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A transient genai-prices failure is retried on the next lookup.
+
+    Guards against caching the ``None`` from the exception branch, which would pin
+    the model to unpriced until the date rolls over. A genuine ``LookupError`` miss
+    is still cacheable; only a raised exception must be retried.
+    """
+    as_of = datetime(2025, 1, 1, tzinfo=UTC)
+
+    def boom(*args: object, **kwargs: object) -> object:
+        raise RuntimeError("genai-prices hiccup")
+
+    monkeypatch.setattr(pricing_service, "calc_price", boom)
+
+    # First lookup hits the transient failure and degrades to None...
+    assert default_model_pricing("openai", "gpt-4o", as_of) is None
+
+    # ...and because the failure was not cached, restoring the real client and
+    # retrying the same key resolves a price (a cached None would stay None here).
+    monkeypatch.undo()
+    pricing = default_model_pricing("openai", "gpt-4o", as_of)
+    assert pricing is not None
+    assert pricing.input_price_per_million > 0
+
+
 def test_configure_default_pricing_toggles_enabled_flag() -> None:
     """configure_default_pricing flips the process-wide enabled flag."""
     configure_default_pricing(False)

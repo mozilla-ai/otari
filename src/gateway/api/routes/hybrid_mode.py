@@ -31,3 +31,31 @@ async def budgets_disabled() -> None:
 @router.api_route("/v1/usage", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def usage_disabled() -> None:
     _raise_disabled()
+
+
+# The admin-dashboard management surface (settings, aliases, providers, pricing)
+# is standalone-only for the same reason as the resources above: in hybrid mode
+# these are owned by the platform. Stubbed so an operator hitting them gets the
+# same "manage via the platform UI" hint instead of a bare 404.
+@router.api_route("/v1/settings/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@router.api_route("/v1/settings", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def settings_disabled() -> None:
+    _raise_disabled()
+
+
+@router.api_route("/v1/aliases/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@router.api_route("/v1/aliases", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def aliases_disabled() -> None:
+    _raise_disabled()
+
+
+@router.api_route("/v1/providers/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@router.api_route("/v1/providers", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def providers_disabled() -> None:
+    _raise_disabled()
+
+
+@router.api_route("/v1/pricing/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@router.api_route("/v1/pricing", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def pricing_disabled() -> None:
+    _raise_disabled()

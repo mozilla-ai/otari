@@ -76,6 +76,87 @@
     {
       "item": [
         {
+          "name": "List Aliases",
+          "request": {
+            "description": "List every alias in force, from config.yml and from storage.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "aliases"
+              ],
+              "raw": "{{baseUrl}}/v1/aliases"
+            }
+          }
+        },
+        {
+          "name": "Set Alias",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\",\n  \"target\": \"string\"\n}"
+            },
+            "description": "Create or update a stored alias.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "aliases"
+              ],
+              "raw": "{{baseUrl}}/v1/aliases"
+            }
+          }
+        },
+        {
+          "name": "Delete Alias",
+          "request": {
+            "description": "Delete a stored alias.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "aliases",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/v1/aliases/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "aliases"
+    },
+    {
+      "item": [
+        {
           "name": "Create Speech",
           "request": {
             "body": {
@@ -1028,6 +1109,44 @@
           }
         },
         {
+          "name": "List Discoverable Models",
+          "request": {
+            "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\nmaster-key gated because a provider error message describes the gateway's own\nconfiguration.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "models",
+                "discoverable"
+              ],
+              "raw": "{{baseUrl}}/v1/models/discoverable"
+            }
+          }
+        },
+        {
+          "name": "List Model Metadata",
+          "request": {
+            "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nMaster-key gated: it describes the gateway's configured providers.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "models",
+                "metadata"
+              ],
+              "raw": "{{baseUrl}}/v1/models/metadata"
+            }
+          }
+        },
+        {
           "name": "Get Model",
           "request": {
             "description": "Get details for a specific model.",
@@ -1147,7 +1266,7 @@
               },
               "raw": "{\n  \"model_key\": \"string\",\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
             },
-            "description": "Set or update pricing for a model.",
+            "description": "Set or update pricing for a model.\n\nRejects an alias: pricing, budgets, and usage all key on the resolved\ntarget, so a row stored under an alias name would never be read.",
             "header": [
               {
                 "key": "Content-Type",
@@ -1268,6 +1387,29 @@
     {
       "item": [
         {
+          "name": "List Providers",
+          "request": {
+            "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.\nMaster-key gated because it describes the gateway's own configuration.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "providers"
+              ],
+              "raw": "{{baseUrl}}/v1/providers"
+            }
+          }
+        }
+      ],
+      "name": "providers"
+    },
+    {
+      "item": [
+        {
           "name": "Create Rerank",
           "request": {
             "body": {
@@ -1338,6 +1480,61 @@
         }
       ],
       "name": "responses"
+    },
+    {
+      "item": [
+        {
+          "name": "Get Settings",
+          "request": {
+            "description": "Return non-secret runtime settings for the admin dashboard.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "settings"
+              ],
+              "raw": "{{baseUrl}}/v1/settings"
+            }
+          }
+        },
+        {
+          "name": "Update Settings",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"default_pricing\": false,\n  \"model_discovery\": false\n}"
+            },
+            "description": "Persist and apply runtime setting toggles.\n\nEach provided flag is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Master-key gated: these change\nhow the gateway meters and lists models.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "settings"
+              ],
+              "raw": "{{baseUrl}}/v1/settings"
+            }
+          }
+        }
+      ],
+      "name": "settings"
     },
     {
       "item": [
