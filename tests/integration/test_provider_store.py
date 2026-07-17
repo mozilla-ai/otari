@@ -58,6 +58,35 @@ async def test_crud_round_trip(async_db: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_explicit_none_clears_a_field_while_omitting_keeps_it(async_db: AsyncSession) -> None:
+    await save_credential(
+        async_db,
+        instance="home_lab",
+        provider_type="openai",
+        api_base="https://box/v1",
+        api_key="tok-1234",
+    )
+    await async_db.commit()
+
+    # Explicit None clears api_base; omitted fields (provider_type, api_key) stay put.
+    await save_credential(async_db, instance="home_lab", api_base=None)
+    await async_db.commit()
+    row = await get_credential(async_db, "home_lab")
+    assert row is not None
+    assert row.api_base is None
+    assert row.provider_type == "openai"
+    assert row.last4 == "1234"
+
+    # Explicit None on the key clears it (keyless local backend).
+    await save_credential(async_db, instance="home_lab", api_key=None)
+    await async_db.commit()
+    row = await get_credential(async_db, "home_lab")
+    assert row is not None
+    assert row.encrypted_api_key is None
+    assert row.last4 is None
+
+
+@pytest.mark.asyncio
 async def test_refresh_overlays_and_shadows_config(async_db: AsyncSession) -> None:
     await save_credential(async_db, instance="openai", api_key="sk-stored-9999")
     await async_db.commit()

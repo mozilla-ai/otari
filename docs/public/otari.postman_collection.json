@@ -1481,7 +1481,7 @@
               },
               "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"expected_updated_at\": \"string\",\n  \"provider_type\": \"string\"\n}"
             },
-            "description": "Update a stored provider. ``api_key`` rotates in place; omit it to keep the current key.",
+            "description": "Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``\nso the ``expected_updated_at`` check and the write it guards are atomic.",
             "header": [
               {
                 "key": "Content-Type",

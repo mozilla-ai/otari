@@ -21,7 +21,7 @@ only: the caller must not load or refresh this in the hybrid platform path.
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, Final
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +41,15 @@ from gateway.services.secret_box import (
 # added or edited provider takes at most this long to reach every replica;
 # providers already serving traffic are unaffected.
 PROVIDER_CACHE_TTL_SECONDS = 30.0
+
+
+class _Unset:
+    """Sentinel type: 'this field was not provided', distinct from an explicit None."""
+
+
+# A field left at UNSET keeps its stored value; passing None clears it. This lets
+# a PATCH distinguish "leave the api_base alone" from "remove the api_base".
+UNSET: Final = _Unset()
 
 # instance -> decrypted overlay entry (the same shape as a config.providers value)
 _cache: dict[str, dict[str, Any]] = {}
@@ -190,22 +199,36 @@ async def get_credential(db: AsyncSession, instance: str) -> ProviderCredential 
     return await db.get(ProviderCredential, instance)
 
 
+async def get_credential_for_update(db: AsyncSession, instance: str) -> ProviderCredential | None:
+    """Like :func:`get_credential`, but locks the row ``FOR UPDATE``.
+
+    Used by the PATCH path so a version check and the write it guards run under
+    the same row lock: on PostgreSQL a concurrent PATCH waits and then sees the
+    new ``updated_at`` (so it 412s instead of clobbering). SQLite serialises
+    writers anyway, so the lock is a no-op there without changing correctness.
+    """
+    stmt = select(ProviderCredential).where(ProviderCredential.instance == instance).with_for_update()
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
 async def save_credential(
     db: AsyncSession,
     *,
     instance: str,
-    provider_type: str | None = None,
-    api_base: str | None = None,
-    api_key: str | None = None,
-    client_args: dict[str, Any] | None = None,
+    provider_type: str | None | _Unset = UNSET,
+    api_base: str | None | _Unset = UNSET,
+    api_key: str | None | _Unset = UNSET,
+    client_args: dict[str, Any] | None | _Unset = UNSET,
 ) -> ProviderCredential:
     """Create or update a stored credential (staged; caller commits).
 
-    ``api_key`` is encrypted before storage and requires ``OTARI_SECRET_KEY``
-    (raises ``SecretBoxUnavailableError`` otherwise). On update, ``api_key=None``
-    leaves the existing key untouched (rotate-in-place semantics); other
-    ``None`` fields also leave the stored value unchanged. On create, unset
-    fields default to empty/null. The plaintext key is never logged or stored.
+    Each field is tri-state: left at ``UNSET`` it keeps the stored value; passed
+    ``None`` it is cleared; passed a value it is set. That lets a PATCH remove an
+    ``api_base`` or rotate a key without disturbing the rest. ``api_key`` is
+    encrypted before storage and requires ``OTARI_SECRET_KEY`` (raises
+    ``SecretBoxUnavailableError``); passing it ``None`` clears the stored key
+    (keyless local backends). ``client_args`` is normalised to ``{}`` when
+    cleared, since the column is non-null. The plaintext key is never logged.
     """
     existing = await db.get(ProviderCredential, instance)
     if existing is None:
@@ -214,15 +237,19 @@ async def save_credential(
     else:
         row = existing
 
-    if provider_type is not None:
+    if not isinstance(provider_type, _Unset):
         row.provider_type = provider_type
-    if api_base is not None:
+    if not isinstance(api_base, _Unset):
         row.api_base = api_base
-    if client_args is not None:
-        row.client_args = client_args
-    if api_key is not None:
-        row.encrypted_api_key = encrypt_secret(api_key)
-        row.last4 = _last4(api_key)
+    if not isinstance(client_args, _Unset):
+        row.client_args = client_args or {}
+    if not isinstance(api_key, _Unset):
+        if api_key:
+            row.encrypted_api_key = encrypt_secret(api_key)
+            row.last4 = _last4(api_key)
+        else:
+            row.encrypted_api_key = None
+            row.last4 = None
 
     return row
 

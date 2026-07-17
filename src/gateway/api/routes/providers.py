@@ -31,8 +31,10 @@ from gateway.services.provider_metadata_service import (
     list_provider_info,
 )
 from gateway.services.provider_store_service import (
+    UNSET,
     delete_credential,
     get_credential,
+    get_credential_for_update,
     list_credentials,
     refresh_provider_cache,
     save_credential,
@@ -357,8 +359,13 @@ async def update_stored_provider(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> StoredProviderResponse:
-    """Update a stored provider. ``api_key`` rotates in place; omit it to keep the current key."""
-    existing = await get_credential(db, instance)
+    """Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.
+
+    ``api_key`` follows the same rule: omit it to keep the stored key, send a new
+    one to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``
+    so the ``expected_updated_at`` check and the write it guards are atomic.
+    """
+    existing = await get_credential_for_update(db, instance)
     if existing is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No stored provider '{instance}'.")
     if request.expected_updated_at is not None:
@@ -369,14 +376,16 @@ async def update_stored_provider(
                 detail="This provider was modified since you loaded it; reload and retry.",
             )
     _validate_instance(instance, request.provider_type)
+    # Distinguish "field omitted" (keep) from "field set to null" (clear).
+    sent = request.model_fields_set
     try:
         row = await save_credential(
             db,
             instance=instance,
-            provider_type=request.provider_type,
-            api_base=request.api_base,
-            api_key=request.api_key,
-            client_args=request.client_args,
+            provider_type=request.provider_type if "provider_type" in sent else UNSET,
+            api_base=request.api_base if "api_base" in sent else UNSET,
+            api_key=request.api_key if "api_key" in sent else UNSET,
+            client_args=request.client_args if "client_args" in sent else UNSET,
         )
     except SecretBoxUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None

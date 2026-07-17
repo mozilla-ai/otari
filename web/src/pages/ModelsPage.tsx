@@ -1,5 +1,5 @@
 import { Button, Card, Chip } from "@heroui/react";
-import { Fragment, type ReactNode, useEffect, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -225,12 +225,15 @@ function InfoTooltip({
   tone?: "info" | "warning";
   children: ReactNode;
 }) {
+  // Unique per instance: several tooltips render at once, so a shared id would
+  // make aria-describedby resolve to the wrong (or ambiguous) tooltip.
+  const tipId = useId();
   return (
     <span className="group relative inline-flex items-center font-normal normal-case">
       <button
         type="button"
         aria-label={label}
-        aria-describedby="pricing-info-tip"
+        aria-describedby={tipId}
         className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] leading-none ${
           tone === "warning"
             ? "border-[#c2843a] text-[#b45309]"
@@ -240,7 +243,7 @@ function InfoTooltip({
         i
       </button>
       <span
-        id="pricing-info-tip"
+        id={tipId}
         role="tooltip"
         className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 rounded-lg border border-[var(--otari-line)] bg-[var(--otari-surface)] px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-[var(--otari-ink)] opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
       >
@@ -769,7 +772,9 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
           </InfoTooltip>
         </span>
       ) : null}
-      {setPricing.error ? <span className="text-xs text-red-700">{errorMessage(setPricing.error)}</span> : null}
+      {setPricing.error || deletePricing.error ? (
+        <span className="text-xs text-red-700">{errorMessage(setPricing.error ?? deletePricing.error)}</span>
+      ) : null}
     </div>
   );
 }

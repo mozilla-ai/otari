@@ -37,8 +37,14 @@ export default function App() {
 // so this only runs once authenticated.
 function IndexRedirect() {
   const providers = useProviders();
-  if (!providers.isSuccess) {
+  if (providers.isLoading) {
     return null;
+  }
+  // Never strand the index route on a blank screen: if the providers query
+  // failed, fall back to Providers (where the error surfaces and an admin can
+  // add one) rather than rendering nothing forever.
+  if (!providers.isSuccess) {
+    return <Navigate to="/providers" replace />;
   }
   return <Navigate to={providers.data.providers.length === 0 ? "/providers" : "/models"} replace />;
 }

@@ -155,7 +155,7 @@ docker run --rm -p 8000:8000 mzdotai/otari:latest otari serve
 
 With no master key set, Otari generates one and prints it to the logs once on startup:
 
-```
+```text
 Otari first-run: no master key was set, so one was generated.
 Save it now (it is shown only once). Sign in to the dashboard at http://localhost:8000/
 Your master key:

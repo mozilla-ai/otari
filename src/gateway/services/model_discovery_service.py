@@ -183,7 +183,10 @@ async def discover_provider_models(config: GatewayConfig, instance: str) -> Prov
     try:
         _, models = await _discover_for_provider(instance, config)
     except Exception as exc:
-        logger.info("Model discovery failed for instance '%s': %s", instance, exc)
+        # Log the class only, never str(exc): some providers echo a partial key
+        # or endpoint in the message. The capped text still reaches the
+        # master-key caller in the response, where it is a useful diagnostic.
+        logger.info("Model discovery failed for instance '%s' (%s)", instance, type(exc).__name__)
         return ProviderDiscovery(provider=instance, models=[], error=_short_error(exc))
 
     cache.set(instance, models)
@@ -225,7 +228,9 @@ async def test_provider_credentials(
             client_args=client_args,
         )
     except Exception as exc:
-        logger.info("Provider connection test failed for '%s': %s", impl_name, exc)
+        # Class only in the log (see discover_provider_models); the capped
+        # message still goes back to the master-key caller who owns the key.
+        logger.info("Provider connection test failed for '%s' (%s)", impl_name, type(exc).__name__)
         return ProviderDiscovery(provider=impl_name, models=[], error=_short_error(exc))
     return ProviderDiscovery(provider=impl_name, models=list(models))
 

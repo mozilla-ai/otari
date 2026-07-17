@@ -123,6 +123,11 @@ function ProviderComboBox({
         if (key != null) {
           onChange(String(key));
           setText(options.find((o) => o.id === String(key))?.name ?? "");
+        } else {
+          // Selection cleared: clear the parent value too, so the submitted
+          // data cannot keep a stale provider after the field is emptied.
+          onChange("");
+          setText("");
         }
       }}
       className="flex flex-col gap-1"
@@ -681,7 +686,9 @@ export function ProvidersPage() {
         }
       />
 
-      <ErrorBanner error={meta.error ?? stored.error} />
+      <ErrorBanner
+        error={meta.error ?? stored.error ?? settings.error ?? updateSettings.error ?? deleteProvider.error}
+      />
 
       {showOnboarding ? (
         <OnboardingPanel
