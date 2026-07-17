@@ -50,7 +50,8 @@ Build and check from the repo root:
 - New HeroUI **v2** patterns: granular imports (`@heroui/button`), `HeroUIProvider`,
   `classNames={{ slot }}` objects, `onValueChange` on inputs, or `color` on `Button`. This is
   v3: unified `@heroui/react` import, compound components (`Card.Content`, `Card.Header`),
-  `onChange`, `onPress`, `variant="primary"|"secondary"|"ghost"|"outline"|"danger"|"danger-soft"`.
+  `onChange`, `onPress`, and a `variant` (the dashboard uses `primary`, `ghost`, `outline`,
+  `danger`, `danger-soft`) instead of `color` on `Button`.
 - Inline `style={{}}` or `<style>` tags. Use Tailwind utilities or a token.
 - Manual polling with bare `setInterval`/`setTimeout`. Use TanStack Query's `refetchInterval`
   (see `useDashboardBuild`).

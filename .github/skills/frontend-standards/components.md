@@ -30,8 +30,9 @@ import { Button, Card } from "@heroui/react";
 </Button>
 ```
 
-`variant` values the dashboard uses: `primary`, `secondary`, `ghost`, `outline`, `danger`,
-`danger-soft`. Stick to these unless you're deliberately adding a new one.
+`variant` values the dashboard uses: `primary`, `ghost`, `outline`, `danger`, `danger-soft`.
+`secondary` and the other HeroUI v3 variants are available if a new need arises; stick to the
+in-use set unless you're deliberately adding one.
 
 ## Props over `className`
 
