@@ -15,6 +15,16 @@ Scope: entire repo.
 - Database: SQLite by default (async via `aiosqlite`), PostgreSQL in integration tests (async via `asyncpg`).
 - Provider calls go through the `any-llm` SDK (`any_llm`), not hand-rolled HTTP clients.
 
+## Skills & Scoped Instructions
+Detailed, task-scoped guidance lives outside this file so it loads only when relevant
+(progressive disclosure). Read the applicable one before editing:
+
+- **Backend (`src/gateway/`)** → [.github/skills/backend-standards/SKILL.md](.github/skills/backend-standards/SKILL.md): async SQLAlchemy house style, layering, the budget/reservation lifecycle, migrations, config/logging conventions.
+- **Dashboard (`web/`)** → [.github/skills/frontend-standards/SKILL.md](.github/skills/frontend-standards/SKILL.md): HeroUI v3, the `--otari-*` design tokens, TanStack Query patterns, and Vitest testing for the admin dashboard.
+- **Reviewing a change** → the path-scoped files in [.github/instructions/](.github/instructions/) auto-apply during Copilot reviews (they carry `applyTo` globs): [security-review](.github/instructions/security-review.instructions.md) (budget/tenant isolation, auth, SSRF, prompt injection) and [performance-review](.github/instructions/performance-review.instructions.md) (N+1, indexes, pagination limits, transaction atomicity).
+
+The `.claude/skills` directory symlinks to `.github/skills`, so the same skills are available to Claude and to GitHub Copilot from one source.
+
 ## Architecture (Big Picture)
 Read these together before changing request behavior, the flow spans several files.
 
