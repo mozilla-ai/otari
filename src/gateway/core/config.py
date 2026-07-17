@@ -105,6 +105,11 @@ class GatewayConfig(BaseSettings):
         env_file=".env",
         case_sensitive=False,
         extra="ignore",
+        # Treat an empty OTARI_<FIELD> env var as unset, matching the empty-skip
+        # in _apply_otari_env_overrides. Without this, a blank OTARI_MASTER_KEY
+        # (common from container templating) would read as "" instead of None,
+        # and an empty bearer token would then satisfy _is_valid_master_key.
+        env_ignore_empty=True,
     )
 
     database_url: str = Field(

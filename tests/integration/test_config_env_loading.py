@@ -96,6 +96,22 @@ def test_load_config_reads_otari_prefixed_env_aliases(tmp_path: Path, monkeypatc
     assert config.bootstrap_api_key is False
 
 
+def test_load_config_treats_empty_otari_scalar_env_as_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A blank OTARI_MASTER_KEY (common from container templating) must read as
+    # unset, not "". An empty master key otherwise lets an empty bearer token
+    # satisfy the master-key check on the shared auth path.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_MASTER_KEY", "")
+
+    config = load_config(str(config_file))
+
+    assert config.master_key is None
+
+
 def test_load_config_ignores_legacy_gateway_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # The GATEWAY_ prefix was removed after the Otari rename deprecation window;
     # it no longer configures anything, so a value set only under GATEWAY_ falls
