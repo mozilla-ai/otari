@@ -190,6 +190,46 @@ async def discover_provider_models(config: GatewayConfig, instance: str) -> Prov
     return ProviderDiscovery(provider=instance, models=models)
 
 
+async def test_provider_credentials(
+    impl_name: str,
+    *,
+    api_key: str | None = None,
+    api_base: str | None = None,
+    client_args: dict[str, object] | None = None,
+) -> ProviderDiscovery:
+    """List models for ad-hoc credentials without storing them.
+
+    Backs the dashboard's "test connection" before a provider is saved. Reports
+    failure rather than raising, and never echoes the api key (only sanitized,
+    capped provider errors, which may include the api_base but never the key).
+    """
+    if not _supports_list_models(impl_name):
+        return ProviderDiscovery(
+            provider=impl_name,
+            models=[],
+            error=f"Provider '{impl_name}' cannot list models, so a connection cannot be verified this way.",
+        )
+    try:
+        provider_enum = LLMProvider(impl_name)
+    except ValueError:
+        return ProviderDiscovery(
+            provider=impl_name,
+            models=[],
+            error=f"'{impl_name}' is not a known provider implementation.",
+        )
+    try:
+        models = await alist_models(
+            provider=provider_enum,
+            api_key=api_key,
+            api_base=api_base,
+            client_args=client_args,
+        )
+    except Exception as exc:
+        logger.info("Provider connection test failed for '%s': %s", impl_name, exc)
+        return ProviderDiscovery(provider=impl_name, models=[], error=_short_error(exc))
+    return ProviderDiscovery(provider=impl_name, models=list(models))
+
+
 async def discover_models_with_status(config: GatewayConfig) -> list[ProviderDiscovery]:
     """Discover every configured instance's models concurrently, keeping errors.
 

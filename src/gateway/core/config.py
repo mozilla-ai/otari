@@ -22,6 +22,8 @@ API_KEY_HEADER = "Otari-Key"
 PROVIDER_TYPE_ALIASES = {
     "openai-compatible": "openai",
     "openai_compatible": "openai",
+    "anthropic-compatible": "anthropic",
+    "anthropic_compatible": "anthropic",
 }
 LEGACY_API_KEY_HEADERS = ("AnyLLM-Key", "X-AnyLLM-Key")  # Back-compat aliases; prefer API_KEY_HEADER.
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
@@ -438,6 +440,20 @@ class GatewayConfig(BaseSettings):
     # mutation, and hot paths no longer re-read os.getenv on every access.
     _platform_token: str | None = PrivateAttr(default=None)
     _platform_token_resolved: bool = PrivateAttr(default=False)
+
+    # The config-file providers as loaded, before any dashboard-stored providers
+    # are overlaid onto ``providers`` at runtime. Captured once by
+    # ``provider_store_service`` so every refresh rebuilds the merged view from a
+    # stable base (and a deleted stored row restores the config entry). Kept on
+    # the config, not a module global, so it is per-config and cannot leak
+    # between processes or tests.
+    _provider_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
+
+    # SHA-256 hash of a master key generated on first run (see
+    # ``master_key_service``). Set at startup when no ``master_key`` is
+    # configured, so ``verify_master_key`` can authenticate the generated key
+    # without the plaintext ever living in config.
+    _master_key_hash: str | None = PrivateAttr(default=None)
 
     def _resolve_platform_token(self) -> str | None:
         if not self._platform_token_resolved:

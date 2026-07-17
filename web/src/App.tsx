@@ -1,24 +1,44 @@
-import { useState } from "react";
+import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 
+import { useProviders } from "@/api/hooks";
 import { useAuth } from "@/auth/AuthContext";
 import { AppShell } from "@/components/AppShell";
-import type { PageKey } from "@/components/AppShell";
 import { Login } from "@/components/Login";
+import { AliasesPage } from "@/pages/AliasesPage";
 import { ModelsPage } from "@/pages/ModelsPage";
+import { ProvidersPage } from "@/pages/ProvidersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 
 export default function App() {
   const { isAuthenticated } = useAuth();
-  const [page, setPage] = useState<PageKey>("models");
 
   if (!isAuthenticated) {
     return <Login />;
   }
 
   return (
-    <AppShell page={page} onNavigate={setPage}>
-      {page === "models" ? <ModelsPage /> : null}
-      {page === "settings" ? <SettingsPage /> : null}
-    </AppShell>
+    <HashRouter>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route index element={<IndexRedirect />} />
+          <Route path="providers" element={<ProvidersPage />} />
+          <Route path="models" element={<ModelsPage />} />
+          <Route path="aliases" element={<AliasesPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    </HashRouter>
   );
+}
+
+// First run (no provider configured yet) lands on Providers so a new admin is
+// guided to add one; otherwise Models. The providers query is master-key gated,
+// so this only runs once authenticated.
+function IndexRedirect() {
+  const providers = useProviders();
+  if (!providers.isSuccess) {
+    return null;
+  }
+  return <Navigate to={providers.data.providers.length === 0 ? "/providers" : "/models"} replace />;
 }

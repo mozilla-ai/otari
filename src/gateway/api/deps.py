@@ -16,6 +16,7 @@ from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
+from gateway.services.master_key_service import hash_master_key
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -176,8 +177,13 @@ async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
 
 
 def _is_valid_master_key(token: str, config: GatewayConfig) -> bool:
-    """Check if token matches the master key."""
-    return config.master_key is not None and secrets.compare_digest(token, config.master_key)
+    """Check if token matches the master key (operator-set plaintext or generated hash)."""
+    if config.master_key is not None and secrets.compare_digest(token, config.master_key):
+        return True
+    stored_hash = config._master_key_hash
+    if stored_hash is not None:
+        return secrets.compare_digest(hash_master_key(token), stored_hash)
+    return False
 
 
 async def verify_api_key(
@@ -217,7 +223,7 @@ async def verify_master_key(
         HTTPException: If master key is not configured or invalid
 
     """
-    if not config.master_key:
+    if config.master_key is None and config._master_key_hash is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Master key not configured. Set OTARI_MASTER_KEY environment variable.",
