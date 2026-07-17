@@ -21,6 +21,7 @@ from gateway.services.composite_interpreter import (
     EmitToolUse,
     Punt,
     SubJudgment,
+    materialize_plan,
     next_action,
     verify_action,
 )
@@ -83,6 +84,18 @@ def _tools_satisfied(composite: dict[str, Any], tool_names: list[str] | None) ->
     return set(required).issubset(set(tool_names))
 
 
+def select_composite(
+    composites: list[dict[str, Any]], session_label: str | None, tool_names: list[str] | None
+) -> dict[str, Any] | None:
+    """The composite ``decide`` would bind this turn, exposed so the async hook can
+    pre-select it and resolve its ``compute`` nodes (otari-exec I/O) before calling
+    the pure ``decide``. Selection is deterministic, so the bindings computed here
+    apply to exactly the plan ``decide`` will materialize."""
+    if not session_label:
+        return None
+    return _match(composites, session_label, tool_names)
+
+
 def _match(
     composites: list[dict[str, Any]], session_label: str, tool_names: list[str] | None
 ) -> dict[str, Any] | None:
@@ -110,6 +123,7 @@ def decide(
     *,
     session_label: str | None,
     tool_names: list[str] | None = None,
+    bindings: dict[str, Any] | None = None,
 ) -> Decision:
     """Decide how to handle the current turn.
 
@@ -119,6 +133,11 @@ def decide(
       punts are recorded as shadow data).
     - Approved composite -> Serve when the interpreter emits a verified action,
       else NoDispatch (recognize-or-punt).
+
+    ``bindings`` are resolved ``compute``-node values (see ``composite_compute``),
+    folded into the plan via ``materialize_plan`` before interpretation. Empty when
+    the plan has no compute nodes or the sandbox was unreachable; an unresolved
+    ``{"var": ...}`` then fails to evaluate and the turn punts, never mis-serves.
     """
     if not session_label:
         return NoDispatch("no_session_label")
@@ -128,7 +147,7 @@ def decide(
     if composite is None:
         return NoDispatch("tools_mismatch" if has_key else "no_match")
 
-    plan = composite.get("plan", {})
+    plan = materialize_plan(composite.get("plan") or {}, bindings or {})
     action = next_action(plan, messages)
 
     # A failed mechanical verifier degrades an emit to a punt (sec 5.4): a bad

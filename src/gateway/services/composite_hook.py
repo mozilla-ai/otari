@@ -31,14 +31,16 @@ from fastapi.responses import StreamingResponse
 
 from gateway.core.env import otari_env
 from gateway.services.composite_backend import CompositeBackend, build_composite_backend
-from gateway.services.composite_dispatch import NoDispatch, Serve, ServeT1, decide
-from gateway.services.composite_interpreter import EmitTerminal, EmitToolUse
+from gateway.services.composite_compute import resolve_bindings
+from gateway.services.composite_dispatch import NoDispatch, Serve, ServeT1, decide, select_composite
+from gateway.services.composite_interpreter import EmitTerminal, EmitToolUse, compute_nodes
 from gateway.services.composite_key import derive_automation_key
 from gateway.services.composite_response import (
     terminal_response,
     tool_use_response,
     tool_use_stream_events,
 )
+from gateway.services.sandbox_backend import SandboxBackend
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +154,39 @@ def _served_report(decision: Serve, session_label: str) -> dict[str, Any]:
     }
 
 
+async def _resolve_compute_bindings(
+    composites: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    automation_key: str,
+    tool_names: list[str] | None,
+    ctx: Any,
+) -> dict[str, Any]:
+    """Resolve the matched composite's ``compute`` nodes in the sandbox, if any.
+
+    Inert by construction: returns ``{}`` unless the composite ``decide`` would
+    select has compute nodes and ``OTARI_SANDBOX_URL`` is configured. Any failure
+    returns ``{}`` so the plan punts on its ``var`` reference; never raises into the
+    request hot path.
+    """
+    composite = select_composite(composites, automation_key, tool_names)
+    if composite is None:
+        return {}
+    plan = composite.get("plan") or {}
+    if not compute_nodes(plan):
+        return {}
+    sandbox_url = otari_env("SANDBOX_URL")
+    if not sandbox_url:
+        return {}
+    try:
+        async with SandboxBackend(sandbox_url=sandbox_url, auth_token=ctx.user_token) as runner:
+            return await resolve_bindings(plan, messages, runner)
+    except Exception:
+        logger.warning(
+            "compute binding resolution failed; serving without compute (turn will punt)", exc_info=True
+        )
+        return {}
+
+
 async def try_serve_composite(
     *,
     request: Any,
@@ -174,8 +209,15 @@ async def try_serve_composite(
             if isinstance(raw_tools, list)
             else None
         )
+        bindings = await _resolve_compute_bindings(
+            composites, request.messages, automation_key, tool_names, ctx
+        )
         decision = decide(
-            composites, request.messages, session_label=automation_key, tool_names=tool_names
+            composites,
+            request.messages,
+            session_label=automation_key,
+            tool_names=tool_names,
+            bindings=bindings,
         )
         logger.info(
             "composite dispatch key=%s fetched=%d req_tools=%d executed=%d decision=%s%s",

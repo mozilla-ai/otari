@@ -345,6 +345,49 @@ def _actionable_nodes(plan: Any) -> list[dict[str, Any]]:
     return [n for n in nodes if isinstance(n, dict) and n.get("type")]
 
 
+def compute_nodes(plan: Any) -> list[dict[str, Any]]:
+    """Top-level ``compute`` nodes, in plan order.
+
+    A compute node is ``{"type": "compute", "bind": <name>, "code": <python>}``.
+    Its code runs in the credential-free sandbox (otari-exec), reads the visible
+    tool results, and returns a JSON value bound to ``bind``; later nodes reference
+    it with the ``{"var": <name>}`` expression. The async hook resolves these (the
+    only I/O), then calls ``materialize_plan`` so the pure interpreter never sees a
+    compute node or a live ``var``. v1 supports top-level compute only (a compute
+    inside a ``map``/``branch`` body would need the loop item and is deferred).
+    """
+    return [n for n in _actionable_nodes(plan) if n.get("type") == "compute"]
+
+
+def materialize_plan(plan: dict[str, Any], bindings: dict[str, Any]) -> dict[str, Any]:
+    """Fold resolved compute ``bindings`` into a plan for the pure interpreter.
+
+    Deep-substitutes every ``{"var": name}`` for which a binding exists with a
+    ``{"const": value}`` literal, and drops the (now-resolved) compute nodes. A
+    ``var`` with no binding is left as-is, so it fails to evaluate downstream and
+    the turn punts, never serves on a missing value. Returns a new plan; the input
+    is not mutated."""
+    if not isinstance(plan, dict):
+        return plan  # malformed plan; next_action handles it (punt), unchanged
+
+    def subst(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            if list(obj.keys()) == ["var"] and isinstance(obj["var"], str):
+                if obj["var"] in bindings:
+                    return {"const": bindings[obj["var"]]}
+                return obj
+            return {k: subst(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [subst(v) for v in obj]
+        return obj
+
+    nodes = plan.get("nodes", []) if isinstance(plan, dict) else []
+    new_nodes = [
+        subst(n) for n in nodes if not (isinstance(n, dict) and n.get("type") == "compute")
+    ]
+    return {**plan, "nodes": new_nodes}
+
+
 @dataclass(frozen=True)
 class _Step:
     """One flattened emit position: the tool to emit, the node carrying its arg
@@ -383,7 +426,7 @@ def _parse_plan(
     for node in nodes:
         if tail is not None:
             break
-        if node.get("type") in ("emit_tool_use", "map", "branch"):
+        if node.get("type") in ("emit_tool_use", "map", "branch", "compute"):
             body_nodes.append(node)
         else:
             tail = node
@@ -415,6 +458,14 @@ def _expand(
         if not isinstance(node, dict):
             return False
         ntype = node.get("type")
+        if ntype == "compute":
+            # A compute node produces a binding (a value derived from prior tool
+            # results by sandboxed code in otari-exec), resolved out-of-band by the
+            # async hook and folded into the plan via ``materialize_plan`` before
+            # the interpreter runs. It emits no tool, so it contributes no step; if
+            # a plan reaches here unmaterialized, its ``{"var": ...}`` references
+            # simply fail to evaluate downstream and the turn punts. Skip it.
+            continue
         if ntype == "emit_tool_use":
             tool = node.get("tool")
             if not isinstance(tool, str):
