@@ -1,3 +1,7 @@
+---
+applyTo: "src/gateway/api/**/*.py,src/gateway/auth/**/*.py,src/gateway/services/**/*.py,src/gateway/core/config.py,src/gateway/models/entities.py,src/gateway/streaming.py,alembic/versions/**/*.py"
+---
+
 # Security Review Instructions
 
 How to review otari for security regressions. otari is a self-hosted, OpenAI-compatible
