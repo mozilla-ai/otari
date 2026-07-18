@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
-from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, get_db
 from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
@@ -96,6 +96,10 @@ def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
                 detail="Invalid header format. Expected 'Bearer <token>'",
             )
         return auth_header[7:]
+
+    raw_token = request.headers.get(X_API_KEY_HEADER)
+    if raw_token:
+        return raw_token
 
     record_auth_failure("missing_credentials")
     raise HTTPException(

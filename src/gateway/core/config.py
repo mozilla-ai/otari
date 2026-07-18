@@ -24,6 +24,7 @@ PROVIDER_TYPE_ALIASES = {
     "openai_compatible": "openai",
 }
 LEGACY_API_KEY_HEADERS = ("AnyLLM-Key", "X-AnyLLM-Key")  # Back-compat aliases; prefer API_KEY_HEADER.
+X_API_KEY_HEADER = "x-api-key"  # Anthropic-native clients send credentials here (no Bearer prefix).
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
 PLATFORM_TOKEN_ENV_VARS = (
     "OTARI_AI_TOKEN",
