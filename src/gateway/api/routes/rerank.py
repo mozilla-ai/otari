@@ -4,14 +4,15 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from any_llm.exceptions import AnyLLMError
 from any_llm import arerank
+from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._pipeline import _raise_for_unresolvable_model
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -26,7 +27,6 @@ from gateway.services.budget_service import (
 )
 from gateway.services.log_writer import LogWriter
 from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
-from gateway.api.routes._pipeline import _raise_for_unresolvable_model
 from gateway.services.provider_kwargs import resolve_provider_selector
 
 router = APIRouter(prefix="/v1", tags=["rerank"])

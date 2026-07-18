@@ -20,7 +20,6 @@ from fastapi import HTTPException
 
 from gateway.api.routes._pipeline import _raise_for_unresolvable_model, resolve_dispatch_provider
 
-
 # ---------------------------------------------------------------------------
 # _raise_for_unresolvable_model
 # ---------------------------------------------------------------------------
@@ -51,13 +50,13 @@ def test_detail_contains_model_name() -> None:
 # resolve_dispatch_provider
 # ---------------------------------------------------------------------------
 
-def _make_ctx(resolved_provider=None):
+def _make_ctx(resolved_provider: object = None) -> MagicMock:
     ctx = MagicMock()
     ctx.resolved_provider = resolved_provider
     return ctx
 
 
-def _make_config():
+def _make_config() -> MagicMock:
     return MagicMock()
 
 

@@ -35,7 +35,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import Any, Generic, NamedTuple, Protocol, TypeVar
+from typing import Any, Generic, NamedTuple, NoReturn, Protocol, TypeVar
 from urllib.parse import ParseResult, urlparse
 
 import httpx
@@ -413,7 +413,7 @@ class RequestContext:
 
 
 
-def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> None:
+def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoReturn:
     """Convert a selector-parse failure into an HTTP 400 with a helpful detail.
 
     resolve_provider_selector raises ValueError for an unparseable
