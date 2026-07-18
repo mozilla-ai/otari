@@ -630,18 +630,21 @@ class GatewayConfig(BaseSettings):
         # "platform" is the legacy alias for "hybrid" (the otari.ai-connected
         # runtime mode); accept it so pre-rename configs keep working.
         if configured_mode not in {"standalone", "hybrid", "platform"}:
-            msg = "Invalid OTARI_MODE value. Expected 'standalone' or 'hybrid'."
+            msg = (
+                "Invalid mode (set via OTARI_MODE or the config 'mode' field). "
+                "Expected 'standalone' or 'hybrid'."
+            )
             raise ValueError(msg)
 
         token_present = self.platform_token is not None
         if configured_mode in {"hybrid", "platform"} and not token_present:
-            msg = "OTARI_MODE=hybrid (legacy value: platform) requires OTARI_AI_TOKEN to be set."
+            msg = "Hybrid mode (legacy value 'platform') requires OTARI_AI_TOKEN to be set."
             raise ValueError(msg)
         if configured_mode == "standalone" and token_present:
             msg = (
-                "OTARI_MODE=standalone conflicts with OTARI_AI_TOKEN being set: the token selects "
-                "hybrid mode. Unset the token to run standalone, or remove OTARI_MODE to let the "
-                "token select hybrid mode."
+                "Standalone mode conflicts with OTARI_AI_TOKEN being set: the token selects hybrid "
+                "mode. Unset the token to run standalone, or clear the mode setting to let the token "
+                "select hybrid mode."
             )
             raise ValueError(msg)
 
