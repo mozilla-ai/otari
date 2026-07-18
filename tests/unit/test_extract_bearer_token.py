@@ -128,9 +128,9 @@ def test_missing_credentials_raises_401(config: GatewayConfig) -> None:
 
 
 def test_x_api_key_header_returns_raw_token(config: GatewayConfig) -> None:
-    request = _make_request({X_API_KEY_HEADER: "sk-ant-raw-token"})
+    request = _make_request({X_API_KEY_HEADER: "test-raw-token"})
 
-    assert _extract_bearer_token(request, config) == "sk-ant-raw-token"
+    assert _extract_bearer_token(request, config) == "test-raw-token"
 
 
 def test_authorization_takes_precedence_over_x_api_key(config: GatewayConfig) -> None:
@@ -156,7 +156,7 @@ def test_canonical_takes_precedence_over_x_api_key(config: GatewayConfig) -> Non
 
 
 def test_x_api_key_without_bearer_prefix_succeeds(config: GatewayConfig) -> None:
-    request = _make_request({X_API_KEY_HEADER: "sk-ant-api03-rawtoken"})
+    request = _make_request({X_API_KEY_HEADER: "test-raw-token-no-bearer-prefix"})
 
     token = _extract_bearer_token(request, config)
-    assert token == "sk-ant-api03-rawtoken"
+    assert token == "test-raw-token-no-bearer-prefix"
