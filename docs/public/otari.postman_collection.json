@@ -434,7 +434,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\"\n}"
             },
             "description": "Create a new budget.",
             "header": [
@@ -492,7 +492,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\"\n}"
             },
             "description": "Update a budget.",
             "header": [
@@ -538,6 +538,47 @@
                 ":budget_id"
               ],
               "raw": "{{baseUrl}}/v1/budgets/:budget_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "budget_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Budget Reset Logs",
+          "request": {
+            "description": "List per-user reset events for a budget, newest first.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "budgets",
+                ":budget_id",
+                "reset-logs"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/budgets/:budget_id/reset-logs?skip=&limit=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1888,7 +1929,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"alias\": \"string\",\n  \"blocked\": false,\n  \"budget_id\": \"string\",\n  \"metadata\": {}\n}"
+              "raw": "{\n  \"alias\": \"string\",\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"blocked\": false,\n  \"budget_id\": \"string\",\n  \"metadata\": {}\n}"
             },
             "description": "Update a user.",
             "header": [
