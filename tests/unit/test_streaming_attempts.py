@@ -160,6 +160,66 @@ async def test_final_attempt_of_chain_gets_the_grace() -> None:
     assert failures == [("primary", "_RetryableError")]
 
 
+async def _raising_stream(exc: Exception) -> AsyncIterator[str]:
+    """Async stream that raises on its first ``__anext__`` (upstream error before
+    the first chunk), rather than timing out or failing at build time."""
+    raise exc
+    yield  # unreachable; makes this a generator
+
+
+@pytest.mark.asyncio
+async def test_failure_reason_buckets_by_abandonment_phase() -> None:
+    """Each abandonment site tags the failure with its coarse ``reason`` bucket:
+    ``build_error`` when opening the stream fails, ``timeout`` when the first-chunk
+    wait elapses, and ``upstream_error`` when the stream raises before yielding."""
+    reasons: list[str] = []
+
+    def classify_error(exc: BaseException) -> tuple[bool, str]:
+        return True, type(exc).__name__
+
+    async def on_attempt_failed(attempt: SimpleNamespace, failure: StreamingAttemptFailure) -> None:
+        reasons.append(failure.reason)
+
+    async def build_stream_ok_but_raises(_attempt: SimpleNamespace) -> AsyncIterator[str]:
+        return _raising_stream(_RetryableError("upstream blew up before first chunk"))
+
+    async def build_stream_that_fails(_attempt: SimpleNamespace) -> AsyncIterator[str]:
+        raise _RetryableError("could not open stream")
+
+    # build_error: build_stream raises before any stream exists.
+    with pytest.raises(_RetryableError):
+        await iterate_streaming_attempts(
+            attempts=[_attempt("only")],
+            build_stream=build_stream_that_fails,
+            classify_error=classify_error,
+            on_attempt_failed=on_attempt_failed,
+            first_chunk_timeout_seconds=_BUDGET_SECONDS,
+        )
+
+    # timeout: the stream opens but the first chunk never arrives in time.
+    build_stream, _classify, _on_failed, _failures = _harness()
+    with pytest.raises(TimeoutError):
+        await iterate_streaming_attempts(
+            attempts=[_attempt("only", delay=_BEYOND_GRACE_DELAY)],
+            build_stream=build_stream,
+            classify_error=classify_error,
+            on_attempt_failed=on_attempt_failed,
+            first_chunk_timeout_seconds=_BUDGET_SECONDS,
+        )
+
+    # upstream_error: the stream opens but raises before yielding a first chunk.
+    with pytest.raises(_RetryableError):
+        await iterate_streaming_attempts(
+            attempts=[_attempt("only")],
+            build_stream=build_stream_ok_but_raises,
+            classify_error=classify_error,
+            on_attempt_failed=on_attempt_failed,
+            first_chunk_timeout_seconds=_BUDGET_SECONDS,
+        )
+
+    assert reasons == ["build_error", "timeout", "upstream_error"]
+
+
 @pytest.mark.asyncio
 async def test_default_extra_is_zero_preserves_uniform_cap() -> None:
     """With no grace passed, every attempt (including the sole one) is capped at
