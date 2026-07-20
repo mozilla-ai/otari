@@ -41,6 +41,12 @@ class _Recorder:
         async def fake_find_pricing(*args: Any, **kwargs: Any) -> None:
             return None
 
+        # The key inherits (allowed_models None); the resolver would otherwise hit
+        # the DB for the user default. This is a pure unit test, so stub it
+        # unrestricted like the other DB-touching helpers.
+        async def fake_resolve_allowlist(*args: Any, **kwargs: Any) -> None:
+            return None
+
         async def fake_reserve(*args: Any, **kwargs: Any) -> ReservationHandle:
             return ReservationHandle(user_id="user-1", estimate=0.0, reserved=True, strategy="for_update")
 
@@ -61,6 +67,7 @@ class _Recorder:
         monkeypatch.setattr(pipeline, "verify_api_key_or_master_key", fake_verify)
         monkeypatch.setattr(pipeline, "check_rate_limit", lambda request, user_id: None)
         monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
+        monkeypatch.setattr(pipeline, "resolve_request_allowlist", fake_resolve_allowlist)
         monkeypatch.setattr(pipeline, "reserve_budget", fake_reserve)
         monkeypatch.setattr(pipeline, "increase_reservation", fake_increase)
         monkeypatch.setattr(pipeline, "log_usage", fake_log_usage)

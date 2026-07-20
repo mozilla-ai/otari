@@ -259,8 +259,61 @@
         "title": "Body_create_transcription_v1_audio_transcriptions_post",
         "type": "object"
       },
+      "BudgetResetLogResponse": {
+        "description": "Response model for one budget reset event (per user).",
+        "properties": {
+          "budget_id": {
+            "title": "Budget Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "next_reset_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Reset At"
+          },
+          "previous_spend": {
+            "title": "Previous Spend",
+            "type": "number"
+          },
+          "reset_at": {
+            "title": "Reset At",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "budget_id",
+          "previous_spend",
+          "reset_at",
+          "next_reset_at"
+        ],
+        "title": "BudgetResetLogResponse",
+        "type": "object"
+      },
       "BudgetResponse": {
-        "description": "Response model for budget information.",
+        "description": "Response model for budget information.\n\n``max_budget`` is the per-user spending limit, and multiple users can share\none budget, so the usage rollup is an aggregate over the users assigned to\nthis budget: how many there are and their combined ``spend`` / ``reserved``.\nAssigning users to a budget is done through the users API (dashboard support\nlands with user management), so a fresh gateway reports zeros here.",
         "properties": {
           "budget_duration_sec": {
             "anyOf": [
@@ -292,13 +345,40 @@
             ],
             "title": "Max Budget"
           },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "total_reserved": {
+            "default": 0.0,
+            "title": "Total Reserved",
+            "type": "number"
+          },
+          "total_spend": {
+            "default": 0.0,
+            "title": "Total Spend",
+            "type": "number"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
+          },
+          "user_count": {
+            "default": 0,
+            "title": "User Count",
+            "type": "integer"
           }
         },
         "required": [
           "budget_id",
+          "name",
           "max_budget",
           "budget_duration_sec",
           "created_at",
@@ -863,6 +943,18 @@
             ],
             "description": "Maximum spending limit",
             "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Admin-facing label for the budget",
+            "title": "Name"
           }
         },
         "title": "CreateBudgetRequest",
@@ -1108,6 +1200,21 @@
             ],
             "description": "Optional admin-facing alias",
             "title": "Alias"
+          },
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default model access-list this user's keys inherit; null = unrestricted, [] = deny all",
+            "title": "Allowed Models"
           },
           "blocked": {
             "default": false,
@@ -3285,6 +3392,17 @@
               }
             ],
             "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           }
         },
         "title": "UpdateBudgetRequest",
@@ -3464,6 +3582,20 @@
               }
             ],
             "title": "Alias"
+          },
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
           },
           "blocked": {
             "anyOf": [
@@ -3801,6 +3933,20 @@
             ],
             "title": "Alias"
           },
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
           "blocked": {
             "title": "Blocked",
             "type": "boolean"
@@ -3870,6 +4016,7 @@
           "spend",
           "reserved",
           "budget_id",
+          "allowed_models",
           "budget_started_at",
           "next_budget_reset_at",
           "blocked",
@@ -4845,6 +4992,84 @@
           }
         ],
         "summary": "Update Budget",
+        "tags": [
+          "budgets"
+        ]
+      }
+    },
+    "/v1/budgets/{budget_id}/reset-logs": {
+      "get": {
+        "description": "List per-user reset events for a budget, newest first.",
+        "operationId": "list_budget_reset_logs_v1_budgets__budget_id__reset_logs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_id",
+            "required": true,
+            "schema": {
+              "title": "Budget Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BudgetResetLogResponse"
+                  },
+                  "title": "Response List Budget Reset Logs V1 Budgets  Budget Id  Reset Logs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Budget Reset Logs",
         "tags": [
           "budgets"
         ]

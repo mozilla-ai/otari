@@ -7,10 +7,12 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_db, verify_master_key
+from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, Budget, UsageLog, User
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budget_service import calculate_next_reset
+from gateway.services.model_access import validate_allowed_models
 
 router = APIRouter(prefix="/v1/users", tags=["users"])
 
@@ -22,6 +24,10 @@ class CreateUserRequest(BaseModel):
     alias: str | None = Field(default=None, description="Optional admin-facing alias")
     budget_id: str | None = Field(default=None, description="Optional budget ID")
     blocked: bool = Field(default=False, description="Whether user is blocked")
+    allowed_models: list[str] | None = Field(
+        default=None,
+        description="Default model access-list this user's keys inherit; null = unrestricted, [] = deny all",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
 
@@ -33,6 +39,7 @@ class UserResponse(BaseModel):
     spend: float
     reserved: float
     budget_id: str | None
+    allowed_models: list[str] | None
     budget_started_at: str | None
     next_budget_reset_at: str | None
     blocked: bool
@@ -50,6 +57,7 @@ class UserResponse(BaseModel):
             # the effective committed amount is spend + reserved.
             reserved=float(user.reserved),
             budget_id=user.budget_id,
+            allowed_models=list(user.allowed_models) if user.allowed_models is not None else None,
             budget_started_at=user.budget_started_at.isoformat() if user.budget_started_at else None,
             next_budget_reset_at=user.next_budget_reset_at.isoformat() if user.next_budget_reset_at else None,
             blocked=bool(user.blocked),
@@ -65,6 +73,7 @@ class UpdateUserRequest(BaseModel):
     alias: str | None = None
     budget_id: str | None = None
     blocked: bool | None = None
+    allowed_models: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -108,8 +117,14 @@ class UsageLogResponse(BaseModel):
 async def create_user(
     request: CreateUserRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> UserResponse:
     """Create a new user."""
+    try:
+        allowed_models = validate_allowed_models(config, request.allowed_models)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     result = await db.execute(select(User).where(User.user_id == request.user_id))
     existing_user = result.scalar_one_or_none()
     if existing_user and existing_user.deleted_at is None:
@@ -135,6 +150,7 @@ async def create_user(
         user.alias = request.alias
         user.budget_id = request.budget_id
         user.blocked = request.blocked
+        user.allowed_models = allowed_models
         user.metadata_ = request.metadata
         user.budget_started_at = None
         user.next_budget_reset_at = None
@@ -144,6 +160,7 @@ async def create_user(
             alias=request.alias,
             budget_id=request.budget_id,
             blocked=request.blocked,
+            allowed_models=allowed_models,
             metadata_=request.metadata,
         )
         db.add(user)
@@ -204,6 +221,7 @@ async def update_user(
     user_id: str,
     request: UpdateUserRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> UserResponse:
     """Update a user."""
     user = await get_active_user(db, user_id)
@@ -213,6 +231,16 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User with id '{user_id}' not found",
         )
+
+    # Tri-state like the per-key list: omit leaves it unchanged, a supplied null
+    # clears to unrestricted, [] denies all, a list restricts. Note this default
+    # caps a key only at key-write time; changing it does not retroactively
+    # re-validate existing keys (see keys.py, validate-subset-on-write).
+    if "allowed_models" in request.model_fields_set:
+        try:
+            user.allowed_models = validate_allowed_models(config, request.allowed_models)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     if request.alias is not None:
         user.alias = request.alias

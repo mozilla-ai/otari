@@ -38,10 +38,64 @@ test.describe("dashboard core flows", () => {
 
   test("navigate the management pages", async ({ page }) => {
     await login(page);
-    for (const name of ["Models", "Aliases", "Settings", "Providers"]) {
+    for (const name of ["Models", "Aliases", "Users", "Budgets", "Settings", "Providers"]) {
       await page.getByRole("link", { name }).click();
-      await expect(page.getByRole("heading", { name })).toBeVisible();
+      // Exact match: the Budgets onboarding heading ("No budgets yet") would
+      // otherwise also substring-match the page title.
+      await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
     }
+  });
+
+  test("create a budget", async ({ page }) => {
+    await login(page);
+    await page.getByRole("link", { name: "Budgets" }).click();
+    await page.getByRole("button", { name: "Create your first budget" }).click();
+    await page.getByLabel("Name (optional)").fill("e2e-budget");
+    await page.getByLabel("Spending limit (USD)").fill("100");
+    await page.getByRole("button", { name: "Create budget" }).click();
+
+    await expect(page.getByRole("cell", { name: "$100.00" })).toBeVisible();
+    await expect(page.getByText("e2e-budget")).toBeVisible();
+    await expect(page.getByText("No budgets yet")).toBeHidden();
+  });
+
+  test("create a user and assign the budget", async ({ page }) => {
+    await login(page);
+    await page.getByRole("link", { name: "Users" }).click();
+    // A bootstrap virtual user already exists (from the first-run key), so use the
+    // header action, not the empty-state button. It is removed when the form opens,
+    // leaving the form's own "Create user" as the only match.
+    await page.getByRole("button", { name: "Create user" }).click();
+    await page.getByLabel("User ID").fill("alice@example.com");
+    // The budget created by the prior test is the only non-default option.
+    await page.getByLabel("Budget").selectOption({ index: 1 });
+    await page.getByRole("button", { name: "Create user" }).click();
+
+    const row = page.getByRole("row", { name: /alice@example\.com/ });
+    await expect(row).toBeVisible();
+    // The assigned budget's name renders in the user's Budget cell.
+    await expect(row.getByText("e2e-budget")).toBeVisible();
+  });
+
+  test("create an API key owned by a chosen user", async ({ page }) => {
+    await login(page);
+    await page.getByRole("link", { name: "API keys" }).click();
+    // A bootstrap key already exists, so use the header action, not onboarding.
+    await page.getByRole("button", { name: "Create key" }).click();
+    await page.getByLabel("Name").fill("ci-bot");
+    // Owner is required (user-first). Reuse the user created earlier; type it and
+    // close the combobox popover so it does not aria-hide the submit button.
+    await page.getByPlaceholder("Pick a user, or type a new id…").fill("alice@example.com");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Create key" }).click();
+
+    // The one-time reveal appears; acknowledge it.
+    await page.getByRole("button", { name: /saved this key/i }).click();
+
+    const row = page.getByRole("row", { name: /ci-bot/ });
+    await expect(row).toBeVisible();
+    // The key is owned by the named user, not an anonymous virtual one.
+    await expect(row.getByText("alice@example.com")).toBeVisible();
   });
 
   test("create an alias", async ({ page }) => {

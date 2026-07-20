@@ -72,6 +72,19 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    to: "/users",
+    section: "access",
+    label: "Users",
+    icon: (
+      // Two figures: the principals that keys and budgets attach to.
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+        <circle cx="9" cy="8" r="3.2" strokeLinejoin="round" />
+        <path d="M3.5 19a5.5 5.5 0 0 1 11 0" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M16 5.2a3.2 3.2 0 0 1 0 5.6M17.5 19a5.5 5.5 0 0 0-3-4.9" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     to: "/keys",
     section: "access",
     label: "API keys",
@@ -80,6 +93,20 @@ const NAV: NavItem[] = [
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
         <circle cx="7.5" cy="15.5" r="3.5" />
         <path d="M10 13l7-7M14 5l3 3M16.5 7.5l2-2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    to: "/budgets",
+    section: "access",
+    label: "Budgets",
+    icon: (
+      // A wallet: the spending limits callers are held to, alongside the keys.
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+        <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H18a1.5 1.5 0 0 1 1.5 1.5V9" strokeLinejoin="round" />
+        <rect x="3" y="7.5" width="18" height="12" rx="1.5" strokeLinejoin="round" />
+        <path d="M16 13.5h.01" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M21 12v3h-3.5a1.5 1.5 0 0 1 0-3H21z" strokeLinejoin="round" />
       </svg>
     ),
   },

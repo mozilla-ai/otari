@@ -29,7 +29,7 @@ from gateway.services.budget_service import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.model_access import effective_allowlist, is_model_allowed, model_not_allowed_detail
+from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
 
@@ -238,8 +238,9 @@ async def create_batch(
     provider, model = resolved.provider, resolved.model
 
     # Model access control (per-key). Runs before the reservation, so nothing to
-    # refund. Master-key callers have api_key None -> unrestricted.
-    key_allowlist = effective_allowlist(api_key)
+    # refund. Master-key callers have api_key None -> unrestricted. A key with no
+    # list of its own inherits its user's default.
+    key_allowlist = await resolve_request_allowlist(db, api_key)
     if key_allowlist is not None and not is_model_allowed(
         key_allowlist, f"{resolved.instance}:{resolved.model}"
     ):

@@ -12,7 +12,15 @@ from gateway.api.deps import get_config, get_db, verify_master_key
 from gateway.auth.models import generate_api_key, hash_key, key_prefix
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, User
-from gateway.services.model_access import validate_allowed_models
+from gateway.repositories.users_repository import get_or_create_default_user
+from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
+
+# A key inherits its user's default allow-list and may narrow it, never broaden
+# it, so a key list that is not a subset of the user's is rejected on write.
+_KEY_EXCEEDS_USER_DETAIL = (
+    "This key's allowed_models exceeds its user's default; a key can only narrow "
+    "the user's model access, not broaden it."
+)
 
 router = APIRouter(prefix="/v1/keys", tags=["keys"])
 
@@ -131,12 +139,16 @@ async def create_key(
             )
         user_id = request.user_id
     else:
-        user_id = f"apikey-{key_id}"
-        user = User(
-            user_id=user_id,
-            alias=f"Virtual user for API key: {request.key_name or 'unnamed'}",
-        )
-        db.add(user)
+        # No owner given: attach to the shared "default" user rather than minting a
+        # throwaway per-key user, so the key still has a real, visible, budgetable
+        # owner and nothing is untracked.
+        user = await get_or_create_default_user(db)
+        user_id = user.user_id
+
+    # A key must not grant more than its user's default (a freshly created user
+    # has no default, so this only bites when attaching to a restricted user).
+    if not is_allowlist_subset(allowed_models, user.allowed_models):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
 
     db_key = APIKey(
         id=str(key_id),
@@ -234,9 +246,17 @@ async def update_key(
     # null clears to unrestricted; [] denies all; a list restricts.
     if "allowed_models" in request.model_fields_set:
         try:
-            key.allowed_models = validate_allowed_models(config, request.allowed_models)
+            new_allowed = validate_allowed_models(config, request.allowed_models)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        # Enforce narrow-only against the key's user default (see create_key).
+        if key.user_id is not None:
+            user_default = (
+                await db.execute(select(User.allowed_models).where(User.user_id == key.user_id))
+            ).scalar_one_or_none()
+            if not is_allowlist_subset(new_allowed, user_default):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
+        key.allowed_models = new_allowed
     if request.metadata is not None:
         key.metadata_ = request.metadata
 
