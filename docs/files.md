@@ -18,7 +18,7 @@ target model actually needs.
 
 ```bash
 curl -X POST http://localhost:8000/v1/files \
-  -H "Otari-Key: Bearer <your-api-key>" \
+  -H "Otari-Key: <your-api-key>" \
   -F purpose=user_data \
   -F file=@report.pdf
 # -> {"id": "file-abc123", "object": "file", "bytes": 84213, "filename": "report.pdf", ...}
@@ -30,7 +30,7 @@ format; uploaded files also work with Anthropic `document` blocks and Responses
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
-  -H "Otari-Key: Bearer <your-api-key>" \
+  -H "Otari-Key: <your-api-key>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "ollama:llama3",
