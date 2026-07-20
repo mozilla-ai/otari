@@ -403,6 +403,23 @@ class RequestContext:
         self.resolved_provider = resolved_provider
 
 
+def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoReturn:
+    """Convert a selector-parse failure into an HTTP 400 with a helpful detail.
+
+    resolve_provider_selector raises ValueError for an unparseable
+    selector (no provider: prefix) and AnyLLMError for an unknown
+    provider.  Both are client input errors; surfacing them as a bare 500 is
+    confusing.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            f"Unknown or unsupported model {model_selector!r}. "
+            "Use the format 'provider:model' with a configured provider."
+        ),
+    ) from exc
+
+
 def resolve_dispatch_provider(ctx: RequestContext, config: GatewayConfig, model_selector: str) -> ResolvedProvider:
     """Get the ``ResolvedProvider`` for dispatch, reusing the one computed for
     the pricing/budget gate (``ctx.resolved_provider``) instead of resolving
@@ -417,7 +434,10 @@ def resolve_dispatch_provider(ctx: RequestContext, config: GatewayConfig, model_
     """
     if ctx.resolved_provider is not None:
         return ctx.resolved_provider
-    return resolve_provider_selector(config, model_selector)
+    try:
+        return resolve_provider_selector(config, model_selector)
+    except (ValueError, AnyLLMError) as exc:
+        _raise_for_unresolvable_model(model_selector, exc)
 
 
 async def _bill_vision_side_call(

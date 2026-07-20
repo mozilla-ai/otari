@@ -22,11 +22,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Generic, TypeVar
 
+from any_llm.exceptions import AnyLLMError
 from fastapi import HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes._pipeline import rate_limit_headers
+from gateway.api.routes._pipeline import _raise_for_unresolvable_model, rate_limit_headers
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -172,9 +173,18 @@ async def run_passthrough(
         reservation = await reserve_budget(
             db, user_id, estimate(None) if estimate else 0.0, model=model, strategy=config.budget_strategy
         )
-        resolved = resolve_provider_selector(config, model)
+        # The reservation is already held, so refund it before mapping an
+        # unresolvable selector to 400; otherwise the estimate leaks.
+        try:
+            resolved = resolve_provider_selector(config, model)
+        except (ValueError, AnyLLMError) as exc:
+            await refund_reservation(db, reservation)
+            _raise_for_unresolvable_model(model, exc)
     else:
-        resolved = resolve_provider_selector(config, model)
+        try:
+            resolved = resolve_provider_selector(config, model)
+        except (ValueError, AnyLLMError) as exc:
+            _raise_for_unresolvable_model(model, exc)
         if lookup_pricing:
             pricing = await find_model_pricing(db, resolved.instance, resolved.model)
         # Reserve first so user/blocked/budget rejections (404/403) precede the

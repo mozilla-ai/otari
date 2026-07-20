@@ -31,27 +31,33 @@ from gateway.core.config import API_KEY_HEADER
 _PROVIDER_REACHED = AssertionError("provider entrypoint must not be reached when enforcement rejects the request")
 
 
-def _send_embeddings(client: TestClient, headers: dict[str, str], user_id: str) -> Response:
+def _send_embeddings(
+    client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:text-embedding-3-small"
+) -> Response:
     return client.post(
         "/v1/embeddings",
-        json={"model": "openai:text-embedding-3-small", "input": "hello world", "user": user_id},
+        json={"model": model, "input": "hello world", "user": user_id},
         headers=headers,
     )
 
 
-def _send_moderations(client: TestClient, headers: dict[str, str], user_id: str) -> Response:
+def _send_moderations(
+    client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:omni-moderation-latest"
+) -> Response:
     return client.post(
         "/v1/moderations",
-        json={"model": "openai:omni-moderation-latest", "input": "hello world", "user": user_id},
+        json={"model": model, "input": "hello world", "user": user_id},
         headers=headers,
     )
 
 
-def _send_rerank(client: TestClient, headers: dict[str, str], user_id: str) -> Response:
+def _send_rerank(
+    client: TestClient, headers: dict[str, str], user_id: str, model: str = "cohere:rerank-v3.5"
+) -> Response:
     return client.post(
         "/v1/rerank",
         json={
-            "model": "cohere:rerank-v3.5",
+            "model": model,
             "query": "what is the capital of france",
             "documents": ["paris is the capital of france", "berlin is the capital of germany"],
             "user": user_id,
@@ -60,27 +66,33 @@ def _send_rerank(client: TestClient, headers: dict[str, str], user_id: str) -> R
     )
 
 
-def _send_images(client: TestClient, headers: dict[str, str], user_id: str) -> Response:
+def _send_images(
+    client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:dall-e-3"
+) -> Response:
     return client.post(
         "/v1/images/generations",
-        json={"model": "openai:dall-e-3", "prompt": "a red bicycle", "user": user_id},
+        json={"model": model, "prompt": "a red bicycle", "user": user_id},
         headers=headers,
     )
 
 
-def _send_transcription(client: TestClient, headers: dict[str, str], user_id: str) -> Response:
+def _send_transcription(
+    client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:whisper-1"
+) -> Response:
     return client.post(
         "/v1/audio/transcriptions",
         files={"file": ("clip.mp3", b"fake-audio-bytes", "audio/mpeg")},
-        data={"model": "openai:whisper-1", "user": user_id},
+        data={"model": model, "user": user_id},
         headers=headers,
     )
 
 
-def _send_speech(client: TestClient, headers: dict[str, str], user_id: str) -> Response:
+def _send_speech(
+    client: TestClient, headers: dict[str, str], user_id: str, model: str = "openai:tts-1"
+) -> Response:
     return client.post(
         "/v1/audio/speech",
-        json={"model": "openai:tts-1", "input": "hello world", "voice": "alloy", "user": user_id},
+        json={"model": model, "input": "hello world", "voice": "alloy", "user": user_id},
         headers=headers,
     )
 
@@ -190,3 +202,36 @@ def test_batches_rejects_blocked_user(
 
     assert response.status_code == 403
     assert "blocked" in response.json()["detail"].lower()
+
+
+# An unknown-provider selector: it parses into a prefix but names no configured
+# instance and no any-llm provider, so resolve_provider_selector raises
+# AnyLLMError. Previously this escaped as a bare 500; it must now be a 400.
+_UNRESOLVABLE_MODEL = "nobodyprovider:some-model"
+
+
+@pytest.mark.parametrize(("patch_target", "send"), _ROUTE_PARAMS)
+def test_billable_route_unresolvable_model_returns_400(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    patch_target: str,
+    send: Callable[..., Response],
+) -> None:
+    """A bad model name maps to 400 (not 500) before any provider is reached.
+
+    Covers the shared run_passthrough resolution guard, including the audio
+    routes whose reservation is taken before resolution (the estimate is
+    refunded before the 400 is raised).
+    """
+    user_id = "unresolvable-model-user"
+    # Create the user so reservation-first routes (audio) clear the
+    # user/blocked/budget gate and actually reach model resolution; otherwise
+    # they would 404 before the selector is parsed.
+    created = client.post("/v1/users", json={"user_id": user_id}, headers=master_key_header)
+    assert created.status_code == 200
+
+    with patch(patch_target, side_effect=_PROVIDER_REACHED):
+        response = send(client, master_key_header, user_id, model=_UNRESOLVABLE_MODEL)
+
+    assert response.status_code == 400
+    assert _UNRESOLVABLE_MODEL in response.json()["detail"]

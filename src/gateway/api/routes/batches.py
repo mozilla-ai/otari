@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.api import acancel_batch, acreate_batch, alist_batches, aretrieve_batch, aretrieve_batch_results
-from any_llm.exceptions import BatchNotCompleteError, UnsupportedProviderError
+from any_llm.exceptions import AnyLLMError, BatchNotCompleteError, UnsupportedProviderError
 from any_llm.types.batch import Batch
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._pipeline import _raise_for_unresolvable_model
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -231,11 +232,8 @@ async def create_batch(
 
     try:
         resolved = resolve_provider_selector(config, request.model)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid request: {e}",
-        ) from e
+    except (ValueError, AnyLLMError) as exc:
+        _raise_for_unresolvable_model(request.model, exc)
     provider, model = resolved.provider, resolved.model
 
     # Validate provider supports batch operations
