@@ -17,8 +17,25 @@ import pytest
 from fastapi import HTTPException
 
 from gateway.api.routes import _platform
-from gateway.api.routes._platform import ResolvedRoute, run_platform_attempts
+from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, run_platform_attempts
 from gateway.core.config import GatewayConfig
+from gateway.metrics import REGISTRY
+
+
+def _abandoned_sample(provider: str, model: str, reason: str, position: int) -> float:
+    return (
+        REGISTRY.get_sample_value(
+            "gateway_abandoned_attempts_total",
+            {"provider": provider, "model": model, "reason": reason, "position": str(position)},
+        )
+        or 0.0
+    )
+
+
+def _single_attempt(provider: str, model: str) -> ResolvedAttempt:
+    return ResolvedAttempt(
+        attempt_id="a0", position=0, provider=provider, model=model, api_key="k", managed=False
+    )
 
 
 @pytest.mark.asyncio
@@ -49,6 +66,67 @@ async def test_empty_attempts_raises_500_with_explicit_diagnostic() -> None:
         )
     assert ei.value.status_code == 500
     assert "empty attempts list" in ei.value.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_class", "expected_reason"),
+    [("conn_err", "upstream_error"), ("timeout", "timeout")],
+)
+async def test_pre_lock_in_failure_counts_as_abandoned(error_class: str, expected_reason: str) -> None:
+    """A non-streaming attempt that fails before any assistant message is
+    abandonment waste: it is counted under ``gateway_abandoned_attempts`` with a
+    reason derived from the error classification."""
+    attempt = _single_attempt("openai", f"gpt-{expected_reason}")
+    route = ResolvedRoute(request_id="r", fallback_enabled=False, attempts=[attempt])
+    before = _abandoned_sample("openai", attempt.model, expected_reason, 0)
+
+    async def _run_attempt(_kwargs: dict[str, Any], _on_first_response: Any) -> Any:
+        raise RuntimeError("boom before any output")
+
+    with pytest.raises(HTTPException):
+        await run_platform_attempts(
+            route=route,
+            attempts=[attempt],
+            base_request_fields={},
+            run_attempt=_run_attempt,
+            extract_usage=lambda _r: None,
+            classify_error=lambda _exc: (False, error_class),
+            report_attempt_outcome=lambda *_a: None,
+            on_success=lambda _a: None,
+            max_tool_iterations=1,
+        )
+
+    assert _abandoned_sample("openai", attempt.model, expected_reason, 0) - before == 1.0
+
+
+@pytest.mark.asyncio
+async def test_locked_in_failure_not_counted_as_abandoned() -> None:
+    """A locked-in attempt already produced a first assistant message, so a
+    later failure is not abandonment-before-first-chunk and must not inflate the
+    counter."""
+    attempt = _single_attempt("anthropic", "claude-locked")
+    route = ResolvedRoute(request_id="r", fallback_enabled=False, attempts=[attempt])
+    before = _abandoned_sample("anthropic", "claude-locked", "upstream_error", 0)
+
+    async def _run_attempt(_kwargs: dict[str, Any], on_first_response: Any) -> Any:
+        on_first_response()  # lock in on the first upstream response
+        raise RuntimeError("failed after the first assistant message")
+
+    with pytest.raises(HTTPException):
+        await run_platform_attempts(
+            route=route,
+            attempts=[attempt],
+            base_request_fields={},
+            run_attempt=_run_attempt,
+            extract_usage=lambda _r: None,
+            classify_error=lambda _exc: (True, "http_500"),
+            report_attempt_outcome=lambda *_a: None,
+            on_success=lambda _a: None,
+            max_tool_iterations=1,
+        )
+
+    assert _abandoned_sample("anthropic", "claude-locked", "upstream_error", 0) == before
 
 
 @pytest.mark.asyncio

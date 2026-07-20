@@ -1797,11 +1797,6 @@ async def run_platform_non_stream(
         )
         if outcome != "success":
             pending_error_reports.append((attempt.attempt_id, outcome, usage, error_class))
-            # Non-streaming attempts have no separable build phase, so a failed
-            # attempt is a timeout when the classifier said so, else a generic
-            # upstream error. Both are waste worth counting for fallback tuning.
-            reason = "timeout" if error_class == "timeout" else "upstream_error"
-            record_abandoned_attempt(attempt.provider, attempt.model, reason, attempt.position)
 
     def _on_attempt_success(attempt: ResolvedAttempt) -> None:
         response.headers["X-Correlation-ID"] = attempt.attempt_id
