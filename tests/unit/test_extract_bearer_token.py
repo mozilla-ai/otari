@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from gateway.api.deps import _extract_bearer_token
-from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, X_API_KEY_HEADER, GatewayConfig
 
 
 def _make_request(headers: dict[str, str]) -> Request:
@@ -120,3 +120,43 @@ def test_missing_credentials_raises_401(config: GatewayConfig) -> None:
 
     assert exc_info.value.status_code == 401
     assert API_KEY_HEADER in exc_info.value.detail
+
+
+# ---------------------------------------------------------------------------
+# x-api-key (Anthropic-native clients)
+# ---------------------------------------------------------------------------
+
+
+def test_x_api_key_header_returns_raw_token(config: GatewayConfig) -> None:
+    request = _make_request({X_API_KEY_HEADER: "test-raw-token"})
+
+    assert _extract_bearer_token(request, config) == "test-raw-token"
+
+
+def test_authorization_takes_precedence_over_x_api_key(config: GatewayConfig) -> None:
+    request = _make_request(
+        {
+            "Authorization": "Bearer bearer-wins",
+            X_API_KEY_HEADER: "x-api-key-loses",
+        }
+    )
+
+    assert _extract_bearer_token(request, config) == "bearer-wins"
+
+
+def test_canonical_takes_precedence_over_x_api_key(config: GatewayConfig) -> None:
+    request = _make_request(
+        {
+            API_KEY_HEADER: "Bearer canonical-wins",
+            X_API_KEY_HEADER: "x-api-key-loses",
+        }
+    )
+
+    assert _extract_bearer_token(request, config) == "canonical-wins"
+
+
+def test_x_api_key_without_bearer_prefix_succeeds(config: GatewayConfig) -> None:
+    request = _make_request({X_API_KEY_HEADER: "test-raw-token-no-bearer-prefix"})
+
+    token = _extract_bearer_token(request, config)
+    assert token == "test-raw-token-no-bearer-prefix"

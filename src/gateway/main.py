@@ -12,7 +12,7 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
-from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.dashboard import get_dashboard_build_id, get_dashboard_dir
 from gateway.rate_limit import RateLimiter
@@ -186,13 +186,19 @@ def create_app(config: GatewayConfig) -> FastAPI:
             "name": API_KEY_HEADER,
             "description": f"Enter your API key here (sent as {API_KEY_HEADER} header).",
         }
+        openapi_schema["components"]["securitySchemes"]["XApiKeyAuth"] = {
+            "type": "apiKey",
+            "in": "header",
+            "name": X_API_KEY_HEADER,
+            "description": "Anthropic-native clients send credentials here (no Bearer prefix).",
+        }
 
         for path, path_item in openapi_schema.get("paths", {}).items():
             if path.startswith(_PUBLIC_PREFIXES):
                 continue
             for operation in path_item.values():
                 if isinstance(operation, dict):
-                    operation["security"] = [{"ApiKeyAuth": []}]
+                    operation["security"] = [{"ApiKeyAuth": []}, {"XApiKeyAuth": []}]
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema
@@ -255,6 +261,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 "Content-Type",
                 "Authorization",
                 API_KEY_HEADER,
+                X_API_KEY_HEADER,
                 *LEGACY_API_KEY_HEADERS,
             ],
         )
