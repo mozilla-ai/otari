@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
+from gateway.metrics import record_abandoned_attempt
 from gateway.models.mcp import McpServerConfig
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 from gateway.services.sandbox_backend import SandboxNotReachableError
@@ -262,6 +263,14 @@ async def run_platform_attempts(
                 locked_in,
             )
             last_exc = exc
+            # Count as abandoned-before-first-chunk only when nothing was
+            # produced yet. A locked-in failure already yielded a first
+            # assistant message, so it is not abandonment waste. Non-streaming
+            # attempts have no separable build phase, so a classified timeout
+            # maps to ``timeout`` and everything else to ``upstream_error``.
+            if not locked_in:
+                reason = "timeout" if error_class == "timeout" else "upstream_error"
+                record_abandoned_attempt(attempt.provider, attempt.model, reason, attempt.position)
             # Locked-in: at least one tool-loop round produced an assistant
             # message on this attempt. Subsequent failures cannot be
             # transparently retried on another provider.
