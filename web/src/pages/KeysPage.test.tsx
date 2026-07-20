@@ -314,12 +314,21 @@ describe("KeysPage", () => {
     expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
   });
 
-  it("shows a key's access scope in its row", async () => {
-    mockApi({ keys: [apiKey({ key_name: "scoped", allowed_models: ["openai:*", "openai:gpt-4o"] })] });
+  it("shows a key's access scope in its row without a misleading count", async () => {
+    mockApi({
+      keys: [
+        apiKey({ id: "k1", key_name: "scoped", allowed_models: ["openai:*", "openai:gpt-4o"] }),
+        apiKey({ id: "k2", key_name: "open", allowed_models: null }),
+        apiKey({ id: "k3", key_name: "locked", allowed_models: [] }),
+      ],
+    });
     renderPage(<KeysPage />);
 
-    const row = (await screen.findByText("scoped")).closest("tr")!;
-    expect(within(row).getByText("2 models")).toBeInTheDocument();
+    const scoped = (await screen.findByText("scoped")).closest("tr")!;
+    // A wildcard is many models, so the chip says "Selected models", not "2 models".
+    expect(within(scoped).getByText("Selected models")).toBeInTheDocument();
+    expect(within(screen.getByText("open").closest("tr")!).getByText("All models")).toBeInTheDocument();
+    expect(within(screen.getByText("locked").closest("tr")!).getByText("No models")).toBeInTheDocument();
   });
 
   it("flags an expired key and marks a virtual owner", async () => {

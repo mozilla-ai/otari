@@ -463,7 +463,13 @@ function AccessChip({ allowed }: { allowed: string[] | null }) {
       : tone === "muted"
         ? "text-[var(--otari-muted)]"
         : "text-[var(--otari-brand-dark)] font-medium";
-  return <span className={`text-xs ${cls}`}>{text}</span>;
+  // Surface the exact entries on hover; the count would mislead (a wildcard is many).
+  const title = allowed && allowed.length > 0 ? allowed.join(", ") : undefined;
+  return (
+    <span className={`text-xs ${cls}`} title={title}>
+      {text}
+    </span>
+  );
 }
 
 function OnboardingPanel({ onCreate }: { onCreate: () => void }) {

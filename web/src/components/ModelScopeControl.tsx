@@ -198,9 +198,11 @@ export function ModelScopeControl({
   );
 }
 
-// A compact chip describing a key's access, for the table row.
+// A compact label describing a key's access, for the table row. Deliberately not
+// a count: an entry like `openai:*` is one entry but many models, so a number
+// would mislead. The exact entries are surfaced on hover / in the edit form.
 export function accessLabel(allowed: string[] | null): { text: string; tone: "muted" | "normal" | "danger" } {
   if (allowed === null) return { text: "All models", tone: "muted" };
-  if (allowed.length === 0) return { text: "Blocked", tone: "danger" };
-  return { text: `${allowed.length} model${allowed.length === 1 ? "" : "s"}`, tone: "normal" };
+  if (allowed.length === 0) return { text: "No models", tone: "danger" };
+  return { text: "Selected models", tone: "normal" };
 }
