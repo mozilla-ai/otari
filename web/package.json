@@ -11,7 +11,7 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test",
+    "e2e": "npm run build && playwright test",
     "e2e:install": "playwright install chromium"
   },
   "dependencies": {

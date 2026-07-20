@@ -62,6 +62,11 @@ jobs:
     # Browser end-to-end smoke: boot the gateway serving the freshly built bundle
     # (Playwright's webServer, see web/playwright.config.ts) and walk the core
     # multi-page flows a real operator does.
+    #
+    # Scoped to the workflow's web/** + committed-bundle paths: a src/gateway
+    # backend change that breaks a dashboard-served flow is not caught here (the
+    # main test suite covers the API). Broadening the trigger to src/gateway/**
+    # is a possible follow-up if that gap starts to bite.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -73,7 +78,7 @@ jobs:
 
     - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
       with:
-        python-version: 3.14
+        python-version: "3.14"
 
     - name: Install Python deps
       run: uv sync --dev --frozen
@@ -88,14 +93,12 @@ jobs:
       working-directory: web
       run: npm ci
 
-    - name: Build dashboard bundle
-      working-directory: web
-      run: npm run build
-
     - name: Install Playwright Chromium
       working-directory: web
       run: npx playwright install --with-deps chromium
 
+    # `npm run e2e` builds the bundle first (see web/package.json), so a local run
+    # and CI serve the same freshly built dashboard.
     - name: Run end-to-end tests
       working-directory: web
       run: npm run e2e
