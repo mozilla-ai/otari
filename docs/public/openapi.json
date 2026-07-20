@@ -1029,6 +1029,7 @@
           },
           "instance": {
             "description": "Routing key, e.g. 'openai' or a named instance like 'home_lab'.",
+            "minLength": 1,
             "title": "Instance",
             "type": "string"
           },

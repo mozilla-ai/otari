@@ -210,7 +210,10 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
   const needsKey = selected?.requires_api_key ?? true;
   const renamed = name.trim() !== "" && name.trim() !== providerId;
   const nameHasDelimiter = /[:/]/.test(name);
-  const canSubmit = providerId !== "" && !nameHasDelimiter && !create.isPending;
+  // Require the key when the chosen provider says it needs one; keyless local
+  // backends (Ollama, llama.cpp) can submit without it.
+  const canSubmit =
+    providerId !== "" && !nameHasDelimiter && (!needsKey || apiKey.trim() !== "") && !create.isPending;
 
   const submit = () => {
     if (!canSubmit) return;

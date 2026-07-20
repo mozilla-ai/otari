@@ -67,12 +67,21 @@ async def ensure_master_key(config: GatewayConfig, session: AsyncSession) -> Non
             config._master_key_hash = existing
             return
         token = generate_master_key()
-        session.add(RuntimeSetting(key=MASTER_KEY_HASH_KEY, value=hash_master_key(token)))
+        hashed = hash_master_key(token)
+        session.add(RuntimeSetting(key=MASTER_KEY_HASH_KEY, value=hashed))
         await session.commit()
-        config._master_key_hash = hash_master_key(token)
+        config._master_key_hash = hashed
         _print_banner(config, token)
     except SQLAlchemyError:
         await session.rollback()
+        # With several workers/replicas on a shared DB, all of them see no hash
+        # on first run and race to INSERT; the losers land here on the duplicate
+        # primary key. Adopt the winner's hash instead of returning with the
+        # management API locked at 503 (and never print a second, dead banner).
+        existing = await _load_hash(session)
+        if existing:
+            config._master_key_hash = existing
+            return
         logger.warning("Could not persist a generated master key; the management API stays locked until one is set.")
 
 

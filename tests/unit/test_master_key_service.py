@@ -3,10 +3,12 @@
 import hashlib
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from gateway.api import deps
@@ -16,6 +18,7 @@ from gateway.models.entities import RuntimeSetting
 from gateway.services import master_key_service
 from gateway.services.master_key_service import (
     MASTER_KEY_HASH_KEY,
+    ensure_master_key,
     generate_master_key,
     hash_master_key,
 )
@@ -70,6 +73,25 @@ def test_generation_is_idempotent_across_restarts(tmp_path: Path) -> None:
     second = _stored_hashes(db_url)
     assert first == second
     assert len(second) == 1
+
+
+@pytest.mark.asyncio
+async def test_first_run_race_adopts_winner_hash() -> None:
+    # Simulate the losing worker: no hash on the pre-check, the INSERT collides
+    # (IntegrityError on commit), and the winner's hash is present on re-read.
+    config = GatewayConfig(require_pricing=False)
+    assert config.master_key is None
+    winner_hash = "winner-hash-value"
+
+    session = AsyncMock()
+    session.add = MagicMock()
+    session.get.side_effect = [None, RuntimeSetting(key=MASTER_KEY_HASH_KEY, value=winner_hash)]
+    session.commit.side_effect = IntegrityError("INSERT", {}, Exception("duplicate key"))
+
+    await ensure_master_key(config, session)
+
+    session.rollback.assert_awaited()
+    assert config._master_key_hash == winner_hash
 
 
 def test_operator_key_skips_generation(tmp_path: Path) -> None:

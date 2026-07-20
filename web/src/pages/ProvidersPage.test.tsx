@@ -196,6 +196,37 @@ describe("ProvidersPage", () => {
     expect(screen.queryByLabelText("API base")).not.toBeInTheDocument();
   });
 
+  it("keeps Add disabled for a key-requiring provider until a key is entered", async () => {
+    mockApi({
+      stored: [storedProvider("anthropic", "0000")],
+      catalog: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          env_key: "OPENAI_API_KEY",
+          default_api_base: "https://api.openai.com/v1",
+          requires_api_key: true,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••0000");
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+
+    await user.type(screen.getByPlaceholderText("Search providers…"), "OpenAI");
+    await user.click(await screen.findByRole("option", { name: /OpenAI/ }));
+    // Close the combobox popover, which otherwise aria-hides the submit button.
+    await user.keyboard("{Escape}");
+
+    const submit = screen.getByRole("button", { name: "Add provider" });
+    expect(submit).toBeDisabled();
+
+    await user.type(screen.getByLabelText("API key"), "sk-live-xxxx");
+    expect(submit).toBeEnabled();
+  });
+
   it("shows the welcome onboarding when no provider is configured", async () => {
     mockApi({ meta: [], stored: [] });
     renderPage(<ProvidersPage />);

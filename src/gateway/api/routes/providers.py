@@ -12,7 +12,7 @@ from typing import Annotated, Any
 from any_llm import LLMProvider
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_master_key
@@ -193,7 +193,7 @@ def _is_decryptable(row: ProviderCredential) -> bool:
 class CreateStoredProviderRequest(BaseModel):
     """Create a stored provider. ``api_key`` is write-only and requires OTARI_SECRET_KEY."""
 
-    instance: str = Field(description="Routing key, e.g. 'openai' or a named instance like 'home_lab'.")
+    instance: str = Field(min_length=1, description="Routing key, e.g. 'openai' or a named instance like 'home_lab'.")
     provider_type: str | None = Field(
         default=None,
         description="any-llm implementation when the instance name is not itself one.",
@@ -236,6 +236,11 @@ class TestProviderRequest(BaseModel):
 
 def _validate_instance(instance: str, provider_type: str | None) -> None:
     """Reject an unroutable instance name or an unknown provider_type, as a 400."""
+    if not instance.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provider instance name must not be blank.",
+        )
     if ":" in instance or "/" in instance:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -252,9 +257,16 @@ def _validate_instance(instance: str, provider_type: str | None) -> None:
             ) from exc
 
 
-async def _commit(db: AsyncSession) -> None:
+async def _commit(db: AsyncSession, *, conflict_detail: str | None = None) -> None:
     try:
         await db.commit()
+    except IntegrityError:
+        # A concurrent create can slip past the pre-check and collide on the
+        # primary key here; surface that as the intended 409, not a 500.
+        await db.rollback()
+        if conflict_detail is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=conflict_detail) from None
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
     except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(
@@ -341,7 +353,10 @@ async def create_stored_provider(
     except SecretBoxUnavailableError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
 
-    await _commit(db)
+    await _commit(
+        db,
+        conflict_detail=f"A stored provider '{request.instance}' already exists; use PATCH to update it.",
+    )
     if request.instance in (config._provider_baseline or {}):
         logger.warning(
             "Stored provider '%s' shadows the config.yml provider of the same name; the stored credential now wins.",
