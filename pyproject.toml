@@ -17,6 +17,7 @@ dependencies = [
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
     "click>=8.1.0",
+    "cryptography>=44.0.0",
     "fastapi>=0.115.0",
     "genai-prices>=0.0.66",
     "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",

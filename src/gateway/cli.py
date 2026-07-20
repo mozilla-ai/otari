@@ -125,11 +125,11 @@ def serve(
             )
         logger.info("Hybrid mode active. Base URL: %s", platform_base_url)
 
-    if not gateway_config.master_key:
-        logger.warning(
-            "No master key configured. Key management endpoints will be unavailable.",
+    if not gateway_config.master_key and not gateway_config.is_hybrid_mode:
+        logger.info(
+            "No master key configured; one will be generated and printed at startup. "
+            "Set OTARI_MASTER_KEY (or --master-key) to choose your own instead.",
         )
-        logger.warning("Set OTARI_MASTER_KEY environment variable or use --master-key flag.")
 
     logger.info("Starting Otari on %s:%s", gateway_config.host, gateway_config.port)
     if gateway_config.is_hybrid_mode:
@@ -211,6 +211,19 @@ def migrate(config: str | None, database_url: str | None, revision: str) -> None
     except subprocess.CalledProcessError as e:
         click.echo(f"Migration failed: {e.stderr}", err=True)
         sys.exit(1)
+
+
+@cli.command(name="gen-secret-key")
+def gen_secret_key() -> None:
+    """Print a fresh OTARI_SECRET_KEY for encrypting stored provider credentials.
+
+    Set the printed value as OTARI_SECRET_KEY before adding provider keys in the
+    dashboard. Keep it safe: losing it makes every stored provider key
+    undecryptable.
+    """
+    from gateway.services.secret_box import generate_secret_key
+
+    click.echo(generate_secret_key())
 
 
 def main() -> None:

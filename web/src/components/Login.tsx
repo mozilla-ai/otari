@@ -66,8 +66,18 @@ export function Login() {
               className="flex flex-col gap-1"
             >
               <Label className="text-sm font-medium text-[var(--otari-ink)]">Master key</Label>
-              <Input placeholder="sk-…" autoFocus autoComplete="off" />
+              <Input placeholder="otari-mk-… or your master key" autoFocus autoComplete="off" />
             </TextField>
+            <details className="text-xs text-[var(--otari-muted)]">
+              <summary className="cursor-pointer font-medium text-[var(--otari-brand-dark)]">
+                First run? Where to find your key
+              </summary>
+              <p className="mt-2 leading-relaxed">
+                If you did not set <code>OTARI_MASTER_KEY</code>, Otari generated one and printed it to the server logs
+                on startup. Look for the line <code>Your master key:</code> (for example, run{" "}
+                <code>docker logs &lt;container&gt;</code>) and paste it above.
+              </p>
+            </details>
             <ErrorBanner error={error} />
             <Button type="submit" variant="primary" fullWidth isDisabled={!value.trim() || isSubmitting}>
               {isSubmitting ? "Signing in…" : "Sign in"}

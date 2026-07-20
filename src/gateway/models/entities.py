@@ -183,6 +183,45 @@ class RuntimeSetting(Base):
     )
 
 
+class ProviderCredential(Base):
+    """A provider instance configured at runtime through the dashboard.
+
+    The database counterpart of a ``providers:`` entry in config.yml: it is
+    merged over the config-file providers at runtime (see
+    ``provider_store_service``), with the stored row winning on an instance-name
+    collision. The API key is held encrypted (``secret_box``); ``last4`` is kept
+    in clear only so the UI can show which key is set without ever decrypting.
+    Standalone mode only, never used in the hybrid platform path.
+    """
+
+    __tablename__ = "provider_credentials"
+
+    instance: Mapped[str] = mapped_column(primary_key=True)
+    provider_type: Mapped[str | None] = mapped_column()
+    api_base: Mapped[str | None] = mapped_column()
+    encrypted_api_key: Mapped[str | None] = mapped_column()
+    last4: Mapped[str | None] = mapped_column()
+    client_args: Mapped[dict[str, Any]] = mapped_column("client_args", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    def to_public_dict(self) -> dict[str, Any]:
+        """Serialize for the API. Never includes the secret, only ``last4``."""
+        return {
+            "instance": self.instance,
+            "provider_type": self.provider_type,
+            "api_base": self.api_base,
+            "last4": self.last4,
+            "client_args": self.client_args or {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class ModelPricing(Base):
     """Model pricing configuration."""
 

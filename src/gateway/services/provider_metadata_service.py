@@ -17,7 +17,7 @@ join client-side.
 
 from dataclasses import dataclass, field
 
-from any_llm import AnyLLM
+from any_llm import AnyLLM, LLMProvider
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -141,3 +141,48 @@ def list_provider_info(config: GatewayConfig) -> list[ProviderInfo]:
         (provider_info(config, instance) for instance in config.providers),
         key=lambda info: info.instance,
     )
+
+
+@dataclass
+class KnownProvider:
+    """One any-llm provider the add-provider picker can offer."""
+
+    id: str
+    name: str
+    env_key: str | None = None
+    default_api_base: str | None = None
+    requires_api_key: bool = True
+
+
+def list_known_providers() -> list[KnownProvider]:
+    """Every any-llm provider offered in the add-provider picker, by display name.
+
+    Network-free: display name, credential env var, and default endpoint come
+    from the bundled any-llm and genai-prices datasets. A provider whose class
+    cannot be imported (a missing optional dependency) is skipped rather than
+    failing the whole listing.
+    """
+    result: list[KnownProvider] = []
+    for provider in LLMProvider:
+        pid = provider.value
+        try:
+            cls = AnyLLM.get_provider_class(pid)
+            meta = cls.get_provider_metadata()
+        except Exception as exc:
+            logger.debug("skipping provider %r in catalog: %s", pid, exc)
+            continue
+        gp = _genai_provider(pid)
+        name = _clean(getattr(gp, "name", None)) or _clean(getattr(meta, "name", None)) or pid
+        raw_env = _clean(getattr(meta, "env_key", None))
+        # any-llm uses the literal string "None" for keyless backends (Ollama, llama.cpp).
+        env_key = None if raw_env in (None, "None") else raw_env
+        result.append(
+            KnownProvider(
+                id=pid,
+                name=name,
+                env_key=env_key,
+                default_api_base=_clean(getattr(cls, "API_BASE", None)),
+                requires_api_key=env_key is not None,
+            )
+        )
+    return sorted(result, key=lambda provider: provider.name.lower())

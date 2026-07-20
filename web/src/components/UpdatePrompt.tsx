@@ -32,7 +32,7 @@ export function UpdatePrompt() {
   return (
     <div
       role="status"
-      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-[var(--otari-brand)] bg-[var(--otari-brand-tint)] px-4 py-3 text-sm text-[var(--otari-brand-dark)]"
+      className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-[var(--otari-brand)] bg-[var(--otari-brand-tint)] px-5 py-2.5 text-sm text-[var(--otari-brand-dark)]"
     >
       <span className="flex-1">
         <strong className="font-semibold">An update is available.</strong> This tab is running an older version of the

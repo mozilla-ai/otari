@@ -105,7 +105,11 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
-from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
+from gateway.services.pricing_service import (
+    find_model_pricing,
+    no_pricing_error_detail,
+    pricing_required_but_missing,
+)
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
@@ -599,7 +603,7 @@ async def resolve_request_context(
             await refund_reservation(db, reservation)
             raise adapter.error(
                 402,
-                f"No pricing configured for model '{model}'",
+                no_pricing_error_detail(model),
                 ErrorKind.INVALID_REQUEST,
             )
 
