@@ -2,11 +2,10 @@ import { Button } from "@heroui/react";
 import { clsx } from "clsx";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { NavLink, Outlet } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthContext";
 import { UpdatePrompt } from "@/components/UpdatePrompt";
-
-export type PageKey = "models" | "settings";
 
 const MIN_SIDEBAR = 200;
 const MAX_SIDEBAR = 480;
@@ -41,14 +40,24 @@ function readStoredCollapsed(): boolean {
 }
 
 interface NavItem {
-  key: PageKey;
+  to: string;
   label: string;
   icon: ReactNode;
 }
 
 const NAV: NavItem[] = [
   {
-    key: "models",
+    to: "/providers",
+    label: "Providers",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+        <circle cx="7.5" cy="15.5" r="3.5" />
+        <path d="M10 13l7-7M14 5l3 3M16.5 7.5l2-2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    to: "/models",
     label: "Models",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
@@ -58,7 +67,17 @@ const NAV: NavItem[] = [
     ),
   },
   {
-    key: "settings",
+    to: "/aliases",
+    label: "Aliases",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+        <path d="M20.6 13.4L13.4 20.6a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 3 12.2V5a2 2 0 0 1 2-2h7.2a2 2 0 0 1 1.4.6l7 7a2 2 0 0 1 0 2.8z" strokeLinejoin="round" />
+        <circle cx="7.5" cy="7.5" r="1.5" />
+      </svg>
+    ),
+  },
+  {
+    to: "/settings",
     label: "Settings",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
@@ -72,15 +91,7 @@ const NAV: NavItem[] = [
   },
 ];
 
-export function AppShell({
-  page,
-  onNavigate,
-  children,
-}: {
-  page: PageKey;
-  onNavigate: (page: PageKey) => void;
-  children: ReactNode;
-}) {
+export function AppShell() {
   const { logout } = useAuth();
 
   const asideRef = useRef<HTMLElement>(null);
@@ -139,102 +150,115 @@ export function AppShell({
   const width = collapsed ? COLLAPSED_SIDEBAR : sidebarWidth;
 
   return (
-    <div className={clsx("flex min-h-full", resizing && "cursor-col-resize select-none")}>
-      <aside
-        ref={asideRef}
-        style={{ width }}
-        className={clsx(
-          "relative flex shrink-0 flex-col border-r border-[var(--otari-line)] bg-[var(--otari-surface)]",
-          !resizing && "transition-[width] duration-150",
-        )}
-      >
-        <div className={clsx("flex items-center py-5", collapsed ? "justify-center px-0" : "gap-2.5 px-5")}>
+    <div className={clsx("flex h-full flex-col overflow-hidden", resizing && "cursor-col-resize select-none")}>
+      <header className="flex shrink-0 items-center justify-between border-b border-[var(--otari-line)] bg-[var(--otari-surface)] px-5 py-3">
+        <div className="flex items-center gap-2.5">
           <img src="/favicon.svg" alt="" className="h-7 w-7 shrink-0" />
-          {collapsed ? null : <span className="text-base font-semibold text-[var(--otari-ink)]">Otari</span>}
+          <span className="text-base font-semibold text-[var(--otari-ink)]">Otari</span>
         </div>
-        <nav className={clsx("flex flex-col gap-1", collapsed ? "px-2" : "px-3")}>
-          {NAV.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              onClick={() => onNavigate(item.key)}
-              aria-current={page === item.key ? "page" : undefined}
-              aria-label={collapsed ? item.label : undefined}
-              title={collapsed ? item.label : undefined}
-              className={clsx(
-                "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
-                collapsed ? "justify-center px-0" : "gap-3 px-3",
-                page === item.key
-                  ? "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
-                  : "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]",
-              )}
-            >
-              {item.icon}
-              {collapsed ? null : item.label}
-            </button>
-          ))}
-        </nav>
-        <div className={clsx("mt-auto flex flex-col gap-2 py-5", collapsed ? "items-center px-2" : "px-5")}>
+        <Button size="sm" variant="outline" onPress={logout} aria-label="Sign out">
+          Sign out
+        </Button>
+      </header>
+      <UpdatePrompt />
+      <div className="flex min-h-0 flex-1">
+        <aside
+          ref={asideRef}
+          style={{ width }}
+          className={clsx(
+            "relative flex shrink-0 flex-col border-r border-[var(--otari-line)] bg-[var(--otari-surface)]",
+            !resizing && "transition-[width] duration-150",
+          )}
+        >
+          {/* A round chevron on the sidebar's edge toggles collapse — floats over
+              the border for a polished, VS Code / Notion-style affordance. */}
           <button
             type="button"
             onClick={() => setCollapsed((value) => !value)}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-pressed={collapsed}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={clsx(
-              "flex items-center rounded-lg py-2 text-sm font-medium text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]",
-              collapsed ? "justify-center px-0" : "gap-3 px-3",
-            )}
+            className="absolute -right-3 top-4 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-surface)] text-[var(--otari-muted)] shadow-sm transition-colors hover:border-[var(--otari-brand)] hover:text-[var(--otari-brand-dark)]"
           >
             <svg
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
-              className={clsx("h-5 w-5 shrink-0 transition-transform", collapsed && "rotate-180")}
+              strokeWidth="2.5"
+              className={clsx("h-3.5 w-3.5 transition-transform", collapsed && "rotate-180")}
             >
               <path d="M15 6l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            {collapsed ? null : "Collapse"}
           </button>
-          <Button size="sm" variant="outline" onPress={logout} aria-label="Sign out">
-            {collapsed ? (
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            ) : (
-              "Sign out"
-            )}
-          </Button>
-        </div>
-        {collapsed ? null : (
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize sidebar"
-            aria-valuenow={Math.round(sidebarWidth)}
-            aria-valuemin={MIN_SIDEBAR}
-            aria-valuemax={MAX_SIDEBAR}
-            tabIndex={0}
-            onPointerDown={startResize}
-            onPointerMove={moveResize}
-            onPointerUp={endResize}
-            onKeyDown={nudgeResize}
+          <nav className={clsx("flex flex-col gap-1 py-4", collapsed ? "px-2" : "px-3")}>
+            {NAV.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                aria-label={collapsed ? item.label : undefined}
+                title={collapsed ? item.label : undefined}
+                className={({ isActive }) =>
+                  clsx(
+                    "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
+                    collapsed ? "justify-center px-0" : "gap-3 px-3",
+                    isActive
+                      ? "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
+                      : "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]",
+                  )
+                }
+              >
+                {item.icon}
+                {collapsed ? null : item.label}
+              </NavLink>
+            ))}
+          </nav>
+          {/* Subtle pointer to the hosted product; muted until hovered. */}
+          <a
+            href="https://otari.ai"
+            target="_blank"
+            rel="noreferrer"
+            title="otari.ai — the hosted Otari gateway"
             className={clsx(
-              "absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize touch-none transition-colors",
-              "hover:bg-[var(--otari-brand)] focus-visible:bg-[var(--otari-brand)] focus:outline-none",
-              resizing ? "bg-[var(--otari-brand)]" : "bg-transparent",
+              "mt-auto mb-3 flex items-center rounded-lg py-2 text-xs font-medium text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-brand-dark)]",
+              collapsed ? "mx-2 justify-center px-0" : "mx-3 gap-2 px-3",
             )}
-          />
-        )}
-      </aside>
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-6 py-6">
-          <UpdatePrompt />
-          {children}
-        </div>
-      </main>
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+              <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" strokeLinejoin="round" />
+            </svg>
+            {collapsed ? null : (
+              <span className="flex-1">
+                otari.ai <span aria-hidden>↗</span>
+              </span>
+            )}
+          </a>
+          {collapsed ? null : (
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize sidebar"
+              aria-valuenow={Math.round(sidebarWidth)}
+              aria-valuemin={MIN_SIDEBAR}
+              aria-valuemax={MAX_SIDEBAR}
+              tabIndex={0}
+              onPointerDown={startResize}
+              onPointerMove={moveResize}
+              onPointerUp={endResize}
+              onKeyDown={nudgeResize}
+              className={clsx(
+                "absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize touch-none transition-colors",
+                "hover:bg-[var(--otari-brand)] focus-visible:bg-[var(--otari-brand)] focus:outline-none",
+                resizing ? "bg-[var(--otari-brand)]" : "bg-transparent",
+              )}
+            />
+          )}
+        </aside>
+        <main className="flex-1 overflow-y-auto">
+          <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-6 py-6">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

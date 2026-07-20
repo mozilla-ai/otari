@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from any_llm import AnyLLM, LLMProvider
+from any_llm.exceptions import AnyLLMError
 
 from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import GatewayConfig
@@ -171,6 +172,10 @@ def normalize_pricing_key(config: GatewayConfig, raw_key: str) -> str:
         return f"{split[0]}:{split[1]}"
     try:
         provider, model = AnyLLM.split_model_provider(raw_key)
-    except ValueError:
+    # AnyLLMError (UnsupportedProviderError) fires when the prefix is an instance
+    # name that is no longer configured, e.g. a pricing row left behind after its
+    # stored provider was removed or could not be decrypted. Return it unchanged
+    # rather than 500 the whole listing.
+    except (ValueError, AnyLLMError):
         return raw_key
     return f"{provider.value}:{model}"

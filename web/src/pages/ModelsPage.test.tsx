@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -196,13 +197,13 @@ function panel(): HTMLElement {
   return screen.getByRole("complementary");
 }
 
-function aliasRow(): HTMLElement {
-  return within(table()).getByText("fast-model").closest("tr") as HTMLElement;
-}
-
 function renderWithClient(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <MemoryRouter>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </MemoryRouter>,
+  );
 }
 
 function notFound(): Response {
@@ -266,12 +267,8 @@ function mockApi(
   });
 }
 
-async function goToTab(user: ReturnType<typeof userEvent.setup>, name: string) {
-  await user.click(screen.getByRole("tab", { name: new RegExp(`^${name}`) }));
-}
-
-async function openAdd(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: "Add" }));
+async function openPriceForm(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: /Price a model not listed here/i }));
 }
 
 // Selects a model row and returns the detail panel scoped for assertions.
@@ -300,19 +297,6 @@ describe("ModelsPage", () => {
     window.localStorage.clear();
   });
 
-  // -- tab structure -------------------------------------------------------
-
-  it("opens on the Models tab and keeps aliases separate, each with a count", async () => {
-    mockApi();
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("openai:gpt-4o");
-
-    expect(screen.getByRole("tab", { name: /All models 3/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Aliases 1/ })).toBeInTheDocument();
-    expect(within(table()).queryByText("fast-model")).not.toBeInTheDocument();
-  });
-
   it("shows no usage columns anywhere", async () => {
     mockApi();
 
@@ -326,7 +310,7 @@ describe("ModelsPage", () => {
 
   // -- model list ----------------------------------------------------------
 
-  it("lists models with their context window and feature chips", async () => {
+  it("lists models with their context window", async () => {
     mockApi();
 
     renderWithClient(<ModelsPage />);
@@ -334,9 +318,6 @@ describe("ModelsPage", () => {
 
     expect(within(tableRow("openai:gpt-4o")).getByText("128K")).toBeInTheDocument();
     expect(within(tableRow("anthropic:claude-sonnet-4")).getByText("200K")).toBeInTheDocument();
-    // Feature chips come from models.dev metadata (image input -> Vision, tools).
-    expect(within(tableRow("openai:gpt-4o")).getByText("Vision")).toBeInTheDocument();
-    expect(within(tableRow("openai:gpt-4o")).getByText("Tools")).toBeInTheDocument();
   });
 
   it("surfaces the default-pricing note as a tooltip on the pricing column, not a banner", async () => {
@@ -493,21 +474,19 @@ describe("ModelsPage", () => {
     expect(miniIndex).toBeLessThan(claudeIndex);
   });
 
-  it("defaults to newest models first with a compact release date", async () => {
+  it("defaults to sorting by model name, ascending", async () => {
     mockApi();
 
     renderWithClient(<ModelsPage />);
-    // Wait for models.dev metadata (release dates) to land; "2025-05-14" -> "May 2025".
-    await screen.findByText("May 2025");
-    expect(within(tableRow("openai:gpt-4o")).getByText("May 2024")).toBeInTheDocument();
+    await screen.findByText("openai:gpt-4o");
 
-    // No header click needed: the default sort is newest-first.
+    // No header click needed: default is model A→Z, so anthropic sorts before openai.
     const order = modelOrder();
     const claude = order.findIndex((text) => text.includes("claude-sonnet-4"));
-    const mini = order.findIndex((text) => text.includes("gpt-4o-mini"));
     const base = order.findIndex((text) => text.includes("openai:gpt-4o") && !text.includes("mini"));
-    expect(claude).toBeLessThan(mini);
-    expect(mini).toBeLessThan(base);
+    const mini = order.findIndex((text) => text.includes("gpt-4o-mini"));
+    expect(claude).toBeLessThan(base);
+    expect(base).toBeLessThan(mini);
   });
 
   it("remembers the chosen sort across a remount", async () => {
@@ -515,20 +494,20 @@ describe("ModelsPage", () => {
     const user = userEvent.setup();
 
     const { unmount } = renderWithClient(<ModelsPage />);
-    await screen.findByText("May 2025");
+    await screen.findByText("openai:gpt-4o");
 
-    // Flip the Released column to oldest-first and confirm it is persisted.
-    await user.click(screen.getByRole("button", { name: /Released/ }));
+    // Flip the Model column to Z→A and confirm it is persisted.
+    await user.click(screen.getByRole("button", { name: /^Model/ }));
     expect(JSON.parse(window.localStorage.getItem("otari.dashboard.modelsSort") ?? "{}")).toEqual({
-      col: "released",
-      dir: "asc",
+      col: "model",
+      dir: "desc",
     });
 
     unmount();
 
-    // A fresh mount restores oldest-first rather than the newest-first default.
+    // A fresh mount restores Z→A rather than the A→Z default.
     renderWithClient(<ModelsPage />);
-    await screen.findByText("May 2025");
+    await screen.findByText("openai:gpt-4o");
     const order = modelOrder();
     const base = order.findIndex((text) => text.includes("openai:gpt-4o") && !text.includes("mini"));
     const claude = order.findIndex((text) => text.includes("claude-sonnet-4"));
@@ -614,66 +593,7 @@ describe("ModelsPage", () => {
     expect(screen.queryByRole("button", { name: /backfill/i })).not.toBeInTheDocument();
   });
 
-  it("opens the Add form in alias mode with the target prefilled from the panel", async () => {
-    mockApi({
-      post: (url) => (url.includes("/v1/aliases") ? jsonResponse(ALIASES[0]) : jsonResponse(PRICED)),
-    });
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("openai:gpt-4o");
-
-    const detail = await selectModel(user, "openai:gpt-4o");
-    await user.click(within(detail).getByRole("button", { name: /Alias to this model/ }));
-
-    await user.type(screen.getByRole("textbox", { name: /alias name/i }), "smart");
-    await user.click(screen.getByRole("button", { name: /create alias/i }));
-
-    const aliasPost = fetchSpy.mock.calls.find(
-      ([url, init]) => String(url).includes("/v1/aliases") && (init?.method ?? "") === "POST",
-    );
-    expect(JSON.parse(String(aliasPost?.[1]?.body))).toEqual({ name: "smart", target: "openai:gpt-4o" });
-  });
-
-  // -- Aliases tab ---------------------------------------------------------
-
-  it("shows an alias with its target and resolved price, and no way to price it", async () => {
-    mockApi();
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await goToTab(user, "Aliases");
-    await screen.findByText("fast-model");
-
-    expect(within(aliasRow()).getByText("openai:gpt-4o-mini")).toBeInTheDocument();
-    expect(within(aliasRow()).getByText("$0.15")).toBeInTheDocument();
-    expect(within(aliasRow()).getByText("set in config.yml")).toBeInTheDocument();
-    expect(within(aliasRow()).queryByRole("button", { name: /price|delete/i })).not.toBeInTheDocument();
-  });
-
-  it("deletes a stored alias but not one from config.yml", async () => {
-    mockApi({
-      aliases: [
-        { name: "fast-model", target: "openai:gpt-4o-mini", source: "stored", created_at: null, updated_at: null },
-      ],
-    });
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await goToTab(user, "Aliases");
-    await screen.findByText("fast-model");
-
-    expect(screen.queryByText("set in config.yml")).not.toBeInTheDocument();
-    await user.click(within(aliasRow()).getByRole("button", { name: "Delete" }));
-    await user.click(within(aliasRow()).getByRole("button", { name: "Delete" }));
-
-    const call = fetchSpy.mock.calls.find(([, init]) => (init?.method ?? "") === "DELETE");
-    expect(String(call?.[0])).toContain("/v1/aliases/fast-model");
-  });
-
-  // -- Add form: picker + alias creation -----------------------------------
+  // -- Price an unlisted model: the picker -----------------------------------
 
   it("offers discovered models in the picker and puts the full selector in the field", async () => {
     mockApi();
@@ -681,7 +601,7 @@ describe("ModelsPage", () => {
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
-    await openAdd(user);
+    await openPriceForm(user);
 
     const picker = screen.getByRole("combobox", { name: /model/i });
     await user.type(picker, "4o-mini");
@@ -697,7 +617,7 @@ describe("ModelsPage", () => {
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
-    await openAdd(user);
+    await openPriceForm(user);
 
     const picker = screen.getByRole("combobox", { name: /model/i });
     await user.type(picker, "bedrock:claude-3-sonnet");
@@ -716,19 +636,5 @@ describe("ModelsPage", () => {
       input_price_per_million: 1,
       output_price_per_million: 2,
     });
-  });
-
-  it("refuses an alias name that could be mistaken for a model key", async () => {
-    mockApi();
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await goToTab(user, "Aliases");
-    await openAdd(user);
-
-    await user.type(screen.getByRole("textbox", { name: /alias name/i }), "openai:fast");
-
-    expect(screen.getByText(/cannot contain/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /create alias/i })).toBeDisabled();
   });
 });

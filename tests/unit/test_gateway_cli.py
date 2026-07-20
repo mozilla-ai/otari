@@ -105,3 +105,14 @@ def test_gateway_config_defaults_to_sqlite() -> None:
     config = GatewayConfig()
     assert config.database_url == "sqlite:///./otari.db"
     assert config.bootstrap_api_key is True
+
+
+def test_gen_secret_key_prints_a_usable_fernet_key() -> None:
+    from cryptography.fernet import Fernet
+
+    result = CliRunner().invoke(gateway_cli.cli, ["gen-secret-key"])
+    assert result.exit_code == 0
+    key = result.output.strip()
+    # Round-trips through Fernet, so it is a valid key the secret box can use.
+    box = Fernet(key.encode())
+    assert box.decrypt(box.encrypt(b"x")) == b"x"

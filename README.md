@@ -131,7 +131,7 @@ Prefer a typed client? Use one of the [Otari SDKs](#the-otari-ecosystem) for Pyt
 The Quickstart touches three different keys. Keeping them straight saves the most common first-run error:
 
 - **Provider key** (`OPENAI_API_KEY`): your real OpenAI secret. It goes in as an environment variable and stays inside Otari. Your apps never see it.
-- **Master key** (`OTARI_MASTER_KEY`): manages Otari. Use it to create and revoke API keys, not to make requests.
+- **Master key** (`OTARI_MASTER_KEY`): manages Otari. Use it to create and revoke API keys, not to make requests. Leave it unset and Otari generates one on first run and prints it to the logs.
 - **API key** (`gw-...`): what clients send to Otari in the `Authorization` header. The bootstrap key is one of these.
 
 To mint a named key yourself instead of using the bootstrap key, call the management endpoint with your master key:
@@ -144,6 +144,33 @@ curl -X POST http://localhost:8000/v1/keys \
 ```
 
 The returned `gw-` key is shown in full only once.
+
+### Set it up in the browser instead
+
+Prefer not to pre-set anything on the command line? Launch Otari bare and finish in the dashboard.
+
+```bash
+docker run --rm -p 8000:8000 mzdotai/otari:latest otari serve
+```
+
+With no master key set, Otari generates one and prints it to the logs once on startup:
+
+```text
+Otari first-run: no master key was set, so one was generated.
+Save it now (it is shown only once). Sign in to the dashboard at http://localhost:8000/
+Your master key:
+otari-mk-...
+```
+
+Open `http://localhost:8000/`, sign in with that key, then open **Providers** and add your OpenAI key. Storing a provider key requires `OTARI_SECRET_KEY`, a Fernet key that encrypts credentials at rest; generate one with `otari gen-secret-key` and set it before launch:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e OTARI_SECRET_KEY="$(docker run --rm mzdotai/otari:latest otari gen-secret-key)" \
+  mzdotai/otari:latest otari serve
+```
+
+Back it up somewhere safe: losing `OTARI_SECRET_KEY` makes every stored provider key undecryptable. Providers you set in `config.yml` keep working and appear in the dashboard marked `config` (read-only there); keys you add in the UI are marked `stored`, and a stored key of the same name takes precedence.
 
 ## Run the full stack
 
@@ -191,10 +218,15 @@ For hot reload against a local `.env`, use `make dev`.
 ### Admin dashboard
 
 In standalone mode the gateway serves a web admin dashboard at the root URL
-(`http://localhost:8000`). Sign in with your master key (`OTARI_MASTER_KEY`) to
-browse the model catalogue, set model pricing, manage aliases, and toggle
-runtime settings (model discovery and default pricing). The get-started
-tutorial page moved to `/welcome`. The dashboard is a React +
+(`http://localhost:8000`). Sign in with your master key (`OTARI_MASTER_KEY`, or
+the one printed to the logs on first run) to add provider API keys, browse the
+model catalogue, set model pricing, manage aliases, and toggle runtime settings
+(model discovery and default pricing). Provider keys added in the **Providers**
+page are encrypted at rest (requires `OTARI_SECRET_KEY`; see
+[Set it up in the browser instead](#set-it-up-in-the-browser-instead)) and merge
+over `config.yml` providers, so you can start with an empty config and add
+credentials after launch. The get-started tutorial page moved to `/welcome`. The
+dashboard is a React +
 HeroUI app that lives in `web/`; its built bundle is committed under
 `src/gateway/static/dashboard`, so the published package and Docker image serve
 it with no extra build step. See [`web/README.md`](web/README.md) to work on it.

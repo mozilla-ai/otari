@@ -1,10 +1,8 @@
 import { Button, Card, Chip } from "@heroui/react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import {
-  useAliases,
-  useCreateAlias,
-  useDeleteAlias,
   useDeletePricing,
   useDiscoverableModels,
   useModelMetadata,
@@ -15,7 +13,6 @@ import {
   useSettings,
 } from "@/api/hooks";
 import type { ModelMetadata, ProviderCapabilities, ProviderInfo } from "@/api/types";
-import { Field } from "@/components/Field";
 import { ModelComboBox } from "@/components/ModelComboBox";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/components/ui";
@@ -108,8 +105,6 @@ interface ModelRow {
   key: string;
   model: string;
   provider: string;
-  aliasSource?: "config" | "stored";
-  aliasPriceSource?: PriceSource;
   isDiscovered?: boolean;
   contextWindow: number | null;
   releaseDate?: string | null;
@@ -162,91 +157,6 @@ function SourceChip({ source }: { source: PriceSource }) {
     );
   }
   return <span className="text-xs text-[var(--otari-muted)]">not priced</span>;
-}
-
-// A compact row of the model's headline capabilities, for the table's Features
-// column: vision from the input modalities, plus tool calling and reasoning.
-function FeatureChips({ metadata }: { metadata: ModelMetadata | undefined }) {
-  const chips: string[] = [];
-  if (metadata) {
-    if (metadata.input_modalities.includes("image")) {
-      chips.push("Vision");
-    }
-    if (metadata.tool_call) {
-      chips.push("Tools");
-    }
-    if (metadata.reasoning) {
-      chips.push("Reasoning");
-    }
-  }
-  if (chips.length === 0) {
-    return <span className="text-xs text-[var(--otari-muted)]">—</span>;
-  }
-  return (
-    <div className="flex flex-wrap gap-1">
-      {chips.map((chip) => (
-        <Chip key={chip} size="sm" color="default">
-          {chip}
-        </Chip>
-      ))}
-    </div>
-  );
-}
-
-// Creates a stored alias. Pricing, budgets, and usage all key on the target, so
-// an alias is never priced here. `initialTarget` prefills the target when the
-// detail panel opens this to alias a specific model.
-function AddAliasForm({ onClose, initialTarget = "" }: { onClose: () => void; initialTarget?: string }) {
-  const createAlias = useCreateAlias();
-  const [name, setName] = useState("");
-  const [target, setTarget] = useState(initialTarget);
-
-  const nameHasDelimiter = /[:/]/.test(name);
-  const canSubmit = name.trim() !== "" && target.trim() !== "" && !nameHasDelimiter;
-
-  const submit = () => {
-    if (!canSubmit) {
-      return;
-    }
-    createAlias.mutate({ name: name.trim(), target: target.trim() }, { onSuccess: onClose });
-  };
-
-  return (
-    <div className="flex flex-col gap-4">
-      <ErrorBanner error={createAlias.error} />
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field
-          label="Alias name"
-          value={name}
-          onChange={setName}
-          placeholder="fast-model"
-          isRequired
-          autoFocus
-          description={
-            nameHasDelimiter ? (
-              <span className="text-red-700">
-                An alias name cannot contain “:” or “/”, which would make it look like a provider:model key.
-              </span>
-            ) : (
-              "What callers send as `model`."
-            )
-          }
-        />
-        <ModelComboBox
-          label="Target"
-          value={target}
-          onChange={setTarget}
-          isRequired
-          description="The real model this resolves to. Callers never see it."
-        />
-      </div>
-      <div>
-        <Button variant="primary" isDisabled={!canSubmit || createAlias.isPending} onPress={submit}>
-          {createAlias.isPending ? "Creating…" : "Create alias"}
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 // Prices a model the picker lists, or one it cannot see (an unconfigured
@@ -303,59 +213,6 @@ function PriceModelForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-type AddTab = "model" | "alias";
-
-function AddForm({
-  onClose,
-  initialMode = "model",
-  initialTarget = "",
-}: {
-  onClose: () => void;
-  initialMode?: AddTab;
-  initialTarget?: string;
-}) {
-  const [tab, setTab] = useState<AddTab>(initialMode);
-
-  return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1 rounded-lg bg-[var(--otari-bg)] p-1">
-            {(
-              [
-                ["model", "Price a model"],
-                ["alias", "Add an alias"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={tab === id}
-                onClick={() => setTab(id)}
-                className={
-                  tab === id
-                    ? "rounded-md bg-white px-3 py-1.5 text-sm font-medium text-[var(--otari-ink)] shadow-sm"
-                    : "rounded-md px-3 py-1.5 text-sm text-[var(--otari-muted)] hover:text-[var(--otari-ink)]"
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <Button size="sm" variant="ghost" onPress={onClose}>
-            Close
-          </Button>
-        </div>
-        {tab === "model" ? (
-          <PriceModelForm onClose={onClose} />
-        ) : (
-          <AddAliasForm onClose={onClose} initialTarget={initialTarget} />
-        )}
-      </Card.Content>
-    </Card>
-  );
-}
-
 // A small info affordance: an "i" bubble that reveals a tooltip on hover or
 // keyboard focus. Hand-rolled to match the dashboard's other bare primitives
 // (HeroUI v3 ships no tooltip we use here).
@@ -368,12 +225,15 @@ function InfoTooltip({
   tone?: "info" | "warning";
   children: ReactNode;
 }) {
+  // Unique per instance: several tooltips render at once, so a shared id would
+  // make aria-describedby resolve to the wrong (or ambiguous) tooltip.
+  const tipId = useId();
   return (
     <span className="group relative inline-flex items-center font-normal normal-case">
       <button
         type="button"
         aria-label={label}
-        aria-describedby="pricing-info-tip"
+        aria-describedby={tipId}
         className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] leading-none ${
           tone === "warning"
             ? "border-[#c2843a] text-[#b45309]"
@@ -383,7 +243,7 @@ function InfoTooltip({
         i
       </button>
       <span
-        id="pricing-info-tip"
+        id={tipId}
         role="tooltip"
         className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 rounded-lg border border-[var(--otari-line)] bg-[var(--otari-surface)] px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-[var(--otari-ink)] opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
       >
@@ -520,13 +380,19 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           {row.source === "configured" ? "Edit price" : "Set price"}
         </Button>
         {row.source === "configured" ? (
-          <ConfirmButton
-            confirmLabel="Clear"
-            isPending={deletePricing.isPending}
-            onConfirm={() => deletePricing.mutate(row.key)}
-          >
-            Clear
-          </ConfirmButton>
+          <>
+            <ConfirmButton
+              confirmLabel="Reset"
+              isPending={deletePricing.isPending}
+              onConfirm={() => deletePricing.mutate(row.key)}
+            >
+              Reset
+            </ConfirmButton>
+            <InfoTooltip label="What reset does">
+              Removes the custom price. The model reverts to the default rate (genai-prices) when default pricing is on,
+              otherwise it is metered at no cost.
+            </InfoTooltip>
+          </>
         ) : null}
         {deletePricing.error ? <span className="text-xs text-red-700">{errorMessage(deletePricing.error)}</span> : null}
       </div>
@@ -607,7 +473,7 @@ function ModelDetailPanel({
   providerInfo,
   providerModelCount,
   providerDiscoveryError,
-  onAliasTo,
+  onMakeAlias,
 }: {
   row: ModelRow | null;
   metadata: ModelMetadata | undefined;
@@ -615,7 +481,7 @@ function ModelDetailPanel({
   providerInfo: ProviderInfo | undefined;
   providerModelCount: number;
   providerDiscoveryError: string | null;
-  onAliasTo: (key: string) => void;
+  onMakeAlias: (key: string) => void;
 }) {
   if (!row) {
     return (
@@ -656,8 +522,8 @@ function ModelDetailPanel({
             {row.isDiscovered ? null : <span className="text-xs text-[var(--otari-muted)]">not discovered</span>}
           </div>
           <PanelPriceEditor key={row.key} row={row} />
-          <Button size="sm" variant="outline" onPress={() => onAliasTo(row.key)}>
-            Alias to this model
+          <Button size="sm" variant="outline" onPress={() => onMakeAlias(row.key)}>
+            Make an alias
           </Button>
         </PanelSection>
 
@@ -712,52 +578,23 @@ function ModelDetailPanel({
           )}
         </PanelSection>
 
-        <ProviderBlock
-          provider={row.provider}
-          info={providerInfo}
-          modelCount={providerModelCount}
-          discoveryError={providerDiscoveryError}
-        />
+        {/* Skip the provider pane for a custom / self-hosted instance (its name is
+            not a stock provider): the bundled capabilities and doc links describe
+            the underlying implementation, not the operator's endpoint. */}
+        {providerInfo && providerInfo.provider_type === row.provider ? (
+          <ProviderBlock
+            provider={row.provider}
+            info={providerInfo}
+            modelCount={providerModelCount}
+            discoveryError={providerDiscoveryError}
+          />
+        ) : null}
       </Card.Content>
     </Card>
   );
 }
 
-const TAB_ITEMS = [
-  { id: "models", label: "All models" },
-  { id: "aliases", label: "Aliases" },
-] as const;
-
-type Tab = (typeof TAB_ITEMS)[number]["id"];
-
 const PAGE_SIZE = 25;
-
-function TabBar({ tab, counts, onSelect }: { tab: Tab; counts: Record<Tab, number>; onSelect: (tab: Tab) => void }) {
-  return (
-    <div role="tablist" aria-label="Model categories" className="flex items-center gap-1 border-b border-[var(--otari-line)]">
-      {TAB_ITEMS.map((item) => {
-        const active = item.id === tab;
-        return (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            onClick={() => onSelect(item.id)}
-            className={
-              active
-                ? "-mb-px border-b-2 border-[var(--otari-brand)] px-3 py-2 text-sm font-medium text-[var(--otari-ink)]"
-                : "-mb-px border-b-2 border-transparent px-3 py-2 text-sm text-[var(--otari-muted)] hover:text-[var(--otari-ink)]"
-            }
-          >
-            {item.label}
-            <span className="ml-1.5 text-xs text-[var(--otari-muted)] tabular-nums">{counts[item.id]}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 function SearchInput({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
@@ -826,7 +663,7 @@ type Sort = { col: SortCol; dir: SortDir };
 
 // Newest models first by default; the choice is remembered across refreshes.
 const SORT_STORAGE_KEY = "otari.dashboard.modelsSort";
-const DEFAULT_SORT: Sort = { col: "released", dir: "desc" };
+const DEFAULT_SORT: Sort = { col: "model", dir: "asc" };
 const SORT_COLS: SortCol[] = ["model", "context", "released", "input", "output"];
 
 function readStoredSort(): Sort {
@@ -882,24 +719,86 @@ function SortableTh({
   );
 }
 
+// Compact inline price editor shown in a sub-row under a model, so you can
+// price it without leaving the list.
+function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void }) {
+  const setPricing = useSetPricing();
+  const deletePricing = useDeletePricing();
+  const [input, setInput] = useState(row.inputPrice == null ? "" : String(row.inputPrice));
+  const [output, setOutput] = useState(row.outputPrice == null ? "" : String(row.outputPrice));
+
+  const save = () => {
+    if (!isValidPrice(input) || !isValidPrice(output)) return;
+    setPricing.mutate(
+      { model_key: row.key, input_price_per_million: Number(input), output_price_per_million: Number(output) },
+      { onSuccess: onClose },
+    );
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-4 py-3">
+      <span className="text-xs font-medium break-all text-[var(--otari-muted)]">{row.key}</span>
+      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        Input $ / 1M
+        <MoneyInput value={input} onChange={setInput} ariaLabel={`Input price for ${row.key}`} />
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        Output $ / 1M
+        <MoneyInput value={output} onChange={setOutput} ariaLabel={`Output price for ${row.key}`} />
+      </label>
+      <Button
+        size="sm"
+        variant="primary"
+        isDisabled={setPricing.isPending || !isValidPrice(input) || !isValidPrice(output)}
+        onPress={save}
+      >
+        {setPricing.isPending ? "Saving…" : "Save"}
+      </Button>
+      <Button size="sm" variant="ghost" isDisabled={setPricing.isPending} onPress={onClose}>
+        Cancel
+      </Button>
+      {row.source === "configured" ? (
+        <span className="inline-flex items-center gap-1">
+          <ConfirmButton
+            confirmLabel="Reset"
+            isPending={deletePricing.isPending}
+            onConfirm={() => deletePricing.mutate(row.key, { onSuccess: onClose })}
+          >
+            Reset
+          </ConfirmButton>
+          <InfoTooltip label="What reset does">
+            Removes the custom price. The model reverts to the default rate (genai-prices) when default pricing is on,
+            otherwise it is metered at no cost.
+          </InfoTooltip>
+        </span>
+      ) : null}
+      {setPricing.error || deletePricing.error ? (
+        <span className="text-xs text-red-700">{errorMessage(setPricing.error ?? deletePricing.error)}</span>
+      ) : null}
+    </div>
+  );
+}
+
 function ModelTable({
   rows,
-  metadataByKey,
   isLoading,
   empty,
   sort,
   onSort,
   selectedKey,
   onSelect,
+  pricingKey,
+  onSetPricingKey,
 }: {
   rows: ModelRow[];
-  metadataByKey: Record<string, ModelMetadata>;
   isLoading: boolean;
   empty: ReactNode;
   sort: { col: SortCol; dir: SortDir };
   onSort: (col: SortCol) => void;
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  pricingKey: string | null;
+  onSetPricingKey: (key: string | null) => void;
 }) {
   return (
     <Table>
@@ -908,8 +807,6 @@ function ModelTable({
           <SortableTh label="Model" col="model" sort={sort} onSort={onSort} />
           <Th>Provider</Th>
           <SortableTh label="Context" col="context" sort={sort} onSort={onSort} align="right" />
-          <SortableTh label="Released" col="released" sort={sort} onSort={onSort} />
-          <Th>Features</Th>
           <SortableTh
             label="Input $ / 1M"
             col="input"
@@ -919,96 +816,51 @@ function ModelTable({
             info={<PricingInfo />}
           />
           <SortableTh label="Output $ / 1M" col="output" sort={sort} onSort={onSort} align="right" />
-        </Tr>
-      </THead>
-      <tbody>
-        {isLoading ? (
-          <LoadingRow colSpan={7} />
-        ) : rows.length > 0 ? (
-          rows.map((row) => (
-            <Tr key={row.key} onClick={() => onSelect(row.key)} selected={row.key === selectedKey}>
-              <Td className="font-medium break-all">{row.model}</Td>
-              <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
-              <Td className="text-right tabular-nums text-[var(--otari-muted)]">{formatContext(row.contextWindow)}</Td>
-              <Td className="whitespace-nowrap text-[var(--otari-muted)]">{formatReleaseDate(row.releaseDate)}</Td>
-              <Td>
-                <FeatureChips metadata={metadataByKey[row.key]} />
-              </Td>
-              <Td className="text-right tabular-nums">{row.inputPrice == null ? "—" : formatCost(row.inputPrice)}</Td>
-              <Td className="text-right tabular-nums">{row.outputPrice == null ? "—" : formatCost(row.outputPrice)}</Td>
-            </Tr>
-          ))
-        ) : (
-          <TableMessage colSpan={7}>{empty}</TableMessage>
-        )}
-      </tbody>
-    </Table>
-  );
-}
-
-interface AliasEntry {
-  name: string;
-  target: string;
-  source: "config" | "stored";
-  row?: ModelRow;
-}
-
-function AliasTableRow({ entry }: { entry: AliasEntry }) {
-  const deleteAlias = useDeleteAlias();
-  const row = entry.row;
-  return (
-    <Tr>
-      <Td className="font-medium break-all">{entry.name}</Td>
-      <Td className="break-all text-[var(--otari-muted)]">{entry.target}</Td>
-      <Td>
-        {row?.aliasPriceSource ? (
-          <SourceChip source={row.aliasPriceSource} />
-        ) : (
-          <span className="text-xs text-[var(--otari-muted)]">—</span>
-        )}
-      </Td>
-      <Td className="text-right">{row?.inputPrice != null ? formatCost(row.inputPrice) : "—"}</Td>
-      <Td className="text-right">{row?.outputPrice != null ? formatCost(row.outputPrice) : "—"}</Td>
-      <Td className="text-right whitespace-nowrap">
-        {entry.source === "stored" ? (
-          <span className="inline-flex items-center gap-2">
-            <ConfirmButton
-              confirmLabel="Delete"
-              isPending={deleteAlias.isPending}
-              onConfirm={() => deleteAlias.mutate(entry.name)}
-            >
-              Delete
-            </ConfirmButton>
-            {deleteAlias.error ? <span className="text-xs text-red-700">{errorMessage(deleteAlias.error)}</span> : null}
-          </span>
-        ) : (
-          <span className="text-xs text-[var(--otari-muted)]">set in config.yml</span>
-        )}
-      </Td>
-    </Tr>
-  );
-}
-
-function AliasTable({ entries, isLoading }: { entries: AliasEntry[]; isLoading: boolean }) {
-  return (
-    <Table>
-      <THead>
-        <Tr>
-          <Th>Alias</Th>
-          <Th>Target</Th>
-          <Th>Resolves to</Th>
-          <Th className="text-right">Input $ / 1M</Th>
-          <Th className="text-right">Output $ / 1M</Th>
-          <Th className="text-right">Actions</Th>
+          <Th className="text-right">Price</Th>
         </Tr>
       </THead>
       <tbody>
         {isLoading ? (
           <LoadingRow colSpan={6} />
-        ) : entries.length > 0 ? (
-          entries.map((entry) => <AliasTableRow key={entry.name} entry={entry} />)
+        ) : rows.length > 0 ? (
+          rows.map((row) => (
+            <Fragment key={row.key}>
+              <Tr onClick={() => onSelect(row.key)} selected={row.key === selectedKey}>
+                <Td className="font-medium break-all">{row.model}</Td>
+                <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
+                <Td className="text-right tabular-nums text-[var(--otari-muted)]">
+                  {formatContext(row.contextWindow)}
+                </Td>
+                <Td className="text-right tabular-nums">
+                  {row.inputPrice == null ? "—" : formatCost(row.inputPrice)}
+                </Td>
+                <Td className="text-right tabular-nums">
+                  {row.outputPrice == null ? "—" : formatCost(row.outputPrice)}
+                </Td>
+                <Td className="text-right">
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-[var(--otari-brand-dark)] hover:underline"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSetPricingKey(pricingKey === row.key ? null : row.key);
+                    }}
+                  >
+                    {row.source === "configured" ? "Edit" : "Set price"}
+                  </button>
+                </Td>
+              </Tr>
+              {pricingKey === row.key ? (
+                <tr className="border-b border-[var(--otari-line)] bg-[var(--otari-bg)] last:border-b-0">
+                  <td colSpan={6}>
+                    <InlinePriceForm row={row} onClose={() => onSetPricingKey(null)} />
+                  </td>
+                </tr>
+              ) : null}
+            </Fragment>
+          ))
         ) : (
-          <TableMessage colSpan={6}>No aliases yet. Use “Add” to create one.</TableMessage>
+          <TableMessage colSpan={6}>{empty}</TableMessage>
         )}
       </tbody>
     </Table>
@@ -1028,19 +880,17 @@ function DiscoveredErrors({ providers }: { providers: { provider: string; error:
 }
 
 export function ModelsPage() {
+  const navigate = useNavigate();
   const models = useModels();
   const pricing = usePricing();
-  const aliases = useAliases();
   const discoverable = useDiscoverableModels();
   const providers = useProviders();
   const metadata = useModelMetadata();
 
-  const [tab, setTab] = useState<Tab>("models");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
-  const [showForm, setShowForm] = useState(false);
-  const [addMode, setAddMode] = useState<AddTab>("model");
-  const [addTarget, setAddTarget] = useState("");
+  const [showPriceForm, setShowPriceForm] = useState(false);
+  const [pricingKey, setPricingKey] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>(readStoredSort);
 
@@ -1068,11 +918,6 @@ export function ModelsPage() {
     [discoverable.data],
   );
 
-  const selectTab = (next: Tab) => {
-    setTab(next);
-    setSearch("");
-    setPage(0);
-  };
   const changeSearch = (value: string) => {
     setSearch(value);
     setPage(0);
@@ -1089,20 +934,9 @@ export function ModelsPage() {
     );
     setPage(0);
   };
-  const openAliasTo = (key: string) => {
-    setAddMode("alias");
-    setAddTarget(key);
-    setShowForm(true);
-  };
-  const openAdd = () => {
-    setAddMode(tab === "aliases" ? "alias" : "model");
-    setAddTarget("");
-    setShowForm((open) => !open);
-  };
 
   const rows = useMemo<ModelRow[]>(() => {
     const configured = new Map(currentPricing(pricing.data ?? []).map((row) => [row.model_key, row]));
-    const aliasSourceByName = new Map((aliases.data ?? []).map((alias) => [alias.name, alias.source]));
     const result: ModelRow[] = [];
     const seen = new Set<string>();
 
@@ -1111,14 +945,11 @@ export function ModelsPage() {
         return;
       }
       seen.add(key);
-      const isAlias = catalogRow?.source === "alias";
-      const priced = isAlias ? undefined : configured.get(key);
+      const priced = configured.get(key);
       result.push({
         key,
         model,
         provider,
-        aliasSource: isAlias ? aliasSourceByName.get(key) : undefined,
-        aliasPriceSource: catalogRow?.aliasPriceSource,
         isDiscovered: discoverableKeys.has(key),
         contextWindow: catalogRow?.contextWindow ?? null,
         inputPrice: priced ? priced.input_price_per_million : (catalogRow?.inputPrice ?? null),
@@ -1128,18 +959,20 @@ export function ModelsPage() {
     };
 
     for (const model of models.data?.data ?? []) {
-      const isAlias = model.owned_by === ALIAS_OWNED_BY;
+      // Aliases are managed on their own page, not part of the model catalogue.
+      if (model.owned_by === ALIAS_OWNED_BY) {
+        continue;
+      }
       const priceStatus: PriceSource =
         model.pricing_source === "default" ? "default" : model.pricing ? "configured" : "none";
       add(model.id, model.id, model.owned_by || providerFromModelKey(model.id), {
         key: model.id,
         model: model.id,
         provider: model.owned_by,
-        aliasPriceSource: isAlias ? priceStatus : undefined,
         contextWindow: model.context_window,
         inputPrice: model.pricing?.input_price_per_million ?? null,
         outputPrice: model.pricing?.output_price_per_million ?? null,
-        source: isAlias ? "alias" : priceStatus,
+        source: priceStatus,
       });
     }
     for (const key of configured.keys()) {
@@ -1147,16 +980,14 @@ export function ModelsPage() {
     }
 
     return result;
-  }, [models.data, pricing.data, aliases.data, discoverableKeys]);
+  }, [models.data, pricing.data, discoverableKeys]);
 
   const rowsByKey = useMemo(() => new Map(rows.map((row) => [row.key, row])), [rows]);
 
-  // The unified model list, with the context window filled from models.dev when
-  // the catalog did not supply one. Aliases are their own tab.
+  // The model list, with the context window filled from models.dev when the
+  // catalog did not supply one. Aliases live on their own page.
   const modelRows = useMemo<ModelRow[]>(() => {
-    const out = rows
-      .filter((row) => row.source !== "alias")
-      .map((row) => ({
+    const out = rows.map((row) => ({
         ...row,
         contextWindow: row.contextWindow ?? (metadataByKey[row.key]?.context_window ?? null),
         releaseDate: metadataByKey[row.key]?.release_date ?? null,
@@ -1185,19 +1016,6 @@ export function ModelsPage() {
   }, [rows, discoverable.data, metadataByKey]);
 
   const discoveredErrors = (discoverable.data?.providers ?? []).filter((provider) => !provider.ok);
-
-  const aliasEntries = useMemo<AliasEntry[]>(
-    () =>
-      (aliases.data ?? [])
-        .map((alias) => ({
-          name: alias.name,
-          target: alias.target,
-          source: alias.source,
-          row: rowsByKey.get(alias.name),
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [aliases.data, rowsByKey],
-  );
 
   const providerOptions = useMemo(() => {
     const names = Array.from(new Set(modelRows.map((row) => row.provider))).sort((a, b) => a.localeCompare(b));
@@ -1308,21 +1126,11 @@ export function ModelsPage() {
     sort,
   ]);
 
-  const filteredAliases = aliasEntries.filter(
-    (entry) => !query || entry.name.toLowerCase().includes(query) || entry.target.toLowerCase().includes(query),
-  );
-
-  const counts: Record<Tab, number> = {
-    models: modelRows.length,
-    aliases: aliasEntries.length,
-  };
-
-  const total = tab === "aliases" ? filteredAliases.length : filteredModels.length;
+  const total = filteredModels.length;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const clampedPage = Math.min(page, pageCount - 1);
   const start = clampedPage * PAGE_SIZE;
   const pageModels = filteredModels.slice(start, start + PAGE_SIZE);
-  const pageAliases = filteredAliases.slice(start, start + PAGE_SIZE);
 
   const modelsLoading = models.isLoading || pricing.isLoading || discoverable.isLoading;
   const hasActiveFilters =
@@ -1336,7 +1144,7 @@ export function ModelsPage() {
     releaseFilter !== "all";
   const emptyModels = hasActiveFilters
     ? "No models match your filters."
-    : "No models yet. Check provider credentials in config.yml, or use “Add” to price one.";
+    : "No models yet. Add a provider on the Providers page, or price a model below.";
 
   // The row selected in the table, resolved against the filtered list (falling
   // back to any known row) to fill the detail panel.
@@ -1355,47 +1163,14 @@ export function ModelsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Models"
-        description="Browse the models your providers can reach, inspect their pricing and capabilities, and manage aliases."
-        action={
-          <Button variant="primary" onPress={openAdd}>
-            {showForm ? "Hide form" : "Add"}
-          </Button>
-        }
+        description="Every model your providers can serve. Set a price on any model so budgets and usage tracking work."
       />
-
-      {showForm ? (
-        // Remount when the requested mode/target changes so "Alias to this model"
-        // re-seeds the form's tab and target even while the form is already open
-        // (AddForm copies these props into state only on mount).
-        <AddForm
-          key={`${addMode}:${addTarget}`}
-          onClose={() => setShowForm(false)}
-          initialMode={addMode}
-          initialTarget={addTarget}
-        />
-      ) : null}
 
       <ErrorBanner
-        error={
-          models.error ??
-          pricing.error ??
-          aliases.error ??
-          discoverable.error ??
-          providers.error ??
-          metadata.error
-        }
+        error={models.error ?? pricing.error ?? discoverable.error ?? providers.error ?? metadata.error}
       />
 
-      <TabBar tab={tab} counts={counts} onSelect={selectTab} />
-
-      {tab === "aliases" ? (
-        <div className="flex flex-col gap-3">
-          <SearchInput value={search} onChange={changeSearch} placeholder="Search aliases…" />
-          <AliasTable entries={pageAliases} isLoading={aliases.isLoading} />
-          <Pagination page={clampedPage} pageCount={pageCount} total={total} onPage={setPage} />
-        </div>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
           <div className="flex min-w-0 flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <SearchInput value={search} onChange={changeSearch} placeholder="Search models…" />
@@ -1460,16 +1235,40 @@ export function ModelsPage() {
 
             <ModelTable
               rows={pageModels}
-              metadataByKey={metadataByKey}
               isLoading={modelsLoading}
               empty={emptyModels}
               sort={sort}
               onSort={onSort}
               selectedKey={selectedKey}
               onSelect={setSelectedKey}
+              pricingKey={pricingKey}
+              onSetPricingKey={setPricingKey}
             />
 
-            <Pagination page={clampedPage} pageCount={pageCount} total={total} onPage={setPage} />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Pagination page={clampedPage} pageCount={pageCount} total={total} onPage={setPage} />
+              <button
+                type="button"
+                className="text-xs font-medium text-[var(--otari-brand-dark)]"
+                onClick={() => setShowPriceForm((open) => !open)}
+              >
+                {showPriceForm ? "Hide" : "+ Price a model not listed here"}
+              </button>
+            </div>
+
+            {showPriceForm ? (
+              <Card>
+                <Card.Content className="flex flex-col gap-4 p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-[var(--otari-ink)]">Price a model not listed here</div>
+                    <Button size="sm" variant="ghost" onPress={() => setShowPriceForm(false)}>
+                      Close
+                    </Button>
+                  </div>
+                  <PriceModelForm onClose={() => setShowPriceForm(false)} />
+                </Card.Content>
+              </Card>
+            ) : null}
           </div>
 
           <aside className="lg:sticky lg:top-4">
@@ -1482,11 +1281,10 @@ export function ModelsPage() {
               providerDiscoveryError={
                 selectedProviderDiscovery && !selectedProviderDiscovery.ok ? selectedProviderDiscovery.error : null
               }
-              onAliasTo={openAliasTo}
+              onMakeAlias={(key) => navigate(`/aliases?target=${encodeURIComponent(key)}`)}
             />
           </aside>
         </div>
-      )}
     </div>
   );
 }

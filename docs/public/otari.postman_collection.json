@@ -1387,6 +1387,182 @@
     {
       "item": [
         {
+          "name": "List Stored Providers",
+          "request": {
+            "description": "List runtime-stored providers. Keys are never returned, only ``last4``.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "provider-credentials"
+              ],
+              "raw": "{{baseUrl}}/v1/provider-credentials"
+            }
+          }
+        },
+        {
+          "name": "Create Stored Provider",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"instance\": \"string\"\n}"
+            },
+            "description": "Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "provider-credentials"
+              ],
+              "raw": "{{baseUrl}}/v1/provider-credentials"
+            }
+          }
+        },
+        {
+          "name": "Test Provider Connection",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"instance\": \"string\",\n  \"provider_type\": \"string\"\n}"
+            },
+            "description": "Test provider credentials without storing them (for the add/edit form).\n\nResolves the implementation from ``provider_type`` (honoring the\n``*-compatible`` aliases) or the ``instance`` name, then lists the provider's\nmodels with the supplied credentials. Nothing is persisted and the key is\nnever echoed.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "provider-credentials",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/v1/provider-credentials/test"
+            }
+          }
+        },
+        {
+          "name": "Update Stored Provider",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"expected_updated_at\": \"string\",\n  \"provider_type\": \"string\"\n}"
+            },
+            "description": "Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``\nso the ``expected_updated_at`` check and the write it guards are atomic.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "provider-credentials",
+                ":instance"
+              ],
+              "raw": "{{baseUrl}}/v1/provider-credentials/:instance",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "instance",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Stored Provider",
+          "request": {
+            "description": "Delete a stored provider. A config.yml provider cannot be deleted here.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "provider-credentials",
+                ":instance"
+              ],
+              "raw": "{{baseUrl}}/v1/provider-credentials/:instance",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "instance",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Test Stored Provider",
+          "request": {
+            "description": "Verify a stored provider's key by listing its models, without exposing the key.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "provider-credentials",
+                ":instance",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/v1/provider-credentials/:instance/test",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "instance",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
           "name": "List Providers",
           "request": {
             "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.\nMaster-key gated because it describes the gateway's own configuration.",
@@ -1401,6 +1577,25 @@
                 "providers"
               ],
               "raw": "{{baseUrl}}/v1/providers"
+            }
+          }
+        },
+        {
+          "name": "Provider Catalog",
+          "request": {
+            "description": "List every known provider for the add-provider picker.\n\nNetwork-free and config-independent: the full any-llm provider set with each\none's display name, credential env var, default endpoint, and whether it\nneeds a key. Master-key gated because it is operator-facing dashboard data.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "providers",
+                "catalog"
+              ],
+              "raw": "{{baseUrl}}/v1/providers/catalog"
             }
           }
         }
