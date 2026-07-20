@@ -278,7 +278,13 @@ class UsageLog(Base):
     """Usage log model for tracking API requests."""
 
     __tablename__ = "usage_logs"
-    __table_args__ = (Index("ix_usage_logs_user_id_timestamp", "user_id", "timestamp"),)
+    __table_args__ = (
+        Index("ix_usage_logs_user_id_timestamp", "user_id", "timestamp"),
+        # Supports the activity-log viewer's primary "show errors, newest-first"
+        # query. status is low-cardinality; model is high-cardinality and left
+        # unindexed on purpose.
+        Index("ix_usage_logs_status_timestamp", "status", "timestamp"),
+    )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
@@ -298,6 +304,11 @@ class UsageLog(Base):
 
     status: Mapped[str] = mapped_column()
     error_message: Mapped[str | None] = mapped_column()
+
+    # Total server-side wall-clock for the request, in milliseconds. Nullable:
+    # historical rows predate the column, and some write paths (batch jobs,
+    # provider-never-reached rejections) have no meaningful request duration.
+    latency_ms: Mapped[int | None] = mapped_column()
 
     api_key = relationship("APIKey", back_populates="usage_logs")
     user = relationship("User", back_populates="usage_logs")
@@ -319,6 +330,7 @@ class UsageLog(Base):
             "cost": self.cost,
             "status": self.status,
             "error_message": self.error_message,
+            "latency_ms": self.latency_ms,
         }
 
 

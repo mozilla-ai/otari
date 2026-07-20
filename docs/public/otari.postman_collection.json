@@ -1777,7 +1777,7 @@
         {
           "name": "List Usage",
           "request": {
-            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range and user. Paginated via skip/limit.\nTimestamps accept either ISO 8601 strings or Unix epoch seconds (numeric).",
+            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, and endpoint.\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
             "header": [],
             "method": "GET",
             "url": {
@@ -1808,6 +1808,24 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single status (e.g. 'success' or 'error')",
+                  "disabled": true,
+                  "key": "status",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single model",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+                  "disabled": true,
+                  "key": "endpoint",
+                  "value": ""
+                },
+                {
                   "description": "",
                   "disabled": true,
                   "key": "skip",
@@ -1820,7 +1838,64 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&skip=&limit="
+              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&model=&endpoint=&skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Count Usage",
+          "request": {
+            "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "usage",
+                "count"
+              ],
+              "query": [
+                {
+                  "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "start_date",
+                  "value": ""
+                },
+                {
+                  "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "end_date",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single user",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single status (e.g. 'success' or 'error')",
+                  "disabled": true,
+                  "key": "status",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single model",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+                  "disabled": true,
+                  "key": "endpoint",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&model=&endpoint="
             }
           }
         }

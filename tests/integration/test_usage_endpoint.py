@@ -34,6 +34,7 @@ def _make_log(
     cost: float | None = 0.01,
     status: str = "success",
     error_message: str | None = None,
+    latency_ms: int | None = None,
     log_id: str | None = None,
 ) -> UsageLog:
     _ensure_user(db, user_id)
@@ -51,6 +52,7 @@ def _make_log(
         cost=cost,
         status=status,
         error_message=error_message,
+        latency_ms=latency_ms,
     )
     db.add(log)
     return log
@@ -225,6 +227,7 @@ def test_list_usage_response_shape(
         cost=1.23,
         status="error",
         error_message="capacity",
+        latency_ms=842,
         log_id="shape-log-id",
     )
     db_session.commit()
@@ -249,6 +252,7 @@ def test_list_usage_response_shape(
         "cost": 1.23,
         "status": "error",
         "error_message": "capacity",
+        "latency_ms": 842,
     }
 
 
@@ -297,3 +301,134 @@ def test_list_usage_filter_by_epoch_seconds(
     data = response.json()
     assert len(data) == 1
     assert data[0]["timestamp"] == newer.isoformat()
+
+
+def test_list_usage_filter_by_status(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    timestamp = datetime(2025, 9, 1, 12, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="status-user", timestamp=timestamp, status="success")
+    _make_log(db_session, user_id="status-user", timestamp=timestamp, status="error", error_message="boom")
+    db_session.commit()
+
+    response = client.get(USAGE_PATH, headers=master_key_header, params={"status": "error"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["status"] == "error"
+
+
+def test_list_usage_filter_by_model(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    timestamp = datetime(2025, 9, 2, 12, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="model-user", timestamp=timestamp, model="gpt-4o")
+    _make_log(db_session, user_id="model-user", timestamp=timestamp, model="claude-sonnet-5")
+    db_session.commit()
+
+    response = client.get(USAGE_PATH, headers=master_key_header, params={"model": "claude-sonnet-5"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["model"] == "claude-sonnet-5"
+
+
+def test_list_usage_filter_by_endpoint(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    timestamp = datetime(2025, 9, 3, 12, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="ep-user", timestamp=timestamp, endpoint="/v1/chat/completions")
+    _make_log(db_session, user_id="ep-user", timestamp=timestamp, endpoint="/v1/embeddings")
+    db_session.commit()
+
+    response = client.get(USAGE_PATH, headers=master_key_header, params={"endpoint": "/v1/embeddings"})
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["endpoint"] == "/v1/embeddings"
+
+
+def test_list_usage_filters_combine_with_and(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    timestamp = datetime(2025, 9, 4, 12, 0, tzinfo=UTC)
+    # Only this row matches both status=error AND model=gpt-4o.
+    _make_log(db_session, user_id="combo", timestamp=timestamp, model="gpt-4o", status="error", error_message="x")
+    _make_log(db_session, user_id="combo", timestamp=timestamp, model="gpt-4o", status="success")
+    _make_log(db_session, user_id="combo", timestamp=timestamp, model="claude-sonnet-5", status="error")
+    db_session.commit()
+
+    response = client.get(
+        USAGE_PATH,
+        headers=master_key_header,
+        params={"status": "error", "model": "gpt-4o"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["status"] == "error"
+    assert data[0]["model"] == "gpt-4o"
+
+
+def test_list_usage_still_returns_bare_list(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """Contract guard: /v1/usage must stay a bare JSON array, not an envelope.
+
+    External billing/analytics consumers depend on the top-level array; the
+    paginated UI's total count is served by /v1/usage/count instead.
+    """
+    _make_log(db_session, user_id="contract", timestamp=datetime(2025, 9, 5, 12, 0, tzinfo=UTC))
+    db_session.commit()
+
+    response = client.get(USAGE_PATH, headers=master_key_header)
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_count_usage_requires_master_key(client: TestClient) -> None:
+    response = client.get(f"{USAGE_PATH}/count")
+    assert response.status_code == 401
+
+
+def test_count_usage_matches_filtered_list(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    timestamp = datetime(2025, 9, 6, 12, 0, tzinfo=UTC)
+    for _ in range(3):
+        _make_log(db_session, user_id="count-user", timestamp=timestamp, status="error", error_message="e")
+    _make_log(db_session, user_id="count-user", timestamp=timestamp, status="success")
+    db_session.commit()
+
+    count_resp = client.get(f"{USAGE_PATH}/count", headers=master_key_header, params={"status": "error"})
+    assert count_resp.status_code == 200
+    assert count_resp.json() == {"total": 3}
+
+    # The count must match the number of rows the list returns for the same filter.
+    list_resp = client.get(
+        USAGE_PATH,
+        headers=master_key_header,
+        params={"status": "error", "limit": 1000},
+    )
+    assert len([row for row in list_resp.json() if row["user_id"] == "count-user"]) == 3
+
+
+def test_count_usage_empty_is_zero(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    response = client.get(f"{USAGE_PATH}/count", headers=master_key_header, params={"user_id": "nobody"})
+    assert response.status_code == 200
+    assert response.json() == {"total": 0}

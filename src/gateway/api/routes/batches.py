@@ -78,6 +78,9 @@ async def log_batch_usage(
     cost: float | None = None,
 ) -> None:
     """Log batch API usage, including token counts and cost when derivable."""
+    # latency_ms is intentionally left NULL: a batch is an asynchronous job that
+    # is submitted and later polled, so there is no synchronous request duration
+    # to record (unlike the chat/passthrough paths).
     usage_log = UsageLog(
         id=str(uuid.uuid4()),
         api_key_id=api_key_id,

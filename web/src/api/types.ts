@@ -284,6 +284,46 @@ export interface UpdateBudgetRequest {
   budget_duration_sec?: number | null;
 }
 
+// One usage-log row: the metadata for a single API request the gateway served.
+// No request or response body is stored, only counts and timing. Surfaced by the
+// Activity page and by the per-user usage view.
+export interface UsageEntry {
+  id: string;
+  user_id: string | null;
+  api_key_id: string | null;
+  timestamp: string;
+  model: string;
+  provider: string | null;
+  endpoint: string;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  cost: number | null;
+  status: string;
+  error_message: string | null;
+  // Total server-side request duration in ms; null for historical rows and for
+  // write paths with no synchronous duration (e.g. batch jobs).
+  latency_ms: number | null;
+}
+
+// Activity-log filters. All optional; an omitted field means "no filter". Sent as
+// query params to /v1/usage and /v1/usage/count.
+export interface UsageFilters {
+  start_date?: string;
+  status?: string;
+  model?: string;
+  endpoint?: string;
+  user_id?: string;
+}
+
+// Total matching rows for a set of filters (from /v1/usage/count). Kept separate
+// from the list so /v1/usage stays a bare array for external export consumers.
+export interface UsageCount {
+  total: number;
+}
+
 // One per-user budget reset event (the spend that was cleared and when the next
 // reset is due). Surfaced as the budget's reset history.
 export interface BudgetResetLog {
