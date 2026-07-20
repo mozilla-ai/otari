@@ -6215,6 +6215,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Stored Providers",
@@ -6260,6 +6263,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Stored Provider",
@@ -6307,6 +6313,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Test Provider Connection",
@@ -6348,6 +6357,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete Stored Provider",
@@ -6404,6 +6416,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Update Stored Provider",
@@ -6452,6 +6467,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Test Stored Provider",
@@ -6513,6 +6531,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Provider Catalog",
