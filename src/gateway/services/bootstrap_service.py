@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.auth import generate_api_key, hash_key
+from gateway.auth import generate_api_key, hash_key, key_prefix
 from gateway.core.config import GatewayConfig
 from gateway.log_config import log_secret
 from gateway.models.entities import APIKey, User
@@ -33,6 +33,7 @@ async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession) -> No
     db_key = APIKey(
         id=key_id,
         key_hash=hash_key(api_key),
+        key_prefix=key_prefix(api_key),
         key_name="bootstrap",
         user_id=user_id,
         metadata_={"bootstrap": True},

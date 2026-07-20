@@ -27,6 +27,10 @@ def test_create_app_bootstraps_first_api_key(tmp_path: Path) -> None:
     assert len(keys) == 1
     assert keys[0].key_name == "bootstrap"
     assert keys[0].metadata_.get("bootstrap") is True
+    # The bootstrap key is the operator's first and most-used key, so it must carry a
+    # fingerprint like any other (regression guard for the third mint path).
+    assert keys[0].key_prefix is not None
+    assert keys[0].key_prefix.startswith("gw-")
     assert len(users) == 1
     assert users[0].user_id == keys[0].user_id
 

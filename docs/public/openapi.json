@@ -871,6 +871,21 @@
       "CreateKeyRequest": {
         "description": "Request model for creating a new API key.",
         "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model allow-list: null = any model, [] = deny all, or canonical instance:model entries (with instance:* / instance:prefix* wildcards).",
+            "title": "Allowed Models"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -921,6 +936,20 @@
       "CreateKeyResponse": {
         "description": "Response model for creating a new API key.",
         "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -959,6 +988,17 @@
             ],
             "title": "Key Name"
           },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -979,11 +1019,13 @@
         "required": [
           "id",
           "key",
+          "key_prefix",
           "key_name",
           "user_id",
           "created_at",
           "expires_at",
           "is_active",
+          "allowed_models",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -1432,6 +1474,20 @@
       "KeyInfo": {
         "description": "Response model for key information.",
         "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -1466,6 +1522,17 @@
             ],
             "title": "Key Name"
           },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          },
           "last_used_at": {
             "anyOf": [
               {
@@ -1496,12 +1563,14 @@
         },
         "required": [
           "id",
+          "key_prefix",
           "key_name",
           "user_id",
           "created_at",
           "last_used_at",
           "expires_at",
           "is_active",
+          "allowed_models",
           "metadata"
         ],
         "title": "KeyInfo",
@@ -3224,6 +3293,20 @@
       "UpdateKeyRequest": {
         "description": "Request model for updating a key.",
         "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
           "expires_at": {
             "anyOf": [
               {

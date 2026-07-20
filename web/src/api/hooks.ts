@@ -3,7 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type {
   AliasResponse,
+  ApiKey,
   CreateAliasRequest,
+  CreateKeyRequest,
+  CreateKeyResponse,
   CreateStoredProviderRequest,
   DashboardBuild,
   DiscoverableModelsResponse,
@@ -16,6 +19,7 @@ import type {
   SetPricingRequest,
   StoredProvider,
   TestProviderResult,
+  UpdateKeyRequest,
   UpdateSettingsRequest,
   UpdateStoredProviderRequest,
 } from "@/api/types";
@@ -32,6 +36,7 @@ const PROVIDERS = "providers";
 const STORED_PROVIDERS = "stored-providers";
 const METADATA = "model-metadata";
 const BUILD = "build";
+const KEYS = "keys";
 
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
@@ -286,5 +291,70 @@ export function useDeletePricing() {
       void queryClient.invalidateQueries({ queryKey: [PRICING] });
       void queryClient.invalidateQueries({ queryKey: [MODELS] });
     },
+  });
+}
+
+// The keys endpoint caps `limit` at 1000 server-side; page through it (capped like
+// pricing) so a gateway with many keys can't have rows silently vanish from the
+// table, and a backend that ignores `skip` can't spin an unbounded loop.
+const KEYS_PAGE_SIZE = 1000;
+const KEYS_MAX_PAGES = 100;
+
+async function fetchAllKeys(): Promise<ApiKey[]> {
+  const all: ApiKey[] = [];
+  for (let page = 0; page < KEYS_MAX_PAGES; page += 1) {
+    const rows = await apiFetch<ApiKey[]>(`/v1/keys?skip=${page * KEYS_PAGE_SIZE}&limit=${KEYS_PAGE_SIZE}`);
+    all.push(...rows);
+    if (rows.length < KEYS_PAGE_SIZE) {
+      break;
+    }
+  }
+  return all;
+}
+
+export function useKeys() {
+  return useQuery({
+    queryKey: [KEYS],
+    queryFn: fetchAllKeys,
+    staleTime: 60_000,
+  });
+}
+
+// Create returns the plaintext key exactly once (in `key`); the caller reveals it
+// and must never write the response into the query cache.
+export function useCreateKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateKeyRequest) =>
+      apiFetch<CreateKeyResponse>("/v1/keys", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
+  });
+}
+
+export function useUpdateKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateKeyRequest }) =>
+      apiFetch<ApiKey>(`/v1/keys/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
+  });
+}
+
+// Regenerate: a new secret for the same key row. The old secret stops working
+// immediately. Returns the new plaintext once, like create.
+export function useRotateKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<CreateKeyResponse>(`/v1/keys/${encodeURIComponent(id)}/rotate`, { method: "POST" }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
+  });
+}
+
+export function useDeleteKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/keys/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
   });
 }

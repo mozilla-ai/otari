@@ -5,6 +5,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { NavLink, Outlet } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthContext";
+import { PricingWarning } from "@/components/PricingWarning";
 import { UpdatePrompt } from "@/components/UpdatePrompt";
 
 const MIN_SIDEBAR = 200;
@@ -42,14 +43,40 @@ function readStoredCollapsed(): boolean {
 interface NavItem {
   to: string;
   label: string;
+  section: string;
   icon: ReactNode;
 }
+
+// Sidebar groups, in display order. "Catalog" is what the gateway serves
+// (providers, their models, and aliases over them); "Access" is who may call it
+// (keys today; users/budgets later); "system" holds standalone config with no
+// header. Grouping keeps the list legible as the dashboard grows.
+const NAV_SECTIONS: { key: string; label?: string }[] = [
+  { key: "catalog", label: "Catalog" },
+  { key: "access", label: "Access" },
+  { key: "system" },
+];
 
 const NAV: NavItem[] = [
   {
     to: "/providers",
+    section: "catalog",
     label: "Providers",
     icon: (
+      // A server stack: upstream provider services, distinct from the API-keys key.
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+        <rect x="3.5" y="4.5" width="17" height="6" rx="1.5" strokeLinejoin="round" />
+        <rect x="3.5" y="13.5" width="17" height="6" rx="1.5" strokeLinejoin="round" />
+        <path d="M7 7.5h.01M7 16.5h.01" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    to: "/keys",
+    section: "access",
+    label: "API keys",
+    icon: (
+      // The key glyph now belongs to API keys (Providers moved to a server stack).
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
         <circle cx="7.5" cy="15.5" r="3.5" />
         <path d="M10 13l7-7M14 5l3 3M16.5 7.5l2-2" strokeLinecap="round" strokeLinejoin="round" />
@@ -58,6 +85,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/models",
+    section: "catalog",
     label: "Models",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
@@ -68,6 +96,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/aliases",
+    section: "catalog",
     label: "Aliases",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
@@ -78,6 +107,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/settings",
+    section: "system",
     label: "Settings",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
@@ -150,7 +180,7 @@ export function AppShell() {
   const width = collapsed ? COLLAPSED_SIDEBAR : sidebarWidth;
 
   return (
-    <div className={clsx("flex h-full flex-col overflow-hidden", resizing && "cursor-col-resize select-none")}>
+    <div className={clsx("relative flex h-full flex-col overflow-hidden", resizing && "cursor-col-resize select-none")}>
       <header className="flex shrink-0 items-center justify-between border-b border-[var(--otari-line)] bg-[var(--otari-surface)] px-5 py-3">
         <div className="flex items-center gap-2.5">
           <img src="/favicon.svg" alt="" className="h-7 w-7 shrink-0" />
@@ -161,6 +191,7 @@ export function AppShell() {
         </Button>
       </header>
       <UpdatePrompt />
+      <PricingWarning />
       <div className="flex min-h-0 flex-1">
         <aside
           ref={asideRef}
@@ -190,27 +221,51 @@ export function AppShell() {
               <path d="M15 6l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
-          <nav className={clsx("flex flex-col gap-1 py-4", collapsed ? "px-2" : "px-3")}>
-            {NAV.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                aria-label={collapsed ? item.label : undefined}
-                title={collapsed ? item.label : undefined}
-                className={({ isActive }) =>
-                  clsx(
-                    "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
-                    collapsed ? "justify-center px-0" : "gap-3 px-3",
-                    isActive
-                      ? "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
-                      : "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]",
-                  )
-                }
-              >
-                {item.icon}
-                {collapsed ? null : item.label}
-              </NavLink>
-            ))}
+          <nav className={clsx("flex flex-col py-4", collapsed ? "px-2" : "px-3")}>
+            {NAV_SECTIONS.map((section, sectionIndex) => {
+              const items = NAV.filter((item) => item.section === section.key);
+              if (items.length === 0) {
+                return null;
+              }
+              return (
+                <div key={section.key} className={sectionIndex > 0 ? "mt-4" : undefined}>
+                  {/* A header labels each group when expanded; a thin divider stands
+                      in for it when the sidebar is collapsed, or when a group has no
+                      header of its own (e.g. Settings) to set it off from the group
+                      above. */}
+                  {!collapsed && section.label ? (
+                    <div className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-[var(--otari-muted)] uppercase">
+                      {section.label}
+                    </div>
+                  ) : null}
+                  {sectionIndex > 0 && (collapsed || !section.label) ? (
+                    <div className="mx-1 mb-2 border-t border-[var(--otari-line)]" />
+                  ) : null}
+                  <div className="flex flex-col gap-1">
+                    {items.map((item) => (
+                      <NavLink
+                        key={item.to}
+                        to={item.to}
+                        aria-label={collapsed ? item.label : undefined}
+                        title={collapsed ? item.label : undefined}
+                        className={({ isActive }) =>
+                          clsx(
+                            "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
+                            collapsed ? "justify-center px-0" : "gap-3 px-3",
+                            isActive
+                              ? "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
+                              : "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]",
+                          )
+                        }
+                      >
+                        {item.icon}
+                        {collapsed ? null : item.label}
+                      </NavLink>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </nav>
           {/* Subtle pointer to the hosted product; muted until hovered. */}
           <a

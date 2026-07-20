@@ -34,7 +34,9 @@ class _Recorder:
 
     def install(self, monkeypatch: pytest.MonkeyPatch, *, topup_status: int | None) -> None:
         async def fake_verify(*args: Any, **kwargs: Any) -> tuple[Any, bool]:
-            return SimpleNamespace(id="key-1", user_id="user-1"), False
+            # allowed_models mirrors the real APIKey column (None = unrestricted); the
+            # pipeline's model-access check reads it.
+            return SimpleNamespace(id="key-1", user_id="user-1", allowed_models=None), False
 
         async def fake_find_pricing(*args: Any, **kwargs: Any) -> None:
             return None

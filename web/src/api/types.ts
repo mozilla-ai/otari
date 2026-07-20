@@ -198,6 +198,61 @@ export interface SetPricingRequest {
   effective_at?: string | null;
 }
 
+// An API key row. The full secret is never returned after creation; `key_prefix`
+// is a display-only fingerprint (leading chars of the key), null for keys minted
+// before the prefix was recorded. Note: providers use `last4` while keys use a
+// leading `key_prefix` — a deliberate divergence (the gw-/sk- convention is
+// recognized by its prefix), not an inconsistency to "fix".
+// `allowed_models` is the per-key model access-list: null = any model
+// (unrestricted), [] = deny all, or canonical `instance:model` entries with
+// `instance:*` / `instance:prefix*` wildcards. Governs both /v1/models visibility
+// and inference.
+export interface ApiKey {
+  id: string;
+  key_prefix: string | null;
+  key_name: string | null;
+  user_id: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+  allowed_models: string[] | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface CreateKeyRequest {
+  key_name?: string | null;
+  user_id?: string | null;
+  expires_at?: string | null;
+  allowed_models?: string[] | null;
+  metadata?: Record<string, unknown>;
+}
+
+// Returned by create and regenerate: the one and only time the plaintext `key`
+// is exposed. Shape matches the gateway's CreateKeyResponse (no last_used_at).
+export interface CreateKeyResponse {
+  id: string;
+  key: string;
+  key_prefix: string | null;
+  key_name: string | null;
+  user_id: string | null;
+  created_at: string;
+  expires_at: string | null;
+  is_active: boolean;
+  allowed_models: string[] | null;
+  metadata: Record<string, unknown>;
+}
+
+// Omitted fields are left unchanged. `allowed_models` is tri-state on the wire:
+// omit = unchanged, null = clear to unrestricted, [] = deny all, list = restrict.
+export interface UpdateKeyRequest {
+  key_name?: string | null;
+  is_active?: boolean | null;
+  expires_at?: string | null;
+  allowed_models?: string[] | null;
+  metadata?: Record<string, unknown> | null;
+}
+
 export interface GatewaySettings {
   mode: string;
   version: string;
