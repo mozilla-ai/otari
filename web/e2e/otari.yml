@@ -1,0 +1,9 @@
+# Gateway config used only by the Playwright E2E suite (web/playwright.config.ts
+# boots a gateway with this, serving the built dashboard bundle). SQLite so there
+# is no external dependency; a fixed master key so the login step is deterministic.
+database_url: "sqlite:///./web/e2e/e2e.db"
+host: "127.0.0.1"
+port: 8000
+master_key: "e2e-master-key"
+# Keep the smoke focused on the flows under test rather than the pricing gate.
+require_pricing: false

@@ -4,3 +4,12 @@ dist/
 .vite/
 coverage/
 *.tsbuildinfo
+
+# Playwright E2E
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+e2e/e2e.db
+e2e/e2e.db-wal
+e2e/e2e.db-shm
