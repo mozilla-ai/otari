@@ -75,8 +75,16 @@ function mockApi(opts: { keys?: ApiKey[] } = {}) {
       }
       return jsonResponse(list);
     }
-    if (url.includes("/v1/providers") || url.includes("/v1/models/discoverable")) {
-      return jsonResponse({ providers: [] });
+    if (url.includes("/v1/models/discoverable")) {
+      return jsonResponse({
+        providers: [{ provider: "openai", ok: true, error: null, models: [{ id: "gpt-4o", key: "openai:gpt-4o" }] }],
+      });
+    }
+    if (url.includes("/v1/providers")) {
+      return jsonResponse({ providers: [{ instance: "openai" }] });
+    }
+    if (url.includes("/v1/aliases")) {
+      return jsonResponse([]);
     }
     return jsonResponse([]);
   });
@@ -240,8 +248,12 @@ describe("KeysPage", () => {
     await user.click(screen.getByRole("button", { name: "Create your first key" }));
     await user.click(screen.getByRole("button", { name: "Advanced (user, model access)" }));
     await user.click(screen.getByRole("button", { name: "Only selected" }));
-    await user.type(screen.getByLabelText("Add a model"), "openai:gpt-4o");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    // The scope picker is a catalog combobox, not free text: type to filter, then
+    // pick the discovered model.
+    await user.type(screen.getByLabelText("Add a model"), "gpt-4o");
+    await user.click(await screen.findByRole("option", { name: "openai:gpt-4o" }));
+    // Close the combobox popover, which otherwise aria-hides the submit button.
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Create key" }));
 
     const post = fetchMock.mock.calls.find(
@@ -280,21 +292,26 @@ describe("KeysPage", () => {
     expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled();
   });
 
-  it("rejects a bare (non-canonical) model entry inline", async () => {
-    mockApi({ keys: [] });
+  it("opens the edit form when a key row is clicked", async () => {
+    mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot" })] });
     const user = userEvent.setup();
     renderPage(<KeysPage />);
 
-    await screen.findByText("No API keys yet");
-    await user.click(screen.getByRole("button", { name: "Create your first key" }));
-    await user.click(screen.getByRole("button", { name: "Advanced (user, model access)" }));
-    await user.click(screen.getByRole("button", { name: "Only selected" }));
-    await user.type(screen.getByLabelText("Add a model"), "gpt-4o");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(await screen.findByText("ci-bot"));
 
-    expect(screen.getByText(/Use instance:model/)).toBeInTheDocument();
-    // Nothing was added, so the form is still incomplete.
-    expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled();
+    // The inline edit card appears (its Save button is unique to edit mode).
+    expect(await screen.findByRole("button", { name: "Save changes" })).toBeInTheDocument();
+  });
+
+  it("clicking a row action does not also open the edit form", async () => {
+    mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot", is_active: true })] });
+    const user = userEvent.setup();
+    renderPage(<KeysPage />);
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Disable" }));
+
+    expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument();
   });
 
   it("shows a key's access scope in its row", async () => {

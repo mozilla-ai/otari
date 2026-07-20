@@ -1,7 +1,7 @@
-import { Button } from "@heroui/react";
-import { useId, useMemo, useState } from "react";
+import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react";
+import { useMemo, useState } from "react";
 
-import { useDiscoverableModels, useProviders } from "@/api/hooks";
+import { useAliases, useDiscoverableModels, useProviders } from "@/api/hooks";
 
 // The per-key model access-list is a tri-state:
 //   null  -> "any"   (unrestricted, the default)
@@ -18,22 +18,14 @@ function modeOf(value: string[] | null): Mode {
   return "only";
 }
 
-// Client-side echo of the server's grammar so a bad entry never becomes a chip.
-// The server is the source of truth (it also rejects alias names and unknown
-// providers); this catches the common mistakes inline.
-function entryError(raw: string): string | null {
-  const entry = raw.trim();
-  if (!entry) return "Enter a model.";
-  const colon = entry.indexOf(":");
-  if (colon <= 0 || colon === entry.length - 1) {
-    return "Use instance:model, e.g. openai:gpt-4o, openai:*, or openai:gpt-4*";
-  }
-  const model = entry.slice(colon + 1);
-  if (model.includes("*") && !/^[^*]*\*$/.test(model)) {
-    return "Only a single trailing * is allowed (openai:* or openai:gpt-4*).";
-  }
-  return null;
+interface CatalogOption {
+  // The canonical value stored on the allow-list (instance:model or instance:*).
+  id: string;
+  // What the operator sees in the dropdown.
+  label: string;
 }
+
+const MAX_VISIBLE = 50;
 
 export function ModelScopeControl({
   initial,
@@ -44,22 +36,42 @@ export function ModelScopeControl({
 }) {
   const providers = useProviders();
   const discoverable = useDiscoverableModels();
+  const aliases = useAliases();
   const [mode, setMode] = useState<Mode>(modeOf(initial));
   const [entries, setEntries] = useState<string[]>(initial ?? []);
-  const [draft, setDraft] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const listId = useId();
+  const [query, setQuery] = useState("");
 
-  // Suggestions: a wildcard per configured provider, then every discoverable
-  // model key (already canonical instance:model). Flat, not grouped.
-  const suggestions = useMemo(() => {
-    const set = new Set<string>();
-    for (const p of providers.data?.providers ?? []) set.add(`${p.instance}:*`);
-    for (const prov of discoverable.data?.providers ?? []) {
-      for (const m of prov.models) set.add(m.key);
+  // The pickable catalog: a wildcard per configured provider, every discoverable
+  // model (already canonical instance:model), and each alias resolved to its
+  // target. Deduped by value, so an alias whose target is already discoverable
+  // does not appear twice. This is a pick-from-list control, not free text: every
+  // stored entry is a real, canonical selector the backend will accept.
+  const catalog = useMemo<CatalogOption[]>(() => {
+    const seen = new Set<string>();
+    const options: CatalogOption[] = [];
+    const add = (id: string, label: string) => {
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        options.push({ id, label });
+      }
+    };
+    for (const p of providers.data?.providers ?? []) {
+      add(`${p.instance}:*`, `${p.instance}:*  ·  all ${p.instance} models`);
     }
-    return [...set].sort();
-  }, [providers.data, discoverable.data]);
+    for (const prov of discoverable.data?.providers ?? []) {
+      for (const m of prov.models) add(m.key, m.key);
+    }
+    for (const a of aliases.data ?? []) add(a.target, `${a.name}  ·  alias`);
+    return options;
+  }, [providers.data, discoverable.data, aliases.data]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return catalog
+      .filter((o) => !entries.includes(o.id))
+      .filter((o) => !q || o.id.toLowerCase().includes(q) || o.label.toLowerCase().includes(q))
+      .slice(0, MAX_VISIBLE);
+  }, [catalog, entries, query]);
 
   const emit = (nextMode: Mode, nextEntries: string[]) => {
     if (nextMode === "any") onChange(null, true);
@@ -69,26 +81,18 @@ export function ModelScopeControl({
 
   const chooseMode = (next: Mode) => {
     setMode(next);
-    setError(null);
     emit(next, entries);
   };
 
-  const addDraft = () => {
-    const err = entryError(draft);
-    if (err) {
-      setError(err);
-      return;
-    }
-    const entry = draft.trim();
-    const next = entries.includes(entry) ? entries : [...entries, entry];
+  const addEntry = (id: string) => {
+    const next = entries.includes(id) ? entries : [...entries, id];
     setEntries(next);
-    setDraft("");
-    setError(null);
+    setQuery("");
     emit("only", next);
   };
 
-  const removeEntry = (entry: string) => {
-    const next = entries.filter((e) => e !== entry);
+  const removeEntry = (id: string) => {
+    const next = entries.filter((e) => e !== id);
     setEntries(next);
     emit("only", next);
   };
@@ -107,6 +111,8 @@ export function ModelScopeControl({
       {label}
     </button>
   );
+
+  const catalogEmpty = !discoverable.isLoading && !providers.isLoading && catalog.length === 0;
 
   return (
     <div className="flex flex-col gap-3">
@@ -134,7 +140,7 @@ export function ModelScopeControl({
           <div className="flex flex-wrap gap-1.5">
             {entries.length === 0 ? (
               <span className="text-xs text-[var(--otari-muted)]">
-                Add at least one model, or choose “Block all”.
+                Pick at least one model below, or choose “Block all”.
               </span>
             ) : (
               entries.map((entry) => (
@@ -155,37 +161,37 @@ export function ModelScopeControl({
               ))
             )}
           </div>
-          <div className="flex items-start gap-2">
-            <div className="flex flex-1 flex-col gap-1">
-              <input
-                aria-label="Add a model"
-                list={listId}
-                value={draft}
-                placeholder="openai:gpt-4o or openai:*"
-                onChange={(e) => {
-                  setDraft(e.target.value);
-                  if (error) setError(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addDraft();
-                  }
-                }}
-                autoComplete="off"
-                className="w-full rounded-lg border border-[var(--otari-line)] bg-[var(--otari-surface)] px-3 py-2 font-mono text-xs text-[var(--otari-ink)]"
-              />
-              <datalist id={listId}>
-                {suggestions.map((s) => (
-                  <option key={s} value={s} />
-                ))}
-              </datalist>
-              {error ? <span className="text-xs text-red-700">{error}</span> : null}
-            </div>
-            <Button size="sm" variant="outline" onPress={addDraft}>
-              Add
-            </Button>
-          </div>
+          {catalogEmpty ? (
+            <span className="text-xs text-[var(--otari-muted)]">
+              No providers or models discovered yet. Configure a provider first, then scope this key.
+            </span>
+          ) : (
+            <ComboBox.Root
+              allowsEmptyCollection
+              menuTrigger="input"
+              inputValue={query}
+              onInputChange={setQuery}
+              selectedKey={null}
+              onSelectionChange={(key) => {
+                if (key != null) addEntry(String(key));
+              }}
+              className="flex flex-col gap-1"
+            >
+              <ComboBox.InputGroup>
+                <Input aria-label="Add a model" placeholder="Search providers, models, aliases…" autoComplete="off" />
+                <ComboBox.Trigger />
+              </ComboBox.InputGroup>
+              <ComboBox.Popover>
+                <ListBox items={visible} className="max-h-72 overflow-auto">
+                  {(option: CatalogOption) => (
+                    <ListBoxItem id={option.id} textValue={option.label}>
+                      {option.label}
+                    </ListBoxItem>
+                  )}
+                </ListBox>
+              </ComboBox.Popover>
+            </ComboBox.Root>
+          )}
         </div>
       ) : null}
     </div>

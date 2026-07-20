@@ -570,7 +570,14 @@ export function KeysPage() {
             <TableMessage colSpan={8}>No API keys yet. Create one to authenticate a caller.</TableMessage>
           ) : (
             rows.map((k) => (
-              <Tr key={k.id}>
+              <Tr
+                key={k.id}
+                selected={editing === k.id}
+                onClick={() => {
+                  setAddOpen(false);
+                  setEditing(k.id);
+                }}
+              >
                 <Td className="font-medium text-[var(--otari-ink)]">
                   <div className="flex flex-col gap-0.5">
                     <span>{k.key_name ?? <span className="text-[var(--otari-muted)]">(unnamed)</span>}</span>
@@ -602,7 +609,9 @@ export function KeysPage() {
                   </span>
                 </Td>
                 <Td>
-                  <div className="flex items-center justify-end gap-1.5">
+                  {/* Row click opens Edit; the action buttons stop propagation so
+                      they fire their own handler instead of also opening Edit. */}
+                  <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
                     {k.is_active ? (
                       <Button size="sm" variant="outline" isDisabled={updateKey.isPending} onPress={() => setActive(k, false)}>
                         Disable
