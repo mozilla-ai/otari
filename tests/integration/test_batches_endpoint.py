@@ -1,14 +1,21 @@
 """Tests for the /v1/batches batch API endpoints."""
 
 import os
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from any_llm.exceptions import BatchNotCompleteError
 from any_llm.types.batch import BatchResult, BatchResultError, BatchResultItem
+from any_llm.types.completion import CompletionUsage
 from fastapi.testclient import TestClient
 from openai.types.batch import Batch
 from openai.types.batch_request_counts import BatchRequestCounts
+
+from gateway.core.config import API_KEY_HEADER
+
+from .test_rate_limiting import _make_rate_limit_client
 
 
 def _mock_batch(**overrides: Any) -> Batch:
@@ -91,17 +98,28 @@ def test_create_batch_with_master_key(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/batches works with master key."""
+    """POST /v1/batches works with master key naming an existing user."""
     mock_batch = _mock_batch()
 
     class _SupportsBatch:
         SUPPORTS_BATCH = True
 
+    resp = client.post(
+        "/v1/users",
+        json={"user_id": "batch-master-user"},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+
     with (
         patch("gateway.api.routes.batches.acreate_batch", new_callable=AsyncMock, return_value=mock_batch),
         patch("gateway.api.routes.batches.AnyLLM.get_provider_class", return_value=_SupportsBatch),
     ):
-        resp = client.post("/v1/batches", json=_create_batch_body(), headers=master_key_header)
+        resp = client.post(
+            "/v1/batches",
+            json=_create_batch_body(user="batch-master-user"),
+            headers=master_key_header,
+        )
 
     assert resp.status_code == 200
     assert resp.json()["id"] == "batch_abc123"
@@ -151,7 +169,7 @@ def test_create_batch_invalid_model_format(
             headers=api_key_header,
         )
     assert resp.status_code == 400
-    assert "Invalid request" in resp.json()["detail"]
+    assert "gpt-4o-mini" in resp.json()["detail"]
 
 
 def test_create_batch_provider_error(
@@ -282,7 +300,14 @@ def test_cancel_batch(
     """POST /v1/batches/{batch_id}/cancel cancels a batch."""
     mock_batch = _mock_batch(status="cancelling")
 
-    with patch("gateway.api.routes.batches.acancel_batch", new_callable=AsyncMock, return_value=mock_batch):
+    with (
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(status="in_progress"),
+        ),
+        patch("gateway.api.routes.batches.acancel_batch", new_callable=AsyncMock, return_value=mock_batch),
+    ):
         resp = client.post("/v1/batches/batch_abc123/cancel?provider=openai", headers=api_key_header)
 
     assert resp.status_code == 200
@@ -335,6 +360,7 @@ def test_retrieve_batch_results(
     """GET /v1/batches/{batch_id}/results returns per-request results."""
     mock_completion = MagicMock()
     mock_completion.model = "gpt-4o-mini"
+    mock_completion.usage = None
     mock_completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
 
     mock_result = BatchResult(
@@ -346,7 +372,14 @@ def test_retrieve_batch_results(
         ]
     )
 
-    with patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result):
+    with (
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(status="completed"),
+        ),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
+    ):
         resp = client.get("/v1/batches/batch_abc123/results?provider=openai", headers=api_key_header)
 
     assert resp.status_code == 200
@@ -367,10 +400,17 @@ def test_retrieve_batch_results_not_complete(
     api_key_header: dict[str, str],
 ) -> None:
     """GET /v1/batches/{batch_id}/results returns 409 when batch is not complete."""
-    with patch(
-        "gateway.api.routes.batches.aretrieve_batch_results",
-        new_callable=AsyncMock,
-        side_effect=BatchNotCompleteError(batch_id="batch_abc123", status="in_progress"),
+    with (
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(status="in_progress"),
+        ),
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch_results",
+            new_callable=AsyncMock,
+            side_effect=BatchNotCompleteError(batch_id="batch_abc123", status="in_progress"),
+        ),
     ):
         resp = client.get("/v1/batches/batch_abc123/results?provider=openai", headers=api_key_header)
 
@@ -391,7 +431,14 @@ def test_retrieve_batch_results_logs_usage(
     mock_result = BatchResult(results=[])
     user_id = api_key_obj["user_id"]
 
-    with patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result):
+    with (
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(status="completed"),
+        ),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
+    ):
         resp = client.get("/v1/batches/batch_abc123/results?provider=openai", headers=api_key_header)
 
     assert resp.status_code == 200
@@ -402,6 +449,377 @@ def test_retrieve_batch_results_logs_usage(
     results_logs = [log for log in logs if log["endpoint"] == "/v1/batches/results"]
     assert len(results_logs) >= 1
     assert results_logs[0]["status"] == "success"
+
+
+# ---------------------------------------------------------------------------
+# Enforcement — user resolution, budget, rate limiting, ownership (issue #258)
+# ---------------------------------------------------------------------------
+
+
+class _SupportsBatch:
+    SUPPORTS_BATCH = True
+
+
+def _batch_enforcement_patches() -> tuple[Any, Any]:
+    """Patches for provider calls so enforcement tests never hit a provider."""
+    return (
+        patch("gateway.api.routes.batches.acreate_batch", new_callable=AsyncMock, return_value=_mock_batch()),
+        patch("gateway.api.routes.batches.AnyLLM.get_provider_class", return_value=_SupportsBatch),
+    )
+
+
+def test_create_batch_master_key_requires_user(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """POST /v1/batches with master key and no user field is rejected with 400."""
+    create_patch, supports_patch = _batch_enforcement_patches()
+    with create_patch as mock_call, supports_patch:
+        resp = client.post("/v1/batches", json=_create_batch_body(), headers=master_key_header)
+
+    assert resp.status_code == 400
+    assert "user" in resp.json()["detail"].lower()
+    mock_call.assert_not_awaited()
+
+
+def test_create_batch_master_key_unknown_user(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """POST /v1/batches with master key naming a nonexistent user returns 404."""
+    create_patch, supports_patch = _batch_enforcement_patches()
+    with create_patch as mock_call, supports_patch:
+        resp = client.post(
+            "/v1/batches",
+            json=_create_batch_body(user="no-such-user"),
+            headers=master_key_header,
+        )
+
+    assert resp.status_code == 404
+    assert "not found" in resp.json()["detail"].lower()
+    mock_call.assert_not_awaited()
+
+
+def test_create_batch_blocked_user(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """POST /v1/batches for a blocked user is rejected before the provider call."""
+    resp = client.post(
+        "/v1/users",
+        json={"user_id": "batch-blocked-user", "blocked": True},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+
+    create_patch, supports_patch = _batch_enforcement_patches()
+    with create_patch as mock_call, supports_patch:
+        resp = client.post(
+            "/v1/batches",
+            json=_create_batch_body(user="batch-blocked-user"),
+            headers=master_key_header,
+        )
+
+    assert resp.status_code == 403
+    assert "blocked" in resp.json()["detail"].lower()
+    mock_call.assert_not_awaited()
+
+
+def test_create_batch_over_budget_user(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """POST /v1/batches for a user over budget is rejected before the provider call."""
+    budget_resp = client.post(
+        "/v1/budgets",
+        json={"max_budget": 0.0},
+        headers=master_key_header,
+    )
+    assert budget_resp.status_code == 200
+    budget_id = budget_resp.json()["budget_id"]
+
+    resp = client.post(
+        "/v1/users",
+        json={"user_id": "batch-broke-user", "budget_id": budget_id},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+
+    create_patch, supports_patch = _batch_enforcement_patches()
+    with create_patch as mock_call, supports_patch:
+        resp = client.post(
+            "/v1/batches",
+            json=_create_batch_body(user="batch-broke-user"),
+            headers=master_key_header,
+        )
+
+    assert resp.status_code == 403
+    assert "exceeded budget" in resp.json()["detail"].lower()
+    mock_call.assert_not_awaited()
+
+
+def test_create_batch_api_key_cannot_bill_other_user(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """A non-master key naming a user other than its own is rejected."""
+    resp = client.post(
+        "/v1/users",
+        json={"user_id": "batch-victim-user"},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+
+    create_patch, supports_patch = _batch_enforcement_patches()
+    with create_patch as mock_call, supports_patch:
+        resp = client.post(
+            "/v1/batches",
+            json=_create_batch_body(user="batch-victim-user"),
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 403
+    assert "does not match" in resp.json()["detail"].lower()
+    mock_call.assert_not_awaited()
+
+
+def test_create_batch_stamps_owner_metadata(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """The billed user is stamped into batch metadata; a spoofed value never wins."""
+    create_patch, supports_patch = _batch_enforcement_patches()
+    with create_patch as mock_call, supports_patch:
+        resp = client.post(
+            "/v1/batches",
+            json=_create_batch_body(metadata={"team": "ml-ops", "otari_user_id": "spoofed-user"}),
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200
+    metadata = mock_call.call_args.kwargs["metadata"]
+    assert metadata["otari_user_id"] == api_key_obj["user_id"]
+    assert metadata["team"] == "ml-ops"
+
+
+@pytest.fixture
+def batch_rate_limit_client(postgres_url: str) -> Generator[TestClient]:
+    yield from _make_rate_limit_client(postgres_url, rate_limit_rpm=2)
+
+
+def test_create_batch_rate_limited(batch_rate_limit_client: TestClient) -> None:
+    """POST /v1/batches enforces the per-user rate limit."""
+    header = {API_KEY_HEADER: "Bearer test-master-key"}
+    resp = batch_rate_limit_client.post(
+        "/v1/users",
+        json={"user_id": "batch-rl-user"},
+        headers=header,
+    )
+    assert resp.status_code == 200
+
+    create_patch, supports_patch = _batch_enforcement_patches()
+    with create_patch, supports_patch:
+        first = batch_rate_limit_client.post(
+            "/v1/batches",
+            json=_create_batch_body(user="batch-rl-user"),
+            headers=header,
+        )
+        second = batch_rate_limit_client.post(
+            "/v1/batches",
+            json=_create_batch_body(user="batch-rl-user"),
+            headers=header,
+        )
+        third = batch_rate_limit_client.post(
+            "/v1/batches",
+            json=_create_batch_body(user="batch-rl-user"),
+            headers=header,
+        )
+
+    assert first.status_code == 200
+    assert first.headers["X-RateLimit-Limit"] == "2"
+    assert second.status_code == 200
+    assert third.status_code == 429
+    assert "Retry-After" in third.headers
+
+
+def test_retrieve_batch_owned_by_other_user_is_404(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """GET /v1/batches/{batch_id} hides batches owned by another user."""
+    foreign = _mock_batch(metadata={"otari_user_id": "someone-else"})
+
+    with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=foreign):
+        resp = client.get("/v1/batches/batch_abc123?provider=openai", headers=api_key_header)
+
+    assert resp.status_code == 404
+    assert "not found" in resp.json()["detail"].lower()
+
+
+def test_retrieve_batch_owned_by_self(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """GET /v1/batches/{batch_id} returns batches owned by the key's user."""
+    own = _mock_batch(metadata={"otari_user_id": api_key_obj["user_id"]})
+
+    with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=own):
+        resp = client.get("/v1/batches/batch_abc123?provider=openai", headers=api_key_header)
+
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "batch_abc123"
+
+
+def test_retrieve_batch_master_key_sees_any(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The master key may retrieve any batch regardless of owner."""
+    foreign = _mock_batch(metadata={"otari_user_id": "someone-else"})
+
+    with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=foreign):
+        resp = client.get("/v1/batches/batch_abc123?provider=openai", headers=master_key_header)
+
+    assert resp.status_code == 200
+
+
+def test_cancel_batch_owned_by_other_user_is_404(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """POST /v1/batches/{batch_id}/cancel refuses batches owned by another user."""
+    foreign = _mock_batch(metadata={"otari_user_id": "someone-else"})
+
+    with (
+        patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=foreign),
+        patch("gateway.api.routes.batches.acancel_batch", new_callable=AsyncMock) as mock_cancel,
+    ):
+        resp = client.post("/v1/batches/batch_abc123/cancel?provider=openai", headers=api_key_header)
+
+    assert resp.status_code == 404
+    mock_cancel.assert_not_awaited()
+
+
+def test_retrieve_batch_results_owned_by_other_user_is_404(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """GET /v1/batches/{batch_id}/results refuses batches owned by another user."""
+    foreign = _mock_batch(metadata={"otari_user_id": "someone-else"})
+
+    with (
+        patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=foreign),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock) as mock_results,
+    ):
+        resp = client.get("/v1/batches/batch_abc123/results?provider=openai", headers=api_key_header)
+
+    assert resp.status_code == 404
+    mock_results.assert_not_awaited()
+
+
+def test_list_batches_filters_foreign_batches(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """GET /v1/batches hides other users' batches but keeps own and legacy ones."""
+    own = _mock_batch(id="batch_own", metadata={"otari_user_id": api_key_obj["user_id"]})
+    foreign = _mock_batch(id="batch_foreign", metadata={"otari_user_id": "someone-else"})
+    legacy = _mock_batch(id="batch_legacy")
+
+    with patch(
+        "gateway.api.routes.batches.alist_batches",
+        new_callable=AsyncMock,
+        return_value=[own, foreign, legacy],
+    ):
+        resp = client.get("/v1/batches?provider=openai", headers=api_key_header)
+
+    assert resp.status_code == 200
+    ids = [item["id"] for item in resp.json()["data"]]
+    assert "batch_own" in ids
+    assert "batch_legacy" in ids
+    assert "batch_foreign" not in ids
+
+
+def test_retrieve_batch_results_master_key_logs_batch_owner(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Master-key results retrieval attributes usage to the stamped batch owner."""
+    resp = client.post(
+        "/v1/users",
+        json={"user_id": "batch-owner-user"},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+
+    stamped = _mock_batch(status="completed", metadata={"otari_user_id": "batch-owner-user"})
+    mock_result = BatchResult(results=[])
+
+    with (
+        patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=stamped),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
+    ):
+        resp = client.get("/v1/batches/batch_abc123/results?provider=openai", headers=master_key_header)
+
+    assert resp.status_code == 200
+
+    usage_resp = client.get("/v1/users/batch-owner-user/usage", headers=master_key_header)
+    assert usage_resp.status_code == 200
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) == 1
+    assert results_logs[0]["status"] == "success"
+
+
+def test_retrieve_batch_results_records_tokens_and_cost(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """GET /v1/batches/{batch_id}/results records summed tokens and cost."""
+    pricing_resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+        },
+        headers=master_key_header,
+    )
+    assert pricing_resp.status_code == 200
+
+    mock_completion = MagicMock()
+    mock_completion.model = "gpt-4o-mini"
+    mock_completion.usage = CompletionUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)
+    mock_completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
+
+    mock_result = BatchResult(results=[BatchResultItem(custom_id="req-1", result=mock_completion, error=None)])
+
+    with (
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(status="completed"),
+        ),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
+    ):
+        resp = client.get("/v1/batches/batch_abc123/results?provider=openai", headers=api_key_header)
+
+    assert resp.status_code == 200
+
+    usage_resp = client.get(f"/v1/users/{api_key_obj['user_id']}/usage", headers=master_key_header)
+    assert usage_resp.status_code == 200
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) >= 1
+    log = results_logs[0]
+    assert log["prompt_tokens"] == 100
+    assert log["completion_tokens"] == 50
+    assert log["total_tokens"] == 150
+    assert log["cost"] == pytest.approx(100 / 1_000_000 * 1.0 + 50 / 1_000_000 * 2.0)
 
 
 # ---------------------------------------------------------------------------

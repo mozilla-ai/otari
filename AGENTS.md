@@ -15,11 +15,21 @@ Scope: entire repo.
 - Database: SQLite by default (async via `aiosqlite`), PostgreSQL in integration tests (async via `asyncpg`).
 - Provider calls go through the `any-llm` SDK (`any_llm`), not hand-rolled HTTP clients.
 
+## Skills & Scoped Instructions
+Detailed, task-scoped guidance lives outside this file so it loads only when relevant
+(progressive disclosure). Read the applicable one before editing:
+
+- **Backend (`src/gateway/`)** → [.github/skills/backend-standards/SKILL.md](.github/skills/backend-standards/SKILL.md): async SQLAlchemy house style, layering, the budget/reservation lifecycle, migrations, config/logging conventions.
+- **Dashboard (`web/`)** → [.github/skills/frontend-standards/SKILL.md](.github/skills/frontend-standards/SKILL.md): HeroUI v3, the `--otari-*` design tokens, TanStack Query patterns, and Vitest testing for the admin dashboard.
+- **Reviewing a change** → the path-scoped files in [.github/instructions/](.github/instructions/) auto-apply during Copilot reviews (they carry `applyTo` globs): [security-review](.github/instructions/security-review.instructions.md) (budget/tenant isolation, auth, SSRF, prompt injection) and [performance-review](.github/instructions/performance-review.instructions.md) (N+1, indexes, pagination limits, transaction atomicity) for `src/gateway/`, and [frontend-standards](.github/instructions/frontend-standards.instructions.md) (HeroUI v3, design tokens, TanStack Query) for `web/`.
+
+The `.claude/skills` directory symlinks to `.github/skills`, so the same skills are available to Claude and to GitHub Copilot from one source.
+
 ## Architecture (Big Picture)
 Read these together before changing request behavior, the flow spans several files.
 
 ### Two runtime modes
-- Mode is derived, not configured directly: `GatewayConfig.is_hybrid_mode` / `effective_mode` (`src/gateway/core/config.py`) return `hybrid` when a platform token (`OTARI_AI_TOKEN`, plus legacy aliases) is set, else `standalone`. Setting `OTARI_MODE=hybrid` (legacy value `platform`; legacy alias `GATEWAY_MODE`) without a token fails at startup.
+- Mode is derived when `OTARI_MODE` is unset, and honored when set: `GatewayConfig.is_hybrid_mode` / `effective_mode` (`src/gateway/core/config.py`) return `hybrid` when the config field `mode` is `hybrid` (legacy `platform`) or, when `mode` is unset, when a platform token (`OTARI_AI_TOKEN`, plus legacy aliases) is set; otherwise `standalone`. Startup validation (`validate_mode_selection`) rejects the two conflicting combinations: `OTARI_MODE=hybrid` (legacy value `platform`; legacy alias `GATEWAY_MODE`) without a token, and `OTARI_MODE=standalone` with a token set (the token would otherwise silently select hybrid). The token is resolved once at config-load time (cached on the config), not re-read from `os.getenv` on every access.
 - **Standalone**: provider credentials come from the `providers:` block in `config.yml`; users/keys/budgets/usage live in the local DB. All routers are registered.
 - **Hybrid**: per-request provider credentials are resolved from the platform service (otari.ai); local DB/user/budget management is skipped and usage is reported upstream. `register_routers()` (`src/gateway/api/main.py`) only mounts `chat`, `messages`, `responses`, and `health`; management routers (keys/users/budgets/pricing/usage/etc.) are standalone-only.
 - Hybrid mode spans two trust contexts that this codebase treats identically: a gateway someone self-hosts against otari.ai using a workspace's own (BYO) provider keys, and the gateway mozilla.ai operates as part of otari.ai, which additionally serves mozilla.ai-managed models. The managed-vs-BYO boundary (platform-owned upstream credentials are returned only to mozilla.ai's gateway, never to a self-hosted one) is enforced on the platform side (otari-ai), not here. User-facing explanation lives in `docs/modes.md`; the wire contract in `docs/hybrid-mode-protocol.md`.
@@ -58,6 +68,11 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - If you need a local package build artifact, use: `uv build`
 - Docker local build/run: `docker compose up --build`
 - CI Docker smoke check is implemented in `scripts/docker_liveness_check.sh`.
+## Web Dashboard (`web/`)
+- The standalone admin dashboard is a React + HeroUI v3 SPA in `web/` (Vite, Tailwind v4, TanStack Query). It browses the model catalogue, sets model pricing, manages aliases, and toggles runtime settings; it calls the management API (`/v1/models`, `/v1/pricing`, `/v1/aliases`, `/v1/settings`) with the master key, entered on a sign-in screen and kept only in the browser tab's session storage.
+- Build: `npm --prefix web ci && npm --prefix web run build`. Output goes to `src/gateway/static/dashboard/` (set in `web/vite.config.ts`), which is committed so the wheel and Docker image ship the dashboard with no Node build stage. Rebuild and commit after any change under `web/src`.
+- Checks: `npm --prefix web run typecheck`, `npm --prefix web test`. CI runs these and fails if the committed bundle is stale (`.github/workflows/otari-dashboard.yml`).
+- Serving: standalone mode serves `index.html` at `/` and hashed assets under `/assets` (`src/gateway/main.py`, `src/gateway/dashboard.py`); the get-started tutorial moved to `/welcome`. Hybrid mode has no local management API, so `/` keeps serving the tutorial. Navigation is client-side section switching, so no server catch-all route is needed.
 ## Lint / Typecheck Commands
 - Ruff is configured for linting (rules: `E`, `F`, `I`; line length: 120) in `pyproject.toml`.
 - Run lint checks with `make lint` (or `uv run ruff check src tests scripts`).
@@ -87,8 +102,11 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 ### Test Environment Notes
 - `pytest.ini` sets:
   - `timeout = 120`
-  - `reruns = 5`
-  - `reruns_delay = 10`
+  - There is no global rerun policy. A blanket `reruns` would let a test that
+    passes one time in several count as green, hiding flakiness and ordering
+    bugs suite-wide. Mark a genuinely flaky test with
+    `@pytest.mark.flaky(reruns=...)` (from `pytest-rerunfailures`) and say why,
+    rather than reintroducing a global retry.
 - Integration tests can use:
   - `TEST_DATABASE_URL` (if provided), or
   - Testcontainers PostgreSQL (`postgres:17`) if not provided.
@@ -176,6 +194,8 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - ORM models: `src/gateway/models/entities.py`
 - Alembic migrations: `alembic/versions/`
 - OpenAPI generator: `scripts/generate_openapi.py`
+- Admin dashboard source: `web/` (built bundle committed at `src/gateway/static/dashboard/`)
+- Dashboard bundle locator: `src/gateway/dashboard.py`
 
 ## Change Validation Checklist
 - If you touched API routes or schemas, run relevant integration tests first.

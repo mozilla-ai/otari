@@ -1,33 +1,21 @@
 """OpenAI-compatible audio transcription and speech endpoints."""
 
-import uuid
-from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from any_llm import aspeech, atranscription
-from any_llm.exceptions import AnyLLMError
 from any_llm.types.audio import AudioSpeechParams, Transcription
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes._pipeline import _raise_for_unresolvable_model
+from gateway.api.routes._passthrough import run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
-from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
-from gateway.log_config import logger
-from gateway.models.entities import APIKey, UsageLog
-from gateway.rate_limit import check_rate_limit
-from gateway.services.budget_service import (
-    reconcile_reservation,
-    refund_reservation,
-    reserve_budget,
-)
+from gateway.models.entities import APIKey
 from gateway.services.log_writer import LogWriter
-from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(prefix="/v1", tags=["audio"])
 
@@ -69,121 +57,52 @@ async def create_transcription(
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use virtual user created with API key
     """
-    api_key, is_master_key = auth_result
-    api_key_id = api_key.id if api_key else None
 
-    user_id = resolve_user_id(
-        user_id_from_request=user,
-        api_key=api_key,
-        is_master_key=is_master_key,
-        master_key_error=HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="When using master key, 'user' field is required in request body",
-        ),
-        no_api_key_error=HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="API key validation failed",
-        ),
-        no_user_error=HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="API key has no associated user",
-        ),
-        forbidden_user_error=HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="'user' field does not match the authenticated API key's user",
-        ),
-        reject_mismatch=config.reject_user_mismatch,
+    async def call_provider(resolved: ResolvedProvider) -> Transcription:
+        file_bytes = await file.read()
+        if len(file_bytes) > _MAX_AUDIO_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Audio file exceeds maximum upload size of {_MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)} MB",
+            )
+
+        transcription_kwargs: dict[str, Any] = {
+            "model": resolved.model,
+            "file": file_bytes,
+            "provider": resolved.provider,
+            **resolved.kwargs,
+        }
+        if language is not None:
+            transcription_kwargs["language"] = language
+        if prompt is not None:
+            transcription_kwargs["prompt"] = prompt
+        if response_format is not None:
+            transcription_kwargs["response_format"] = response_format
+        if temperature is not None:
+            transcription_kwargs["temperature"] = temperature
+
+        return await atranscription(**transcription_kwargs)
+
+    # Audio is exempt from require_pricing and has no measurable cost unit yet
+    # (tokens, seconds, etc.), so the reservation estimate is 0 and cost stays
+    # unset; the reservation still enforces existing per-user state (user
+    # exists, not blocked, not already over budget).
+    outcome = await run_passthrough(
+        endpoint="/v1/audio/transcriptions",
+        raw_request=raw_request,
+        response=response,
+        auth_result=auth_result,
+        db=db,
+        config=config,
+        log_writer=log_writer,
+        model=model,
+        user=user,
+        call_provider=call_provider,
+        lookup_pricing=False,
+        reserve_before_resolve=True,
+        relabel=False,
     )
-
-    rate_limit_info = check_rate_limit(raw_request, user_id)
-
-    # Audio is exempt from require_pricing and has no measurable cost unit yet,
-    # so the reservation estimate is 0 — it still enforces existing per-user
-    # state (user exists, not blocked, not already over budget).
-    reservation = await reserve_budget(db, user_id, 0.0, model=model, strategy=config.budget_strategy)
-
-    try:
-        resolved = resolve_provider_selector(config, model)
-    except (ValueError, AnyLLMError) as exc:
-        _raise_for_unresolvable_model(model, exc)
-    provider, model_name = resolved.provider, resolved.model
-
-    provider_kwargs = resolved.kwargs
-
-    file_bytes = await file.read()
-    if len(file_bytes) > _MAX_AUDIO_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"Audio file exceeds maximum upload size of {_MAX_AUDIO_UPLOAD_BYTES // (1024 * 1024)} MB",
-        )
-
-    transcription_kwargs: dict[str, Any] = {
-        "model": model_name,
-        "file": file_bytes,
-        "provider": provider,
-        **provider_kwargs,
-    }
-    if language is not None:
-        transcription_kwargs["language"] = language
-    if prompt is not None:
-        transcription_kwargs["prompt"] = prompt
-    if response_format is not None:
-        transcription_kwargs["response_format"] = response_format
-    if temperature is not None:
-        transcription_kwargs["temperature"] = temperature
-
-    try:
-        result: Transcription = await atranscription(**transcription_kwargs)
-
-        usage_log = UsageLog(
-            id=str(uuid.uuid4()),
-            api_key_id=api_key_id,
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            model=model_name,
-            provider=resolved.instance,
-            endpoint="/v1/audio/transcriptions",
-            status="success",
-            prompt_tokens=0,
-            completion_tokens=0,
-            total_tokens=0,
-        )
-
-        # Audio transcription lacks a measurable usage unit (tokens, seconds, etc.)
-        # so cost is left unset until a dedicated pricing metric is available.
-
-        await log_writer.put(usage_log)
-        await reconcile_reservation(db, reservation, 0.0)
-
-    except HTTPException:
-        await refund_reservation(db, reservation)
-        raise
-    except Exception as e:
-        error_log = UsageLog(
-            id=str(uuid.uuid4()),
-            api_key_id=api_key_id,
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            model=model_name,
-            provider=resolved.instance,
-            endpoint="/v1/audio/transcriptions",
-            status="error",
-            error_message=str(e),
-        )
-        await log_writer.put(error_log)
-        await refund_reservation(db, reservation)
-
-        logger.error("Provider call failed for %s:%s: %s", provider, model_name, e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="The request could not be completed by the provider",
-        ) from e
-
-    if rate_limit_info:
-        for key, value in rate_limit_headers(rate_limit_info).items():
-            response.headers[key] = value
-
-    return result.model_dump()
+    return outcome.result.model_dump()
 
 
 class AudioSpeechRequest(derive_request_base(AudioSpeechParams)):  # type: ignore[misc]
@@ -234,115 +153,45 @@ async def create_speech(
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use virtual user created with API key
     """
-    api_key, is_master_key = auth_result
-    api_key_id = api_key.id if api_key else None
 
-    user_id = resolve_user_id(
-        user_id_from_request=request.user,
-        api_key=api_key,
-        is_master_key=is_master_key,
-        master_key_error=HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="When using master key, 'user' field is required in request body",
-        ),
-        no_api_key_error=HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="API key validation failed",
-        ),
-        no_user_error=HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="API key has no associated user",
-        ),
-        forbidden_user_error=HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="'user' field does not match the authenticated API key's user",
-        ),
-        reject_mismatch=config.reject_user_mismatch,
+    async def call_provider(resolved: ResolvedProvider) -> bytes:
+        # Forward every field the schema accepts (it is derived from
+        # AudioSpeechParams), so a new any-llm param is passed through without a
+        # code change. `model` is replaced by the split short name passed
+        # explicitly; gateway-internal (`user`) and sensitive fields are stripped.
+        forward = _strip_gateway_fields(request.model_dump(exclude_unset=True))
+        forward.pop("model", None)
+        speech_kwargs: dict[str, Any] = {
+            "model": resolved.model,
+            "provider": resolved.provider,
+            **resolved.kwargs,
+            **forward,
+        }
+        return await aspeech(**speech_kwargs)
+
+    # Audio is exempt from require_pricing and has no measurable cost unit yet
+    # (tokens, seconds, characters, etc.), so the reservation estimate is 0 and
+    # cost stays unset; the reservation still enforces existing per-user state.
+    outcome = await run_passthrough(
+        endpoint="/v1/audio/speech",
+        raw_request=raw_request,
+        response=None,
+        auth_result=auth_result,
+        db=db,
+        config=config,
+        log_writer=log_writer,
+        model=request.model,
+        user=request.user,
+        call_provider=call_provider,
+        lookup_pricing=False,
+        reserve_before_resolve=True,
+        relabel=False,
     )
-
-    rate_limit_info = check_rate_limit(raw_request, user_id)
-
-    # Audio is exempt from require_pricing and has no measurable cost unit yet,
-    # so the reservation estimate is 0 — it still enforces existing per-user
-    # state (user exists, not blocked, not already over budget).
-    reservation = await reserve_budget(db, user_id, 0.0, model=request.model, strategy=config.budget_strategy)
-
-    try:
-        resolved = resolve_provider_selector(config, request.model)
-    except (ValueError, AnyLLMError) as exc:
-        _raise_for_unresolvable_model(request.model, exc)
-    provider, model_name = resolved.provider, resolved.model
-
-    provider_kwargs = resolved.kwargs
-
-    # Forward every field the schema accepts (it is derived from
-    # AudioSpeechParams), so a new any-llm param is passed through without a code
-    # change. `model` is replaced by the split short name passed explicitly;
-    # gateway-internal (`user`) and sensitive fields are stripped.
-    forward = _strip_gateway_fields(request.model_dump(exclude_unset=True))
-    forward.pop("model", None)
-    speech_kwargs: dict[str, Any] = {
-        "model": model_name,
-        "provider": provider,
-        **provider_kwargs,
-        **forward,
-    }
-
-    try:
-        audio_bytes: bytes = await aspeech(**speech_kwargs)
-
-        usage_log = UsageLog(
-            id=str(uuid.uuid4()),
-            api_key_id=api_key_id,
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            model=model_name,
-            provider=resolved.instance,
-            endpoint="/v1/audio/speech",
-            status="success",
-            prompt_tokens=0,
-            completion_tokens=0,
-            total_tokens=0,
-        )
-
-        # Audio speech lacks a measurable usage unit (tokens, seconds, characters, etc.)
-        # so cost is left unset until a dedicated pricing metric is available.
-
-        await log_writer.put(usage_log)
-        await reconcile_reservation(db, reservation, 0.0)
-
-    except HTTPException:
-        await refund_reservation(db, reservation)
-        raise
-    except Exception as e:
-        error_log = UsageLog(
-            id=str(uuid.uuid4()),
-            api_key_id=api_key_id,
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            model=model_name,
-            provider=resolved.instance,
-            endpoint="/v1/audio/speech",
-            status="error",
-            error_message=str(e),
-        )
-        await log_writer.put(error_log)
-        await refund_reservation(db, reservation)
-
-        logger.error("Provider call failed for %s:%s: %s", provider, model_name, e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="The request could not be completed by the provider",
-        ) from e
 
     content_type = _SPEECH_CONTENT_TYPES.get(request.response_format, "audio/mpeg")
 
-    headers: dict[str, str] = {}
-    if rate_limit_info:
-        headers.update(rate_limit_headers(rate_limit_info))
-
     return StreamingResponse(
-        content=iter([audio_bytes]),
+        content=iter([outcome.result]),
         media_type=content_type,
-        headers=headers,
+        headers=outcome.headers,
     )

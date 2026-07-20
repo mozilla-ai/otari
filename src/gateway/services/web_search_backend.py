@@ -36,6 +36,7 @@ from urllib.parse import urlparse
 
 import httpx
 import trafilatura
+from opentelemetry import trace
 
 from gateway.services.url_safety import UnsafeURLError, validate_outbound_fetch_url
 
@@ -43,6 +44,7 @@ if TYPE_CHECKING:
     from types import TracebackType
 
 logger = logging.getLogger(__name__)
+tracer = trace.get_tracer(__name__)
 
 WEB_SEARCH_TOOL_NAME = "web_search"
 
@@ -198,20 +200,33 @@ class WebSearchBackend:
         if self._client is None:
             raise RuntimeError("WebSearchBackend not entered as an async context manager")
 
-        query = (arguments.get("query") or "").strip()
-        if not query:
-            return "[tool error] empty query"
+        with tracer.start_as_current_span(
+            WEB_SEARCH_TOOL_NAME,
+            record_exception=False,
+            set_status_on_exception=False,
+        ) as span:
+            span.set_attribute("tool.name", WEB_SEARCH_TOOL_NAME)
+            span.set_attribute("tool.type", "otari_web_search")
+            query = (arguments.get("query") or "").strip()
+            span.set_attribute("web_search.query", query)
+            span.set_attribute("web_search.provider", ",".join(self._engines))
+            span.set_attribute("web_search.backend_url", self._base_url)
+            if not query:
+                span.set_status(trace.StatusCode.ERROR, "empty query")
+                return "[tool error] empty query"
+            try:
+                raw_results = await self._search(query)
+            except (httpx.HTTPError, ValueError, KeyError) as exc:
+                span.record_exception(exc)
+                span.set_status(trace.StatusCode.ERROR, str(exc))
+                raise WebSearchNotReachableError(f"web_search failed against {self._base_url}: {exc}") from exc
 
-        try:
-            raw_results = await self._search(query)
-        except (httpx.HTTPError, ValueError, KeyError) as exc:
-            raise WebSearchNotReachableError(f"web_search failed against {self._base_url}: {exc}") from exc
+            filtered = self._apply_domain_filters(raw_results)[: self._max_results]
+            if self._extract_content:
+                await self._enrich_with_extracted_content(filtered)
 
-        filtered = self._apply_domain_filters(raw_results)[: self._max_results]
-        if self._extract_content:
-            await self._enrich_with_extracted_content(filtered)
-
-        return _format_results_for_model(query, filtered)
+            span.set_attribute("web_search.result_count", len(filtered))
+            return _format_results_for_model(query, filtered)
 
     # ----- internals -----
 

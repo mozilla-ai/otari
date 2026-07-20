@@ -12,7 +12,7 @@ version = "0.0.0"
 description = "otari, an OpenAI-compatible LLM gateway"
 requires-python = ">=3.13"
 dependencies = [
-    "any-llm-sdk[all]>=1.17.0",
+    "any-llm-sdk[all]>=1.21.0",
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
@@ -21,6 +21,7 @@ dependencies = [
     "genai-prices>=0.0.66",
     "markitdown[docx,pptx,xlsx,pdf]>=0.1.0",
     "mcp>=1.0.0",
+    "opentelemetry-api>=1.39.1",
     "pillow>=10.0.0",
     "pypdfium2>=4.30.0",
     "prometheus-client>=0.20.0",
@@ -80,7 +81,13 @@ where = ["src"]
 include = ["gateway*"]
 
 [tool.setuptools.package-data]
-gateway = ["templates/*.html", "templates/*.svg"]
+gateway = [
+    "templates/*.html",
+    "templates/*.svg",
+    "static/dashboard/index.html",
+    "static/dashboard/favicon.svg",
+    "static/dashboard/assets/*",
+]
 
 [tool.ruff]
 target-version = "py313"

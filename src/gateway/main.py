@@ -1,10 +1,12 @@
+import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, Callable
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from typing_extensions import override
 
@@ -12,8 +14,10 @@ from gateway.api.deps import set_config
 from gateway.api.main import register_routers
 from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
 from gateway.core.database import create_session, init_db
+from gateway.dashboard import get_dashboard_build_id, get_dashboard_dir
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
+from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
@@ -22,12 +26,18 @@ from gateway.services.pricing_init_service import (
     warn_if_require_pricing_without_pricing,
 )
 from gateway.services.pricing_service import configure_default_pricing
+from gateway.services.runtime_settings_service import apply_overrides_from_db
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
-# Public, unauthenticated static assets that are safe for shared caches and set
-# their own Cache-Control; the middleware leaves their caching headers alone.
+# Public, unauthenticated static assets that shared caches may keep. Paths here
+# set their own Cache-Control at the route (favicon.svg), so the middleware only
+# fills one in when it is missing.
 _CACHEABLE_PATHS = ("/favicon.svg",)
+# Vite stamps a content hash into every /assets filename, so a given URL is
+# immutable; the middleware marks these public and cacheable for a year, since
+# StaticFiles does not set Cache-Control on its own.
+_CACHEABLE_PREFIXES = ("/assets/",)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -44,7 +54,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        if not request.url.path.startswith(_PUBLIC_PREFIXES) and request.url.path not in _CACHEABLE_PATHS:
+        path = request.url.path
+        if path.startswith(_PUBLIC_PREFIXES):
+            return response
+        if path.startswith(_CACHEABLE_PREFIXES):
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+        elif path in _CACHEABLE_PATHS:
+            response.headers.setdefault("Cache-Control", "public, max-age=86400")
+        else:
             response.headers["Cache-Control"] = "private, no-store, no-cache"
             vary_values = {part.strip() for part in response.headers.get("Vary", "").split(",") if part.strip()}
             vary_values.add("Authorization")
@@ -69,16 +86,25 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         configure_default_pricing(config.default_pricing)
         log_writer: LogWriter
+        alias_refresher: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
             init_db(config)
             async with create_session() as session:
+                # Persisted dashboard overrides win over config/env; apply them
+                # before pricing init so default-pricing behavior is consistent.
+                await apply_overrides_from_db(config, session)
                 await bootstrap_first_api_key(config, session)
                 await initialize_pricing_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
+                await load_aliases_at_startup(session)
             log_writer = create_log_writer(config.log_writer_strategy)
             app.state.file_store = build_file_store(config)
+            # Alias resolution is synchronous and reads a cache, so something has
+            # to reload it. A write refreshes its own worker; this is what makes
+            # every other worker and replica catch up.
+            alias_refresher = asyncio.create_task(run_alias_refresher())
 
         await log_writer.start()
         app.state.log_writer = log_writer
@@ -86,6 +112,11 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         try:
             yield
         finally:
+            if alias_refresher is not None:
+                alias_refresher.cancel()
+                with suppress(asyncio.CancelledError):
+                    await alias_refresher
+                reset_alias_cache()
             await log_writer.stop()
 
     return lifespan
@@ -144,7 +175,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     app.openapi = custom_openapi  # type: ignore[method-assign]
 
-    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    @app.get("/welcome", response_class=HTMLResponse, include_in_schema=False)
     async def root_tutorial() -> str:
         return ROOT_TUTORIAL_HTML
 
@@ -155,6 +186,37 @@ def create_app(config: GatewayConfig) -> FastAPI:
             media_type="image/svg+xml",
             headers={"Cache-Control": "public, max-age=86400"},
         )
+
+    # The admin dashboard drives the standalone-only management API (models,
+    # pricing, aliases, settings); in hybrid mode there is none, so the root keeps
+    # serving the tutorial. The dashboard is a single-page app, so a static mount
+    # for /assets plus an index.html at / is all it needs (navigation is client-side).
+    dashboard_dir = get_dashboard_dir() if not config.is_hybrid_mode else None
+    if dashboard_dir is not None:
+        index_file = dashboard_dir / "index.html"
+        app.mount(
+            "/assets",
+            StaticFiles(directory=dashboard_dir / "assets"),
+            name="dashboard-assets",
+        )
+
+        @app.get("/", include_in_schema=False)
+        async def dashboard_index() -> FileResponse:
+            return FileResponse(index_file, media_type="text/html")
+
+        # Lets an open tab notice it is running code this server no longer
+        # serves, and offer a reload, instead of sitting on a stale bundle until
+        # someone thinks to clear their storage. Public like the page it
+        # describes, and read per request so an in-place rebuild is picked up.
+        # The security middleware marks it no-store, which the poll depends on.
+        @app.get("/dashboard-build.json", include_in_schema=False)
+        async def dashboard_build() -> dict[str, str]:
+            return {"build": get_dashboard_build_id(dashboard_dir), "version": __version__}
+    else:
+
+        @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+        async def root_index() -> str:
+            return ROOT_TUTORIAL_HTML
 
     app.add_middleware(SecurityHeadersMiddleware)
 
@@ -183,6 +245,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     else:
         app.state.rate_limiter = None
 
+    app.state.config = config
     app.state.gateway_mode = config.effective_mode
 
     register_routers(app, config)

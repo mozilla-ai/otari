@@ -377,3 +377,49 @@ def test_vision_describe_side_call_is_billed(
     # ...and the describe side-call's cost (1000/1e6*2.5 + 500/1e6*10) was billed.
     user = client.get("/v1/users/vision-user", headers=master_key_header).json()
     assert user["spend"] == pytest.approx(0.0075)
+
+
+def test_files_user_mismatch_rejected_by_default(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    """Strict default: a non-master key naming a different 'user' is rejected."""
+    resp = client.post(
+        "/v1/files",
+        headers=api_key_header,
+        files={"file": ("a.txt", b"hello", "text/plain")},
+        data={"user": "someone-else"},
+    )
+    assert resp.status_code == 403
+    assert "does not match" in resp.json()["detail"]
+
+
+def test_files_user_mismatch_ignored_when_lenient(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    tmp_file_store: None,
+    test_config: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With reject_user_mismatch=False, a mismatched 'user' is ignored.
+
+    The upload succeeds and ownership still binds to the key's own user, like
+    every other pass-through route.
+    """
+    monkeypatch.setattr(test_config, "reject_user_mismatch", False)
+    resp = client.post(
+        "/v1/files",
+        headers=api_key_header,
+        files={"file": ("a.txt", b"hello", "text/plain")},
+        data={"user": "someone-else"},
+    )
+    assert resp.status_code == 200, resp.text
+    file_id = resp.json()["id"]
+
+    # The file is scoped to the key's user, not the mismatched name: listing
+    # with the key (which resolves to its own user) returns it.
+    listing = client.get("/v1/files", headers=api_key_header)
+    assert listing.status_code == 200
+    assert any(f["id"] == file_id for f in listing.json()["data"])

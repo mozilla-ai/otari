@@ -4,18 +4,22 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
 from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, GatewayConfig
-from gateway.core.database import get_db
+from gateway.core.database import create_session, get_db
+from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
 
+# Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
+# ``create_app``); ``get_config`` reads from the request's app state and only
+# falls back to this shim for callers that set it directly (see ``set_config``).
 _config: GatewayConfig | None = None
 _LAST_USED_UPDATE_INTERVAL_SECONDS = 300
 
@@ -35,21 +39,35 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 def set_config(config: GatewayConfig) -> None:
-    """Set the global config instance."""
+    """Set the legacy module-level config fallback.
+
+    Compatibility shim. Config is stored on ``app.state.config`` by
+    ``create_app``; this only updates the module-level fallback that
+    ``get_config`` consults when no request-scoped app state is available.
+    """
     global _config  # noqa: PLW0603
     _config = config
 
 
-def get_config() -> GatewayConfig:
-    """Get the global config instance."""
-    if _config is None:
+def get_config(request: Request) -> GatewayConfig:
+    """Return the config for the current app from ``request.app.state``.
+
+    Every shared resource (rate limiter, log writer, file store) lives on
+    ``app.state``; config does too, so two apps in one process no longer share
+    a single instance. Falls back to the legacy module-level shim only when the
+    app state has no config attached.
+    """
+    config: GatewayConfig | None = getattr(request.app.state, "config", None)
+    if config is None:
+        config = _config
+    if config is None:
         msg = "Config not initialized"
         raise RuntimeError(msg)
-    return _config
+    return config
 
 
 def reset_config() -> None:
-    """Reset config state. Intended for testing only."""
+    """Reset the legacy module-level config fallback. Intended for testing only."""
     global _config  # noqa: PLW0603
     _config = None
 
@@ -136,13 +154,25 @@ async def _verify_and_update_api_key(db: AsyncSession, token: str) -> APIKey:
     )
 
     if should_update_last_used:
-        api_key.last_used_at = now
-        try:
-            await db.commit()
-        except SQLAlchemyError:
-            await db.rollback()
+        await _bump_last_used_at(api_key.id, now)
 
     return api_key
+
+
+async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
+    """Record an API key's last use on a short-lived, separate session.
+
+    The bump runs outside the request's transaction so it never commits the
+    caller's session or leaves it in a dirty state, and a failure is logged
+    rather than swallowed. It is best-effort: throttled by
+    ``_LAST_USED_UPDATE_INTERVAL_SECONDS`` and never fails the request.
+    """
+    try:
+        async with create_session() as session:
+            await session.execute(update(APIKey).where(APIKey.id == api_key_id).values(last_used_at=now))
+            await session.commit()
+    except SQLAlchemyError:
+        logger.warning("Failed to update last_used_at for API key %s", api_key_id, exc_info=True)
 
 
 def _is_valid_master_key(token: str, config: GatewayConfig) -> bool:

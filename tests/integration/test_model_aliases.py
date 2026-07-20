@@ -65,12 +65,11 @@ def alias_config(postgres_url: str) -> GatewayConfig:
     )
 
 
-@pytest.fixture
-def client(alias_config: GatewayConfig) -> Generator[TestClient]:
-    _run_alembic_migrations(alias_config.database_url)
-    engine = create_engine(alias_config.database_url, pool_pre_ping=True)
-    app = create_app(alias_config)
-    override_get_db, dispose_override = build_async_session_override(alias_config.database_url)
+def _build_client(config: GatewayConfig) -> Generator[TestClient]:
+    _run_alembic_migrations(config.database_url)
+    engine = create_engine(config.database_url, pool_pre_ping=True)
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(config.database_url)
     app.dependency_overrides[get_db] = override_get_db
     try:
         with TestClient(app) as test_client:
@@ -81,6 +80,18 @@ def client(alias_config: GatewayConfig) -> Generator[TestClient]:
         with engine.connect() as conn:
             conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
             conn.commit()
+        engine.dispose()
+
+
+@pytest.fixture
+def client(alias_config: GatewayConfig) -> Generator[TestClient]:
+    yield from _build_client(alias_config)
+
+
+@pytest.fixture
+def default_priced_client(alias_config: GatewayConfig) -> Generator[TestClient]:
+    """A gateway that meters unpriced models off the genai-prices fallback."""
+    yield from _build_client(alias_config.model_copy(update={"default_pricing": True}))
 
 
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
@@ -209,6 +220,104 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
     assert resp.json()["pricing"] == {"input_price_per_million": 1.0, "output_price_per_million": 2.0}
 
 
+def test_alias_listing_reports_where_its_price_came_from(client: TestClient) -> None:
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "anthropic:claude-opus-4",
+            "input_price_per_million": 15.0,
+            "output_price_per_million": 75.0,
+        },
+        headers=HEADERS,
+    )
+    resp = client.get("/v1/models", headers=HEADERS)
+    data = resp.json()["data"]
+    # The target is priced in the database, so the alias says so. The unpriced
+    # alias reports "none" rather than inheriting the other one's source.
+    assert next(m for m in data if m["id"] == "myopusmodel")["pricing_source"] == "configured"
+    assert next(m for m in data if m["id"] == "housemodel")["pricing_source"] == "none"
+
+
+def test_alias_inherits_target_default_price(default_priced_client: TestClient) -> None:
+    # Nothing is priced in the database, but the gateway would still bill this
+    # alias at the fallback rate, so the listing has to say so rather than
+    # report it as unpriced.
+    resp = default_priced_client.get("/v1/models", headers=HEADERS)
+    entry = next(m for m in resp.json()["data"] if m["id"] == "myopusmodel")
+
+    assert entry["pricing_source"] == "default"
+    assert entry["pricing"]["input_price_per_million"] > 0
+
+
+def test_alias_target_is_priced_by_name_though_the_listing_hides_it(
+    default_priced_client: TestClient,
+) -> None:
+    # An alias target is withheld from the listing, so a caller that learns the
+    # name elsewhere (usage logs bill the target, not the alias) has no way to
+    # see its rate. Asking for it by name must report what it is billed at
+    # rather than 404, which would read as "this model costs nothing".
+    resp = default_priced_client.get("/v1/models/anthropic:claude-opus-4", headers=HEADERS)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == "anthropic:claude-opus-4"
+    assert body["owned_by"] == "anthropic"
+    assert body["pricing_source"] == "default"
+    assert body["pricing"]["input_price_per_million"] > 0
+
+    # Still withheld from the listing: answering about it by name is not the
+    # same as advertising it.
+    listing = default_priced_client.get("/v1/models", headers=HEADERS)
+    assert "anthropic:claude-opus-4" not in {m["id"] for m in listing.json()["data"]}
+
+
+def test_unknown_model_is_still_404_when_nothing_can_price_it(
+    default_priced_client: TestClient,
+) -> None:
+    resp = default_priced_client.get("/v1/models/openai:not-a-real-model-xyz", headers=HEADERS)
+    assert resp.status_code == 404
+
+
+def test_pricing_an_alias_is_rejected(client: TestClient) -> None:
+    # Pricing keys on the resolved target, so a row stored under the alias name
+    # is never read. Accepting the write would report success and silently
+    # change nothing about what the caller is billed.
+    resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "myopusmodel",
+            "input_price_per_million": 99.0,
+            "output_price_per_million": 99.0,
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 400
+    detail = resp.json()["detail"]
+    assert "alias" in detail
+    # The error names the target, so the caller knows what to price instead.
+    assert "anthropic:claude-opus-4" in detail
+
+    # Nothing was written: the alias is still unpriced, not priced at 99.
+    listing = client.get("/v1/models", headers=HEADERS)
+    assert next(m for m in listing.json()["data"] if m["id"] == "myopusmodel")["pricing"] is None
+    assert client.get("/v1/pricing/myopusmodel", headers=HEADERS).status_code == 404
+
+
+def test_pricing_the_alias_target_is_still_accepted(client: TestClient) -> None:
+    # The rejection is scoped to alias names only; the target it points at is the
+    # supported way to price an aliased model.
+    resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "anthropic:claude-opus-4",
+            "input_price_per_million": 15.0,
+            "output_price_per_million": 75.0,
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200
+
+
 def test_pricing_on_alias_target_does_not_expose_it(client: TestClient) -> None:
     # Aliasing a model forces a pricing entry on the real target (billing keys
     # there), and that entry must not put the hidden name back in the listing.
@@ -225,6 +334,29 @@ def test_pricing_on_alias_target_does_not_expose_it(client: TestClient) -> None:
     assert resp.status_code == 200
     ids = {m["id"] for m in resp.json()["data"]}
     assert ids == {"myopusmodel", "housemodel"}
+
+
+def test_discovered_alias_target_is_hidden_from_the_listing(alias_config: GatewayConfig) -> None:
+    # With discovery on, a provider genuinely returns the alias target
+    # (anthropic:claude-opus-4). It must still be withheld from the listing:
+    # publishing a discovered target would expose the exact provider:model name
+    # the alias exists to hide, the same leak the pricing-only phase guards.
+    from any_llm.types.model import Model
+
+    discovered = [("anthropic", Model(id="claude-opus-4", created=1_700_000_000, object="model", owned_by="anthropic"))]
+    with patch("gateway.api.routes.models.discover_all_models", new=AsyncMock(return_value=discovered)):
+        client_gen = _build_client(alias_config.model_copy(update={"model_discovery": True}))
+        discovery_client = next(client_gen)
+        try:
+            resp = discovery_client.get("/v1/models", headers=HEADERS)
+        finally:
+            client_gen.close()
+
+    assert resp.status_code == 200
+    ids = {m["id"] for m in resp.json()["data"]}
+    # The alias display name is listed; the discovered target it points at is not.
+    assert "myopusmodel" in ids
+    assert "anthropic:claude-opus-4" not in ids
 
 
 def test_pricing_on_unaliased_model_still_lists_it(client: TestClient) -> None:

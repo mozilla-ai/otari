@@ -4,6 +4,7 @@ import os
 import re
 import types
 import typing
+from collections.abc import Container
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,7 @@ from typing import Any
 import yaml
 from any_llm import LLMProvider
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 API_KEY_HEADER = "Otari-Key"
@@ -39,6 +40,25 @@ OTARI_ENV_PREFIX = "OTARI_"
 # scalar fields reachable via OTARI_<FIELD>. Raw YAML wins when both are set.
 OTARI_CONFIG_YAML_ENV = "OTARI_CONFIG_YAML"
 OTARI_CONFIG_B64_ENV = "OTARI_CONFIG_B64"
+# GatewayConfig fields promoted from ad hoc otari_env() reads in route/service
+# code. The read sites still consult otari_env() (they have no config object in
+# scope), so load_config bridges values set in the YAML config into the process
+# environment for these fields; without the bridge a YAML-set value would
+# validate at startup and then be silently ignored at request time. Each field
+# name maps onto its OTARI_<FIELD> environment variable.
+ENV_BRIDGED_FIELDS = (
+    "sandbox_url",
+    "guardrails_url",
+    "tools_header",
+    "sandbox_purpose_hint",
+    "web_search_purpose_hint",
+    "web_search_engines",
+    "web_search_max_results",
+    "web_search_extract",
+    "web_search_allow_private_hosts",
+    "mcp_allow_loopback",
+    "mcp_allow_private_hosts",
+)
 
 
 class _NonScalarField(Exception):
@@ -233,6 +253,20 @@ class GatewayConfig(BaseSettings):
         ge=0,
         description="TTL in seconds for the in-memory model discovery cache (0 disables caching)",
     )
+    models_dev_metadata: bool = Field(
+        default=True,
+        description=(
+            "Enrich the dashboard's model detail with metadata (modalities, "
+            "capabilities, knowledge cutoff) fetched from the public models.dev "
+            "catalog. Set false to disable the outbound call; the gateway then "
+            "falls back to the bundled genai-prices data."
+        ),
+    )
+    models_dev_cache_ttl_seconds: int = Field(
+        default=86400,
+        ge=0,
+        description="TTL in seconds for the cached models.dev catalog (0 disables caching).",
+    )
     files_enabled: bool = Field(
         default=True,
         description="Enable the /v1/files upload/storage endpoints (standalone mode).",
@@ -300,18 +334,136 @@ class GatewayConfig(BaseSettings):
             "local models behind OpenAI-compatible servers."
         ),
     )
-    mode: str = Field(default="standalone", description="Otari operating mode: standalone or hybrid")
+    sandbox_url: str | None = Field(
+        default=None,
+        description=(
+            "Base URL of the code-execution sandbox backend for otari_code_execution tools. "
+            "Legacy env alias: GATEWAY_SANDBOX_URL. When unset, otari_code_execution requests "
+            "are rejected with 400."
+        ),
+    )
+    guardrails_url: str | None = Field(
+        default=None,
+        description=(
+            "Default URL of the input-guardrails service used when a request does not pass its "
+            "own guardrail `url`. Legacy env alias: GATEWAY_GUARDRAILS_URL. docker-compose sets "
+            "this to the bundled guardrails container."
+        ),
+    )
+    tools_header: str | None = Field(
+        default=None,
+        description=(
+            "Per-deployment override for the purpose-hint preamble header injected ahead of "
+            "gateway-managed tool hints. Legacy env alias: GATEWAY_TOOLS_HEADER. When unset, a "
+            "built-in default header is used."
+        ),
+    )
+    sandbox_purpose_hint: str | None = Field(
+        default=None,
+        description=(
+            "Default purpose hint forwarded to the sandbox backend when an otari_code_execution "
+            "tool entry does not supply its own. Legacy env alias: GATEWAY_SANDBOX_PURPOSE_HINT."
+        ),
+    )
+    web_search_purpose_hint: str | None = Field(
+        default=None,
+        description=(
+            "Default purpose hint for the web-search backend when an otari_web_search tool entry "
+            "does not supply its own. Legacy env alias: GATEWAY_WEB_SEARCH_PURPOSE_HINT."
+        ),
+    )
+    web_search_engines: str | None = Field(
+        default=None,
+        description=(
+            "Comma-separated SearXNG engine list for the web-search backend (e.g. 'google,bing'). "
+            "Legacy env alias: GATEWAY_WEB_SEARCH_ENGINES. When unset, the backend default engines "
+            "are used."
+        ),
+    )
+    web_search_max_results: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Default cap on the number of hits returned by the web-search backend (a per-tool "
+            "max_results still overrides it). Legacy env alias: GATEWAY_WEB_SEARCH_MAX_RESULTS."
+        ),
+    )
+    web_search_extract: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the web-search backend extracts page content in-process (True) or returns "
+            "snippet-only results (False). Legacy env alias: GATEWAY_WEB_SEARCH_EXTRACT. When "
+            "unset, the backend default (extraction on) applies."
+        ),
+    )
+    web_search_allow_private_hosts: bool = Field(
+        default=False,
+        description=(
+            "SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. "
+            "Off by default. Legacy env alias: GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS. Only enable "
+            "for unusual setups such as a private search index."
+        ),
+    )
+    mcp_allow_loopback: bool = Field(
+        default=True,
+        description=(
+            "SSRF gate: allow MCP server URLs that resolve to loopback (useful for same-host "
+            "sidecars). On by default. Legacy env alias: GATEWAY_MCP_ALLOW_LOOPBACK."
+        ),
+    )
+    mcp_allow_private_hosts: bool = Field(
+        default=False,
+        description=(
+            "SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept "
+            "hostnames that fail to resolve at validation time. Off by default. Legacy env alias: "
+            "GATEWAY_MCP_ALLOW_PRIVATE_HOSTS."
+        ),
+    )
+    mode: str | None = Field(
+        default=None,
+        description=(
+            "Otari operating mode: 'standalone' or 'hybrid'. When unset (the default), the mode is "
+            "derived from the platform token: hybrid if a token is present (OTARI_AI_TOKEN, legacy "
+            "aliases OTARI_PLATFORM_TOKEN / ANY_LLM_PLATFORM_TOKEN), else standalone. Set explicitly "
+            "to assert the intended mode: 'hybrid' requires a token, and 'standalone' with a token "
+            "present is rejected at startup as conflicting configuration. Legacy value 'platform' is "
+            "accepted as an alias for 'hybrid'."
+        ),
+    )
     platform: dict[str, Any] = Field(default_factory=dict, description="otari.ai connection settings")
+
+    # Resolved once from the environment (primed by load_config, or lazily on
+    # first access for a directly-constructed config) so the runtime mode stays
+    # stable for the process: the token cannot flip mid-request from an env
+    # mutation, and hot paths no longer re-read os.getenv on every access.
+    _platform_token: str | None = PrivateAttr(default=None)
+    _platform_token_resolved: bool = PrivateAttr(default=False)
+
+    def _resolve_platform_token(self) -> str | None:
+        if not self._platform_token_resolved:
+            self._platform_token = _get_platform_token_from_env()
+            self._platform_token_resolved = True
+        return self._platform_token
 
     @property
     def platform_token(self) -> str | None:
-        return _get_platform_token_from_env()
+        return self._resolve_platform_token()
+
+    @property
+    def configured_mode(self) -> str | None:
+        """The explicitly set mode (normalized), or None when unset/blank."""
+        normalized = (self.mode or "").strip().lower()
+        return normalized or None
 
     @property
     def effective_mode(self) -> str:
-        if self.platform_token:
+        configured = self.configured_mode
+        if configured in {"hybrid", "platform"}:
             return "hybrid"
-        return "standalone"
+        if configured == "standalone":
+            return "standalone"
+        # Mode unset: derive from the platform token.
+        return "hybrid" if self.platform_token else "standalone"
 
     @property
     def is_hybrid_mode(self) -> bool:
@@ -345,10 +497,10 @@ class GatewayConfig(BaseSettings):
         target = self.aliases.get(name)
         return target if isinstance(target, str) and target else None
 
-    def validate_aliases(self) -> None:
-        """Validate the ``aliases`` map at startup so misconfig fails fast.
+    def validate_alias(self, name: str, target: str, *, alias_names: Container[str] | None = None) -> None:
+        """Validate a single alias, raising ``ValueError`` with the reason.
 
-        Each alias must name a non-empty target selector with a usable
+        An alias must name a non-empty target selector with a usable
         ``instance``/``provider`` prefix; the prefix must resolve to a configured
         provider instance or a known any-llm implementation. An alias name must
         not contain a selector delimiter (``:`` or ``/``): alias lookup runs
@@ -356,44 +508,55 @@ class GatewayConfig(BaseSettings):
         requests for a real ``provider:model``. It must also not collide with a
         configured provider instance (that would be ambiguous), and its target
         must not itself be an alias (no chaining for now).
+
+        ``alias_names`` is the set of names that count as aliases for the
+        chaining check, defaulting to the configured ones. Callers that also
+        store aliases elsewhere (the runtime ``model_aliases`` table) pass the
+        union, so chaining is rejected no matter which side each alias came from.
         """
+        known_aliases: Container[str] = self.aliases if alias_names is None else alias_names
+
+        if not name:
+            msg = "alias name must not be empty."
+            raise ValueError(msg)
+        if ":" in name or "/" in name:
+            msg = f"alias name '{name}' must not contain ':' or '/' (it would shadow a real model selector)."
+            raise ValueError(msg)
+        if name in self.providers:
+            msg = f"alias '{name}' collides with a configured provider instance name."
+            raise ValueError(msg)
+        if not isinstance(target, str) or not target:
+            msg = f"aliases.{name} must be a non-empty target selector string."
+            raise ValueError(msg)
+        colon, slash = target.find(":"), target.find("/")
+        cut = colon if colon != -1 and (slash == -1 or colon < slash) else slash
+        if cut <= 0 or cut == len(target) - 1:
+            msg = f"aliases.{name} target '{target}' must be of the form 'instance:model' or 'provider:model'."
+            raise ValueError(msg)
+        prefix = target[:cut]
+        if prefix in known_aliases:
+            msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
+            raise ValueError(msg)
+        if prefix in self.providers:
+            return
+        # No PROVIDER_TYPE_ALIASES mapping here: that normalizes an instance's
+        # declared provider_type, not a selector prefix. Request-time routing
+        # splits the selector through any-llm, which knows no such mapping, so
+        # accepting "openai-compatible:model" would pass startup and then fail
+        # on the first request.
+        try:
+            LLMProvider(prefix)
+        except ValueError as exc:
+            msg = (
+                f"aliases.{name} target '{target}' prefix '{prefix}' is neither a configured "
+                "provider instance nor a known provider implementation."
+            )
+            raise ValueError(msg) from exc
+
+    def validate_aliases(self) -> None:
+        """Validate the ``aliases`` map at startup so misconfig fails fast."""
         for name, target in self.aliases.items():
-            if not name:
-                msg = "alias name must not be empty."
-                raise ValueError(msg)
-            if ":" in name or "/" in name:
-                msg = f"alias name '{name}' must not contain ':' or '/' (it would shadow a real model selector)."
-                raise ValueError(msg)
-            if name in self.providers:
-                msg = f"alias '{name}' collides with a configured provider instance name."
-                raise ValueError(msg)
-            if not isinstance(target, str) or not target:
-                msg = f"aliases.{name} must be a non-empty target selector string."
-                raise ValueError(msg)
-            colon, slash = target.find(":"), target.find("/")
-            cut = colon if colon != -1 and (slash == -1 or colon < slash) else slash
-            if cut <= 0 or cut == len(target) - 1:
-                msg = f"aliases.{name} target '{target}' must be of the form 'instance:model' or 'provider:model'."
-                raise ValueError(msg)
-            prefix = target[:cut]
-            if prefix in self.aliases:
-                msg = f"aliases.{name} target '{target}' points at another alias; alias chaining is not supported."
-                raise ValueError(msg)
-            if prefix in self.providers:
-                continue
-            # No PROVIDER_TYPE_ALIASES mapping here: that normalizes an instance's
-            # declared provider_type, not a selector prefix. Request-time routing
-            # splits the selector through any-llm, which knows no such mapping, so
-            # accepting "openai-compatible:model" would pass startup and then fail
-            # on the first request.
-            try:
-                LLMProvider(prefix)
-            except ValueError as exc:
-                msg = (
-                    f"aliases.{name} target '{target}' prefix '{prefix}' is neither a configured "
-                    "provider instance nor a known provider implementation."
-                )
-                raise ValueError(msg) from exc
+            self.validate_alias(name, target)
 
     def validate_provider_instances(self) -> None:
         """Validate per-instance ``provider_type`` / ``models`` declarations.
@@ -471,7 +634,11 @@ class GatewayConfig(BaseSettings):
         return platform
 
     def validate_mode_selection(self) -> None:
-        configured_mode = self.mode.strip().lower()
+        configured_mode = self.configured_mode
+        # Mode unset: the runtime mode is derived from the token, so there is
+        # nothing to assert here.
+        if configured_mode is None:
+            return
         # "platform" is the legacy alias for "hybrid" (the otari.ai-connected
         # runtime mode); accept it so pre-rename configs keep working.
         if configured_mode not in {"standalone", "hybrid", "platform"}:
@@ -483,6 +650,14 @@ class GatewayConfig(BaseSettings):
             msg = (
                 "OTARI_MODE=hybrid (legacy value: platform) requires OTARI_AI_TOKEN to be set "
                 "(legacy token aliases: OTARI_PLATFORM_TOKEN, ANY_LLM_PLATFORM_TOKEN)."
+            )
+            raise ValueError(msg)
+        if configured_mode == "standalone" and token_present:
+            msg = (
+                "OTARI_MODE=standalone (legacy: GATEWAY_MODE) conflicts with a platform token being set "
+                "(OTARI_AI_TOKEN, legacy aliases OTARI_PLATFORM_TOKEN / ANY_LLM_PLATFORM_TOKEN): the "
+                "token selects hybrid mode. Unset the token to run standalone, or remove OTARI_MODE to "
+                "let the token select hybrid mode."
             )
             raise ValueError(msg)
 
@@ -554,13 +729,24 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     if structured_env_config:
         config_dict.update(structured_env_config)
 
+    # Snapshot which bridged fields the YAML config set, before the env
+    # overrides below inject OTARI_ values into the same dict: only YAML-set
+    # values need bridging into the environment (env-set values are already
+    # visible to the otari_env() read sites, with unchanged semantics).
+    yaml_bridged_fields = {name for name in ENV_BRIDGED_FIELDS if config_dict.get(name) is not None}
+
     _apply_otari_env_overrides(config_dict)
     _apply_platform_env_overrides(config_dict)
 
     config = GatewayConfig(**config_dict)
+    # Resolve and cache the platform token once, at load time, so the runtime
+    # mode is fixed for the process instead of re-derived from os.getenv on
+    # every property read.
+    config._resolve_platform_token()
     config.validate_mode_selection()
     config.validate_provider_instances()
     config.validate_aliases()
+    _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
 
 
@@ -594,6 +780,26 @@ def _coerce_scalar_env(value: str, annotation: Any) -> Any:
     if annotation is str:
         return value
     raise _NonScalarField
+
+
+def _bridge_yaml_fields_to_env(config: GatewayConfig, yaml_set_fields: set[str]) -> None:
+    """Bridge YAML-set promoted fields into the process env for otari_env() readers.
+
+    The runtime read sites for ENV_BRIDGED_FIELDS call ``otari_env()``, which
+    only sees environment variables. ``os.environ.setdefault`` keeps env
+    precedence intact: an ``OTARI_<FIELD>`` variable that is already set always
+    wins, and fields not set in YAML are left untouched, so pure-env
+    deployments (including legacy ``GATEWAY_`` names and their exact string
+    spellings) behave byte-for-byte as before. Values are serialized from the
+    validated field, with booleans lowercased to ``true``/``false``, the
+    spellings every otari_env() consumer parses.
+    """
+    for field_name in yaml_set_fields:
+        value = getattr(config, field_name)
+        if value is None:
+            continue
+        serialized = ("true" if value else "false") if isinstance(value, bool) else str(value)
+        os.environ.setdefault(f"{OTARI_ENV_PREFIX}{field_name.upper()}", serialized)
 
 
 def _apply_otari_env_overrides(config: dict[str, Any]) -> None:
@@ -649,7 +855,7 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
             continue
         platform[field_name] = caster(value)
 
-    configured_mode = str(config.get("mode", "")).strip().lower()
+    configured_mode = str(config.get("mode") or "").strip().lower()
     platform_requested = configured_mode in {"hybrid", "platform"} or _get_platform_token_from_env() is not None
     if platform_requested and not platform.get("base_url"):
         platform["base_url"] = DEFAULT_PLATFORM_BASE_URL

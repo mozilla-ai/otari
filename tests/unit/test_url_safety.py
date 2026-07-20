@@ -2,7 +2,11 @@
 
 import pytest
 
-from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
+from gateway.services.url_safety import (
+    UnsafeURLError,
+    validate_mcp_url,
+    validate_outbound_fetch_url,
+)
 
 
 @pytest.mark.asyncio
@@ -68,6 +72,29 @@ async def test_no_host_rejected() -> None:
 async def test_private_override_allows_internal(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GATEWAY_MCP_ALLOW_PRIVATE_HOSTS", "true")
     await validate_mcp_url("https://10.0.0.5/mcp", has_authorization_token=False)
+
+
+@pytest.mark.asyncio
+async def test_mcp_private_override_reads_otari_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    # After promoting these gates to GatewayConfig, the SSRF read path still
+    # consults otari_env() directly (the functions have no config in scope), so
+    # the canonical OTARI_ prefix must keep toggling the gate.
+    monkeypatch.delenv("GATEWAY_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
+    monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
+    await validate_mcp_url("https://10.0.0.5/mcp", has_authorization_token=False)
+
+
+@pytest.mark.asyncio
+async def test_web_search_private_override_reads_otari_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Same gate, web-search fetch path: rejected by default, allowed by the env
+    # override that the promoted web_search_allow_private_hosts field mirrors.
+    monkeypatch.delenv("OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS", raising=False)
+    monkeypatch.delenv("GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS", raising=False)
+    with pytest.raises(UnsafeURLError, match="private"):
+        await validate_outbound_fetch_url("https://10.0.0.5/page")
+
+    monkeypatch.setenv("OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS", "true")
+    await validate_outbound_fetch_url("https://10.0.0.5/page")
 
 
 @pytest.mark.asyncio

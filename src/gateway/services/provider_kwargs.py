@@ -16,6 +16,7 @@ from any_llm import AnyLLM, LLMProvider
 
 from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import GatewayConfig
+from gateway.services.alias_service import resolve_effective_alias
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
@@ -123,15 +124,16 @@ def resolve_provider_selector(config: GatewayConfig, model_selector: str) -> Res
     selector is split by any-llm directly, so unconfigured selectors and the
     legacy ``provider/model`` form keep working exactly as before.
 
-    A selector that names a configured alias is first substituted with the
-    alias target, then resolved as usual; the resulting ``ResolvedProvider``
-    carries ``alias`` so response ``model`` fields can be relabeled.
+    A selector that names an alias, whether from ``config.yml`` or the
+    ``model_aliases`` table, is first substituted with the alias target, then
+    resolved as usual; the resulting ``ResolvedProvider`` carries ``alias`` so
+    response ``model`` fields can be relabeled.
 
     Raises ``ValueError`` / ``AnyLLMError`` (from any-llm) for a selector that
     names neither a configured instance nor a known provider, mirroring the
     prior ``AnyLLM.split_model_provider`` behavior.
     """
-    alias = config.resolve_alias(model_selector)
+    alias = resolve_effective_alias(config, model_selector)
     selector = alias if alias is not None else model_selector
 
     split = split_selector(selector)

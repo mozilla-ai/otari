@@ -85,7 +85,7 @@ def test_transcription_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/transcriptions returns 500 when the provider fails."""
+    """POST /v1/audio/transcriptions returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.audio.atranscription",
         new_callable=AsyncMock,
@@ -97,7 +97,7 @@ def test_transcription_provider_error(
             data={"model": "openai:whisper-1"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
     assert "provider" in resp.json()["detail"].lower()
 
 
@@ -149,7 +149,7 @@ def test_transcription_logs_error_on_failure(
             data={"model": "openai:whisper-1"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
 
     usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200
@@ -269,7 +269,7 @@ def test_speech_provider_error(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """POST /v1/audio/speech returns 500 when the provider fails."""
+    """POST /v1/audio/speech returns 502 when the provider fails."""
     with patch(
         "gateway.api.routes.audio.aspeech",
         new_callable=AsyncMock,
@@ -280,7 +280,7 @@ def test_speech_provider_error(
             json={"model": "openai:tts-1", "input": "Hello", "voice": "alloy"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
     assert "provider" in resp.json()["detail"].lower()
 
 
@@ -329,7 +329,7 @@ def test_speech_logs_error_on_failure(
             json={"model": "openai:tts-1", "input": "Hello", "voice": "alloy"},
             headers=api_key_header,
         )
-    assert resp.status_code == 500
+    assert resp.status_code == 502
 
     usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
     assert usage_resp.status_code == 200

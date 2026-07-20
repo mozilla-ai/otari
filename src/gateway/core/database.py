@@ -19,11 +19,17 @@ from gateway.core.config import GatewayConfig
 
 _engine: AsyncEngine | None = None
 _SessionLocal: async_sessionmaker[AsyncSession] | None = None
-_SYNC_DATABASE_URL: str | None = None
 
 # How long a SQLite connection waits for a held lock before raising
 # "database is locked", in milliseconds.
 _SQLITE_BUSY_TIMEOUT_MS = 5000
+
+# Async drivers this gateway can be pointed at, mapped to the sync driver
+# Alembic needs for the same database. Both are declared dependencies.
+_ASYNC_TO_SYNC_DRIVER = {
+    "sqlite+aiosqlite": "sqlite",
+    "postgresql+asyncpg": "postgresql",
+}
 
 
 def _to_async_url(database_url: str) -> tuple[str, dict[str, Any]]:
@@ -50,6 +56,25 @@ def _to_async_url(database_url: str) -> tuple[str, dict[str, Any]]:
         return database_url, connect_args
 
     return database_url, connect_args
+
+
+def to_sync_url(database_url: str) -> str:
+    """Convert an async SQLAlchemy URL into its sync equivalent.
+
+    Alembic builds a synchronous engine, so an async URL reaches it as a driver
+    it cannot run and fails with ``MissingGreenlet``. The app engine accepts
+    either form (see :func:`_to_async_url`), so the documented
+    ``sqlite+aiosqlite://`` URL must not be the one thing that breaks startup.
+
+    A URL that is already synchronous, or whose driver has no async counterpart
+    here, is returned unchanged.
+    """
+
+    url: URL = make_url(database_url)
+    sync_drivername = _ASYNC_TO_SYNC_DRIVER.get(url.drivername)
+    if sync_drivername is None:
+        return database_url
+    return url.set(drivername=sync_drivername).render_as_string(hide_password=False)
 
 
 def _run_migrations(database_url: str) -> None:
@@ -85,7 +110,7 @@ def _configure_sqlite_pragmas(engine: AsyncEngine) -> None:
 def init_db(config: GatewayConfig) -> None:
     """Initialize async database engine and optionally run migrations."""
 
-    global _engine, _SessionLocal, _SYNC_DATABASE_URL  # noqa: PLW0603
+    global _engine, _SessionLocal  # noqa: PLW0603
 
     database_url = config.database_url
     async_url, connect_args = _to_async_url(database_url)
@@ -104,7 +129,6 @@ def init_db(config: GatewayConfig) -> None:
 
     _engine = create_async_engine(async_url, **engine_kwargs)
     _SessionLocal = async_sessionmaker(_engine, expire_on_commit=False)
-    _SYNC_DATABASE_URL = database_url
 
     if is_sqlite:
         _configure_sqlite_pragmas(_engine)
@@ -139,12 +163,11 @@ async def create_session() -> AsyncIterator[AsyncSession]:
 def reset_db() -> None:
     """Dispose the active engine so it can be re-initialized (testing helper)."""
 
-    global _engine, _SessionLocal, _SYNC_DATABASE_URL  # noqa: PLW0603
+    global _engine, _SessionLocal  # noqa: PLW0603
 
     engine = _engine
     _engine = None
     _SessionLocal = None
-    _SYNC_DATABASE_URL = None
 
     if engine is None:
         return

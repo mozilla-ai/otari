@@ -163,19 +163,13 @@ This starts Otari on port 8000 backed by a Postgres container, so keys, budgets,
 
 ### Render
 
-Deploy Otari with fully managed Postgres on Render for free. Just add your provider credentials; Render provisions and connects your services automatically.
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&blueprintPath=deploy/render/render.yaml)
-
-Read [`the docs`](deploy/render/README.md) for more details, including a hybrid-mode Blueprint connected to otari.ai.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mozilla-ai/otari&path=deploy/render/render.yaml)
 
 ### Railway
 
-Want a hosted gateway with no local setup? Deploy Otari plus a managed Postgres on [Railway](https://railway.com) in one click. Bring a provider key (OpenAI, Anthropic, Mistral, or Gemini) and you get a running gateway with virtual keys, budgets, and usage tracking.
-
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/otari-railway-template-demo)
 
-The two-service template, its environment inputs, and how to publish it are documented in [`deploy/railway/`](deploy/railway/README.md).
+See [Deployment](docs/deployment.md) for setup details on both platforms, including hybrid mode connected to otari.ai.
 
 ### From source (development)
 
@@ -193,6 +187,17 @@ uv run otari serve --config config.yml
 `config.example.yml` defaults to PostgreSQL. If you don't have a local Postgres instance, change `database_url` in your `config.yml` to `sqlite+aiosqlite:///./otari.db` before starting.
 
 For hot reload against a local `.env`, use `make dev`.
+
+### Admin dashboard
+
+In standalone mode the gateway serves a web admin dashboard at the root URL
+(`http://localhost:8000`). Sign in with your master key (`OTARI_MASTER_KEY`) to
+browse the model catalogue, set model pricing, manage aliases, and toggle
+runtime settings (model discovery and default pricing). The get-started
+tutorial page moved to `/welcome`. The dashboard is a React +
+HeroUI app that lives in `web/`; its built bundle is committed under
+`src/gateway/static/dashboard`, so the published package and Docker image serve
+it with no extra build step. See [`web/README.md`](web/README.md) to work on it.
 
 To build and run the container from your local code instead of pulling the published image, layer in the build file:
 
@@ -213,7 +218,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 export OTARI_AI_TOKEN=gw_xxx
 ```
 
-`OTARI_MODE` is optional and derived from `OTARI_AI_TOKEN`. See [Modes](docs/modes.md) for the full comparison, and [`docs/hybrid-mode-protocol.md`](docs/hybrid-mode-protocol.md) for the wire contract.
+`OTARI_MODE` is optional: when unset, the mode is derived from `OTARI_AI_TOKEN`; when set, it is enforced at startup (`hybrid` requires the token, `standalone` conflicts with it). See [Modes](docs/modes.md) for the full comparison, and [`docs/hybrid-mode-protocol.md`](docs/hybrid-mode-protocol.md) for the wire contract.
 
 ## Built-in tools
 

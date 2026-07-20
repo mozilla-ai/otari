@@ -1,32 +1,19 @@
 """OpenAI-compatible moderations endpoint."""
 
-import uuid
-from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from any_llm import amoderation
-from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes._pipeline import _raise_for_unresolvable_model
-from gateway.api.routes.chat import rate_limit_headers
+from gateway.api.routes._passthrough import run_passthrough
 from gateway.core.config import GatewayConfig
-from gateway.log_config import logger
-from gateway.model_labeling import relabel_model
-from gateway.models.entities import APIKey, UsageLog
-from gateway.rate_limit import check_rate_limit
-from gateway.services.budget_service import (
-    reconcile_reservation,
-    refund_reservation,
-    reserve_budget,
-)
+from gateway.models.entities import APIKey, ModelPricing
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import find_model_pricing
-from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.pricing_service import flat_request_cost
+from gateway.services.provider_kwargs import ResolvedProvider
 from gateway.types.moderation import ModerationResponse
 
 # Locked phrasing — cross-SDK error contract. Do not reword.
@@ -43,6 +30,16 @@ class ModerationRequest(BaseModel):
         description="Text, list of texts, or list of content-part dicts to moderate",
     )
     user: str | None = None
+
+
+def _map_unsupported_moderation(e: Exception) -> HTTPException | None:
+    """Surface any-llm's "provider does not support moderation" as a 400."""
+    if isinstance(e, NotImplementedError) and UNSUPPORTED_MODERATION_SUBSTRING in str(e):
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    return None
 
 
 @router.post("/moderations", response_model=ModerationResponse)
@@ -63,135 +60,41 @@ async def create_moderation(
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use virtual user created with API key
     """
-    api_key, is_master_key = auth_result
-    api_key_id = api_key.id if api_key else None
-
-    user_id = resolve_user_id(
-        user_id_from_request=request.user,
-        api_key=api_key,
-        is_master_key=is_master_key,
-        master_key_error=HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="When using master key, 'user' field is required in request body",
-        ),
-        no_api_key_error=HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="API key validation failed",
-        ),
-        no_user_error=HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="API key has no associated user",
-        ),
-        forbidden_user_error=HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="'user' field does not match the authenticated API key's user",
-        ),
-        reject_mismatch=config.reject_user_mismatch,
-    )
-
-    rate_limit_info = check_rate_limit(raw_request, user_id)
-
-    try:
-        resolved = resolve_provider_selector(config, request.model)
-    except (ValueError, AnyLLMError) as exc:
-        _raise_for_unresolvable_model(request.model, exc)
-    provider, model = resolved.provider, resolved.model
 
     # Moderations is exempt from require_pricing: it is free at most providers
-    # and is intentionally treated as $0 when unpriced (see below). Pricing, when
-    # present, is a flat per-request rate stored in input_price_per_million.
-    pricing = await find_model_pricing(db, resolved.instance, model)
-    flat_cost = (pricing.input_price_per_million / 1_000_000) if pricing and pricing.input_price_per_million else 0.0
-    reservation = await reserve_budget(
-        db, user_id, flat_cost, model=request.model, strategy=config.budget_strategy
+    # and is intentionally treated as $0 when unpriced (no "No pricing
+    # configured" warning). Pricing, when present, is a flat per-request rate
+    # (see flat_request_cost); moderation has no token usage.
+    def compute_cost(result: ModerationResponse, pricing: ModelPricing | None) -> float:
+        return flat_request_cost(pricing)
+
+    def usage_tokens(result: ModerationResponse) -> tuple[int | None, int | None, int | None]:
+        return (None, 0, None)
+
+    async def call_provider(resolved: ResolvedProvider) -> ModerationResponse:
+        moderation_kwargs: dict[str, Any] = {
+            "model": resolved.model,
+            "input": request.input,
+            "provider": resolved.provider,
+            "include_raw": include_raw,
+            **resolved.kwargs,
+        }
+        return await amoderation(**moderation_kwargs)
+
+    outcome = await run_passthrough(
+        endpoint="/v1/moderations",
+        raw_request=raw_request,
+        response=response,
+        auth_result=auth_result,
+        db=db,
+        config=config,
+        log_writer=log_writer,
+        model=request.model,
+        user=request.user,
+        call_provider=call_provider,
+        estimate=flat_request_cost,
+        usage_tokens=usage_tokens,
+        compute_cost=compute_cost,
+        map_provider_error=_map_unsupported_moderation,
     )
-
-    provider_kwargs = resolved.kwargs
-
-    moderation_kwargs: dict[str, Any] = {
-        "model": model,
-        "input": request.input,
-        "provider": provider,
-        "include_raw": include_raw,
-        **provider_kwargs,
-    }
-
-    try:
-        result = await amoderation(**moderation_kwargs)
-
-        usage_log = UsageLog(
-            id=str(uuid.uuid4()),
-            api_key_id=api_key_id,
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            model=model,
-            provider=resolved.instance,
-            endpoint="/v1/moderations",
-            status="success",
-            prompt_tokens=None,
-            completion_tokens=0,
-            total_tokens=None,
-        )
-
-        # Flat per-request rate (moderation has no token usage); intentionally
-        # no "No pricing configured" warning here — free at most providers.
-        usage_log.cost = flat_cost
-
-        await log_writer.put(usage_log)
-        await reconcile_reservation(db, reservation, flat_cost)
-
-    except HTTPException:
-        await refund_reservation(db, reservation)
-        raise
-    except NotImplementedError as e:
-        error_log = UsageLog(
-            id=str(uuid.uuid4()),
-            api_key_id=api_key_id,
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            model=model,
-            provider=resolved.instance,
-            endpoint="/v1/moderations",
-            status="error",
-            error_message=str(e),
-        )
-        await log_writer.put(error_log)
-        await refund_reservation(db, reservation)
-        if UNSUPPORTED_MODERATION_SUBSTRING in str(e):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e),
-            ) from e
-        logger.error("Provider implementation gap for %s:%s: %s", provider, model, e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="The request could not be completed by the provider",
-        ) from e
-    except Exception as e:
-        error_log = UsageLog(
-            id=str(uuid.uuid4()),
-            api_key_id=api_key_id,
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            model=model,
-            provider=resolved.instance,
-            endpoint="/v1/moderations",
-            status="error",
-            error_message=str(e),
-        )
-        await log_writer.put(error_log)
-        await refund_reservation(db, reservation)
-
-        logger.error("Provider call failed for %s:%s: %s", provider, model, e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="The request could not be completed by the provider",
-        ) from e
-
-    if rate_limit_info:
-        for key, value in rate_limit_headers(rate_limit_info).items():
-            response.headers[key] = value
-
-    if resolved.alias is not None:
-        relabel_model(result, resolved.alias)
-    return result
+    return outcome.result
