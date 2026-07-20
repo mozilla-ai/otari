@@ -9,6 +9,24 @@ from gateway.core.config import API_KEY_HEADER, GatewayConfig
 from .conftest import MODEL_NAME
 
 
+def test_raw_otari_key_header_authenticates(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """A raw token on Otari-Key (no Bearer prefix) authenticates end-to-end.
+
+    This is the exact shape the dashboard's copy-paste curl snippet emits.
+    """
+    created = client.post("/v1/keys", json={"key_name": "raw-header"}, headers=master_key_header)
+    assert created.status_code == 200
+    secret = created.json()["key"]
+
+    # No "Bearer " prefix, unlike master_key_header.
+    resp = client.get("/v1/models", headers={API_KEY_HEADER: secret})
+    assert resp.status_code == 200, resp.text
+
+    # The Bearer form still works too (back-compat).
+    resp_bearer = client.get("/v1/models", headers={API_KEY_HEADER: f"Bearer {secret}"})
+    assert resp_bearer.status_code == 200, resp_bearer.text
+
+
 def test_create_api_key(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test creating an API key."""
     response = client.post(

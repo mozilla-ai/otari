@@ -68,14 +68,12 @@ def test_legacy_header_is_no_longer_honored(config: GatewayConfig, legacy_header
     assert API_KEY_HEADER in exc_info.value.detail
 
 
-def test_malformed_canonical_header_raises_401(config: GatewayConfig) -> None:
-    request = _make_request({API_KEY_HEADER: "NotBearer token-bad"})
+def test_canonical_header_accepts_raw_token(config: GatewayConfig) -> None:
+    # The dashboard hands out `Otari-Key: gw-...` with no Bearer prefix; the raw
+    # token is returned verbatim.
+    request = _make_request({API_KEY_HEADER: "gw-raw-canonical"})
 
-    with pytest.raises(HTTPException) as exc_info:
-        _extract_bearer_token(request, config)
-
-    assert exc_info.value.status_code == 401
-    assert "Bearer" in exc_info.value.detail
+    assert _extract_bearer_token(request, config) == "gw-raw-canonical"
 
 
 def test_malformed_authorization_header_raises_401(config: GatewayConfig) -> None:
