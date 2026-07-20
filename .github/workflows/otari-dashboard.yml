@@ -57,3 +57,45 @@ jobs:
           git --no-pager status --porcelain -- ../src/gateway/static/dashboard
           exit 1
         fi
+
+  e2e:
+    # Browser end-to-end smoke: boot the gateway serving the freshly built bundle
+    # (Playwright's webServer, see web/playwright.config.ts) and walk the core
+    # multi-page flows a real operator does.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      with:
+        python-version: 3.14
+
+    - name: Install Python deps
+      run: uv sync --dev --frozen
+
+    - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install web deps
+      working-directory: web
+      run: npm ci
+
+    - name: Build dashboard bundle
+      working-directory: web
+      run: npm run build
+
+    - name: Install Playwright Chromium
+      working-directory: web
+      run: npx playwright install --with-deps chromium
+
+    - name: Run end-to-end tests
+      working-directory: web
+      run: npm run e2e
