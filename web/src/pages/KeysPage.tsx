@@ -554,7 +554,10 @@ export function KeysPage() {
           onCreated={(result) => setRevealed({ title: "API key created", result })}
         />
       ) : null}
-      {editingKey ? <EditKeyForm apiKey={editingKey} onClose={() => setEditing(null)} /> : null}
+      {/* Key on the row id so switching which key is edited remounts the form:
+          its fields seed from `apiKey` via useState (mount-only), so without this
+          a second Edit would keep the first key's values and PATCH the wrong row. */}
+      {editingKey ? <EditKeyForm key={editingKey.id} apiKey={editingKey} onClose={() => setEditing(null)} /> : null}
 
       <Table>
         <THead>

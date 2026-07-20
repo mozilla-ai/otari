@@ -303,6 +303,22 @@ describe("KeysPage", () => {
     expect(await screen.findByRole("button", { name: "Save changes" })).toBeInTheDocument();
   });
 
+  it("resets the edit form when switching to a different key row", async () => {
+    mockApi({
+      keys: [apiKey({ id: "k1", key_name: "alpha" }), apiKey({ id: "k2", key_name: "bravo" })],
+    });
+    const user = userEvent.setup();
+    renderPage(<KeysPage />);
+
+    await user.click(await screen.findByText("alpha"));
+    expect(await screen.findByLabelText("Name")).toHaveValue("alpha");
+
+    // Switching to another key must remount the form; without a keyed remount it
+    // would keep "alpha" and PATCH the wrong key.
+    await user.click(screen.getByText("bravo"));
+    expect(await screen.findByLabelText("Name")).toHaveValue("bravo");
+  });
+
   it("clicking a row action does not also open the edit form", async () => {
     mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot", is_active: true })] });
     const user = userEvent.setup();
