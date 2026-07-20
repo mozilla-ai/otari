@@ -8,6 +8,7 @@ import gateway.main as gateway_main
 from gateway.core.config import GatewayConfig
 from gateway.dashboard import get_dashboard_dir
 from gateway.main import create_app
+from gateway.services.secret_box import SecretBoxUnavailableError, generate_secret_key
 
 
 def _config(tmp_path: Path, name: str) -> GatewayConfig:
@@ -72,6 +73,23 @@ def test_dashboard_assets_are_mounted_and_cacheable(tmp_path: Path) -> None:
     assert asset_response.status_code == 200
     # Hashed bundles are immutable, so the security middleware must not force no-store.
     assert "no-store" not in asset_response.headers.get("cache-control", "")
+
+
+def test_create_app_rejects_invalid_secret_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", "not-a-valid-fernet-key")
+    with pytest.raises(SecretBoxUnavailableError) as excinfo:
+        create_app(_config(tmp_path, "gateway-bad-secret-test.db"))
+    assert "not-a-valid-fernet-key" not in str(excinfo.value)
+
+
+def test_create_app_accepts_valid_secret_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    app = create_app(_config(tmp_path, "gateway-good-secret-test.db"))
+
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
 
 
 def test_root_falls_back_to_tutorial_without_dashboard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -33,6 +33,7 @@ from gateway.services.provider_store_service import (
     run_provider_refresher,
 )
 from gateway.services.runtime_settings_service import apply_overrides_from_db
+from gateway.services.secret_box import validate_secret_key
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
@@ -150,6 +151,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
     """Create and configure FastAPI application."""
 
     _validate_platform_config(config)
+    # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
+    # break provider-credential storage at request time. Fail fast here instead.
+    validate_secret_key()
     set_config(config)
 
     app = FastAPI(
