@@ -3492,6 +3492,12 @@
         "in": "header",
         "name": "Otari-Key",
         "type": "apiKey"
+      },
+      "XApiKeyAuth": {
+        "description": "Anthropic-native clients send credentials here (no Bearer prefix).",
+        "in": "header",
+        "name": "x-api-key",
+        "type": "apiKey"
       }
     }
   },
@@ -3598,6 +3604,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Aliases",
@@ -3643,6 +3652,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Set Alias",
@@ -3684,6 +3696,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete Alias",
@@ -3765,6 +3780,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Speech",
@@ -3810,6 +3828,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Transcription",
@@ -3888,6 +3909,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Batches",
@@ -3931,6 +3955,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Batch",
@@ -3986,6 +4013,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Retrieve Batch",
@@ -4041,6 +4071,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Cancel Batch",
@@ -4102,6 +4135,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Retrieve Batch Results",
@@ -4168,6 +4204,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Budgets",
@@ -4213,6 +4252,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Budget",
@@ -4254,6 +4296,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete Budget",
@@ -4300,6 +4345,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Budget",
@@ -4356,6 +4404,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Update Budget",
@@ -4401,6 +4452,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Chat Completions",
@@ -4446,6 +4500,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Embedding",
@@ -4519,6 +4576,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Files",
@@ -4566,6 +4626,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create File",
@@ -4632,6 +4695,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete File",
@@ -4696,6 +4762,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get File",
@@ -4758,6 +4827,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get File Content",
@@ -4803,6 +4875,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Image",
@@ -4869,6 +4944,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Keys",
@@ -4914,6 +4992,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Key",
@@ -4955,6 +5036,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete Key",
@@ -5001,6 +5085,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Key",
@@ -5057,6 +5144,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Update Key",
@@ -5105,6 +5195,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Rotate Key",
@@ -5150,6 +5243,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Message",
@@ -5197,6 +5293,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Count Message Tokens",
@@ -5254,6 +5353,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Models",
@@ -5281,6 +5383,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Discoverable Models",
@@ -5308,6 +5413,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Model Metadata",
@@ -5356,6 +5464,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Model",
@@ -5415,6 +5526,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Moderation",
@@ -5481,6 +5595,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Pricing",
@@ -5526,6 +5643,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Set Pricing",
@@ -5586,6 +5706,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete Pricing",
@@ -5651,6 +5774,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Pricing",
@@ -5703,6 +5829,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Pricing History",
@@ -5730,6 +5859,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Providers",
@@ -5775,6 +5907,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Rerank",
@@ -5820,6 +5955,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Response",
@@ -5847,6 +5985,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Settings",
@@ -5892,6 +6033,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Update Settings",
@@ -6014,6 +6158,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Usage",
@@ -6080,6 +6227,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Users",
@@ -6125,6 +6275,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create User",
@@ -6166,6 +6319,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete User",
@@ -6212,6 +6368,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get User",
@@ -6268,6 +6427,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Update User",
@@ -6343,6 +6505,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get User Usage",

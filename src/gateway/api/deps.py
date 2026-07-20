@@ -76,8 +76,9 @@ def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
     """Extract and validate Bearer token from request header.
 
     Checks the canonical Otari-Key header first, then the legacy
-    AnyLLM-Key / X-AnyLLM-Key aliases (back-compat), then falls back
-    to the standard Authorization header.
+    AnyLLM-Key / X-AnyLLM-Key aliases (back-compat), then the standard
+    Authorization header, and finally the raw x-api-key header used by
+    Anthropic-native clients (no Bearer prefix).
     """
     auth_header = request.headers.get(API_KEY_HEADER)
     if not auth_header:
@@ -104,7 +105,7 @@ def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
     record_auth_failure("missing_credentials")
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail=f"Missing {API_KEY_HEADER} or Authorization header",
+        detail=f"Missing {API_KEY_HEADER}, Authorization, or {X_API_KEY_HEADER} header",
     )
 
 
