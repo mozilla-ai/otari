@@ -40,6 +40,7 @@ from gateway.services.budget_service import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
+from gateway.services.model_access import effective_allowlist, is_model_allowed, model_not_allowed_detail
 from gateway.services.pricing_service import (
     find_model_pricing,
     no_pricing_error_detail,
@@ -198,6 +199,18 @@ async def run_passthrough(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=no_pricing_error_detail(model),
             )
+
+    # Model access control (per-key). The reservation is already taken above (the
+    # audio branch reserves before resolve), so refund before rejecting.
+    key_allowlist = effective_allowlist(api_key)
+    if key_allowlist is not None and not is_model_allowed(
+        key_allowlist, f"{resolved.instance}:{resolved.model}"
+    ):
+        await refund_reservation(db, reservation)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=model_not_allowed_detail(model),
+        )
 
     try:
         result = await call_provider(resolved)

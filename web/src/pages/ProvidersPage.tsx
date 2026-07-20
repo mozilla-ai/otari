@@ -22,7 +22,7 @@ import type {
 } from "@/api/types";
 import { Field } from "@/components/Field";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
-import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/components/ui";
+import { ConfirmButton, ErrorBanner, errorMessage, PageHeader } from "@/components/ui";
 
 // WebkitTextSecurity masks the value like a password field without being one.
 // It is non-standard, so it is absent from React's CSSProperties type.
@@ -703,24 +703,10 @@ export function ProvidersPage() {
           onEnablePricing={() => updateSettings.mutate({ default_pricing: true })}
           enabling={updateSettings.isPending}
         />
-      ) : needsPricing ? (
-        <InfoBanner tone="warning">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span>
-              Requests are rejected until pricing is set (<code>require_pricing</code> is on). Enable default pricing to
-              meter new models with public rates right away.
-            </span>
-            <Button
-              size="sm"
-              variant="primary"
-              isDisabled={updateSettings.isPending}
-              onPress={() => updateSettings.mutate({ default_pricing: true })}
-            >
-              {updateSettings.isPending ? "Enabling…" : "Enable default pricing"}
-            </Button>
-          </div>
-        </InfoBanner>
       ) : null}
+      {/* The gateway-wide "requests are rejected until pricing is set" alarm now
+          lives in the app shell (PricingWarning), so it shows on every page, not
+          only here. The first-run onboarding tip above stays as onboarding guidance. */}
 
       {addOpen ? <AddProviderForm onClose={() => setAddOpen(false)} /> : null}
       {editingProvider ? <EditProviderForm provider={editingProvider} onClose={() => setEditing(null)} /> : null}

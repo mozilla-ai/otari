@@ -105,6 +105,7 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
+from gateway.services.model_access import effective_allowlist, is_model_allowed, model_not_allowed_detail
 from gateway.services.pricing_service import (
     find_model_pricing,
     no_pricing_error_detail,
@@ -587,6 +588,16 @@ async def resolve_request_context(
             resolved_provider = resolved
         except (ValueError, AnyLLMError):
             gate_instance, gate_impl, gate_model = None, None, model
+
+        # Model access control (per-key, standalone). None = unrestricted; a
+        # non-null list restricts. Fail closed: a selector we could not resolve is
+        # denied under a restriction rather than dispatched unchecked. Master-key
+        # callers have api_key None, so the allow-list is None and this is skipped.
+        key_allowlist = effective_allowlist(api_key)
+        if key_allowlist is not None and not (
+            gate_instance is not None and is_model_allowed(key_allowlist, f"{gate_instance}:{gate_model}")
+        ):
+            raise adapter.error(403, model_not_allowed_detail(model), ErrorKind.PERMISSION)
 
         gate_pricing = await find_model_pricing(db, gate_instance, gate_model)
         estimate = estimate_cost(

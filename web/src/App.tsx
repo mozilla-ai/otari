@@ -5,6 +5,7 @@ import { useAuth } from "@/auth/AuthContext";
 import { AppShell } from "@/components/AppShell";
 import { Login } from "@/components/Login";
 import { AliasesPage } from "@/pages/AliasesPage";
+import { KeysPage } from "@/pages/KeysPage";
 import { ModelsPage } from "@/pages/ModelsPage";
 import { ProvidersPage } from "@/pages/ProvidersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
@@ -22,6 +23,7 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route index element={<IndexRedirect />} />
           <Route path="providers" element={<ProvidersPage />} />
+          <Route path="keys" element={<KeysPage />} />
           <Route path="models" element={<ModelsPage />} />
           <Route path="aliases" element={<AliasesPage />} />
           <Route path="settings" element={<SettingsPage />} />

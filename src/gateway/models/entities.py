@@ -31,12 +31,20 @@ class APIKey(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True)
     key_hash: Mapped[str] = mapped_column(unique=True, index=True)
+    # Display-only leading characters of the plaintext key, kept so the dashboard can
+    # recognize a key after its one-time reveal. Nullable: keys minted before this
+    # column existed cannot be back-filled (the plaintext is unrecoverable).
+    key_prefix: Mapped[str | None] = mapped_column()
     key_name: Mapped[str | None] = mapped_column()
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(default=True)
+    # Per-key model allow-list. NULL = unrestricted (default; every key predating
+    # this column stays unrestricted), [] = deny all, a list = canonical
+    # instance:model entries (with instance:* / instance:prefix* wildcards).
+    allowed_models: Mapped[list[str] | None] = mapped_column(JSON)
 
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
 
@@ -47,12 +55,14 @@ class APIKey(Base):
         """Convert model to dictionary."""
         return {
             "id": self.id,
+            "key_prefix": self.key_prefix,
             "key_name": self.key_name,
             "user_id": self.user_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "is_active": self.is_active,
+            "allowed_models": self.allowed_models,
             "metadata": self.metadata_,
         }
 

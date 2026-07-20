@@ -2,6 +2,12 @@ import hashlib
 import re
 import secrets
 
+# Number of leading plaintext characters kept as a display-only fingerprint
+# (``gw-`` plus 7 random chars). The key is ``gw-`` + token_urlsafe(48) = 67 chars,
+# so exposing 10 leaves ~57 secret chars; the prefix never gates auth and cannot be
+# recovered from the stored SHA-256 hash.
+KEY_PREFIX_LENGTH = 10
+
 
 def generate_api_key() -> str:
     """Generate a new API key with prefix.
@@ -22,6 +28,16 @@ def generate_api_key() -> str:
         raise RuntimeError(msg) from e
 
     return api_key
+
+
+def key_prefix(api_key: str) -> str:
+    """Return the display-only fingerprint (leading characters) of an API key.
+
+    Called at every key-mint site so the stored prefix length cannot drift. The
+    prefix is shown in the dashboard to recognize a key after its one-time reveal;
+    it is not a secret and is never used for authentication.
+    """
+    return api_key[:KEY_PREFIX_LENGTH]
 
 
 def validate_api_key_format(api_key: str) -> None:

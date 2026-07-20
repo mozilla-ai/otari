@@ -866,7 +866,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"user_id\": \"string\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"user_id\": \"string\"\n}"
             },
             "description": "Create a new API key.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, a new user will be created automatically and the key will be associated with it.",
             "header": [
@@ -924,7 +924,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {}\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {}\n}"
             },
             "description": "Update an API key.\n\nRequires master key authentication.",
             "header": [

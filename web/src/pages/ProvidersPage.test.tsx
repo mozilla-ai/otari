@@ -264,20 +264,6 @@ describe("ProvidersPage", () => {
     expect(await screen.findByText(/Connected\. 5 models available\./)).toBeInTheDocument();
   });
 
-  it("offers to enable default pricing when require_pricing would reject requests", async () => {
-    const fetchMock = mockApi({
-      stored: [storedProvider("openai", "1234")],
-      settings: { ...SETTINGS, require_pricing: true, default_pricing: false },
-    });
-    const user = userEvent.setup();
-    renderPage(<ProvidersPage />);
-
-    const enable = await screen.findByRole("button", { name: "Enable default pricing" });
-    await user.click(enable);
-
-    const patch = fetchMock.mock.calls.find(
-      ([u, init]) => String(u).includes("/v1/settings") && (init?.method ?? "") === "PATCH",
-    );
-    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ default_pricing: true });
-  });
+  // The gateway-wide require_pricing alarm moved to the app shell; its behavior
+  // (show, enable default pricing, dismiss) is covered in PricingWarning.test.tsx.
 });
