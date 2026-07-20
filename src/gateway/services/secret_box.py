@@ -75,6 +75,20 @@ def get_secret_box() -> MultiFernet:
     return MultiFernet(fernets)
 
 
+def validate_secret_key() -> None:
+    """Fail fast when ``OTARI_SECRET_KEY`` is set but not a valid Fernet key.
+
+    Unset is allowed: the provider store is simply unavailable until a key is
+    configured. A set-but-invalid key would otherwise pass startup and only
+    surface later when a credential is stored or read, so validating it here
+    turns a latent runtime failure into a clear startup error. Raises
+    ``SecretBoxUnavailableError``; the message never carries key material.
+    """
+    if not secret_box_configured():
+        return
+    get_secret_box()
+
+
 def encrypt_secret(plaintext: str) -> str:
     """Encrypt ``plaintext`` with the primary key; return url-safe ciphertext."""
     return get_secret_box().encrypt(plaintext.encode()).decode()
