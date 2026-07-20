@@ -474,6 +474,9 @@ async def _bill_vision_side_call(
         return
     # Key the side-call's usage/pricing on the instance, matching how the main
     # request is billed (the vision call itself routes via the same resolver).
+    # latency_ms is intentionally left NULL: this row bills the describe model as
+    # its own side-call, so the enclosing request's duration would misattribute
+    # the caller's wall-clock to it.
     cost = await log_usage(
         db=db,
         log_writer=log_writer,

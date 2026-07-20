@@ -139,6 +139,39 @@ describe("ActivityPage", () => {
     expect(await screen.findByText("No requests recorded yet.")).toBeInTheDocument();
   });
 
+  it("offers every endpoint that writes a usage log, including batches", async () => {
+    // Batch rows are written by log_batch_usage under /v1/batches and
+    // /v1/batches/results; omitting them made those rows unreachable by filter.
+    mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />);
+
+    await screen.findByText("gpt-4o");
+    const select = screen.getByLabelText("Endpoint");
+    const offered = Array.from(select.querySelectorAll("option")).map((o) => o.getAttribute("value"));
+    for (const ep of ["/v1/chat/completions", "/v1/embeddings", "/v1/batches", "/v1/batches/results"]) {
+      expect(offered).toContain(ep);
+    }
+  });
+
+  it("keeps Next reachable when the count request fails", async () => {
+    // A failed /count must not strand the operator on page 1 with a full page of
+    // rows they cannot page past.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/usage/count")) {
+        return jsonResponse({ detail: "boom" }, 500);
+      }
+      if (url.includes("/v1/usage")) {
+        return jsonResponse(Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })));
+      }
+      return jsonResponse([]);
+    });
+    renderPage(<ActivityPage />);
+
+    await screen.findAllByText("gpt-4o");
+    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+  });
+
   it("shows the paginator range and total", async () => {
     mockApi({ rows: Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })), total: 120 });
     renderPage(<ActivityPage />);

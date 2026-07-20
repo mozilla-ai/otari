@@ -64,8 +64,9 @@ const STATUS_OPTIONS: { label: string; value: string }[] = [
   { label: "Error", value: "error" },
 ];
 
-// The endpoints that write usage logs; a curated list keeps the filter a simple
-// select without a separate "distinct endpoints" query.
+// Every endpoint that writes a usage_logs row, so the filter can reach all of
+// them. A curated list keeps this a simple select without a separate "distinct
+// endpoints" query; it must be extended when a new billable route is added.
 const ENDPOINT_OPTIONS = [
   "/v1/chat/completions",
   "/v1/messages",
@@ -76,6 +77,8 @@ const ENDPOINT_OPTIONS = [
   "/v1/audio/speech",
   "/v1/images/generations",
   "/v1/rerank",
+  "/v1/batches",
+  "/v1/batches/results",
 ];
 
 const PAGE_SIZE = 50;
@@ -261,7 +264,10 @@ export function ActivityPage() {
 
   const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
   const rangeEnd = page * PAGE_SIZE + rows.length;
-  const hasNext = (page + 1) * PAGE_SIZE < total;
+  // Prefer the exact total, but fall back to "a full page came back, so there is
+  // probably more" when the count request failed. Otherwise a failed count would
+  // strand the operator on page 1 with rows they cannot reach.
+  const hasNext = count.data ? (page + 1) * PAGE_SIZE < total : rows.length === PAGE_SIZE;
 
   return (
     <div className="flex flex-col gap-6">
