@@ -22,10 +22,18 @@ DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS = 2.0
 
 @dataclass(frozen=True)
 class StreamingAttemptFailure:
-    """The reason an attempt was abandoned before any bytes were flushed."""
+    """The reason an attempt was abandoned before any bytes were flushed.
+
+    ``error_class`` is the fine-grained classifier label used for logging and
+    upstream reporting (``timeout``, ``conn_err``, ``http_503``, ...). ``reason``
+    is the coarse phase bucket for metrics: ``build_error`` when opening the
+    stream failed, ``timeout`` when the first-chunk wait elapsed, or
+    ``upstream_error`` when the upstream raised before yielding a chunk.
+    """
 
     error_class: str
     exception: BaseException
+    reason: str
 
 
 @dataclass(frozen=True)
@@ -215,7 +223,7 @@ async def iterate_streaming_attempts(
             stream = await build_stream(attempt)
         except BaseException as exc:
             retryable, error_class = classify_error(exc)
-            await on_attempt_failed(attempt, StreamingAttemptFailure(error_class, exc))
+            await on_attempt_failed(attempt, StreamingAttemptFailure(error_class, exc, reason="build_error"))
             last_exception = exc
             if not retryable:
                 raise
@@ -242,14 +250,14 @@ async def iterate_streaming_attempts(
         except asyncio.TimeoutError as exc:
             await on_attempt_failed(
                 attempt,
-                StreamingAttemptFailure("timeout", exc),
+                StreamingAttemptFailure("timeout", exc, reason="timeout"),
             )
             await _close_stream_quietly(stream)
             last_exception = exc
             continue
         except BaseException as exc:
             retryable, error_class = classify_error(exc)
-            await on_attempt_failed(attempt, StreamingAttemptFailure(error_class, exc))
+            await on_attempt_failed(attempt, StreamingAttemptFailure(error_class, exc, reason="upstream_error"))
             await _close_stream_quietly(stream)
             last_exception = exc
             if not retryable:

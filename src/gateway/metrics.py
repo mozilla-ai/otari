@@ -54,6 +54,13 @@ REQUEST_COST_DOLLARS = Histogram(
     registry=REGISTRY,
 )
 
+ABANDONED_ATTEMPTS = Counter(
+    "gateway_abandoned_attempts",
+    "Total upstream attempts abandoned before their first chunk (provider fallback / timeout waste)",
+    ["provider", "model", "reason", "position"],
+    registry=REGISTRY,
+)
+
 RATE_LIMIT_HITS = Counter(
     "gateway_rate_limit_hits",
     "Total number of rate limit hits",
@@ -177,6 +184,18 @@ def record_tokens(provider: str, model: str, prompt_tokens: int, completion_toke
 def record_cost(provider: str, model: str, cost: float) -> None:
     """Record request cost."""
     REQUEST_COST_DOLLARS.labels(provider=provider, model=model).observe(cost)
+
+
+def record_abandoned_attempt(provider: str, model: str, reason: str, position: int) -> None:
+    """Record an upstream attempt abandoned before it produced its first chunk.
+
+    ``reason`` is one of ``timeout`` (the first-chunk wait elapsed),
+    ``build_error`` (opening the upstream stream failed), or ``upstream_error``
+    (the upstream raised before yielding a chunk). ``position`` is the attempt's
+    index in the resolved routing plan; label cardinality stays bounded by the
+    plan length.
+    """
+    ABANDONED_ATTEMPTS.labels(provider=provider, model=model, reason=reason, position=str(position)).inc()
 
 
 def record_rate_limit_hit() -> None:
