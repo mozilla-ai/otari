@@ -989,6 +989,69 @@
         "title": "CreateKeyResponse",
         "type": "object"
       },
+      "CreateStoredProviderRequest": {
+        "description": "Create a stored provider. ``api_key`` is write-only and requires OTARI_SECRET_KEY.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider API key. Stored encrypted; never returned.",
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "instance": {
+            "description": "Routing key, e.g. 'openai' or a named instance like 'home_lab'.",
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          },
+          "provider_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "any-llm implementation when the instance name is not itself one.",
+            "title": "Provider Type"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "CreateStoredProviderRequest",
+        "type": "object"
+      },
       "CreateUserRequest": {
         "description": "Request model for creating a new user.",
         "properties": {
@@ -1442,6 +1505,57 @@
           "metadata"
         ],
         "title": "KeyInfo",
+        "type": "object"
+      },
+      "KnownProviderSchema": {
+        "description": "A provider the add-provider picker can offer, with autofill hints.",
+        "properties": {
+          "default_api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Built-in endpoint; blank means the SDK's default.",
+            "title": "Default Api Base"
+          },
+          "env_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Env var the SDK reads this provider's key from.",
+            "title": "Env Key"
+          },
+          "id": {
+            "description": "any-llm provider id, used as the default instance name.",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-friendly display name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "requires_api_key": {
+            "description": "False for keyless local backends (Ollama, llama.cpp).",
+            "title": "Requires Api Key",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "requires_api_key"
+        ],
+        "title": "KnownProviderSchema",
         "type": "object"
       },
       "McpServerConfig": {
@@ -2903,6 +3017,179 @@
         "title": "SetPricingRequest",
         "type": "object"
       },
+      "StoredProviderResponse": {
+        "description": "A runtime-stored provider. The API key is never returned, only ``last4``.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "client_args": {
+            "additionalProperties": true,
+            "title": "Client Args",
+            "type": "object"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decryptable": {
+            "default": true,
+            "title": "Decryptable",
+            "type": "boolean"
+          },
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "provider_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Type"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "StoredProviderResponse",
+        "type": "object"
+      },
+      "TestProviderRequest": {
+        "description": "Credentials to test before saving (from the add-provider form).",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider/instance name; the impl when no provider_type.",
+            "title": "Instance"
+          },
+          "provider_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Type"
+          }
+        },
+        "title": "TestProviderRequest",
+        "type": "object"
+      },
+      "TestProviderResponse": {
+        "description": "Result of a live provider connection test.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "model_count": {
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "model_count"
+        ],
+        "title": "TestProviderResponse",
+        "type": "object"
+      },
       "UpdateBudgetRequest": {
         "description": "Request model for updating a budget.",
         "properties": {
@@ -3014,6 +3301,71 @@
           }
         },
         "title": "UpdateSettingsRequest",
+        "type": "object"
+      },
+      "UpdateStoredProviderRequest": {
+        "description": "Update a stored provider. Omitted fields are unchanged; ``api_key`` rotates in place.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New API key. Omit to keep the existing one. Never returned.",
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "expected_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.",
+            "title": "Expected Updated At"
+          },
+          "provider_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Type"
+          }
+        },
+        "title": "UpdateStoredProviderRequest",
         "type": "object"
       },
       "UpdateUserRequest": {
@@ -5840,6 +6192,274 @@
         ]
       }
     },
+    "/v1/provider-credentials": {
+      "get": {
+        "description": "List runtime-stored providers. Keys are never returned, only ``last4``.",
+        "operationId": "list_stored_providers_v1_provider_credentials_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StoredProviderResponse"
+                  },
+                  "title": "Response List Stored Providers V1 Provider Credentials Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "List Stored Providers",
+        "tags": [
+          "providers"
+        ]
+      },
+      "post": {
+        "description": "Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.",
+        "operationId": "create_stored_provider_v1_provider_credentials_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStoredProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredProviderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Stored Provider",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/provider-credentials/test": {
+      "post": {
+        "description": "Test provider credentials without storing them (for the add/edit form).\n\nResolves the implementation from ``provider_type`` (honoring the\n``*-compatible`` aliases) or the ``instance`` name, then lists the provider's\nmodels with the supplied credentials. Nothing is persisted and the key is\nnever echoed.",
+        "operationId": "test_provider_connection_v1_provider_credentials_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestProviderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Provider Connection",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/provider-credentials/{instance}": {
+      "delete": {
+        "description": "Delete a stored provider. A config.yml provider cannot be deleted here.",
+        "operationId": "delete_stored_provider_v1_provider_credentials__instance__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "title": "Instance",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Stored Provider",
+        "tags": [
+          "providers"
+        ]
+      },
+      "patch": {
+        "description": "Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``\nso the ``expected_updated_at`` check and the write it guards are atomic.",
+        "operationId": "update_stored_provider_v1_provider_credentials__instance__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "title": "Instance",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStoredProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredProviderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Stored Provider",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/provider-credentials/{instance}/test": {
+      "post": {
+        "description": "Verify a stored provider's key by listing its models, without exposing the key.",
+        "operationId": "test_stored_provider_v1_provider_credentials__instance__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "title": "Instance",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestProviderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Stored Provider",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
     "/v1/providers": {
       "get": {
         "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.\nMaster-key gated because it describes the gateway's own configuration.",
@@ -5865,6 +6485,37 @@
           }
         ],
         "summary": "List Providers",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/providers/catalog": {
+      "get": {
+        "description": "List every known provider for the add-provider picker.\n\nNetwork-free and config-independent: the full any-llm provider set with each\none's display name, credential env var, default endpoint, and whether it\nneeds a key. Master-key gated because it is operator-facing dashboard data.",
+        "operationId": "provider_catalog_v1_providers_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KnownProviderSchema"
+                  },
+                  "title": "Response Provider Catalog V1 Providers Catalog Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Provider Catalog",
         "tags": [
           "providers"
         ]

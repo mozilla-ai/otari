@@ -39,7 +39,11 @@ from gateway.services.budget_service import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
+from gateway.services.pricing_service import (
+    find_model_pricing,
+    no_pricing_error_detail,
+    pricing_required_but_missing,
+)
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 
 ResultT = TypeVar("ResultT")
@@ -182,7 +186,7 @@ async def run_passthrough(
             await refund_reservation(db, reservation)
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=f"No pricing configured for model '{model}'",
+                detail=no_pricing_error_detail(model),
             )
 
     try:

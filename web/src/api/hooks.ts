@@ -4,15 +4,20 @@ import { apiFetch } from "@/api/client";
 import type {
   AliasResponse,
   CreateAliasRequest,
+  CreateStoredProviderRequest,
   DashboardBuild,
   DiscoverableModelsResponse,
   GatewaySettings,
+  KnownProvider,
   ModelListResponse,
   ModelMetadataResponse,
   PricingResponse,
   ProvidersResponse,
   SetPricingRequest,
+  StoredProvider,
+  TestProviderResult,
   UpdateSettingsRequest,
+  UpdateStoredProviderRequest,
 } from "@/api/types";
 
 const MODELS = "models";
@@ -24,6 +29,7 @@ const ALIASES = "aliases";
 // key would fire a live provider call on every save.
 const DISCOVERABLE = "discoverable";
 const PROVIDERS = "providers";
+const STORED_PROVIDERS = "stored-providers";
 const METADATA = "model-metadata";
 const BUILD = "build";
 
@@ -80,6 +86,86 @@ export function useProviders() {
     queryKey: [PROVIDERS],
     queryFn: () => apiFetch<ProvidersResponse>("/v1/providers"),
     staleTime: 5 * 60_000,
+  });
+}
+
+// Every known provider the add-provider picker can offer, with autofill hints.
+// Bundled/static gateway-side, so it never moves within a session.
+export function useProviderCatalog() {
+  return useQuery({
+    queryKey: ["provider-catalog"],
+    queryFn: () => apiFetch<KnownProvider[]>("/v1/providers/catalog"),
+    staleTime: Infinity,
+  });
+}
+
+// Providers configured at runtime through the dashboard. Distinct from
+// useProviders (static metadata for every configured provider, config + stored
+// merged): this is the editable set, with the last 4 of each stored key.
+export function useStoredProviders() {
+  return useQuery({
+    queryKey: [STORED_PROVIDERS],
+    queryFn: () => apiFetch<StoredProvider[]>("/v1/provider-credentials"),
+    staleTime: 60_000,
+  });
+}
+
+// A new or changed provider can change which models the catalog and picker
+// report, so a credential write invalidates those too.
+function invalidateProviderViews(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: [STORED_PROVIDERS] });
+  void queryClient.invalidateQueries({ queryKey: [PROVIDERS] });
+  void queryClient.invalidateQueries({ queryKey: [MODELS] });
+  void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] });
+}
+
+export function useCreateStoredProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateStoredProviderRequest) =>
+      apiFetch<StoredProvider>("/v1/provider-credentials", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => invalidateProviderViews(queryClient),
+  });
+}
+
+export function useUpdateStoredProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ instance, body }: { instance: string; body: UpdateStoredProviderRequest }) =>
+      apiFetch<StoredProvider>(`/v1/provider-credentials/${encodeURIComponent(instance)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateProviderViews(queryClient),
+  });
+}
+
+export function useDeleteStoredProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (instance: string) =>
+      apiFetch<void>(`/v1/provider-credentials/${encodeURIComponent(instance)}`, { method: "DELETE" }),
+    onSuccess: () => invalidateProviderViews(queryClient),
+  });
+}
+
+// Tests a stored provider's key by listing its models. Read-only on the server,
+// so it invalidates nothing.
+export function useTestStoredProvider() {
+  return useMutation({
+    mutationFn: (instance: string) =>
+      apiFetch<TestProviderResult>(`/v1/provider-credentials/${encodeURIComponent(instance)}/test`, {
+        method: "POST",
+      }),
+  });
+}
+
+// Tests credentials from the add/edit form before they are saved. Nothing is
+// persisted server-side, so it invalidates nothing.
+export function useTestProviderCredentials() {
+  return useMutation({
+    mutationFn: (body: CreateStoredProviderRequest) =>
+      apiFetch<TestProviderResult>("/v1/provider-credentials/test", { method: "POST", body: JSON.stringify(body) }),
   });
 }
 

@@ -303,3 +303,18 @@ def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricin
     (the request is served and logged without cost).
     """
     return pricing is None and require_pricing
+
+
+def no_pricing_error_detail(model: str) -> str:
+    """The 402 body for an unpriced model: what went wrong, why, and how to fix it.
+
+    A new operator adding a provider in the dashboard hits this on their first
+    request; the cause and both fixes live only in a startup log they never see,
+    so spell them out in the response.
+    """
+    return (
+        f"No pricing is configured for model '{model}', and require_pricing is on, so it cannot be billed. "
+        "Fix it either way: add pricing (POST /v1/pricing, or the pricing section of config.yml), "
+        'or enable the default-pricing fallback (PATCH /v1/settings {"default_pricing": true}) '
+        "to meter with public list prices."
+    )

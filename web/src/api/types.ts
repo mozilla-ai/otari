@@ -100,6 +100,54 @@ export interface ProvidersResponse {
   providers: ProviderInfo[];
 }
 
+// A provider configured at runtime through the dashboard (a row in
+// provider_credentials). The API key is never returned, only `last4`.
+export interface StoredProvider {
+  instance: string;
+  provider_type: string | null;
+  api_base: string | null;
+  last4: string | null;
+  client_args: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+  // False when the stored key can't be decrypted with the current OTARI_SECRET_KEY.
+  decryptable: boolean;
+}
+
+export interface CreateStoredProviderRequest {
+  instance: string;
+  provider_type?: string | null;
+  api_base?: string | null;
+  api_key?: string | null;
+  client_args?: Record<string, unknown> | null;
+}
+
+// Omitted fields are left unchanged; `api_key` rotates the stored key in place.
+// `expected_updated_at` guards against clobbering a concurrent edit (412).
+export interface UpdateStoredProviderRequest {
+  provider_type?: string | null;
+  api_base?: string | null;
+  api_key?: string | null;
+  client_args?: Record<string, unknown> | null;
+  expected_updated_at?: string | null;
+}
+
+// Result of a live provider connection test (lists the provider's models).
+export interface TestProviderResult {
+  ok: boolean;
+  model_count: number;
+  error: string | null;
+}
+
+// A known provider offered in the add-provider picker, with autofill hints.
+export interface KnownProvider {
+  id: string;
+  name: string;
+  env_key: string | null;
+  default_api_base: string | null;
+  requires_api_key: boolean;
+}
+
 // Per-model metadata from the public models.dev catalog, for the detail panel.
 // Fields are best-effort: models.dev does not know every model, and unknown
 // values come back null/false/[].
