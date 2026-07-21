@@ -429,7 +429,10 @@ def _dense_series(
     in time. ``GROUP BY`` omits empty buckets, so without this a sparse range (say
     usage on day 1 and day 20 of a month) would render as two adjacent bars and
     misread the trend. Falls back to the sparse buckets past ``_MAX_SERIES_POINTS``.
+    An empty window (no rows at all) returns an empty series, not a wall of zeros.
     """
+    if not rows:
+        return []
     populated = {key: (cost, tokens, requests) for key, cost, tokens, requests in rows}
     step = timedelta(hours=1) if bucket == "hour" else timedelta(days=1)
     if bucket == "hour":
