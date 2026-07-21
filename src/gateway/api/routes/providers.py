@@ -24,6 +24,7 @@ from gateway.services.model_discovery_service import (
     get_model_cache,
     test_provider_credentials,
 )
+from gateway.services.provider_health_service import ProviderHealth, check_all_provider_health
 from gateway.services.provider_metadata_service import (
     KnownProvider,
     ProviderInfo,
@@ -152,6 +153,69 @@ async def provider_catalog() -> list[KnownProviderSchema]:
     needs a key. Master-key gated because it is operator-facing dashboard data.
     """
     return [_to_known_schema(provider) for provider in list_known_providers()]
+
+
+class ProviderHealthSchema(BaseModel):
+    """One provider instance's reachability, from the model-discovery test path."""
+
+    instance: str
+    ok: bool = Field(description="True when the provider's credentials could list models.")
+    model_count: int = Field(description="Number of models the last successful listing returned.")
+    error: str | None = Field(default=None, description="Sanitized provider error when unreachable.")
+    checked_at: str | None = Field(
+        default=None,
+        description="ISO 8601 wall-clock time the provider's reachability was last checked (null if never).",
+    )
+
+
+class ProviderHealthResponse(BaseModel):
+    """Provider connectivity across the whole gateway, for the health monitor.
+
+    Carries per-provider results plus the ``healthy`` / ``total`` counts and the
+    most recent ``checked_at`` so the overview page can render a summary tile
+    without re-deriving them.
+    """
+
+    providers: list[ProviderHealthSchema]
+    healthy: int = Field(description="How many providers are currently reachable.")
+    total: int = Field(description="How many providers are configured.")
+    checked_at: str | None = Field(
+        default=None,
+        description="ISO 8601 time of the most recent per-provider check (null if none yet).",
+    )
+
+
+def _to_health_schema(health: ProviderHealth) -> ProviderHealthSchema:
+    return ProviderHealthSchema(
+        instance=health.instance,
+        ok=health.ok,
+        model_count=health.model_count,
+        error=health.error,
+        checked_at=health.checked_at.isoformat() if health.checked_at else None,
+    )
+
+
+@router.get("/providers/health", dependencies=[Depends(verify_master_key)])
+async def provider_health(
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    refresh: bool = False,
+) -> ProviderHealthResponse:
+    """Report every configured provider's reachability, with a last-checked time.
+
+    Reuses the per-provider model-discovery test path, so a provider is healthy
+    when its credentials can list models. Results are served from the discovery
+    cache (cheap enough to poll), so ``checked_at`` reflects when each provider
+    was actually dialed. Pass ``refresh=true`` to force a live re-dial of every
+    provider. Master-key gated because it describes the gateway's own providers.
+    """
+    results = await check_all_provider_health(config, refresh=refresh)
+    checked_ats = [health.checked_at for health in results if health.checked_at is not None]
+    return ProviderHealthResponse(
+        providers=[_to_health_schema(health) for health in sorted(results, key=lambda item: item.instance)],
+        healthy=sum(1 for health in results if health.ok),
+        total=len(results),
+        checked_at=max(checked_ats).isoformat() if checked_ats else None,
+    )
 
 
 # --------------------------------------------------------------------------- #

@@ -587,3 +587,134 @@ def test_discoverable_is_not_shadowed_by_get_model(
     body = resp.json()
     assert "providers" in body
     assert "object" not in body
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/providers/health (provider health monitor)
+# ---------------------------------------------------------------------------
+
+
+def test_provider_health_reports_each_provider(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """A failing provider is unhealthy and carries its error; a working one is healthy."""
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            side_effect=_alist_models_per_provider,
+        ),
+    ):
+        resp = two_provider_client.get("/v1/providers/health", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    # Summary counts are precomputed so the overview tile (issue #302) need not re-derive them.
+    assert body["total"] == 2
+    assert body["healthy"] == 1
+    assert body["checked_at"] is not None
+
+    providers = {p["instance"]: p for p in body["providers"]}
+    # Sorted by instance name for a stable table.
+    assert [p["instance"] for p in body["providers"]] == ["anthropic", "openai"]
+
+    assert providers["openai"]["ok"] is True
+    assert providers["openai"]["model_count"] == 2
+    assert providers["openai"]["error"] is None
+    assert providers["openai"]["checked_at"] is not None
+
+    assert providers["anthropic"]["ok"] is False
+    assert providers["anthropic"]["model_count"] == 0
+    assert "authentication failed" in providers["anthropic"]["error"]
+
+
+def test_provider_health_refresh_forces_a_live_recheck(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """refresh=true clears the cache, so a now-broken provider is re-dialed, not served a stale verdict."""
+    from datetime import UTC, datetime, timedelta
+
+    from any_llm.types.model import Model
+
+    # Prime a healthy listing whose dial is older than the refresh debounce window,
+    # as if a check had succeeded a while ago, so a forced refresh actually re-dials.
+    get_model_cache().set("openai", [Model(**_make_openai_model("gpt-4o"))])
+    get_model_cache()._store["openai"].checked_at = datetime.now(UTC) - timedelta(seconds=60)
+
+    def always_fail(**kwargs: Any) -> list[Any]:
+        raise RuntimeError("provider down")
+
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            side_effect=always_fail,
+        ),
+    ):
+        # Without refresh, openai is served from the cached healthy listing (not dialed).
+        cached = two_provider_client.get("/v1/providers/health", headers=discovery_master_header)
+        # With refresh, the cache is cleared, openai is dialed live, and the outage surfaces.
+        refreshed = two_provider_client.get(
+            "/v1/providers/health?refresh=true", headers=discovery_master_header
+        )
+
+    cached_openai = next(p for p in cached.json()["providers"] if p["instance"] == "openai")
+    assert cached_openai["ok"] is True
+    assert cached_openai["model_count"] == 1
+
+    refreshed_openai = next(p for p in refreshed.json()["providers"] if p["instance"] == "openai")
+    assert refreshed_openai["ok"] is False
+    assert "provider down" in refreshed_openai["error"]
+
+
+def test_provider_health_refresh_is_debounced_within_the_window(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """A refresh moments after a recent dial is coalesced onto it, not re-dialed."""
+    from any_llm.types.model import Model
+
+    # A freshly dialed healthy listing (checked_at == now); a refresh within the
+    # debounce window must reuse it rather than clear the cache and dial again.
+    get_model_cache().set("openai", [Model(**_make_openai_model("gpt-4o"))])
+
+    def always_fail(**kwargs: Any) -> list[Any]:
+        raise RuntimeError("provider down")
+
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            side_effect=always_fail,
+        ),
+    ):
+        refreshed = two_provider_client.get(
+            "/v1/providers/health?refresh=true", headers=discovery_master_header
+        )
+
+    # Debounced: the recent healthy listing is served, not a fresh failed dial.
+    refreshed_openai = next(p for p in refreshed.json()["providers"] if p["instance"] == "openai")
+    assert refreshed_openai["ok"] is True
+    assert refreshed_openai["model_count"] == 1
+
+
+def test_provider_health_requires_master_key(
+    two_provider_client: TestClient,
+) -> None:
+    """The endpoint describes gateway config, so it is master-key gated."""
+    resp = two_provider_client.get("/v1/providers/health")
+    assert resp.status_code in (401, 403)

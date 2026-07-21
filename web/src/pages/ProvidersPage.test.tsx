@@ -5,7 +5,15 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
-import type { GatewaySettings, KnownProvider, ProviderInfo, StoredProvider, TestProviderResult } from "@/api/types";
+import type {
+  GatewaySettings,
+  KnownProvider,
+  ProviderHealth,
+  ProviderHealthResponse,
+  ProviderInfo,
+  StoredProvider,
+  TestProviderResult,
+} from "@/api/types";
 import { ProvidersPage } from "@/pages/ProvidersPage";
 
 const CAPS = {
@@ -60,12 +68,30 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
+// Build a health response, defaulting every provider in `meta` to reachable so
+// tests that don't care about health still get a well-formed payload.
+function healthResponse(providers: ProviderHealth[]): ProviderHealthResponse {
+  // Mirror the backend: the summary checked_at is the most recent per-provider
+  // checked_at, or null when no provider has ever been checked.
+  const checkedAts = providers.map((p) => p.checked_at).filter((t): t is string => t !== null);
+  return {
+    providers,
+    healthy: providers.filter((p) => p.ok).length,
+    total: providers.length,
+    checked_at: checkedAts.length > 0 ? checkedAts.sort().at(-1)! : null,
+  };
+}
+
 interface MockOpts {
   meta?: ProviderInfo[];
   stored?: StoredProvider[];
   settings?: GatewaySettings;
   testResult?: TestProviderResult;
   catalog?: KnownProvider[];
+  // Per-provider health; defaults to every `meta` provider reachable. `healthRefresh`
+  // is served for the forced-refresh (refresh=true) request, if given.
+  health?: ProviderHealth[];
+  healthRefresh?: ProviderHealth[];
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -74,6 +100,10 @@ function mockApi(opts: MockOpts = {}) {
   const meta = opts.meta ?? [];
   const testResult = opts.testResult ?? { ok: true, model_count: 3, error: null };
   const catalog = opts.catalog ?? [];
+  const health =
+    opts.health ??
+    meta.map((info) => ({ instance: info.instance, ok: true, model_count: 3, error: null, checked_at: null }));
+  const healthRefresh = opts.healthRefresh ?? health;
 
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
@@ -98,6 +128,9 @@ function mockApi(opts: MockOpts = {}) {
     }
     if (url.includes("/v1/providers/catalog")) {
       return jsonResponse(catalog);
+    }
+    if (url.includes("/v1/providers/health")) {
+      return jsonResponse(healthResponse(url.includes("refresh=true") ? healthRefresh : health));
     }
     if (url.includes("/v1/providers")) {
       return jsonResponse({ providers: meta });
@@ -266,4 +299,62 @@ describe("ProvidersPage", () => {
 
   // The gateway-wide require_pricing alarm moved to the app shell; its behavior
   // (show, enable default pricing, dismiss) is covered in PricingWarning.test.tsx.
+
+  it("shows each provider's reachability, including config-only providers", async () => {
+    mockApi({
+      meta: [providerInfo("openai"), providerInfo("anthropic")],
+      health: [
+        { instance: "openai", ok: true, model_count: 12, error: null, checked_at: "2026-07-21T00:00:00+00:00" },
+        {
+          instance: "anthropic",
+          ok: false,
+          model_count: 0,
+          error: "authentication failed: invalid key",
+          checked_at: "2026-07-21T00:00:00+00:00",
+        },
+      ],
+    });
+    renderPage(<ProvidersPage />);
+
+    // Scope by the status pill's row (the provider name repeats in the Type cell).
+    const reachableRow = (await screen.findByText("Reachable")).closest("tr")!;
+    expect(within(reachableRow).getAllByText("openai").length).toBeGreaterThan(0);
+
+    const unreachablePill = screen.getByText("Unreachable");
+    const unreachableRow = unreachablePill.closest("tr")!;
+    expect(within(unreachableRow).getAllByText("anthropic").length).toBeGreaterThan(0);
+    // The provider error rides along as the pill's tooltip.
+    expect(unreachablePill).toHaveAttribute("title", expect.stringContaining("authentication failed"));
+  });
+
+  it("summarizes how many providers are reachable", async () => {
+    mockApi({
+      meta: [providerInfo("openai"), providerInfo("anthropic")],
+      health: [
+        { instance: "openai", ok: true, model_count: 3, error: null, checked_at: null },
+        { instance: "anthropic", ok: false, model_count: 0, error: "down", checked_at: null },
+      ],
+    });
+    renderPage(<ProvidersPage />);
+
+    expect(await screen.findByText("1 of 2 providers reachable")).toBeInTheDocument();
+  });
+
+  it("forces a live re-check of every provider on Re-check all", async () => {
+    const user = userEvent.setup();
+    mockApi({
+      meta: [providerInfo("openai")],
+      health: [{ instance: "openai", ok: true, model_count: 3, error: null, checked_at: null }],
+      healthRefresh: [{ instance: "openai", ok: false, model_count: 0, error: "provider down", checked_at: null }],
+    });
+    renderPage(<ProvidersPage />);
+
+    const row = (await screen.findByText("Reachable")).closest("tr")!;
+    expect(within(row).getAllByText("openai").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("button", { name: "Re-check all" }));
+
+    expect(await within(row).findByText("Unreachable")).toBeInTheDocument();
+    expect(await screen.findByText("0 of 1 provider reachable")).toBeInTheDocument();
+  });
 });

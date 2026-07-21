@@ -20,6 +20,7 @@ gateway.db
 otari-gateway.db
 otari.db
 otari-dev.db
+otari-smoke.db
 
 .DS_Store
 

@@ -139,6 +139,28 @@ export interface TestProviderResult {
   error: string | null;
 }
 
+// One provider instance's reachability, from the same model-discovery path the
+// per-provider "test connection" uses. `ok` false means unreachable; `error`
+// carries the sanitized provider error. `checked_at` is the wall-clock time the
+// provider was last dialed (null if never), so a cached status shows honest age.
+export interface ProviderHealth {
+  instance: string;
+  ok: boolean;
+  model_count: number;
+  error: string | null;
+  checked_at: string | null;
+}
+
+// Provider connectivity across the gateway. The `healthy` / `total` counts and
+// most-recent `checked_at` are precomputed so a summary tile (the overview page,
+// issue #302) can reuse them without re-deriving.
+export interface ProviderHealthResponse {
+  providers: ProviderHealth[];
+  healthy: number;
+  total: number;
+  checked_at: string | null;
+}
+
 // A known provider offered in the add-provider picker, with autofill hints.
 export interface KnownProvider {
   id: string;

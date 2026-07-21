@@ -18,6 +18,7 @@ import type {
   ModelListResponse,
   ModelMetadataResponse,
   PricingResponse,
+  ProviderHealthResponse,
   ProvidersResponse,
   SetPricingRequest,
   StoredProvider,
@@ -43,6 +44,7 @@ const ALIASES = "aliases";
 // key would fire a live provider call on every save.
 const DISCOVERABLE = "discoverable";
 const PROVIDERS = "providers";
+const PROVIDER_HEALTH = "provider-health";
 const STORED_PROVIDERS = "stored-providers";
 const METADATA = "model-metadata";
 const BUILD = "build";
@@ -117,6 +119,36 @@ export function useProviderCatalog() {
   });
 }
 
+// Every configured provider's reachability, for the health monitor. Backed by
+// the same model-discovery test path as the per-provider "test connection", so a
+// provider is healthy when its credentials can list models. The gateway caches
+// the underlying dials, so this is cheap enough to poll.
+//
+// `refetchInterval` opts a page into background refresh (pass a millisecond
+// interval); omit it (or pass false) for a purely on-demand load. The response's
+// healthy/total counts are reused by the overview summary tile (issue #302).
+export function useProviderHealth(refetchInterval: number | false = false) {
+  return useQuery({
+    queryKey: [PROVIDER_HEALTH],
+    queryFn: () => apiFetch<ProviderHealthResponse>("/v1/providers/health"),
+    // A provider's reachability does not move second to second; keep it briefly
+    // fresh so navigating back does not re-dial every provider.
+    staleTime: 30_000,
+    refetchInterval,
+  });
+}
+
+// Force a live re-check of every provider (clears the gateway's discovery cache),
+// for an explicit "Refresh" action. Writes the fresh result straight into the
+// health query so the table and any summary tile update together.
+export function useRecheckProviderHealth() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<ProviderHealthResponse>("/v1/providers/health?refresh=true"),
+    onSuccess: (data) => queryClient.setQueryData([PROVIDER_HEALTH], data),
+  });
+}
+
 // Providers configured at runtime through the dashboard. Distinct from
 // useProviders (static metadata for every configured provider, config + stored
 // merged): this is the editable set, with the last 4 of each stored key.
@@ -135,6 +167,9 @@ function invalidateProviderViews(queryClient: ReturnType<typeof useQueryClient>)
   void queryClient.invalidateQueries({ queryKey: [PROVIDERS] });
   void queryClient.invalidateQueries({ queryKey: [MODELS] });
   void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] });
+  // A credential change can flip a provider's reachability, so the health view
+  // must re-check rather than show a verdict from the old key.
+  void queryClient.invalidateQueries({ queryKey: [PROVIDER_HEALTH] });
 }
 
 export function useCreateStoredProvider() {
