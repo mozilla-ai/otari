@@ -46,6 +46,12 @@ class TestShortError:
     def test_falls_back_to_class_name_for_empty_message(self) -> None:
         assert _short_error(ValueError()) == "ValueError"
 
+    def test_falls_back_to_class_name_when_message_is_only_the_tag(self) -> None:
+        # Stripping the tag off a bare "[anthropic]" (or "[anthropic]   ") must not
+        # leave an empty string, which would render as a blank error.
+        assert _short_error(ValueError("[anthropic]"), provider="anthropic") == "ValueError"
+        assert _short_error(ValueError("[anthropic]   "), provider="anthropic") == "ValueError"
+
     def test_caps_long_message_after_stripping_tag(self) -> None:
         body = "x" * (_ERROR_MAX_CHARS + 50)
         result = _short_error(ValueError(f"[anthropic] {body}"), provider="anthropic")

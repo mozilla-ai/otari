@@ -2,7 +2,6 @@ import { Spinner } from "@heroui/react";
 import {
   createContext,
   type PointerEvent as ReactPointerEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useCallback,
   useContext,
@@ -18,7 +17,6 @@ import {
 // stay in memory (per mounted table) rather than persisted: the goal is to let an
 // operator widen a cramped column while they work, not to remember a layout.
 const MIN_COLUMN_WIDTH = 60;
-const COLUMN_RESIZE_STEP = 24;
 
 interface ColumnResize {
   // Per-column pixel widths once the table has switched to a fixed layout, or
@@ -93,32 +91,27 @@ export function THead({ children }: { children: ReactNode }) {
 }
 
 // The drag handle on a header cell's right edge. Resolves its column from the DOM
-// (the parent cell's position in its row) so it needs no per-column wiring, and
-// mirrors the sidebar resizer: pointer drag, plus arrow keys for keyboard users.
+// (the parent cell's position in its row) so it needs no per-column wiring.
+// Pointer-only and aria-hidden on purpose: column resizing is a visual
+// convenience, and a focusable "separator" per column would add a tab stop to
+// every header while exposing an incomplete widget to assistive tech (a column
+// width has no bounded range to announce via aria-valuemin/now/max).
 function ColumnResizeHandle({ resize }: { resize: ColumnResize }) {
   const ref = useRef<HTMLSpanElement>(null);
   const drag = useRef<{ index: number; startX: number; startWidth: number } | null>(null);
 
-  const columnFromDom = (): { index: number; row: HTMLTableRowElement; width: number } | null => {
+  const startResize = (event: ReactPointerEvent<HTMLSpanElement>) => {
     const cell = ref.current?.closest("th");
     const row = cell?.parentElement;
     if (!cell || !(row instanceof HTMLTableRowElement)) {
-      return null;
-    }
-    return { index: cell.cellIndex, row, width: cell.getBoundingClientRect().width };
-  };
-
-  const startResize = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    const column = columnFromDom();
-    if (!column) {
       return;
     }
     // Keep the drag off the header's sort button and the row's click handler.
     event.preventDefault();
     event.stopPropagation();
-    resize.pinWidths(column.row);
+    resize.pinWidths(row);
     ref.current?.setPointerCapture(event.pointerId);
-    drag.current = { index: column.index, startX: event.clientX, startWidth: column.width };
+    drag.current = { index: cell.cellIndex, startX: event.clientX, startWidth: cell.getBoundingClientRect().width };
   };
 
   const moveResize = (event: ReactPointerEvent<HTMLSpanElement>) => {
@@ -129,6 +122,9 @@ function ColumnResizeHandle({ resize }: { resize: ColumnResize }) {
     resize.setColumnWidth(state.index, state.startWidth + (event.clientX - state.startX));
   };
 
+  // Runs on pointer up and on pointer cancel: a browser gesture or OS
+  // interruption can end the drag without a pointerup, so the drag state must be
+  // cleared either way rather than lingering and resizing on the next move.
   const endResize = (event: ReactPointerEvent<HTMLSpanElement>) => {
     if (ref.current?.hasPointerCapture(event.pointerId)) {
       ref.current.releasePointerCapture(event.pointerId);
@@ -136,40 +132,20 @@ function ColumnResizeHandle({ resize }: { resize: ColumnResize }) {
     drag.current = null;
   };
 
-  const nudgeResize = (event: ReactKeyboardEvent<HTMLSpanElement>) => {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
-      return;
-    }
-    const column = columnFromDom();
-    if (!column) {
-      return;
-    }
-    event.preventDefault();
-    resize.pinWidths(column.row);
-    const base = resize.widths?.[column.index] ?? column.width;
-    resize.setColumnWidth(column.index, base + (event.key === "ArrowLeft" ? -COLUMN_RESIZE_STEP : COLUMN_RESIZE_STEP));
-  };
-
   return (
     <span
       ref={ref}
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize column"
+      aria-hidden
       title="Drag to resize"
-      tabIndex={0}
       onPointerDown={startResize}
       onPointerMove={moveResize}
       onPointerUp={endResize}
-      onKeyDown={nudgeResize}
-      className="group absolute top-0 right-0 z-10 flex h-full w-2 cursor-col-resize touch-none select-none justify-end focus:outline-none"
+      onPointerCancel={endResize}
+      className="group absolute top-0 right-0 z-10 flex h-full w-2 cursor-col-resize touch-none select-none justify-end"
     >
       {/* Always-visible divider so the grab point is discoverable; it brightens
-          to the brand color and thickens on hover or keyboard focus. */}
-      <span
-        aria-hidden
-        className="h-full w-px bg-[var(--otari-line)] transition-all group-hover:w-0.5 group-hover:bg-[var(--otari-brand)] group-focus-visible:w-0.5 group-focus-visible:bg-[var(--otari-brand)]"
-      />
+          to the brand color and thickens on hover. */}
+      <span className="h-full w-px bg-[var(--otari-line)] transition-all group-hover:w-0.5 group-hover:bg-[var(--otari-brand)]" />
     </span>
   );
 }

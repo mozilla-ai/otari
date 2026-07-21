@@ -152,7 +152,9 @@ def _short_error(exc: BaseException, provider: str | None = None) -> str:
     # is already provider-specific, so the tag is redundant noise; drop it when it
     # names the provider being tested. Any other bracketed text is left intact.
     if provider and message.startswith(f"[{provider}]"):
-        message = message[len(provider) + 2 :].lstrip()
+        # Re-apply the class-name fallback: a message that was only the tag (e.g.
+        # "[anthropic]") strips to "", which would render as a blank error.
+        message = message[len(provider) + 2 :].lstrip() or exc.__class__.__name__
     if len(message) > _ERROR_MAX_CHARS:
         return message[: _ERROR_MAX_CHARS - 1] + "…"
     return message
