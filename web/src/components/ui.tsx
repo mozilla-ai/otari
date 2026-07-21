@@ -1,5 +1,5 @@
 import { Button, Card } from "@heroui/react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ApiError } from "@/api/client";
@@ -118,9 +118,11 @@ export function FilterSelect({
   options?: { value: string; label: string }[];
   children?: ReactNode;
 }) {
+  const fallbackId = useId();
+  const selectId = id ?? (label ? fallbackId : undefined);
   const select = (
     <select
-      id={id}
+      id={selectId}
       aria-label={label ? undefined : ariaLabel}
       value={value}
       onChange={(event) => onChange(event.target.value)}
@@ -139,7 +141,7 @@ export function FilterSelect({
   if (label) {
     return (
       <div className="flex flex-col gap-1">
-        <label htmlFor={id} className="text-xs font-medium text-[var(--otari-muted)]">
+        <label htmlFor={selectId} className="text-xs font-medium text-[var(--otari-muted)]">
           {label}
         </label>
         {select}
