@@ -127,6 +127,23 @@ describe("AliasesPage", () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: "smart", target: "openai:gpt-4o" });
   });
 
+  it("opening the edit form closes the create form", async () => {
+    mockApi([
+      { name: "smart", target: "anthropic:claude-opus-4", source: "stored", created_at: null, updated_at: null },
+    ]);
+    const user = userEvent.setup();
+    renderPage(<AliasesPage />);
+
+    await user.click(await screen.findByRole("button", { name: "New alias" }));
+    expect(screen.getByText("New alias")).toBeInTheDocument();
+
+    const row = screen.getByText("smart").closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    expect(screen.queryByText("New alias")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /save changes/i })).toBeInTheDocument();
+  });
+
   it("refuses an alias name that could be mistaken for a model key", async () => {
     mockApi([]);
     const user = userEvent.setup();

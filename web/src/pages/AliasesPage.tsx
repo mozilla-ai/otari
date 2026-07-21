@@ -134,7 +134,13 @@ export function AliasesPage() {
         description="Friendly names that map to a real provider:model. Callers send the alias as the model; pricing, budgets, and usage key on the target."
         action={
           adding || editing ? null : (
-            <Button variant="primary" onPress={() => setAdding(true)}>
+            <Button
+              variant="primary"
+              onPress={() => {
+                setEditing(null);
+                setAdding(true);
+              }}
+            >
               New alias
             </Button>
           )
@@ -173,7 +179,16 @@ export function AliasesPage() {
                 <Td className="text-right whitespace-nowrap">
                   {alias.source === "stored" ? (
                     <span className="inline-flex items-center gap-2">
-                      <Button size="sm" variant="ghost" onPress={() => setEditing(alias)}>Edit</Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onPress={() => {
+                          setAdding(false);
+                          setEditing(alias);
+                        }}
+                      >
+                        Edit
+                      </Button>
                       <ConfirmButton
                         confirmLabel="Delete"
                         isPending={deleteAlias.isPending}
