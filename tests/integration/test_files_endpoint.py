@@ -88,12 +88,17 @@ def test_files_are_user_scoped(
     master_key_header: dict[str, str],
     tmp_file_store: None,
 ) -> None:
-    # Upload as the first key's user.
+    # Upload as the first key's user (the shared "default" user: this key was
+    # created without an explicit user_id).
     up = client.post("/v1/files", headers=api_key_header, files={"file": ("a.txt", b"hi", "text/plain")})
     file_id = up.json()["id"]
 
-    # A second, independent key (its own auto-created user) must not see it.
-    other = client.post("/v1/keys", json={"key_name": "other"}, headers=master_key_header)
+    # A key owned by a DIFFERENT user must not see it. File isolation is per-user,
+    # not per-key, and keys created without a user_id all share the "default" user
+    # (see keys.py / get_or_create_default_user), so give this key its own owner.
+    other = client.post(
+        "/v1/keys", json={"key_name": "other", "user_id": "other-user"}, headers=master_key_header
+    )
     # Match the fixture's auth scheme: the gateway requires a "Bearer " prefix on
     # every header form, including Otari-Key (see api_key_header / deps.py
     # _extract_bearer_token), so reuse the fixture's header name with a Bearer value.
@@ -103,6 +108,26 @@ def test_files_are_user_scoped(
     assert client.get(f"/v1/files/{file_id}/content", headers=other_header).status_code == 404
     # Owner still sees it.
     assert client.get(f"/v1/files/{file_id}", headers=api_key_header).status_code == 200
+
+
+def test_no_owner_keys_share_default_user_files(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    tmp_file_store: None,
+) -> None:
+    # Two keys created without an explicit user_id both attach to the shared
+    # "default" user, so they intentionally share files (and budget/usage). This
+    # pins that deliberate behavior: no-owner keys are NOT isolated from each other;
+    # isolation requires giving keys distinct owners (see test_files_are_user_scoped).
+    up = client.post("/v1/files", headers=api_key_header, files={"file": ("a.txt", b"hi", "text/plain")})
+    file_id = up.json()["id"]
+
+    sibling = client.post("/v1/keys", json={"key_name": "sibling"}, headers=master_key_header)
+    sibling_header = {next(iter(api_key_header)): f"Bearer {sibling.json()['key']}"}
+
+    assert client.get(f"/v1/files/{file_id}", headers=sibling_header).status_code == 200
+    assert client.get(f"/v1/files/{file_id}/content", headers=sibling_header).status_code == 200
 
 
 def test_download_filename_header_is_injection_safe(

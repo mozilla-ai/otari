@@ -5,8 +5,28 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
-import type { ApiKey } from "@/api/types";
+import type { ApiKey, User } from "@/api/types";
 import { KeysPage } from "@/pages/KeysPage";
+
+function user(overrides: Partial<User> = {}): User {
+  return {
+    user_id: "alice",
+    // An alias is what makes the owner option's label differ from its user_id,
+    // which is the case the picker has to get right.
+    alias: "Alice",
+    spend: 0,
+    reserved: 0,
+    budget_id: null,
+    allowed_models: null,
+    budget_started_at: null,
+    next_budget_reset_at: null,
+    blocked: false,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
+    metadata: {},
+    ...overrides,
+  };
+}
 
 function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
   return {
@@ -31,8 +51,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 const NEW_SECRET = "gw-NEWSECRET0000000000000000000000000000000000000000000000";
 const REGEN_SECRET = "gw-REGEN00000000000000000000000000000000000000000000000000";
 
-function mockApi(opts: { keys?: ApiKey[] } = {}) {
+function mockApi(opts: { keys?: ApiKey[]; users?: User[] } = {}) {
   let list = [...(opts.keys ?? [])];
+  const users = opts.users ?? [];
 
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
@@ -74,6 +95,9 @@ function mockApi(opts: { keys?: ApiKey[] } = {}) {
         return new Response(null, { status: 204 });
       }
       return jsonResponse(list);
+    }
+    if (url.includes("/v1/users")) {
+      return jsonResponse(users);
     }
     if (url.includes("/v1/models/discoverable")) {
       return jsonResponse({
@@ -131,6 +155,8 @@ describe("KeysPage", () => {
     await screen.findByText("No API keys yet");
     await user.click(screen.getByRole("button", { name: "Create your first key" }));
     await user.type(screen.getByLabelText("Name"), "deploy-key");
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Create key" }));
 
     // The reveal shows the secret and a runnable curl snippet with the key injected.
@@ -155,6 +181,8 @@ describe("KeysPage", () => {
 
     await screen.findByText("No API keys yet");
     await user.click(screen.getByRole("button", { name: "Create your first key" }));
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Create key" }));
 
     const dialog = await screen.findByRole("dialog");
@@ -176,6 +204,8 @@ describe("KeysPage", () => {
 
     await screen.findByText("No API keys yet");
     await user.click(screen.getByRole("button", { name: "Create your first key" }));
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Create key" }));
 
     const dialog = await screen.findByRole("dialog");
@@ -246,7 +276,9 @@ describe("KeysPage", () => {
 
     await screen.findByText("No API keys yet");
     await user.click(screen.getByRole("button", { name: "Create your first key" }));
-    await user.click(screen.getByRole("button", { name: "Advanced (user, model access)" }));
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Advanced (restrict models)" }));
     await user.click(screen.getByRole("button", { name: "Only selected" }));
     // The scope picker is a catalog combobox, not free text: type to filter, then
     // pick the discovered model.
@@ -260,6 +292,30 @@ describe("KeysPage", () => {
       ([u, init]) => String(u).endsWith("/v1/keys") && (init?.method ?? "") === "POST",
     );
     expect(JSON.parse(String(post?.[1]?.body)).allowed_models).toEqual(["openai:gpt-4o"]);
+    // User-first: the key names its owner rather than auto-creating a virtual user.
+    expect(JSON.parse(String(post?.[1]?.body)).user_id).toBe("alice");
+  });
+
+  it("posts the picked owner's user_id, not the option's display label", async () => {
+    // Regression: picking an existing owner used to submit the option's label
+    // ("alice (Alice)") because selecting writes that text back into the input,
+    // re-firing onInputChange. The keys API does not know that id, so it silently
+    // created a second user aliased "User alice (Alice)" instead of reusing alice.
+    const fetchMock = mockApi({ keys: [], users: [user({ user_id: "alice", alias: "Alice" })] });
+    const usr = userEvent.setup();
+    renderPage(<KeysPage />);
+
+    await screen.findByText("No API keys yet");
+    await usr.click(screen.getByRole("button", { name: "Create your first key" }));
+    await usr.click(screen.getByPlaceholderText(/Pick a user/));
+    await usr.click(await screen.findByRole("option", { name: "alice (Alice)" }));
+    await usr.keyboard("{Escape}");
+    await usr.click(screen.getByRole("button", { name: "Create key" }));
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) => String(u).endsWith("/v1/keys") && (init?.method ?? "") === "POST",
+    );
+    expect(JSON.parse(String(post?.[1]?.body)).user_id).toBe("alice");
   });
 
   it("blocks all models by posting an empty list", async () => {
@@ -269,7 +325,9 @@ describe("KeysPage", () => {
 
     await screen.findByText("No API keys yet");
     await user.click(screen.getByRole("button", { name: "Create your first key" }));
-    await user.click(screen.getByRole("button", { name: "Advanced (user, model access)" }));
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Advanced (restrict models)" }));
     await user.click(screen.getByRole("button", { name: "Block all" }));
     await user.click(screen.getByRole("button", { name: "Create key" }));
 
@@ -286,10 +344,45 @@ describe("KeysPage", () => {
 
     await screen.findByText("No API keys yet");
     await user.click(screen.getByRole("button", { name: "Create your first key" }));
-    await user.click(screen.getByRole("button", { name: "Advanced (user, model access)" }));
+    // Give it an owner so the only reason Create stays disabled is the empty scope.
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Advanced (restrict models)" }));
     await user.click(screen.getByRole("button", { name: "Only selected" }));
 
     expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled();
+  });
+
+  it("requires an owner before a key can be created (no anonymous virtual users)", async () => {
+    mockApi({ keys: [] });
+    const user = userEvent.setup();
+    renderPage(<KeysPage />);
+
+    await screen.findByText("No API keys yet");
+    await user.click(screen.getByRole("button", { name: "Create your first key" }));
+    // Owner is empty: Create is blocked.
+    expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled();
+
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "team-checkout");
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Create key" })).toBeEnabled();
+  });
+
+  it("frames the per-key scope as narrowing within the owner's access", async () => {
+    mockApi({ keys: [] });
+    const user = userEvent.setup();
+    renderPage(<KeysPage />);
+
+    await screen.findByText("No API keys yet");
+    await user.click(screen.getByRole("button", { name: "Create your first key" }));
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "team-checkout");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Advanced (restrict models)" }));
+
+    // The "any" mode is labelled as inheritance, not unrestricted, and the owner's
+    // access is surfaced for context (a new id starts unrestricted).
+    expect(screen.getByRole("button", { name: "Inherit owner access" })).toBeInTheDocument();
+    expect(screen.getByText(/starts unrestricted/)).toBeInTheDocument();
   });
 
   it("opens the edit form when a key row is clicked", async () => {

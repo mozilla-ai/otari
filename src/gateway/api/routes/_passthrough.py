@@ -40,7 +40,7 @@ from gateway.services.budget_service import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.model_access import effective_allowlist, is_model_allowed, model_not_allowed_detail
+from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import (
     find_model_pricing,
     no_pricing_error_detail,
@@ -201,8 +201,9 @@ async def run_passthrough(
             )
 
     # Model access control (per-key). The reservation is already taken above (the
-    # audio branch reserves before resolve), so refund before rejecting.
-    key_allowlist = effective_allowlist(api_key)
+    # audio branch reserves before resolve), so refund before rejecting. A key with
+    # no list of its own inherits its user's default.
+    key_allowlist = await resolve_request_allowlist(db, api_key)
     if key_allowlist is not None and not is_model_allowed(
         key_allowlist, f"{resolved.instance}:{resolved.model}"
     ):

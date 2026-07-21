@@ -1,10 +1,11 @@
 import { Button, Card, Chip } from "@heroui/react";
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
-import { useCreateKey, useDeleteKey, useKeys, useRotateKey, useUpdateKey } from "@/api/hooks";
-import type { ApiKey, CreateKeyRequest, CreateKeyResponse } from "@/api/types";
+import { useCreateKey, useDeleteKey, useKeys, useRotateKey, useUpdateKey, useUsers } from "@/api/hooks";
+import type { ApiKey, CreateKeyRequest, CreateKeyResponse, User } from "@/api/types";
 import { Field } from "@/components/Field";
 import { accessLabel, ModelScopeControl } from "@/components/ModelScopeControl";
+import { UserComboBox } from "@/components/UserComboBox";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
 
@@ -275,8 +276,43 @@ function InlineConfirm({
 
 // ---------- create / edit forms (inline cards, matching ProvidersPage) ----------
 
+// Shows the selected owner's model access so the operator sees the ceiling this
+// key narrows within (a key can inherit it or restrict to a subset, never exceed).
+function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
+  const id = userId.trim();
+  if (id === "") {
+    return (
+      <p className="text-xs text-[var(--otari-muted)]">Choose an owner above to see the models this key can inherit.</p>
+    );
+  }
+  const owner = users.find((u) => u.user_id === id);
+  if (!owner) {
+    return (
+      <p className="text-xs text-[var(--otari-muted)]">
+        New user <code>{id}</code> starts unrestricted, so this key may allow any model.
+      </p>
+    );
+  }
+  const { text } = accessLabel(owner.allowed_models);
+  const entries = owner.allowed_models && owner.allowed_models.length > 0 ? owner.allowed_models.join(", ") : null;
+  return (
+    <p className="text-xs text-[var(--otari-muted)]">
+      Owner <code>{id}</code> allows <span className="font-medium text-[var(--otari-ink)]">{text.toLowerCase()}</span>
+      {entries ? (
+        <>
+          {" ("}
+          <span className="font-mono">{entries}</span>
+          {")"}
+        </>
+      ) : null}
+      . This key inherits that, or narrows within it.
+    </p>
+  );
+}
+
 function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated: (result: CreateKeyResponse) => void }) {
   const create = useCreateKey();
+  const users = useUsers();
   const [keyName, setKeyName] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -285,12 +321,16 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [scopeValid, setScopeValid] = useState(true);
 
   const expiresInPast = expiresAt !== "" && new Date(expiresAt).getTime() < Date.now();
+  // User-first: a key must name its owner (an existing user or a new id, which the
+  // API creates as a named user). This is what keeps the dashboard from minting the
+  // anonymous virtual users an omitted id would.
+  const ownerMissing = userId.trim() === "";
 
   const submit = () => {
-    if (create.isPending || !scopeValid) return;
+    if (create.isPending || !scopeValid || ownerMissing) return;
     const body: CreateKeyRequest = {
       key_name: keyName.trim() || null,
-      user_id: userId.trim() || null,
+      user_id: userId.trim(),
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels,
     };
@@ -337,23 +377,21 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
             }
           />
         </div>
+        <UserComboBox value={userId} onChange={setUserId} users={users.data ?? []} />
         <button
           type="button"
           className="self-start text-xs font-medium text-[var(--otari-brand-dark)]"
           onClick={() => setShowAdvanced((v) => !v)}
         >
-          {showAdvanced ? "Hide advanced" : "Advanced (user, model access)"}
+          {showAdvanced ? "Hide advanced" : "Advanced (restrict models)"}
         </button>
         {showAdvanced ? (
           <div className="flex flex-col gap-4 rounded-lg border border-[var(--otari-line)] p-4">
-            <Field
-              label="User ID"
-              value={userId}
-              onChange={setUserId}
-              placeholder="leave blank to auto-create"
-              description="Blank auto-creates a virtual user for this key. Entering an id that does not exist creates a new user with that id."
-            />
+            <OwnerAccessNote userId={userId} users={users.data ?? []} />
             <ModelScopeControl
+              title="Restrict this key's models"
+              description="By default this key inherits its owner's access. Optionally narrow it to a subset; a key can never exceed its owner's allowed models."
+              anyLabel="Inherit owner access"
               initial={null}
               onChange={(value, valid) => {
                 setAllowedModels(value);
@@ -363,7 +401,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
           </div>
         ) : null}
         <div>
-          <Button variant="primary" isDisabled={create.isPending || !scopeValid} onPress={submit}>
+          <Button variant="primary" isDisabled={create.isPending || !scopeValid || ownerMissing} onPress={submit}>
             {create.isPending ? "Creating…" : "Create key"}
           </Button>
         </div>
@@ -374,6 +412,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
 
 function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void }) {
   const update = useUpdateKey();
+  const users = useUsers();
   const [keyName, setKeyName] = useState(apiKey.key_name ?? "");
   const [expiresAt, setExpiresAt] = useState(toDatetimeLocal(apiKey.expires_at));
   const [allowedModels, setAllowedModels] = useState<string[] | null>(apiKey.allowed_models);
@@ -411,7 +450,11 @@ function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void 
             description="Blank clears the expiry."
           />
         </div>
+        {apiKey.user_id ? <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} /> : null}
         <ModelScopeControl
+          title="Restrict this key's models"
+          description="This key inherits its owner's access by default. Narrow it to a subset here; it can never exceed the owner's allowed models."
+          anyLabel="Inherit owner access"
           initial={apiKey.allowed_models}
           onChange={(value, valid) => {
             setAllowedModels(value);

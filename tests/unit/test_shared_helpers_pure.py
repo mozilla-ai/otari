@@ -158,6 +158,7 @@ def test_resolve_user_id_empty_string_treated_as_missing() -> None:
 def test_budget_response_from_model() -> None:
     budget = MagicMock()
     budget.budget_id = "budget-1"
+    budget.name = "team-free"
     budget.max_budget = 100.0
     budget.budget_duration_sec = 86400
     budget.created_at = datetime(2025, 1, 1, tzinfo=UTC)
@@ -165,21 +166,27 @@ def test_budget_response_from_model() -> None:
 
     resp = BudgetResponse.from_model(budget)
     assert resp.budget_id == "budget-1"
+    assert resp.name == "team-free"
     assert resp.max_budget == 100.0
     assert resp.budget_duration_sec == 86400
     assert resp.created_at == "2025-01-01T00:00:00+00:00"
     assert resp.updated_at == "2025-01-02T00:00:00+00:00"
+    # A freshly serialized budget has no assigned users yet.
+    assert resp.user_count == 0
+    assert resp.total_spend == 0.0
 
 
 def test_budget_response_from_model_nullable_fields() -> None:
     budget = MagicMock()
     budget.budget_id = "budget-2"
+    budget.name = None
     budget.max_budget = None
     budget.budget_duration_sec = None
     budget.created_at = datetime(2025, 6, 15, tzinfo=UTC)
     budget.updated_at = datetime(2025, 6, 15, tzinfo=UTC)
 
     resp = BudgetResponse.from_model(budget)
+    assert resp.name is None
     assert resp.max_budget is None
     assert resp.budget_duration_sec is None
 

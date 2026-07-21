@@ -5,10 +5,12 @@ import { useAuth } from "@/auth/AuthContext";
 import { AppShell } from "@/components/AppShell";
 import { Login } from "@/components/Login";
 import { AliasesPage } from "@/pages/AliasesPage";
+import { BudgetsPage } from "@/pages/BudgetsPage";
 import { KeysPage } from "@/pages/KeysPage";
 import { ModelsPage } from "@/pages/ModelsPage";
 import { ProvidersPage } from "@/pages/ProvidersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { UsersPage } from "@/pages/UsersPage";
 
 export default function App() {
   const { isAuthenticated } = useAuth();
@@ -24,6 +26,8 @@ export default function App() {
           <Route index element={<IndexRedirect />} />
           <Route path="providers" element={<ProvidersPage />} />
           <Route path="keys" element={<KeysPage />} />
+          <Route path="users" element={<UsersPage />} />
+          <Route path="budgets" element={<BudgetsPage />} />
           <Route path="models" element={<ModelsPage />} />
           <Route path="aliases" element={<AliasesPage />} />
           <Route path="settings" element={<SettingsPage />} />

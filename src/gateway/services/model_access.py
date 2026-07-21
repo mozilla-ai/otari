@@ -16,6 +16,8 @@ the inference gates and the catalog filter feed it the *same* canonical
 """
 
 from any_llm import LLMProvider
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, User
@@ -29,11 +31,11 @@ PERMISSION_CODE = "model_not_allowed"
 def effective_allowlist(api_key: APIKey | None, user: User | None = None) -> list[str] | None:
     """Resolve the allow-list that governs a request. ``None`` = unrestricted.
 
-    The key's own list wins when set; otherwise the user default (the per-user
-    layer lands with the Users page, issue #300); otherwise unrestricted. ``user``
-    is accepted now so the signature and every call site stay unchanged when the
-    user column is added -- v1 reads it defensively via ``getattr`` so it works
-    before that column exists.
+    The key's own list wins when set; otherwise the user default (``User``'s own
+    allow-list) is inherited; otherwise unrestricted. A key with ``None`` of its
+    own therefore inherits its user's default rather than being unrestricted.
+    ``user`` is read defensively via ``getattr`` so a user-like object without the
+    column (e.g. a test stub) still works.
     """
     key_list: list[str] | None = api_key.allowed_models if api_key is not None else None
     if key_list is not None:
@@ -43,6 +45,59 @@ def effective_allowlist(api_key: APIKey | None, user: User | None = None) -> lis
         if user_list is not None:
             return user_list
     return None
+
+
+async def resolve_request_allowlist(db: AsyncSession, api_key: APIKey | None) -> list[str] | None:
+    """The effective allow-list for a request, loading the user default if needed.
+
+    Master-key callers (``api_key is None``) are unrestricted. A key with its own
+    list uses it directly, no user lookup. Only a key that inherits (its own list
+    is ``None``) costs one scalar query for its user's default.
+    """
+    if api_key is None or api_key.allowed_models is not None:
+        return effective_allowlist(api_key)
+    if api_key.user_id is None:
+        return None
+    user_default = (
+        await db.execute(select(User.allowed_models).where(User.user_id == api_key.user_id))
+    ).scalar_one_or_none()
+    return user_default
+
+
+def _covers(parent: list[str], entry: str) -> bool:
+    """Whether a concrete parent allow-list permits everything ``entry`` could match.
+
+    For a concrete ``entry`` (no wildcard) this is plain membership. For a wildcard
+    ``entry`` (``inst:*`` or ``inst:pre*``) the parent must hold an entry at least as
+    broad: ``inst:*`` covers anything on that instance, and ``inst:pp*`` covers
+    ``inst:cc*`` only when ``cc`` extends ``pp`` (a concrete parent never covers a
+    wildcard child).
+    """
+    inst, _, model = entry.partition(":")
+    if not model.endswith("*"):
+        return is_model_allowed(parent, entry)
+    child_prefix = model[:-1]
+    for candidate in parent:
+        c_inst, _, c_model = candidate.partition(":")
+        if c_inst != inst:
+            continue
+        if c_model == "*":
+            return True
+        if c_model.endswith("*") and child_prefix.startswith(c_model[:-1]):
+            return True
+    return False
+
+
+def is_allowlist_subset(child: list[str] | None, parent: list[str] | None) -> bool:
+    """Whether ``child`` grants no more than ``parent`` (a key vs its user default).
+
+    ``child is None`` means the key inherits the parent, so it can never broaden ->
+    always a subset. ``parent is None`` is unrestricted, so any child fits. Otherwise
+    every child entry must be covered by the parent; an empty child grants nothing.
+    """
+    if child is None or parent is None:
+        return True
+    return all(_covers(parent, entry) for entry in child)
 
 
 def _entry_matches(entry: str, canonical_key: str) -> bool:

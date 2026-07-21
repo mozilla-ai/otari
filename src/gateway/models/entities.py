@@ -73,6 +73,7 @@ class Budget(Base):
     __tablename__ = "budgets"
 
     budget_id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str | None] = mapped_column(default=None)
     max_budget: Mapped[float | None] = mapped_column()
     budget_duration_sec: Mapped[int | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
@@ -89,6 +90,7 @@ class Budget(Base):
         """Convert model to dictionary."""
         return {
             "budget_id": self.budget_id,
+            "name": self.name,
             "max_budget": self.max_budget,
             "budget_duration_sec": self.budget_duration_sec,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -109,7 +111,14 @@ class User(Base):
     # ``spend + reserved``; reservations are reconciled into ``spend`` (actual
     # cost) on success or released on failure. See gateway.services.budget_service.
     reserved: Mapped[float] = mapped_column(default=0.0, server_default="0")
-    budget_id: Mapped[str | None] = mapped_column(ForeignKey("budgets.budget_id"))
+    # Indexed: the budgets list groups users by this column to build each budget's
+    # usage rollup, so an unindexed FK turns that page into a users table scan.
+    budget_id: Mapped[str | None] = mapped_column(ForeignKey("budgets.budget_id"), index=True)
+    # Default model access-list every one of this user's keys inherits when the
+    # key has no list of its own. null = unrestricted, [] = deny all, else
+    # canonical instance:model entries (see services/model_access.py). A key may
+    # narrow this default but never broaden it (validated on key write).
+    allowed_models: Mapped[list[str] | None] = mapped_column(JSON)
     budget_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     next_budget_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     blocked: Mapped[bool] = mapped_column(default=False)
@@ -135,6 +144,7 @@ class User(Base):
             "spend": self.spend,
             "reserved": self.reserved,
             "budget_id": self.budget_id,
+            "allowed_models": self.allowed_models,
             "budget_started_at": self.budget_started_at.isoformat() if self.budget_started_at else None,
             "next_budget_reset_at": self.next_budget_reset_at.isoformat() if self.next_budget_reset_at else None,
             "blocked": self.blocked,
@@ -360,7 +370,9 @@ class BudgetResetLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), index=True)
-    budget_id: Mapped[str] = mapped_column(ForeignKey("budgets.budget_id"))
+    # Indexed: the reset-log drill-down filters on this column, and the table only
+    # grows, so an unindexed FK degrades that endpoint to a full scan over time.
+    budget_id: Mapped[str] = mapped_column(ForeignKey("budgets.budget_id"), index=True)
     previous_spend: Mapped[float] = mapped_column()
     reset_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     next_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

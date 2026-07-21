@@ -46,7 +46,7 @@ async def create_rerank(
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
-    - API key without user field: Use virtual user created with API key
+    - API key without user field: Use the shared "default" user
     """
     # Rerank bills on total tokens (input only). Estimate from query + documents.
     prompt_chars = len(request.query) + sum(len(doc) for doc in request.documents)

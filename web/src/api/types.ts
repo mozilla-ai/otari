@@ -253,6 +253,86 @@ export interface UpdateKeyRequest {
   metadata?: Record<string, unknown> | null;
 }
 
+// A budget: a reusable spending template (a per-user limit plus an optional
+// reset period). Multiple users can share one budget, so the usage fields are an
+// aggregate rollup over the users currently assigned to it: how many there are
+// and their combined spend/reserved. Assigning users lands with user management,
+// so a gateway without assigned users reports zeros here.
+export interface Budget {
+  budget_id: string;
+  name: string | null;
+  max_budget: number | null;
+  budget_duration_sec: number | null;
+  created_at: string;
+  updated_at: string;
+  user_count: number;
+  total_spend: number;
+  total_reserved: number;
+}
+
+export interface CreateBudgetRequest {
+  name?: string | null;
+  max_budget?: number | null;
+  budget_duration_sec?: number | null;
+}
+
+// Omitted fields are left unchanged; `name` is tri-state (omit = unchanged,
+// null = clear to unnamed, string = rename).
+export interface UpdateBudgetRequest {
+  name?: string | null;
+  max_budget?: number | null;
+  budget_duration_sec?: number | null;
+}
+
+// One per-user budget reset event (the spend that was cleared and when the next
+// reset is due). Surfaced as the budget's reset history.
+export interface BudgetResetLog {
+  id: number;
+  user_id: string | null;
+  budget_id: string;
+  previous_spend: number;
+  reset_at: string;
+  next_reset_at: string | null;
+}
+
+// A user/customer: the principal keys and budgets attach to, and where the
+// per-user model-access default lives. `allowed_models` is the default every one
+// of this user's keys inherits (null = unrestricted, [] = deny all, else canonical
+// `instance:model` entries). `user_id` is the identifier used by request routing.
+export interface User {
+  user_id: string;
+  alias: string | null;
+  spend: number;
+  reserved: number;
+  budget_id: string | null;
+  allowed_models: string[] | null;
+  budget_started_at: string | null;
+  next_budget_reset_at: string | null;
+  blocked: boolean;
+  created_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface CreateUserRequest {
+  user_id: string;
+  alias?: string | null;
+  budget_id?: string | null;
+  blocked?: boolean;
+  allowed_models?: string[] | null;
+  metadata?: Record<string, unknown>;
+}
+
+// Omitted fields are left unchanged. `allowed_models` is tri-state on the wire
+// (omit = unchanged, null = clear to unrestricted, [] = deny all, list = restrict).
+export interface UpdateUserRequest {
+  alias?: string | null;
+  budget_id?: string | null;
+  blocked?: boolean | null;
+  allowed_models?: string[] | null;
+  metadata?: Record<string, unknown> | null;
+}
+
 export interface GatewaySettings {
   mode: string;
   version: string;

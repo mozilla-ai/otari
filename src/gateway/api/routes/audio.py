@@ -55,7 +55,7 @@ async def create_transcription(
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
-    - API key without user field: Use virtual user created with API key
+    - API key without user field: Use the shared "default" user
     """
 
     async def call_provider(resolved: ResolvedProvider) -> Transcription:
@@ -151,7 +151,7 @@ async def create_speech(
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
-    - API key without user field: Use virtual user created with API key
+    - API key without user field: Use the shared "default" user
     """
 
     async def call_provider(resolved: ResolvedProvider) -> bytes:

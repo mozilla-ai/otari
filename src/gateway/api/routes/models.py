@@ -14,7 +14,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, ModelPricing
 from gateway.services.alias_service import effective_aliases
-from gateway.services.model_access import effective_allowlist, is_model_allowed
+from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_catalog_service import (
     ModelCatalogEntry,
     build_metadata_map,
@@ -393,7 +393,7 @@ async def list_models(
     # feed the SAME matcher the SAME canonical instance:model key; an alias id is a
     # display name, so it is matched on its resolved target. Master key sees all.
     api_key, is_master_key = auth
-    key_allowlist = None if is_master_key else effective_allowlist(api_key)
+    key_allowlist = None if is_master_key else await resolve_request_allowlist(db, api_key)
     if key_allowlist is not None:
 
         def _canonical(model_id: str) -> str:
@@ -479,7 +479,7 @@ async def get_model(
     # behind an allow-list. Uses the same matcher/canonical key as the listing and
     # inference. Master key bypasses.
     api_key, is_master_key = auth
-    key_allowlist = None if is_master_key else effective_allowlist(api_key)
+    key_allowlist = None if is_master_key else await resolve_request_allowlist(db, api_key)
     if key_allowlist is not None:
         target = aliases.get(model_id, model_id)
         if not is_model_allowed(key_allowlist, normalize_pricing_key(config, target)):

@@ -1,5 +1,5 @@
 import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 import { useAliases, useDiscoverableModels, useProviders } from "@/api/hooks";
 
@@ -27,12 +27,23 @@ interface CatalogOption {
 
 const MAX_VISIBLE = 50;
 
+// The control is reused for two layers of the same allow-list grammar: a user's
+// default and a key's (narrower) override. The wording differs between them, so
+// the heading, help text, and the "any" mode label are parameterized. "any" means
+// null on the wire: unrestricted for a user, but "inherit the owner's default" for
+// a key (a key with no list of its own falls back to its user).
 export function ModelScopeControl({
   initial,
   onChange,
+  title = "Model access",
+  description,
+  anyLabel = "Any model",
 }: {
   initial: string[] | null;
   onChange: (value: string[] | null, valid: boolean) => void;
+  title?: ReactNode;
+  description?: ReactNode;
+  anyLabel?: string;
 }) {
   const providers = useProviders();
   const discoverable = useDiscoverableModels();
@@ -117,21 +128,21 @@ export function ModelScopeControl({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <span className="text-sm font-medium text-[var(--otari-ink)]">Model access</span>
+        <span className="text-sm font-medium text-[var(--otari-ink)]">{title}</span>
         <p className="text-xs text-[var(--otari-muted)]">
-          Which models this key may list and call. The master key is never restricted, so blocking a key cannot lock
-          you out of the dashboard.
+          {description ??
+            "Which models this key may list and call. The master key is never restricted, so blocking a key cannot lock you out of the dashboard."}
         </p>
       </div>
       <div className="flex w-fit items-center gap-1 rounded-lg bg-[var(--otari-bg)] p-1">
-        {modeButton("any", "Any model")}
+        {modeButton("any", anyLabel)}
         {modeButton("only", "Only selected")}
         {modeButton("block", "Block all")}
       </div>
 
       {mode === "block" ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          This key is refused for <strong>every</strong> model until you change its access.
+          Blocked from <strong>every</strong> model until you change this access.
         </div>
       ) : null}
 

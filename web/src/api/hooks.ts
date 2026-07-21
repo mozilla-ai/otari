@@ -4,7 +4,10 @@ import { apiFetch } from "@/api/client";
 import type {
   AliasResponse,
   ApiKey,
+  Budget,
+  BudgetResetLog,
   CreateAliasRequest,
+  CreateBudgetRequest,
   CreateKeyRequest,
   CreateKeyResponse,
   CreateStoredProviderRequest,
@@ -19,9 +22,13 @@ import type {
   SetPricingRequest,
   StoredProvider,
   TestProviderResult,
+  UpdateBudgetRequest,
   UpdateKeyRequest,
   UpdateSettingsRequest,
   UpdateStoredProviderRequest,
+  UpdateUserRequest,
+  User,
+  CreateUserRequest,
 } from "@/api/types";
 
 const MODELS = "models";
@@ -37,6 +44,8 @@ const STORED_PROVIDERS = "stored-providers";
 const METADATA = "model-metadata";
 const BUILD = "build";
 const KEYS = "keys";
+const BUDGETS = "budgets";
+const USERS = "users";
 
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
@@ -356,5 +365,131 @@ export function useDeleteKey() {
   return useMutation({
     mutationFn: (id: string) => apiFetch<void>(`/v1/keys/${encodeURIComponent(id)}`, { method: "DELETE" }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
+  });
+}
+
+// The budgets endpoint caps `limit` at 1000 server-side; page through it (capped
+// like keys/pricing) so a gateway with many budgets can't have rows silently
+// vanish, and a backend that ignores `skip` can't spin an unbounded loop.
+const BUDGETS_PAGE_SIZE = 1000;
+const BUDGETS_MAX_PAGES = 100;
+
+async function fetchAllBudgets(): Promise<Budget[]> {
+  const all: Budget[] = [];
+  for (let page = 0; page < BUDGETS_MAX_PAGES; page += 1) {
+    const rows = await apiFetch<Budget[]>(`/v1/budgets?skip=${page * BUDGETS_PAGE_SIZE}&limit=${BUDGETS_PAGE_SIZE}`);
+    all.push(...rows);
+    if (rows.length < BUDGETS_PAGE_SIZE) {
+      break;
+    }
+  }
+  return all;
+}
+
+export function useBudgets() {
+  return useQuery({
+    queryKey: [BUDGETS],
+    queryFn: fetchAllBudgets,
+    staleTime: 60_000,
+  });
+}
+
+// Per-user reset history for one budget. Enabled only once a budget id is set
+// (the drill-down is opened), so the query does not fire for the whole list.
+export function useBudgetResetLogs(budgetId: string | null) {
+  return useQuery({
+    queryKey: [BUDGETS, budgetId, "reset-logs"],
+    queryFn: () => apiFetch<BudgetResetLog[]>(`/v1/budgets/${encodeURIComponent(budgetId as string)}/reset-logs`),
+    enabled: budgetId !== null,
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateBudgetRequest) =>
+      apiFetch<Budget>("/v1/budgets", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
+  });
+}
+
+export function useUpdateBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateBudgetRequest }) =>
+      apiFetch<Budget>(`/v1/budgets/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
+  });
+}
+
+export function useDeleteBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/budgets/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
+  });
+}
+
+// The users endpoint caps `limit` at 1000 server-side; page through it (capped
+// like keys/budgets) so a gateway with many users can't have rows silently
+// vanish, and a backend that ignores `skip` can't spin an unbounded loop.
+const USERS_PAGE_SIZE = 1000;
+const USERS_MAX_PAGES = 100;
+
+async function fetchAllUsers(): Promise<User[]> {
+  const all: User[] = [];
+  for (let page = 0; page < USERS_MAX_PAGES; page += 1) {
+    const rows = await apiFetch<User[]>(`/v1/users?skip=${page * USERS_PAGE_SIZE}&limit=${USERS_PAGE_SIZE}`);
+    all.push(...rows);
+    if (rows.length < USERS_PAGE_SIZE) {
+      break;
+    }
+  }
+  return all;
+}
+
+export function useUsers() {
+  return useQuery({
+    queryKey: [USERS],
+    queryFn: fetchAllUsers,
+    staleTime: 60_000,
+  });
+}
+
+// Assigning a budget to a user changes that budget's usage rollup, so a user
+// write invalidates the budgets list too.
+function invalidateUserViews(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: [USERS] });
+  void queryClient.invalidateQueries({ queryKey: [BUDGETS] });
+}
+
+export function useCreateUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateUserRequest) =>
+      apiFetch<User>("/v1/users", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => invalidateUserViews(queryClient),
+  });
+}
+
+export function useUpdateUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateUserRequest }) =>
+      apiFetch<User>(`/v1/users/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => invalidateUserViews(queryClient),
+  });
+}
+
+export function useDeleteUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSuccess: () => {
+      invalidateUserViews(queryClient);
+      // Deleting a user deactivates its keys server-side.
+      void queryClient.invalidateQueries({ queryKey: [KEYS] });
+    },
   });
 }

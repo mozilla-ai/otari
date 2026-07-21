@@ -174,15 +174,15 @@ def test_batches_rejects_blocked_user(
 ) -> None:
     """``/v1/batches`` rejects a blocked user with 403 before the provider.
 
-    Batches bills the API key's own virtual user when no ``user`` body field is
-    sent, so we block that virtual user and drive the route with the API key.
-    Enforcement landed with issue #258.
+    Batches bills the API key's owner when no ``user`` body field is sent. A key
+    created without a user_id owns the shared "default" user, so we block that and
+    drive the route with the API key. Enforcement landed with issue #258.
     """
     api_key_header = {API_KEY_HEADER: f"Bearer {api_key_obj['key']}"}
-    virtual_user_id = f"apikey-{api_key_obj['id']}"
+    owner_user_id = "default"
 
     blocked = client.patch(
-        f"/v1/users/{virtual_user_id}",
+        f"/v1/users/{owner_user_id}",
         json={"blocked": True},
         headers=master_key_header,
     )
