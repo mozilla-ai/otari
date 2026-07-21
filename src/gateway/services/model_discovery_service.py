@@ -21,6 +21,7 @@ import asyncio
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
 from any_llm import AnyLLM, LLMProvider, alist_models
 from any_llm.types.model import Model
@@ -60,7 +61,8 @@ class _CacheEntry:
     """A single provider's cached discovery result (success or failure)."""
 
     result: ProviderDiscovery
-    cached_at: float  # time.monotonic()
+    cached_at: float  # time.monotonic(), for TTL math (immune to wall-clock jumps)
+    checked_at: datetime  # wall-clock time the result was produced, for "last checked" display
 
 
 @dataclass
@@ -97,7 +99,18 @@ class ModelCache:
         self._store[provider] = _CacheEntry(
             result=ProviderDiscovery(provider=provider, models=list(models)),
             cached_at=time.monotonic(),
+            checked_at=datetime.now(UTC),
         )
+
+    def checked_at(self, provider: str) -> datetime | None:
+        """Wall-clock time this provider's cached result was produced, or ``None``.
+
+        The provider-health monitor reports this as each instance's "last checked"
+        time, so a status served from the cache honestly shows when the underlying
+        provider was actually dialed rather than when the dashboard last asked.
+        """
+        entry = self._store.get(provider)
+        return entry.checked_at if entry is not None else None
 
     def clear(self, provider: str | None = None) -> None:
         """Invalidate one or all cached results.
@@ -178,7 +191,9 @@ class ModelCache:
                 # because ``get_or_discover`` hands every caller a copy, so no
                 # external reference to this stored object survives.
                 if self._inflight.get(provider) is task:
-                    self._store[provider] = _CacheEntry(result=result, cached_at=time.monotonic())
+                    self._store[provider] = _CacheEntry(
+                        result=result, cached_at=time.monotonic(), checked_at=datetime.now(UTC)
+                    )
             return result
         finally:
             async with self._lock:
