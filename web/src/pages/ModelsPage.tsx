@@ -1,6 +1,6 @@
 import { Button, Card, Chip } from "@heroui/react";
 import { Fragment, type ReactNode, useEffect, useId, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   useDeletePricing,
@@ -857,6 +857,7 @@ function DiscoveredErrors({ providers }: { providers: { provider: string; error:
 
 export function ModelsPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const models = useModels();
   const pricing = usePricing();
   const discoverable = useDiscoverableModels();
@@ -878,7 +879,9 @@ export function ModelsPage() {
     }
   }, [sort]);
 
-  const [providerFilter, setProviderFilter] = useState("all");
+  // A provider clicked on the Providers page arrives as ?provider=<instance>,
+  // pre-selecting that provider's filter so the list shows only their models.
+  const [providerFilter, setProviderFilter] = useState(searchParams.get("provider") ?? "all");
   const [pricingFilter, setPricingFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [capabilityFilter, setCapabilityFilter] = useState("all");

@@ -198,10 +198,10 @@ function panel(): HTMLElement {
   return screen.getByRole("complementary");
 }
 
-function renderWithClient(ui: ReactElement) {
+function renderWithClient(ui: ReactElement, initialEntries: string[] = ["/"]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
     </MemoryRouter>,
   );
@@ -385,6 +385,19 @@ describe("ModelsPage", () => {
 
     await user.selectOptions(screen.getByLabelText("Filter by provider"), "anthropic");
 
+    expect(within(table()).getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
+  });
+
+  it("reads the provider filter from the URL query parameter", async () => {
+    mockApi();
+
+    renderWithClient(<ModelsPage />, ["/models?provider=anthropic"]);
+    await screen.findByText("anthropic:claude-sonnet-4");
+
+    // The provider select is pre-set to the URL's provider, and only that
+    // provider's models are shown.
+    expect(screen.getByLabelText("Filter by provider")).toHaveValue("anthropic");
     expect(within(table()).getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
     expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
   });

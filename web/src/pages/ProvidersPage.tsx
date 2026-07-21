@@ -1,5 +1,6 @@
 import { Button, Card, Chip, ComboBox, Description, Input, Label, ListBox, ListBoxItem, Spinner, TextField } from "@heroui/react";
 import { type CSSProperties, type ReactNode, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
 import {
   useCreateStoredProvider,
@@ -804,7 +805,14 @@ export function ProvidersPage() {
           ) : (
             rows.map((row) => (
               <Tr key={row.instance}>
-                <Td className="font-medium text-[var(--otari-ink)]">{row.instance}</Td>
+                <Td className="font-medium">
+                  <Link
+                    to={`/models?provider=${encodeURIComponent(row.instance)}`}
+                    className="text-[var(--otari-ink)] hover:text-[var(--otari-brand-dark)] hover:underline"
+                  >
+                    {row.instance}
+                  </Link>
+                </Td>
                 <Td className="text-[var(--otari-muted)]">
                   {row.meta?.provider_type ?? row.stored?.provider_type ?? row.instance}
                 </Td>
