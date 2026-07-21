@@ -35,11 +35,23 @@ export function UserComboBox({
     .filter((o) => !query || o.id.toLowerCase().includes(query) || o.name.toLowerCase().includes(query))
     .slice(0, 50);
 
-  const known = options.some((o) => o.id === text.trim());
+  // What the input holds is not necessarily the user_id: when an option is picked
+  // the ComboBox writes that option's display text back into the input, which
+  // re-fires onInputChange. Resolve either form (raw id, or "id (alias)" label) to
+  // the canonical id, or the submitted owner would be the label and the keys API
+  // would silently create a second user named after it.
+  const resolveId = (raw: string): string => {
+    const trimmed = raw.trim();
+    const match = options.find((o) => o.id === trimmed || o.name === trimmed);
+    return match ? match.id : trimmed;
+  };
+
+  const selectedId = resolveId(text);
+  const known = options.some((o) => o.id === selectedId);
   const creatingHint =
-    text.trim() !== "" && !known ? (
+    selectedId !== "" && !known ? (
       <span>
-        Creates a new user <code>{text.trim()}</code>.
+        Creates a new user <code>{selectedId}</code>.
       </span>
     ) : (
       (description ?? "Spend and budgets track against this user.")
@@ -53,7 +65,7 @@ export function UserComboBox({
       inputValue={text}
       onInputChange={(next) => {
         setText(next);
-        onChange(next.trim());
+        onChange(resolveId(next));
       }}
       onSelectionChange={(key) => {
         if (key != null) {

@@ -5,8 +5,28 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
-import type { ApiKey } from "@/api/types";
+import type { ApiKey, User } from "@/api/types";
 import { KeysPage } from "@/pages/KeysPage";
+
+function user(overrides: Partial<User> = {}): User {
+  return {
+    user_id: "alice",
+    // An alias is what makes the owner option's label differ from its user_id,
+    // which is the case the picker has to get right.
+    alias: "Alice",
+    spend: 0,
+    reserved: 0,
+    budget_id: null,
+    allowed_models: null,
+    budget_started_at: null,
+    next_budget_reset_at: null,
+    blocked: false,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
+    metadata: {},
+    ...overrides,
+  };
+}
 
 function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
   return {
@@ -31,8 +51,9 @@ function jsonResponse(body: unknown, status = 200): Response {
 const NEW_SECRET = "gw-NEWSECRET0000000000000000000000000000000000000000000000";
 const REGEN_SECRET = "gw-REGEN00000000000000000000000000000000000000000000000000";
 
-function mockApi(opts: { keys?: ApiKey[] } = {}) {
+function mockApi(opts: { keys?: ApiKey[]; users?: User[] } = {}) {
   let list = [...(opts.keys ?? [])];
+  const users = opts.users ?? [];
 
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
@@ -74,6 +95,9 @@ function mockApi(opts: { keys?: ApiKey[] } = {}) {
         return new Response(null, { status: 204 });
       }
       return jsonResponse(list);
+    }
+    if (url.includes("/v1/users")) {
+      return jsonResponse(users);
     }
     if (url.includes("/v1/models/discoverable")) {
       return jsonResponse({
@@ -269,6 +293,28 @@ describe("KeysPage", () => {
     );
     expect(JSON.parse(String(post?.[1]?.body)).allowed_models).toEqual(["openai:gpt-4o"]);
     // User-first: the key names its owner rather than auto-creating a virtual user.
+    expect(JSON.parse(String(post?.[1]?.body)).user_id).toBe("alice");
+  });
+
+  it("posts the picked owner's user_id, not the option's display label", async () => {
+    // Regression: picking an existing owner used to submit the option's label
+    // ("alice (Alice)") because selecting writes that text back into the input,
+    // re-firing onInputChange. The keys API does not know that id, so it silently
+    // created a second user aliased "User alice (Alice)" instead of reusing alice.
+    const fetchMock = mockApi({ keys: [], users: [user({ user_id: "alice", alias: "Alice" })] });
+    const usr = userEvent.setup();
+    renderPage(<KeysPage />);
+
+    await screen.findByText("No API keys yet");
+    await usr.click(screen.getByRole("button", { name: "Create your first key" }));
+    await usr.click(screen.getByPlaceholderText(/Pick a user/));
+    await usr.click(await screen.findByRole("option", { name: "alice (Alice)" }));
+    await usr.keyboard("{Escape}");
+    await usr.click(screen.getByRole("button", { name: "Create key" }));
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) => String(u).endsWith("/v1/keys") && (init?.method ?? "") === "POST",
+    );
     expect(JSON.parse(String(post?.[1]?.body)).user_id).toBe("alice");
   });
 
