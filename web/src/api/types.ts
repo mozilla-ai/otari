@@ -324,6 +324,54 @@ export interface UsageCount {
   total: number;
 }
 
+// Time-series granularity for the analytics summary.
+export type UsageBucket = "hour" | "day";
+
+// Grand totals over the summary window (from /v1/usage/summary).
+export interface UsageTotals {
+  cost: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  request_count: number;
+  error_count: number;
+  // Mean server-side latency over rows that recorded one; null when none did.
+  avg_latency_ms: number | null;
+}
+
+// One breakdown row (a model, a user, or an API key). `key` is null both for the
+// synthesized "other" fold row and for usage whose grouping column was NULL
+// (e.g. a since-deleted user).
+export interface UsageGroupRow {
+  key: string | null;
+  cost: number;
+  tokens: number;
+  requests: number;
+}
+
+// One time bucket. `bucket_start` is canonical ISO-8601 UTC (`...Z`).
+export interface UsageSeriesPoint {
+  bucket_start: string;
+  cost: number;
+  tokens: number;
+  requests: number;
+}
+
+// Aggregated spend/volume for the Usage & analytics page. `start_date`/`end_date`
+// echo the (clamped) window the server actually aggregated over.
+export interface UsageSummary {
+  start_date: string;
+  end_date: string;
+  bucket: UsageBucket;
+  totals: UsageTotals;
+  by_model: UsageGroupRow[];
+  by_user: UsageGroupRow[];
+  by_api_key: UsageGroupRow[];
+  series: UsageSeriesPoint[];
+}
+
 // One per-user budget reset event (the spend that was cleared and when the next
 // reset is due). Surfaced as the budget's reset history.
 export interface BudgetResetLog {

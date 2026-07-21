@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
@@ -45,6 +46,30 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number } = {}) {
     if (url.includes("/v1/usage/count")) {
       return jsonResponse({ total });
     }
+    if (url.includes("/v1/usage/summary")) {
+      // Model-suggestion query: distinct models drawn from the mocked rows.
+      const models = Array.from(new Set(rows.map((r) => r.model)));
+      return jsonResponse({
+        start_date: "",
+        end_date: "",
+        bucket: "day",
+        totals: {
+          cost: 0,
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          request_count: 0,
+          error_count: 0,
+          avg_latency_ms: null,
+        },
+        by_model: models.map((m) => ({ key: m, cost: 0, tokens: 0, requests: 0 })),
+        by_user: [],
+        by_api_key: [],
+        series: [],
+      });
+    }
     if (url.includes("/v1/usage")) {
       return jsonResponse(rows);
     }
@@ -55,16 +80,21 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number } = {}) {
   });
 }
 
-function renderPage(ui: ReactElement) {
+function renderPage(ui: ReactElement, route = "/activity") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>
+    </QueryClientProvider>,
+  );
 }
 
-// Only the list requests (not /count) carry the pagination + filter params.
+// Only the list requests (not /count, not the /summary model-suggestion query)
+// carry the pagination + filter params.
 function listCalls(fetchMock: ReturnType<typeof mockApi>): string[] {
   return fetchMock.mock.calls
     .map(([u]) => String(u))
-    .filter((u) => u.includes("/v1/usage") && !u.includes("/count"));
+    .filter((u) => u.includes("/v1/usage") && !u.includes("/count") && !u.includes("/summary"));
 }
 
 describe("ActivityPage", () => {
@@ -174,6 +204,35 @@ describe("ActivityPage", () => {
     // which would contradict the 50 visible rows.
     expect(screen.getByText("1–50")).toBeInTheDocument();
     expect(screen.queryByText("0 of 0")).not.toBeInTheDocument();
+  });
+
+  it("suggests in-window models in the picker and commits the picked one", async () => {
+    const fetchMock = mockApi({
+      rows: [entry({ model: "gpt-4o" }), entry({ id: "b", model: "claude-sonnet-5" })],
+    });
+    const user = userEvent.setup();
+    renderPage(<ActivityPage />);
+    await screen.findAllByText("gpt-4o");
+
+    const modelInput = screen.getByRole("combobox", { name: "Model" });
+    await user.click(modelInput);
+    await user.type(modelInput, "claude");
+    // The suggestion comes from the window's usage, not a free-text guess.
+    await user.click(await screen.findByRole("option", { name: "claude-sonnet-5" }));
+
+    await waitFor(() => expect(listCalls(fetchMock).at(-1)).toContain("model=claude-sonnet-5"));
+  });
+
+  it("seeds filters from the drill-down query string", async () => {
+    // A row click on the Usage page navigates here with the dimension + window.
+    const fetchMock = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?model=gpt-4o&user_id=alice&status=error");
+
+    await screen.findByText("gpt-4o");
+    const latest = listCalls(fetchMock).at(-1)!;
+    expect(latest).toContain("model=gpt-4o");
+    expect(latest).toContain("user_id=alice");
+    expect(latest).toContain("status=error");
   });
 
   it("shows the paginator range and total", async () => {

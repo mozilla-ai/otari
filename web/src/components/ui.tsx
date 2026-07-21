@@ -1,5 +1,5 @@
-import { Button, Card } from "@heroui/react";
-import { useId, useState } from "react";
+import { Button, Card, ComboBox, Input, Label, ListBox, ListBoxItem } from "@heroui/react";
+import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 
 import { ApiError } from "@/api/client";
@@ -153,4 +153,92 @@ export function FilterSelect({
     );
   }
   return select;
+}
+
+// A type-to-filter combobox for page filter bars where the option list is large
+// (users, models): a native <select> with thousands of <option>s is unusable, so
+// this filters the list as you type and commits on selection. An empty input
+// means "no filter" (the caller's cleared value). Options-only by intent: you can
+// only filter to a value that exists, matching how the backend filters. If a
+// selected value is not in `options` (e.g. seeded from a URL), it still shows.
+export function FilterComboBox({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder,
+  maxVisible = 50,
+  allowsCustom = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  placeholder?: string;
+  maxVisible?: number;
+  // When true the typed text is itself a valid filter value (committed live, like
+  // a plain text box) and the options are suggestions. Use for a filter whose full
+  // value space is not enumerable (e.g. any model name the log might hold). When
+  // false the control is options-only: typing just narrows the suggestion list and
+  // a value is committed only by selecting one.
+  allowsCustom?: boolean;
+}) {
+  const labelFor = (v: string): string => options.find((o) => o.value === v)?.label ?? v;
+  const [text, setText] = useState(() => labelFor(value));
+
+  // Re-sync the input when the committed value changes from outside (a "Clear
+  // filters" press, or a drill-down seeding the value). Typing does not change
+  // `value` until a selection commits, so this does not fight the user mid-type.
+  useEffect(() => {
+    setText(labelFor(value));
+    // labelFor closes over options; value is the external source of truth here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
+  const query = text.trim().toLowerCase();
+  const visible = options
+    .filter((o) => !query || o.value.toLowerCase().includes(query) || o.label.toLowerCase().includes(query))
+    .slice(0, maxVisible);
+
+  return (
+    <ComboBox.Root
+      allowsEmptyCollection
+      allowsCustomValue={allowsCustom}
+      menuTrigger="focus"
+      inputValue={text}
+      onInputChange={(next) => {
+        setText(next);
+        if (allowsCustom) {
+          // Free-text mode: the input is the filter (committed live, like a plain
+          // text box), with the options offered as suggestions.
+          onChange(next.trim());
+        } else if (next.trim() === "") {
+          // Options-only: deleting the text clears the filter; partial text just
+          // narrows the dropdown (committing it would filter to a missing value).
+          onChange("");
+        }
+      }}
+      onSelectionChange={(key) => {
+        if (key != null) {
+          onChange(String(key));
+        }
+      }}
+      className="flex flex-col gap-1"
+    >
+      <Label className="text-xs font-medium text-[var(--otari-muted)]">{label}</Label>
+      <ComboBox.InputGroup>
+        <Input placeholder={placeholder} autoComplete="off" onFocus={(event) => event.currentTarget.select()} />
+        <ComboBox.Trigger />
+      </ComboBox.InputGroup>
+      <ComboBox.Popover>
+        <ListBox items={visible} className="max-h-72 overflow-auto">
+          {(option: { value: string; label: string }) => (
+            <ListBoxItem id={option.value} textValue={option.label}>
+              {option.label}
+            </ListBoxItem>
+          )}
+        </ListBox>
+      </ComboBox.Popover>
+    </ComboBox.Root>
+  );
 }
