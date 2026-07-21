@@ -267,19 +267,24 @@ export function ActivityPage() {
   const hasRows = rows.length > 0;
   const rangeStart = hasRows ? page * PAGE_SIZE + 1 : 0;
   const rangeEnd = page * PAGE_SIZE + rows.length;
-  // Without a total, show just the visible range: "0 of 0" would contradict the
-  // rows on screen.
-  const pagerLabel = !count.data
+  // The total is only exact when the newest count for *these* filters succeeded.
+  // `count.data` alone is not that test: TanStack keeps the last successful data
+  // when a refetch errors, and keepPreviousData serves the previous filters'
+  // total while a new one loads. Either would drive the pager off a stale number.
+  const totalIsExact = count.isSuccess && !count.isPlaceholderData;
+  // Without an exact total, show just the visible range: "0 of 0" would
+  // contradict the rows on screen.
+  const pagerLabel = !totalIsExact
     ? hasRows
       ? `${rangeStart}–${rangeEnd}`
       : "0"
     : total === 0
       ? "0 of 0"
       : `${rangeStart}–${rangeEnd} of ${total.toLocaleString()}`;
-  // Prefer the exact total, but fall back to "a full page came back, so there is
-  // probably more" when the count request failed. Otherwise a failed count would
-  // strand the operator on page 1 with rows they cannot reach.
-  const hasNext = count.data ? (page + 1) * PAGE_SIZE < total : rows.length === PAGE_SIZE;
+  // Fall back to "a full page came back, so there is probably more" when the
+  // total is not exact. Otherwise a failed count would strand the operator on
+  // page 1 with rows they cannot reach.
+  const hasNext = totalIsExact ? (page + 1) * PAGE_SIZE < total : rows.length === PAGE_SIZE;
 
   return (
     <div className="flex flex-col gap-6">
@@ -341,7 +346,8 @@ export function ActivityPage() {
               id="filter-model"
               value={modelFilter}
               onChange={(e) => setModelFilter(e.target.value)}
-              placeholder="e.g. gpt-4o"
+              placeholder="exact name, e.g. gemini-2.5-flash"
+              title="Exact match on the model recorded in the log (the resolved target, without a provider prefix)."
               className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)]"
             />
           </div>
