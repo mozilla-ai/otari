@@ -12,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.models.entities import ModelPricing
+from gateway.models.entities import APIKey, ModelPricing
 from gateway.services.alias_service import effective_aliases
+from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_catalog_service import (
     ModelCatalogEntry,
     build_metadata_map,
@@ -301,10 +302,11 @@ async def _get_pricing_map(
     return {p.model_key: p for p in pricings}
 
 
-@router.get("/models", dependencies=[Depends(verify_api_key_or_master_key)])
+@router.get("/models")
 async def list_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     provider: Annotated[str | None, Query(description="Filter models by provider name")] = None,
 ) -> ModelListResponse:
     """List all available models.
@@ -386,6 +388,20 @@ async def list_models(
         for alias, target in aliases.items():
             merged[alias] = _alias_model(config, alias, target, pricing_lookup)
 
+    # Model access control: hide models the calling key may not use, so the
+    # catalog never advertises a model that would 403 at inference. Both surfaces
+    # feed the SAME matcher the SAME canonical instance:model key; an alias id is a
+    # display name, so it is matched on its resolved target. Master key sees all.
+    api_key, is_master_key = auth
+    key_allowlist = None if is_master_key else await resolve_request_allowlist(db, api_key)
+    if key_allowlist is not None:
+
+        def _canonical(model_id: str) -> str:
+            target = aliases[model_id] if model_id in aliases else model_id
+            return normalize_pricing_key(config, target)
+
+        merged = {mid: obj for mid, obj in merged.items() if is_model_allowed(key_allowlist, _canonical(mid))}
+
     sorted_models = sorted(merged.values(), key=lambda m: m.id)
     return ModelListResponse(data=sorted_models)
 
@@ -448,17 +464,31 @@ async def list_model_metadata(
     )
 
 
-@router.get("/models/{model_id:path}", dependencies=[Depends(verify_api_key_or_master_key)])
+@router.get("/models/{model_id:path}")
 async def get_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
 ) -> ModelObject:
     """Get details for a specific model."""
+    aliases = effective_aliases(config)
+
+    # Model access control: a denied model returns 404, indistinguishable from a
+    # missing one, so this endpoint cannot be used to probe which models exist
+    # behind an allow-list. Uses the same matcher/canonical key as the listing and
+    # inference. Master key bypasses.
+    api_key, is_master_key = auth
+    key_allowlist = None if is_master_key else await resolve_request_allowlist(db, api_key)
+    if key_allowlist is not None:
+        target = aliases.get(model_id, model_id)
+        if not is_model_allowed(key_allowlist, normalize_pricing_key(config, target)):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Model '{model_id}' not found")
+
     # An alias resolves to its own entry, with pricing read from the resolved
     # target so the underlying provider/model stays hidden. Only the target's own
     # rows are loaded rather than the whole pricing table.
-    alias_target = effective_aliases(config).get(model_id)
+    alias_target = aliases.get(model_id)
     if alias_target is not None:
         pricing_map = await _get_pricing_map(db, model_keys=_pricing_key_candidates(config, alias_target))
         return _alias_model(config, model_id, alias_target, _normalized_pricing_lookup(config, pricing_map))

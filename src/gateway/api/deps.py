@@ -9,13 +9,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, get_db
 from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
+from gateway.services.master_key_service import hash_master_key
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -75,8 +76,9 @@ def reset_config() -> None:
 def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
     """Extract and validate Bearer token from request header.
 
-    Checks the canonical Otari-Key header first, then falls back to the
-    standard Authorization header.
+    Checks the canonical Otari-Key header first, then the standard
+    Authorization header, and finally the raw x-api-key header used by
+    Anthropic-native clients (no Bearer prefix).
     """
     auth_header = request.headers.get(API_KEY_HEADER)
     if not auth_header:
@@ -91,10 +93,14 @@ def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
             )
         return auth_header[7:]
 
+    raw_token = request.headers.get(X_API_KEY_HEADER)
+    if raw_token:
+        return raw_token
+
     record_auth_failure("missing_credentials")
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail=f"Missing {API_KEY_HEADER} or Authorization header",
+        detail=f"Missing {API_KEY_HEADER}, Authorization, or {X_API_KEY_HEADER} header",
     )
 
 
@@ -170,8 +176,13 @@ async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
 
 
 def _is_valid_master_key(token: str, config: GatewayConfig) -> bool:
-    """Check if token matches the master key."""
-    return config.master_key is not None and secrets.compare_digest(token, config.master_key)
+    """Check if token matches the master key (operator-set plaintext or generated hash)."""
+    if config.master_key is not None and secrets.compare_digest(token, config.master_key):
+        return True
+    stored_hash = config._master_key_hash
+    if stored_hash is not None:
+        return secrets.compare_digest(hash_master_key(token), stored_hash)
+    return False
 
 
 async def verify_api_key(
@@ -211,7 +222,7 @@ async def verify_master_key(
         HTTPException: If master key is not configured or invalid
 
     """
-    if not config.master_key:
+    if config.master_key is None and config._master_key_hash is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Master key not configured. Set OTARI_MASTER_KEY environment variable.",

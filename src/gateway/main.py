@@ -12,7 +12,7 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
-from gateway.core.config import API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.dashboard import get_dashboard_build_id, get_dashboard_dir
 from gateway.rate_limit import RateLimiter
@@ -21,12 +21,19 @@ from gateway.services.alias_service import load_aliases_at_startup, reset_alias_
 from gateway.services.bootstrap_service import bootstrap_first_api_key
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
+from gateway.services.master_key_service import ensure_master_key
 from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
     warn_if_require_pricing_without_pricing,
 )
 from gateway.services.pricing_service import configure_default_pricing
+from gateway.services.provider_store_service import (
+    load_providers_at_startup,
+    reset_provider_cache,
+    run_provider_refresher,
+)
 from gateway.services.runtime_settings_service import apply_overrides_from_db
+from gateway.services.secret_box import validate_secret_key
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
@@ -87,6 +94,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         configure_default_pricing(config.default_pricing)
         log_writer: LogWriter
         alias_refresher: asyncio.Task[None] | None = None
+        provider_refresher: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
@@ -95,6 +103,14 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 # Persisted dashboard overrides win over config/env; apply them
                 # before pricing init so default-pricing behavior is consistent.
                 await apply_overrides_from_db(config, session)
+                # Generate + persist a master key on first run when none is set,
+                # so the dashboard is reachable without hand-editing config, and
+                # the management API is never left unauthenticated.
+                await ensure_master_key(config, session)
+                # Overlay dashboard-stored providers before pricing init, so a
+                # provider added at runtime is visible to everything that reads
+                # config.providers (pricing seeding, discovery, dispatch).
+                await load_providers_at_startup(session, config)
                 await bootstrap_first_api_key(config, session)
                 await initialize_pricing_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
@@ -105,6 +121,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # to reload it. A write refreshes its own worker; this is what makes
             # every other worker and replica catch up.
             alias_refresher = asyncio.create_task(run_alias_refresher())
+            # Provider credentials are the same shape: resolution reads
+            # config.providers synchronously, so the overlay is reloaded on a TTL
+            # to converge sibling workers and replicas after a dashboard write.
+            provider_refresher = asyncio.create_task(run_provider_refresher(config))
 
         await log_writer.start()
         app.state.log_writer = log_writer
@@ -117,6 +137,11 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 with suppress(asyncio.CancelledError):
                     await alias_refresher
                 reset_alias_cache()
+            if provider_refresher is not None:
+                provider_refresher.cancel()
+                with suppress(asyncio.CancelledError):
+                    await provider_refresher
+                reset_provider_cache()
             await log_writer.stop()
 
     return lifespan
@@ -126,6 +151,9 @@ def create_app(config: GatewayConfig) -> FastAPI:
     """Create and configure FastAPI application."""
 
     _validate_platform_config(config)
+    # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
+    # break provider-credential storage at request time. Fail fast here instead.
+    validate_secret_key()
     set_config(config)
 
     app = FastAPI(
@@ -162,13 +190,19 @@ def create_app(config: GatewayConfig) -> FastAPI:
             "name": API_KEY_HEADER,
             "description": f"Enter your API key here (sent as {API_KEY_HEADER} header).",
         }
+        openapi_schema["components"]["securitySchemes"]["XApiKeyAuth"] = {
+            "type": "apiKey",
+            "in": "header",
+            "name": X_API_KEY_HEADER,
+            "description": "Anthropic-native clients send credentials here (no Bearer prefix).",
+        }
 
         for path, path_item in openapi_schema.get("paths", {}).items():
             if path.startswith(_PUBLIC_PREFIXES):
                 continue
             for operation in path_item.values():
                 if isinstance(operation, dict):
-                    operation["security"] = [{"ApiKeyAuth": []}]
+                    operation["security"] = [{"ApiKeyAuth": []}, {"XApiKeyAuth": []}]
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema
@@ -231,6 +265,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 "Content-Type",
                 "Authorization",
                 API_KEY_HEADER,
+                X_API_KEY_HEADER,
             ],
         )
 

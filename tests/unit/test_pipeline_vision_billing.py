@@ -34,9 +34,17 @@ class _Recorder:
 
     def install(self, monkeypatch: pytest.MonkeyPatch, *, topup_status: int | None) -> None:
         async def fake_verify(*args: Any, **kwargs: Any) -> tuple[Any, bool]:
-            return SimpleNamespace(id="key-1", user_id="user-1"), False
+            # allowed_models mirrors the real APIKey column (None = unrestricted); the
+            # pipeline's model-access check reads it.
+            return SimpleNamespace(id="key-1", user_id="user-1", allowed_models=None), False
 
         async def fake_find_pricing(*args: Any, **kwargs: Any) -> None:
+            return None
+
+        # The key inherits (allowed_models None); the resolver would otherwise hit
+        # the DB for the user default. This is a pure unit test, so stub it
+        # unrestricted like the other DB-touching helpers.
+        async def fake_resolve_allowlist(*args: Any, **kwargs: Any) -> None:
             return None
 
         async def fake_reserve(*args: Any, **kwargs: Any) -> ReservationHandle:
@@ -59,6 +67,7 @@ class _Recorder:
         monkeypatch.setattr(pipeline, "verify_api_key_or_master_key", fake_verify)
         monkeypatch.setattr(pipeline, "check_rate_limit", lambda request, user_id: None)
         monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
+        monkeypatch.setattr(pipeline, "resolve_request_allowlist", fake_resolve_allowlist)
         monkeypatch.setattr(pipeline, "reserve_budget", fake_reserve)
         monkeypatch.setattr(pipeline, "increase_reservation", fake_increase)
         monkeypatch.setattr(pipeline, "log_usage", fake_log_usage)

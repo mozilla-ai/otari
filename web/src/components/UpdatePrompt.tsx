@@ -29,16 +29,19 @@ export function UpdatePrompt() {
     return null;
   }
 
+  // A floating pill centered at the very top, overlapping the header rather than
+  // taking a full-width row beneath it. The wrapper spans the top edge but is
+  // click-through (pointer-events-none) so the header stays usable everywhere the
+  // pill isn't; only the pill itself is interactive.
   return (
-    <div
-      role="status"
-      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-[var(--otari-brand)] bg-[var(--otari-brand-tint)] px-4 py-3 text-sm text-[var(--otari-brand-dark)]"
-    >
-      <span className="flex-1">
-        <strong className="font-semibold">An update is available.</strong> This tab is running an older version of the
-        dashboard. Reloading keeps you signed in.
-      </span>
-      <span className="flex items-center gap-2">
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-50 flex justify-center">
+      <div
+        role="status"
+        className="pointer-events-auto mt-1.5 flex items-center gap-3 rounded-full border border-[var(--otari-brand)] bg-[var(--otari-brand-tint)] py-1.5 pr-1.5 pl-4 text-sm text-[var(--otari-brand-dark)] shadow-md"
+      >
+        <span>
+          <strong className="font-semibold">An update is available.</strong> Reloading keeps you signed in.
+        </span>
         {/* A plain reload is enough: the gateway serves index.html with
             no-store, so this fetches the new bundle rather than the cached one,
             and the master key lives in sessionStorage, which survives it. */}
@@ -48,7 +51,7 @@ export function UpdatePrompt() {
         <Button size="sm" variant="ghost" onPress={() => setDismissed(true)}>
           Later
         </Button>
-      </span>
+      </div>
     </div>
   );
 }

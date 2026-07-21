@@ -100,6 +100,54 @@ export interface ProvidersResponse {
   providers: ProviderInfo[];
 }
 
+// A provider configured at runtime through the dashboard (a row in
+// provider_credentials). The API key is never returned, only `last4`.
+export interface StoredProvider {
+  instance: string;
+  provider_type: string | null;
+  api_base: string | null;
+  last4: string | null;
+  client_args: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+  // False when the stored key can't be decrypted with the current OTARI_SECRET_KEY.
+  decryptable: boolean;
+}
+
+export interface CreateStoredProviderRequest {
+  instance: string;
+  provider_type?: string | null;
+  api_base?: string | null;
+  api_key?: string | null;
+  client_args?: Record<string, unknown> | null;
+}
+
+// Omitted fields are left unchanged; `api_key` rotates the stored key in place.
+// `expected_updated_at` guards against clobbering a concurrent edit (412).
+export interface UpdateStoredProviderRequest {
+  provider_type?: string | null;
+  api_base?: string | null;
+  api_key?: string | null;
+  client_args?: Record<string, unknown> | null;
+  expected_updated_at?: string | null;
+}
+
+// Result of a live provider connection test (lists the provider's models).
+export interface TestProviderResult {
+  ok: boolean;
+  model_count: number;
+  error: string | null;
+}
+
+// A known provider offered in the add-provider picker, with autofill hints.
+export interface KnownProvider {
+  id: string;
+  name: string;
+  env_key: string | null;
+  default_api_base: string | null;
+  requires_api_key: boolean;
+}
+
 // Per-model metadata from the public models.dev catalog, for the detail panel.
 // Fields are best-effort: models.dev does not know every model, and unknown
 // values come back null/false/[].
@@ -148,6 +196,141 @@ export interface SetPricingRequest {
   input_price_per_million: number;
   output_price_per_million: number;
   effective_at?: string | null;
+}
+
+// An API key row. The full secret is never returned after creation; `key_prefix`
+// is a display-only fingerprint (leading chars of the key), null for keys minted
+// before the prefix was recorded. Note: providers use `last4` while keys use a
+// leading `key_prefix` — a deliberate divergence (the gw-/sk- convention is
+// recognized by its prefix), not an inconsistency to "fix".
+// `allowed_models` is the per-key model access-list: null = any model
+// (unrestricted), [] = deny all, or canonical `instance:model` entries with
+// `instance:*` / `instance:prefix*` wildcards. Governs both /v1/models visibility
+// and inference.
+export interface ApiKey {
+  id: string;
+  key_prefix: string | null;
+  key_name: string | null;
+  user_id: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+  allowed_models: string[] | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface CreateKeyRequest {
+  key_name?: string | null;
+  user_id?: string | null;
+  expires_at?: string | null;
+  allowed_models?: string[] | null;
+  metadata?: Record<string, unknown>;
+}
+
+// Returned by create and regenerate: the one and only time the plaintext `key`
+// is exposed. Shape matches the gateway's CreateKeyResponse (no last_used_at).
+export interface CreateKeyResponse {
+  id: string;
+  key: string;
+  key_prefix: string | null;
+  key_name: string | null;
+  user_id: string | null;
+  created_at: string;
+  expires_at: string | null;
+  is_active: boolean;
+  allowed_models: string[] | null;
+  metadata: Record<string, unknown>;
+}
+
+// Omitted fields are left unchanged. `allowed_models` is tri-state on the wire:
+// omit = unchanged, null = clear to unrestricted, [] = deny all, list = restrict.
+export interface UpdateKeyRequest {
+  key_name?: string | null;
+  is_active?: boolean | null;
+  expires_at?: string | null;
+  allowed_models?: string[] | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+// A budget: a reusable spending template (a per-user limit plus an optional
+// reset period). Multiple users can share one budget, so the usage fields are an
+// aggregate rollup over the users currently assigned to it: how many there are
+// and their combined spend/reserved. Assigning users lands with user management,
+// so a gateway without assigned users reports zeros here.
+export interface Budget {
+  budget_id: string;
+  name: string | null;
+  max_budget: number | null;
+  budget_duration_sec: number | null;
+  created_at: string;
+  updated_at: string;
+  user_count: number;
+  total_spend: number;
+  total_reserved: number;
+}
+
+export interface CreateBudgetRequest {
+  name?: string | null;
+  max_budget?: number | null;
+  budget_duration_sec?: number | null;
+}
+
+// Omitted fields are left unchanged; `name` is tri-state (omit = unchanged,
+// null = clear to unnamed, string = rename).
+export interface UpdateBudgetRequest {
+  name?: string | null;
+  max_budget?: number | null;
+  budget_duration_sec?: number | null;
+}
+
+// One per-user budget reset event (the spend that was cleared and when the next
+// reset is due). Surfaced as the budget's reset history.
+export interface BudgetResetLog {
+  id: number;
+  user_id: string | null;
+  budget_id: string;
+  previous_spend: number;
+  reset_at: string;
+  next_reset_at: string | null;
+}
+
+// A user/customer: the principal keys and budgets attach to, and where the
+// per-user model-access default lives. `allowed_models` is the default every one
+// of this user's keys inherits (null = unrestricted, [] = deny all, else canonical
+// `instance:model` entries). `user_id` is the identifier used by request routing.
+export interface User {
+  user_id: string;
+  alias: string | null;
+  spend: number;
+  reserved: number;
+  budget_id: string | null;
+  allowed_models: string[] | null;
+  budget_started_at: string | null;
+  next_budget_reset_at: string | null;
+  blocked: boolean;
+  created_at: string;
+  updated_at: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface CreateUserRequest {
+  user_id: string;
+  alias?: string | null;
+  budget_id?: string | null;
+  blocked?: boolean;
+  allowed_models?: string[] | null;
+  metadata?: Record<string, unknown>;
+}
+
+// Omitted fields are left unchanged. `allowed_models` is tri-state on the wire
+// (omit = unchanged, null = clear to unrestricted, [] = deny all, list = restrict).
+export interface UpdateUserRequest {
+  alias?: string | null;
+  budget_id?: string | null;
+  blocked?: boolean | null;
+  allowed_models?: string[] | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface GatewaySettings {

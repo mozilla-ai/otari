@@ -146,7 +146,8 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 
 | Variable | Description |
 |----------|-------------|
-| `OTARI_MASTER_KEY` | Master key for management endpoints |
+| `OTARI_MASTER_KEY` | Master key for management endpoints. When unset in standalone mode, one is generated on first run and printed to the logs (see [Runtime provider management](#runtime-provider-management)). |
+| `OTARI_SECRET_KEY` | Fernet key that encrypts provider credentials added through the dashboard. Required to store a provider key in the UI. Generate one with `otari gen-secret-key`. |
 | `OTARI_DATABASE_URL` | Database connection URL |
 | `OTARI_HOST` | Server bind host |
 | `OTARI_PORT` | Server bind port |
@@ -184,6 +185,32 @@ These credentials are used for standalone deployments. When connected to otari.a
 | `ANTHROPIC_API_KEY` | Anthropic |
 | `MISTRAL_API_KEY` | Mistral |
 | `GEMINI_API_KEY` | Google Gemini |
+
+### Runtime provider management
+
+Instead of setting providers at launch, you can add them from the admin dashboard
+after startup (standalone mode only). This lets you launch Otari with almost
+nothing set and finish configuration in the browser.
+
+- **First-run master key.** If `OTARI_MASTER_KEY` is unset, Otari generates a
+  master key on first startup, stores only its hash, and prints the plaintext
+  once to the logs (look for `Your master key:`). Use it to sign in. An
+  operator-set `OTARI_MASTER_KEY` always takes precedence and is never generated
+  over.
+- **Encryption at rest.** Provider keys added in the dashboard are stored
+  encrypted with `OTARI_SECRET_KEY` (a Fernet key). Set it before adding a key;
+  generate one with `otari gen-secret-key`. Keep it safe and separate from the
+  database: losing it makes every stored provider key undecryptable, and a
+  database dump alone cannot decrypt them. Rotate by prepending a new key
+  (comma- or whitespace-separated); both old and new are tried on decrypt.
+- **Precedence.** Dashboard-stored providers merge over `config.yml` providers.
+  A stored provider with the same instance name as a config one takes precedence
+  (the shadowing is logged at startup). In the dashboard, config providers are
+  marked `config` and are read-only; stored providers are marked `stored` and can
+  be edited, tested, and deleted.
+- **Scope.** Providers that authenticate with an API key (OpenAI, Anthropic,
+  Mistral, Gemini, and OpenAI-compatible backends) are supported. Providers that
+  use ADC/IAM (Vertex AI, Bedrock) remain config-file only.
 
 ### otari.ai variables
 

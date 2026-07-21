@@ -259,15 +259,17 @@ async def test_deleted_alias_stops_routing(client: TestClient) -> None:
     dispatch = AsyncMock()
     with patch("gateway.api.routes.chat.acompletion", new=dispatch):
         # "fast" is no longer an alias and was never a valid selector on its own,
-        # so it now fails to resolve, the same as any unknown model would. What
-        # matters is that it does not quietly keep reaching the old target.
-        with pytest.raises(ValueError, match="Invalid model format"):
-            client.post(
-                "/v1/chat/completions",
-                json={"model": "fast", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
-                headers=HEADERS,
-            )
+        # so it now fails to resolve, the same as any unknown model would. It is
+        # surfaced as a 400 (not a bare 500) and, crucially, does not quietly
+        # keep reaching the old target.
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "fast", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
+            headers=HEADERS,
+        )
 
+    assert response.status_code == 400
+    assert "fast" in response.json()["detail"]
     dispatch.assert_not_awaited()
 
 

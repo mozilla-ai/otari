@@ -22,11 +22,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Generic, TypeVar
 
+from any_llm.exceptions import AnyLLMError
 from fastapi import HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes._pipeline import rate_limit_headers
+from gateway.api.routes._pipeline import _raise_for_unresolvable_model, rate_limit_headers
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -39,7 +40,12 @@ from gateway.services.budget_service import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
+from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
+from gateway.services.pricing_service import (
+    find_model_pricing,
+    no_pricing_error_detail,
+    pricing_required_but_missing,
+)
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 
 ResultT = TypeVar("ResultT")
@@ -168,9 +174,18 @@ async def run_passthrough(
         reservation = await reserve_budget(
             db, user_id, estimate(None) if estimate else 0.0, model=model, strategy=config.budget_strategy
         )
-        resolved = resolve_provider_selector(config, model)
+        # The reservation is already held, so refund it before mapping an
+        # unresolvable selector to 400; otherwise the estimate leaks.
+        try:
+            resolved = resolve_provider_selector(config, model)
+        except (ValueError, AnyLLMError) as exc:
+            await refund_reservation(db, reservation)
+            _raise_for_unresolvable_model(model, exc)
     else:
-        resolved = resolve_provider_selector(config, model)
+        try:
+            resolved = resolve_provider_selector(config, model)
+        except (ValueError, AnyLLMError) as exc:
+            _raise_for_unresolvable_model(model, exc)
         if lookup_pricing:
             pricing = await find_model_pricing(db, resolved.instance, resolved.model)
         # Reserve first so user/blocked/budget rejections (404/403) precede the
@@ -182,8 +197,21 @@ async def run_passthrough(
             await refund_reservation(db, reservation)
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=f"No pricing configured for model '{model}'",
+                detail=no_pricing_error_detail(model),
             )
+
+    # Model access control (per-key). The reservation is already taken above (the
+    # audio branch reserves before resolve), so refund before rejecting. A key with
+    # no list of its own inherits its user's default.
+    key_allowlist = await resolve_request_allowlist(db, api_key)
+    if key_allowlist is not None and not is_model_allowed(
+        key_allowlist, f"{resolved.instance}:{resolved.model}"
+    ):
+        await refund_reservation(db, reservation)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=model_not_allowed_detail(model),
+        )
 
     try:
         result = await call_provider(resolved)

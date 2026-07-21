@@ -48,7 +48,7 @@ async def create_image(
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
-    - API key without user field: Use virtual user created with API key
+    - API key without user field: Use the shared "default" user
     """
     # Reserve for the requested image count; reconciled to the actual count below.
     # `is None` (not `or`) so an explicit n=0 isn't silently treated as 1.

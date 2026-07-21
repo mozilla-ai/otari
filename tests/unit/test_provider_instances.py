@@ -38,6 +38,13 @@ def test_instance_type_normalizes_openai_compatible_alias() -> None:
     assert config2.provider_instance_type("home_lab") == "openai"
 
 
+def test_instance_type_normalizes_anthropic_compatible_alias() -> None:
+    config = GatewayConfig(providers={"proxy": {"provider_type": "anthropic-compatible"}})
+    assert config.provider_instance_type("proxy") == "anthropic"
+    config2 = GatewayConfig(providers={"proxy": {"provider_type": "anthropic_compatible"}})
+    assert config2.provider_instance_type("proxy") == "anthropic"
+
+
 def test_instance_type_unknown_instance_returns_input() -> None:
     assert GatewayConfig().provider_instance_type("anthropic") == "anthropic"
 
@@ -198,6 +205,13 @@ def test_normalize_pricing_key_provider_slash_to_colon() -> None:
 
 def test_normalize_pricing_key_unparseable_returned_unchanged() -> None:
     assert normalize_pricing_key(GatewayConfig(), "bare-model") == "bare-model"
+
+
+def test_normalize_pricing_key_orphaned_instance_does_not_raise() -> None:
+    # Regression: a pricing row keyed on an instance that is no longer configured
+    # (e.g. a stored provider that could not be decrypted and was skipped) must be
+    # returned unchanged, not raise AnyLLMError and 500 the models listing.
+    assert normalize_pricing_key(GatewayConfig(), "home-lab:qwen3") == "home-lab:qwen3"
 
 
 # ---------------------------------------------------------------------------

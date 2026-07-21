@@ -8,9 +8,19 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_db, verify_master_key
-from gateway.auth.models import generate_api_key, hash_key
+from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.auth.models import generate_api_key, hash_key, key_prefix
+from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, User
+from gateway.repositories.users_repository import get_or_create_default_user
+from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
+
+# A key inherits its user's default allow-list and may narrow it, never broaden
+# it, so a key list that is not a subset of the user's is rejected on write.
+_KEY_EXCEEDS_USER_DETAIL = (
+    "This key's allowed_models exceeds its user's default; a key can only narrow "
+    "the user's model access, not broaden it."
+)
 
 router = APIRouter(prefix="/v1/keys", tags=["keys"])
 
@@ -21,6 +31,11 @@ class CreateKeyRequest(BaseModel):
     key_name: str | None = Field(default=None, description="Optional name for the key")
     user_id: str | None = Field(default=None, description="Optional user ID to associate with this key")
     expires_at: datetime | None = Field(default=None, description="Optional expiration timestamp")
+    allowed_models: list[str] | None = Field(
+        default=None,
+        description="Model allow-list: null = any model, [] = deny all, or canonical "
+        "instance:model entries (with instance:* / instance:prefix* wildcards).",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
 
@@ -29,11 +44,15 @@ class CreateKeyResponse(BaseModel):
 
     id: str
     key: str
+    # Leading characters of the key, echoed so the client can key its show-once
+    # reveal to the same fingerprint the list will display afterward.
+    key_prefix: str | None
     key_name: str | None
     user_id: str | None
     created_at: str
     expires_at: str | None
     is_active: bool
+    allowed_models: list[str] | None
     metadata: dict[str, Any]
 
 
@@ -41,24 +60,30 @@ class KeyInfo(BaseModel):
     """Response model for key information."""
 
     id: str
+    # Display-only fingerprint (leading characters of the plaintext key). Null for
+    # keys minted before the prefix was recorded; the full key is never returned.
+    key_prefix: str | None
     key_name: str | None
     user_id: str | None
     created_at: str
     last_used_at: str | None
     expires_at: str | None
     is_active: bool
+    allowed_models: list[str] | None
     metadata: dict[str, Any]
 
     @classmethod
     def from_model(cls, key: APIKey) -> "KeyInfo":
         return cls(
             id=str(key.id),
+            key_prefix=str(key.key_prefix) if key.key_prefix else None,
             key_name=str(key.key_name) if key.key_name else None,
             user_id=str(key.user_id) if key.user_id else None,
             created_at=key.created_at.isoformat(),
             last_used_at=key.last_used_at.isoformat() if key.last_used_at else None,
             expires_at=key.expires_at.isoformat() if key.expires_at else None,
             is_active=bool(key.is_active),
+            allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
 
@@ -69,6 +94,10 @@ class UpdateKeyRequest(BaseModel):
     key_name: str | None = None
     is_active: bool | None = None
     expires_at: datetime | None = None
+    # Tri-state via model_fields_set: absent = unchanged, null = clear to
+    # unrestricted, [] = deny all, list = restrict. A plain default cannot tell
+    # "absent" from "explicit null", so the handler checks model_fields_set.
+    allowed_models: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -76,14 +105,22 @@ class UpdateKeyRequest(BaseModel):
 async def create_key(
     request: CreateKeyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> CreateKeyResponse:
     """Create a new API key.
 
     Requires master key authentication.
 
     If user_id is provided, the key will be associated with that user (creates user if it doesn't exist).
-    If user_id is not provided, a new user will be created automatically and the key will be associated with it.
+    If user_id is not provided, the key is associated with the shared "default" user, which is created
+    on first use. Keys without an explicit owner therefore share one identity, and so share budget,
+    usage, and files.
     """
+    try:
+        allowed_models = validate_allowed_models(config, request.allowed_models)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     api_key = generate_api_key()
     key_hash = hash_key(api_key)
     key_id = uuid.uuid4()
@@ -104,19 +141,25 @@ async def create_key(
             )
         user_id = request.user_id
     else:
-        user_id = f"apikey-{key_id}"
-        user = User(
-            user_id=user_id,
-            alias=f"Virtual user for API key: {request.key_name or 'unnamed'}",
-        )
-        db.add(user)
+        # No owner given: attach to the shared "default" user rather than minting a
+        # throwaway per-key user, so the key still has a real, visible, budgetable
+        # owner and nothing is untracked.
+        user = await get_or_create_default_user(db)
+        user_id = user.user_id
+
+    # A key must not grant more than its user's default (a freshly created user
+    # has no default, so this only bites when attaching to a restricted user).
+    if not is_allowlist_subset(allowed_models, user.allowed_models):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
 
     db_key = APIKey(
         id=str(key_id),
         key_hash=key_hash,
+        key_prefix=key_prefix(api_key),
         key_name=request.key_name,
         user_id=user_id,
         expires_at=request.expires_at,
+        allowed_models=allowed_models,
         metadata_=request.metadata,
     )
 
@@ -180,6 +223,7 @@ async def update_key(
     key_id: str,
     request: UpdateKeyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> KeyInfo:
     """Update an API key.
 
@@ -200,6 +244,21 @@ async def update_key(
         key.is_active = request.is_active
     if request.expires_at is not None:
         key.expires_at = request.expires_at
+    # Tri-state: only touch the allow-list when the field was supplied. A supplied
+    # null clears to unrestricted; [] denies all; a list restricts.
+    if "allowed_models" in request.model_fields_set:
+        try:
+            new_allowed = validate_allowed_models(config, request.allowed_models)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        # Enforce narrow-only against the key's user default (see create_key).
+        if key.user_id is not None:
+            user_default = (
+                await db.execute(select(User.allowed_models).where(User.user_id == key.user_id))
+            ).scalar_one_or_none()
+            if not is_allowlist_subset(new_allowed, user_default):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
+        key.allowed_models = new_allowed
     if request.metadata is not None:
         key.metadata_ = request.metadata
 
@@ -241,6 +300,7 @@ async def rotate_key(
 
     new_api_key = generate_api_key()
     key.key_hash = hash_key(new_api_key)
+    key.key_prefix = key_prefix(new_api_key)
     key.last_used_at = None
 
     try:

@@ -3,16 +3,32 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/api/client";
 import type {
   AliasResponse,
+  ApiKey,
+  Budget,
+  BudgetResetLog,
   CreateAliasRequest,
+  CreateBudgetRequest,
+  CreateKeyRequest,
+  CreateKeyResponse,
+  CreateStoredProviderRequest,
   DashboardBuild,
   DiscoverableModelsResponse,
   GatewaySettings,
+  KnownProvider,
   ModelListResponse,
   ModelMetadataResponse,
   PricingResponse,
   ProvidersResponse,
   SetPricingRequest,
+  StoredProvider,
+  TestProviderResult,
+  UpdateBudgetRequest,
+  UpdateKeyRequest,
   UpdateSettingsRequest,
+  UpdateStoredProviderRequest,
+  UpdateUserRequest,
+  User,
+  CreateUserRequest,
 } from "@/api/types";
 
 const MODELS = "models";
@@ -24,8 +40,12 @@ const ALIASES = "aliases";
 // key would fire a live provider call on every save.
 const DISCOVERABLE = "discoverable";
 const PROVIDERS = "providers";
+const STORED_PROVIDERS = "stored-providers";
 const METADATA = "model-metadata";
 const BUILD = "build";
+const KEYS = "keys";
+const BUDGETS = "budgets";
+const USERS = "users";
 
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
@@ -80,6 +100,86 @@ export function useProviders() {
     queryKey: [PROVIDERS],
     queryFn: () => apiFetch<ProvidersResponse>("/v1/providers"),
     staleTime: 5 * 60_000,
+  });
+}
+
+// Every known provider the add-provider picker can offer, with autofill hints.
+// Bundled/static gateway-side, so it never moves within a session.
+export function useProviderCatalog() {
+  return useQuery({
+    queryKey: ["provider-catalog"],
+    queryFn: () => apiFetch<KnownProvider[]>("/v1/providers/catalog"),
+    staleTime: Infinity,
+  });
+}
+
+// Providers configured at runtime through the dashboard. Distinct from
+// useProviders (static metadata for every configured provider, config + stored
+// merged): this is the editable set, with the last 4 of each stored key.
+export function useStoredProviders() {
+  return useQuery({
+    queryKey: [STORED_PROVIDERS],
+    queryFn: () => apiFetch<StoredProvider[]>("/v1/provider-credentials"),
+    staleTime: 60_000,
+  });
+}
+
+// A new or changed provider can change which models the catalog and picker
+// report, so a credential write invalidates those too.
+function invalidateProviderViews(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: [STORED_PROVIDERS] });
+  void queryClient.invalidateQueries({ queryKey: [PROVIDERS] });
+  void queryClient.invalidateQueries({ queryKey: [MODELS] });
+  void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] });
+}
+
+export function useCreateStoredProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateStoredProviderRequest) =>
+      apiFetch<StoredProvider>("/v1/provider-credentials", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => invalidateProviderViews(queryClient),
+  });
+}
+
+export function useUpdateStoredProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ instance, body }: { instance: string; body: UpdateStoredProviderRequest }) =>
+      apiFetch<StoredProvider>(`/v1/provider-credentials/${encodeURIComponent(instance)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateProviderViews(queryClient),
+  });
+}
+
+export function useDeleteStoredProvider() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (instance: string) =>
+      apiFetch<void>(`/v1/provider-credentials/${encodeURIComponent(instance)}`, { method: "DELETE" }),
+    onSuccess: () => invalidateProviderViews(queryClient),
+  });
+}
+
+// Tests a stored provider's key by listing its models. Read-only on the server,
+// so it invalidates nothing.
+export function useTestStoredProvider() {
+  return useMutation({
+    mutationFn: (instance: string) =>
+      apiFetch<TestProviderResult>(`/v1/provider-credentials/${encodeURIComponent(instance)}/test`, {
+        method: "POST",
+      }),
+  });
+}
+
+// Tests credentials from the add/edit form before they are saved. Nothing is
+// persisted server-side, so it invalidates nothing.
+export function useTestProviderCredentials() {
+  return useMutation({
+    mutationFn: (body: CreateStoredProviderRequest) =>
+      apiFetch<TestProviderResult>("/v1/provider-credentials/test", { method: "POST", body: JSON.stringify(body) }),
   });
 }
 
@@ -199,6 +299,197 @@ export function useDeletePricing() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [PRICING] });
       void queryClient.invalidateQueries({ queryKey: [MODELS] });
+    },
+  });
+}
+
+// The keys endpoint caps `limit` at 1000 server-side; page through it (capped like
+// pricing) so a gateway with many keys can't have rows silently vanish from the
+// table, and a backend that ignores `skip` can't spin an unbounded loop.
+const KEYS_PAGE_SIZE = 1000;
+const KEYS_MAX_PAGES = 100;
+
+async function fetchAllKeys(): Promise<ApiKey[]> {
+  const all: ApiKey[] = [];
+  for (let page = 0; page < KEYS_MAX_PAGES; page += 1) {
+    const rows = await apiFetch<ApiKey[]>(`/v1/keys?skip=${page * KEYS_PAGE_SIZE}&limit=${KEYS_PAGE_SIZE}`);
+    all.push(...rows);
+    if (rows.length < KEYS_PAGE_SIZE) {
+      break;
+    }
+  }
+  return all;
+}
+
+export function useKeys() {
+  return useQuery({
+    queryKey: [KEYS],
+    queryFn: fetchAllKeys,
+    staleTime: 60_000,
+  });
+}
+
+// Create returns the plaintext key exactly once (in `key`); the caller reveals it
+// and must never write the response into the query cache.
+export function useCreateKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateKeyRequest) =>
+      apiFetch<CreateKeyResponse>("/v1/keys", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
+  });
+}
+
+export function useUpdateKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateKeyRequest }) =>
+      apiFetch<ApiKey>(`/v1/keys/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
+  });
+}
+
+// Regenerate: a new secret for the same key row. The old secret stops working
+// immediately. Returns the new plaintext once, like create.
+export function useRotateKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<CreateKeyResponse>(`/v1/keys/${encodeURIComponent(id)}/rotate`, { method: "POST" }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
+  });
+}
+
+export function useDeleteKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/keys/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
+  });
+}
+
+// The budgets endpoint caps `limit` at 1000 server-side; page through it (capped
+// like keys/pricing) so a gateway with many budgets can't have rows silently
+// vanish, and a backend that ignores `skip` can't spin an unbounded loop.
+const BUDGETS_PAGE_SIZE = 1000;
+const BUDGETS_MAX_PAGES = 100;
+
+async function fetchAllBudgets(): Promise<Budget[]> {
+  const all: Budget[] = [];
+  for (let page = 0; page < BUDGETS_MAX_PAGES; page += 1) {
+    const rows = await apiFetch<Budget[]>(`/v1/budgets?skip=${page * BUDGETS_PAGE_SIZE}&limit=${BUDGETS_PAGE_SIZE}`);
+    all.push(...rows);
+    if (rows.length < BUDGETS_PAGE_SIZE) {
+      break;
+    }
+  }
+  return all;
+}
+
+export function useBudgets() {
+  return useQuery({
+    queryKey: [BUDGETS],
+    queryFn: fetchAllBudgets,
+    staleTime: 60_000,
+  });
+}
+
+// Per-user reset history for one budget. Enabled only once a budget id is set
+// (the drill-down is opened), so the query does not fire for the whole list.
+export function useBudgetResetLogs(budgetId: string | null) {
+  return useQuery({
+    queryKey: [BUDGETS, budgetId, "reset-logs"],
+    queryFn: () => apiFetch<BudgetResetLog[]>(`/v1/budgets/${encodeURIComponent(budgetId as string)}/reset-logs`),
+    enabled: budgetId !== null,
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateBudgetRequest) =>
+      apiFetch<Budget>("/v1/budgets", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
+  });
+}
+
+export function useUpdateBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateBudgetRequest }) =>
+      apiFetch<Budget>(`/v1/budgets/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
+  });
+}
+
+export function useDeleteBudget() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/budgets/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
+  });
+}
+
+// The users endpoint caps `limit` at 1000 server-side; page through it (capped
+// like keys/budgets) so a gateway with many users can't have rows silently
+// vanish, and a backend that ignores `skip` can't spin an unbounded loop.
+const USERS_PAGE_SIZE = 1000;
+const USERS_MAX_PAGES = 100;
+
+async function fetchAllUsers(): Promise<User[]> {
+  const all: User[] = [];
+  for (let page = 0; page < USERS_MAX_PAGES; page += 1) {
+    const rows = await apiFetch<User[]>(`/v1/users?skip=${page * USERS_PAGE_SIZE}&limit=${USERS_PAGE_SIZE}`);
+    all.push(...rows);
+    if (rows.length < USERS_PAGE_SIZE) {
+      break;
+    }
+  }
+  return all;
+}
+
+export function useUsers() {
+  return useQuery({
+    queryKey: [USERS],
+    queryFn: fetchAllUsers,
+    staleTime: 60_000,
+  });
+}
+
+// Assigning a budget to a user changes that budget's usage rollup, so a user
+// write invalidates the budgets list too.
+function invalidateUserViews(queryClient: ReturnType<typeof useQueryClient>): void {
+  void queryClient.invalidateQueries({ queryKey: [USERS] });
+  void queryClient.invalidateQueries({ queryKey: [BUDGETS] });
+}
+
+export function useCreateUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateUserRequest) =>
+      apiFetch<User>("/v1/users", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => invalidateUserViews(queryClient),
+  });
+}
+
+export function useUpdateUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateUserRequest }) =>
+      apiFetch<User>(`/v1/users/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => invalidateUserViews(queryClient),
+  });
+}
+
+export function useDeleteUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiFetch<void>(`/v1/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSuccess: () => {
+      invalidateUserViews(queryClient);
+      // Deleting a user deactivates its keys server-side.
+      void queryClient.invalidateQueries({ queryKey: [KEYS] });
     },
   });
 }

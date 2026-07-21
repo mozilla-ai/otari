@@ -269,20 +269,18 @@ def test_api_key_cannot_bill_other_user(
     assert "does not match" in response.json()["detail"].lower()
 
 
-def test_virtual_key_without_user(
+def test_key_without_user_attaches_to_default(
     client: TestClient,
     master_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
     test_config: GatewayConfig,
 ) -> None:
-    """Test that API keys create a virtual user at key creation time."""
-    expected_user_id = f"apikey-{api_key_obj['id']}"
-
-    user_response = client.get(f"/v1/users/{expected_user_id}", headers=master_key_header)
+    """A key created without a user_id attaches to the shared 'default' user."""
+    user_response = client.get("/v1/users/default", headers=master_key_header)
     assert user_response.status_code == 200
     user = user_response.json()
-    assert user["user_id"] == expected_user_id
-    assert "Virtual user" in user["alias"]
+    assert user["user_id"] == "default"
+    assert user["alias"] == "Default"
 
     api_key_header = {API_KEY_HEADER: f"Bearer {api_key_obj['key']}"}
     client.post(

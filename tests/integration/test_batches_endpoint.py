@@ -169,7 +169,7 @@ def test_create_batch_invalid_model_format(
             headers=api_key_header,
         )
     assert resp.status_code == 400
-    assert "Invalid request" in resp.json()["detail"]
+    assert "gpt-4o-mini" in resp.json()["detail"]
 
 
 def test_create_batch_provider_error(

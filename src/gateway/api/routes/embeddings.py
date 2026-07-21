@@ -45,7 +45,7 @@ async def create_embedding(
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
-    - API key without user field: Use virtual user created with API key
+    - API key without user field: Use the shared "default" user
     """
     # Embeddings have no generated output, so only the prompt contributes cost.
     prompt_chars = sum(len(s) for s in request.input) if isinstance(request.input, list) else len(request.input)

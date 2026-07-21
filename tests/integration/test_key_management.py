@@ -23,6 +23,9 @@ def test_create_api_key(client: TestClient, master_key_header: dict[str, str]) -
     assert "id" in data
     assert "key" in data
     assert data["key"].startswith("gw-")
+    # The prefix is the leading slice of the plaintext, echoed for the show-once
+    # reveal so the list can later fingerprint the key without the full secret.
+    assert data["key_prefix"] == data["key"][:10]
     assert data["key_name"] == "test-key"
     assert data["is_active"] is True
     assert "created_at" in data
@@ -106,6 +109,8 @@ def test_get_api_key(client: TestClient, master_key_header: dict[str, str], api_
 
     assert data["id"] == api_key_obj["id"]
     assert data["key_name"] == api_key_obj["key_name"]
+    # The fingerprint is listed; the full key never is.
+    assert "key_prefix" in data
     assert "key" not in data
 
 
@@ -194,6 +199,9 @@ def test_rotate_api_key_returns_new_working_key_same_id(
     assert rotated["id"] == original["id"]
     assert rotated["key"].startswith("gw-")
     assert rotated["key"] != original["key"]
+    # Regenerate re-fingerprints: the prefix tracks the new secret, not the old one.
+    assert rotated["key_prefix"] == rotated["key"][:10]
+    assert rotated["key_prefix"] != original["key_prefix"]
     assert rotated["key_name"] == original["key_name"]
     assert rotated["user_id"] == original["user_id"]
     assert rotated["metadata"] == {"team": "eng"}

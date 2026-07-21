@@ -83,7 +83,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
 from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
-from gateway.metrics import record_cost, record_tokens
+from gateway.metrics import record_abandoned_attempt, record_cost, record_tokens
 from gateway.model_labeling import relabel_model
 from gateway.models.entities import UsageLog
 from gateway.models.guardrails import GuardrailConfig
@@ -105,7 +105,12 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
-from gateway.services.pricing_service import find_model_pricing, pricing_required_but_missing
+from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
+from gateway.services.pricing_service import (
+    find_model_pricing,
+    no_pricing_error_detail,
+    pricing_required_but_missing,
+)
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 from gateway.services.sandbox_backend import SandboxBackend, SandboxNotReachableError
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
@@ -399,6 +404,23 @@ class RequestContext:
         self.resolved_provider = resolved_provider
 
 
+def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoReturn:
+    """Convert a selector-parse failure into an HTTP 400 with a helpful detail.
+
+    resolve_provider_selector raises ValueError for an unparseable
+    selector (no provider: prefix) and AnyLLMError for an unknown
+    provider.  Both are client input errors; surfacing them as a bare 500 is
+    confusing.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            f"Unknown or unsupported model {model_selector!r}. "
+            "Use the format 'provider:model' with a configured provider."
+        ),
+    ) from exc
+
+
 def resolve_dispatch_provider(ctx: RequestContext, config: GatewayConfig, model_selector: str) -> ResolvedProvider:
     """Get the ``ResolvedProvider`` for dispatch, reusing the one computed for
     the pricing/budget gate (``ctx.resolved_provider``) instead of resolving
@@ -413,7 +435,10 @@ def resolve_dispatch_provider(ctx: RequestContext, config: GatewayConfig, model_
     """
     if ctx.resolved_provider is not None:
         return ctx.resolved_provider
-    return resolve_provider_selector(config, model_selector)
+    try:
+        return resolve_provider_selector(config, model_selector)
+    except (ValueError, AnyLLMError) as exc:
+        _raise_for_unresolvable_model(model_selector, exc)
 
 
 async def _bill_vision_side_call(
@@ -564,6 +589,17 @@ async def resolve_request_context(
         except (ValueError, AnyLLMError):
             gate_instance, gate_impl, gate_model = None, None, model
 
+        # Model access control (per-key, standalone). None = unrestricted; a
+        # non-null list restricts. Fail closed: a selector we could not resolve is
+        # denied under a restriction rather than dispatched unchecked. Master-key
+        # callers have api_key None, so the allow-list is None and this is skipped.
+        # A key with no list of its own inherits its user's default here.
+        key_allowlist = await resolve_request_allowlist(db, api_key)
+        if key_allowlist is not None and not (
+            gate_instance is not None and is_model_allowed(key_allowlist, f"{gate_instance}:{gate_model}")
+        ):
+            raise adapter.error(403, model_not_allowed_detail(model), ErrorKind.PERMISSION)
+
         gate_pricing = await find_model_pricing(db, gate_instance, gate_model)
         estimate = estimate_cost(
             gate_pricing,
@@ -579,7 +615,7 @@ async def resolve_request_context(
             await refund_reservation(db, reservation)
             raise adapter.error(
                 402,
-                f"No pricing configured for model '{model}'",
+                no_pricing_error_detail(model),
                 ErrorKind.INVALID_REQUEST,
             )
 
@@ -1595,6 +1631,7 @@ async def run_streaming_with_fallback(
             session_label,
         )
         pending_error_reports.append((attempt.attempt_id, "error", None, failure.error_class))
+        record_abandoned_attempt(attempt.provider, attempt.model, failure.reason, attempt.position)
         logger.warning(
             "Streaming attempt failed request_id=%s position=%d provider=%s model=%s error=%s",
             route.request_id,

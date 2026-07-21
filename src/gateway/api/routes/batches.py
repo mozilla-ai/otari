@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 from any_llm import AnyLLM, LLMProvider
 from any_llm.api import acancel_batch, acreate_batch, alist_batches, aretrieve_batch, aretrieve_batch_results
-from any_llm.exceptions import BatchNotCompleteError, UnsupportedProviderError
+from any_llm.exceptions import AnyLLMError, BatchNotCompleteError, UnsupportedProviderError
 from any_llm.types.batch import Batch
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
+from gateway.api.routes._pipeline import _raise_for_unresolvable_model
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -28,6 +29,7 @@ from gateway.services.budget_service import (
     reserve_budget,
 )
 from gateway.services.log_writer import LogWriter
+from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
 
@@ -199,7 +201,7 @@ async def create_batch(
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
-    - API key without user field: Use virtual user created with API key
+    - API key without user field: Use the shared "default" user
     """
     api_key, is_master_key = auth_result
     api_key_id = api_key.id if api_key else None
@@ -231,12 +233,21 @@ async def create_batch(
 
     try:
         resolved = resolve_provider_selector(config, request.model)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid request: {e}",
-        ) from e
+    except (ValueError, AnyLLMError) as exc:
+        _raise_for_unresolvable_model(request.model, exc)
     provider, model = resolved.provider, resolved.model
+
+    # Model access control (per-key). Runs before the reservation, so nothing to
+    # refund. Master-key callers have api_key None -> unrestricted. A key with no
+    # list of its own inherits its user's default.
+    key_allowlist = await resolve_request_allowlist(db, api_key)
+    if key_allowlist is not None and not is_model_allowed(
+        key_allowlist, f"{resolved.instance}:{resolved.model}"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=model_not_allowed_detail(request.model),
+        )
 
     # Validate provider supports batch operations
     provider_class = AnyLLM.get_provider_class(provider)

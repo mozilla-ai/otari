@@ -60,5 +60,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     css: true,
+    // Vitest owns the component tests under src/; the Playwright specs in e2e/
+    // run in a real browser and must not be collected here.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
   },
 });

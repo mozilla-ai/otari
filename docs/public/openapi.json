@@ -259,8 +259,61 @@
         "title": "Body_create_transcription_v1_audio_transcriptions_post",
         "type": "object"
       },
+      "BudgetResetLogResponse": {
+        "description": "Response model for one budget reset event (per user).",
+        "properties": {
+          "budget_id": {
+            "title": "Budget Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "next_reset_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Reset At"
+          },
+          "previous_spend": {
+            "title": "Previous Spend",
+            "type": "number"
+          },
+          "reset_at": {
+            "title": "Reset At",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "budget_id",
+          "previous_spend",
+          "reset_at",
+          "next_reset_at"
+        ],
+        "title": "BudgetResetLogResponse",
+        "type": "object"
+      },
       "BudgetResponse": {
-        "description": "Response model for budget information.",
+        "description": "Response model for budget information.\n\n``max_budget`` is the per-user spending limit, and multiple users can share\none budget, so the usage rollup is an aggregate over the users assigned to\nthis budget: how many there are and their combined ``spend`` / ``reserved``.\nAssigning users to a budget is done through the users API (dashboard support\nlands with user management), so a fresh gateway reports zeros here.",
         "properties": {
           "budget_duration_sec": {
             "anyOf": [
@@ -292,13 +345,40 @@
             ],
             "title": "Max Budget"
           },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "total_reserved": {
+            "default": 0.0,
+            "title": "Total Reserved",
+            "type": "number"
+          },
+          "total_spend": {
+            "default": 0.0,
+            "title": "Total Spend",
+            "type": "number"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
+          },
+          "user_count": {
+            "default": 0,
+            "title": "User Count",
+            "type": "integer"
           }
         },
         "required": [
           "budget_id",
+          "name",
           "max_budget",
           "budget_duration_sec",
           "created_at",
@@ -863,6 +943,18 @@
             ],
             "description": "Maximum spending limit",
             "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Admin-facing label for the budget",
+            "title": "Name"
           }
         },
         "title": "CreateBudgetRequest",
@@ -871,6 +963,21 @@
       "CreateKeyRequest": {
         "description": "Request model for creating a new API key.",
         "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model allow-list: null = any model, [] = deny all, or canonical instance:model entries (with instance:* / instance:prefix* wildcards).",
+            "title": "Allowed Models"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -921,6 +1028,20 @@
       "CreateKeyResponse": {
         "description": "Response model for creating a new API key.",
         "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -959,6 +1080,17 @@
             ],
             "title": "Key Name"
           },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -979,14 +1111,79 @@
         "required": [
           "id",
           "key",
+          "key_prefix",
           "key_name",
           "user_id",
           "created_at",
           "expires_at",
           "is_active",
+          "allowed_models",
           "metadata"
         ],
         "title": "CreateKeyResponse",
+        "type": "object"
+      },
+      "CreateStoredProviderRequest": {
+        "description": "Create a stored provider. ``api_key`` is write-only and requires OTARI_SECRET_KEY.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider API key. Stored encrypted; never returned.",
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "instance": {
+            "description": "Routing key, e.g. 'openai' or a named instance like 'home_lab'.",
+            "minLength": 1,
+            "title": "Instance",
+            "type": "string"
+          },
+          "provider_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "any-llm implementation when the instance name is not itself one.",
+            "title": "Provider Type"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "CreateStoredProviderRequest",
         "type": "object"
       },
       "CreateUserRequest": {
@@ -1003,6 +1200,21 @@
             ],
             "description": "Optional admin-facing alias",
             "title": "Alias"
+          },
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Default model access-list this user's keys inherit; null = unrestricted, [] = deny all",
+            "title": "Allowed Models"
           },
           "blocked": {
             "default": false,
@@ -1369,6 +1581,20 @@
       "KeyInfo": {
         "description": "Response model for key information.",
         "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -1403,6 +1629,17 @@
             ],
             "title": "Key Name"
           },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          },
           "last_used_at": {
             "anyOf": [
               {
@@ -1433,15 +1670,68 @@
         },
         "required": [
           "id",
+          "key_prefix",
           "key_name",
           "user_id",
           "created_at",
           "last_used_at",
           "expires_at",
           "is_active",
+          "allowed_models",
           "metadata"
         ],
         "title": "KeyInfo",
+        "type": "object"
+      },
+      "KnownProviderSchema": {
+        "description": "A provider the add-provider picker can offer, with autofill hints.",
+        "properties": {
+          "default_api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Built-in endpoint; blank means the SDK's default.",
+            "title": "Default Api Base"
+          },
+          "env_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Env var the SDK reads this provider's key from.",
+            "title": "Env Key"
+          },
+          "id": {
+            "description": "any-llm provider id, used as the default instance name.",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-friendly display name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "requires_api_key": {
+            "description": "False for keyless local backends (Ollama, llama.cpp).",
+            "title": "Requires Api Key",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "requires_api_key"
+        ],
+        "title": "KnownProviderSchema",
         "type": "object"
       },
       "McpServerConfig": {
@@ -2903,6 +3193,179 @@
         "title": "SetPricingRequest",
         "type": "object"
       },
+      "StoredProviderResponse": {
+        "description": "A runtime-stored provider. The API key is never returned, only ``last4``.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "client_args": {
+            "additionalProperties": true,
+            "title": "Client Args",
+            "type": "object"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decryptable": {
+            "default": true,
+            "title": "Decryptable",
+            "type": "boolean"
+          },
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "provider_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Type"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "instance"
+        ],
+        "title": "StoredProviderResponse",
+        "type": "object"
+      },
+      "TestProviderRequest": {
+        "description": "Credentials to test before saving (from the add-provider form).",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "instance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider/instance name; the impl when no provider_type.",
+            "title": "Instance"
+          },
+          "provider_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Type"
+          }
+        },
+        "title": "TestProviderRequest",
+        "type": "object"
+      },
+      "TestProviderResponse": {
+        "description": "Result of a live provider connection test.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "model_count": {
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "model_count"
+        ],
+        "title": "TestProviderResponse",
+        "type": "object"
+      },
       "UpdateBudgetRequest": {
         "description": "Request model for updating a budget.",
         "properties": {
@@ -2929,6 +3392,17 @@
               }
             ],
             "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           }
         },
         "title": "UpdateBudgetRequest",
@@ -2937,6 +3411,20 @@
       "UpdateKeyRequest": {
         "description": "Request model for updating a key.",
         "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -3016,6 +3504,71 @@
         "title": "UpdateSettingsRequest",
         "type": "object"
       },
+      "UpdateStoredProviderRequest": {
+        "description": "Update a stored provider. Omitted fields are unchanged; ``api_key`` rotates in place.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New API key. Omit to keep the existing one. Never returned.",
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "expected_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.",
+            "title": "Expected Updated At"
+          },
+          "provider_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Type"
+          }
+        },
+        "title": "UpdateStoredProviderRequest",
+        "type": "object"
+      },
       "UpdateUserRequest": {
         "description": "Request model for updating a user.",
         "properties": {
@@ -3029,6 +3582,20 @@
               }
             ],
             "title": "Alias"
+          },
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
           },
           "blocked": {
             "anyOf": [
@@ -3366,6 +3933,20 @@
             ],
             "title": "Alias"
           },
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
           "blocked": {
             "title": "Blocked",
             "type": "boolean"
@@ -3435,6 +4016,7 @@
           "spend",
           "reserved",
           "budget_id",
+          "allowed_models",
           "budget_started_at",
           "next_budget_reset_at",
           "blocked",
@@ -3491,6 +4073,12 @@
         "description": "Enter your API key here (sent as Otari-Key header).",
         "in": "header",
         "name": "Otari-Key",
+        "type": "apiKey"
+      },
+      "XApiKeyAuth": {
+        "description": "Anthropic-native clients send credentials here (no Bearer prefix).",
+        "in": "header",
+        "name": "x-api-key",
         "type": "apiKey"
       }
     }
@@ -3598,6 +4186,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Aliases",
@@ -3643,6 +4234,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Set Alias",
@@ -3684,6 +4278,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete Alias",
@@ -3694,7 +4291,7 @@
     },
     "/v1/audio/speech": {
       "post": {
-        "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "create_speech_v1_audio_speech_post",
         "requestBody": {
           "content": {
@@ -3765,6 +4362,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Speech",
@@ -3775,7 +4375,7 @@
     },
     "/v1/audio/transcriptions": {
       "post": {
-        "description": "OpenAI-compatible audio transcription endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "description": "OpenAI-compatible audio transcription endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "create_transcription_v1_audio_transcriptions_post",
         "requestBody": {
           "content": {
@@ -3810,6 +4410,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Transcription",
@@ -3888,6 +4491,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Batches",
@@ -3896,7 +4502,7 @@
         ]
       },
       "post": {
-        "description": "Create a batch of LLM requests for asynchronous processing.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "description": "Create a batch of LLM requests for asynchronous processing.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "create_batch_v1_batches_post",
         "requestBody": {
           "content": {
@@ -3931,6 +4537,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Batch",
@@ -3986,6 +4595,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Retrieve Batch",
@@ -4041,6 +4653,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Cancel Batch",
@@ -4102,6 +4717,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Retrieve Batch Results",
@@ -4168,6 +4786,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Budgets",
@@ -4213,6 +4834,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Budget",
@@ -4254,6 +4878,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete Budget",
@@ -4300,6 +4927,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Budget",
@@ -4356,6 +4986,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Update Budget",
@@ -4364,9 +4997,87 @@
         ]
       }
     },
+    "/v1/budgets/{budget_id}/reset-logs": {
+      "get": {
+        "description": "List per-user reset events for a budget, newest first.",
+        "operationId": "list_budget_reset_logs_v1_budgets__budget_id__reset_logs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_id",
+            "required": true,
+            "schema": {
+              "title": "Budget Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BudgetResetLogResponse"
+                  },
+                  "title": "Response List Budget Reset Logs V1 Budgets  Budget Id  Reset Logs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Budget Reset Logs",
+        "tags": [
+          "budgets"
+        ]
+      }
+    },
     "/v1/chat/completions": {
       "post": {
-        "description": "OpenAI-compatible chat completions endpoint.\n\nSupports both streaming and non-streaming responses.\nHandles reasoning content from otari providers.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "description": "OpenAI-compatible chat completions endpoint.\n\nSupports both streaming and non-streaming responses.\nHandles reasoning content from otari providers.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "chat_completions_v1_chat_completions_post",
         "requestBody": {
           "content": {
@@ -4401,6 +5112,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Chat Completions",
@@ -4411,7 +5125,7 @@
     },
     "/v1/embeddings": {
       "post": {
-        "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "create_embedding_v1_embeddings_post",
         "requestBody": {
           "content": {
@@ -4446,6 +5160,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Embedding",
@@ -4519,6 +5236,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Files",
@@ -4566,6 +5286,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create File",
@@ -4632,6 +5355,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete File",
@@ -4696,6 +5422,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get File",
@@ -4758,6 +5487,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get File Content",
@@ -4768,7 +5500,7 @@
     },
     "/v1/images/generations": {
       "post": {
-        "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "create_image_v1_images_generations_post",
         "requestBody": {
           "content": {
@@ -4803,6 +5535,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Image",
@@ -4869,6 +5604,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Keys",
@@ -4877,7 +5615,7 @@
         ]
       },
       "post": {
-        "description": "Create a new API key.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, a new user will be created automatically and the key will be associated with it.",
+        "description": "Create a new API key.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.",
         "operationId": "create_key_v1_keys_post",
         "requestBody": {
           "content": {
@@ -4914,6 +5652,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Key",
@@ -4955,6 +5696,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete Key",
@@ -5001,6 +5745,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Key",
@@ -5057,6 +5804,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Update Key",
@@ -5105,6 +5855,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Rotate Key",
@@ -5150,6 +5903,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Message",
@@ -5197,6 +5953,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Count Message Tokens",
@@ -5254,6 +6013,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Models",
@@ -5281,6 +6043,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Discoverable Models",
@@ -5308,6 +6073,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Model Metadata",
@@ -5356,6 +6124,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Model",
@@ -5366,7 +6137,7 @@
     },
     "/v1/moderations": {
       "post": {
-        "description": "OpenAI-compatible moderations endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "description": "OpenAI-compatible moderations endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "create_moderation_v1_moderations_post",
         "parameters": [
           {
@@ -5415,6 +6186,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Moderation",
@@ -5481,6 +6255,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Pricing",
@@ -5526,6 +6303,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Set Pricing",
@@ -5586,6 +6366,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete Pricing",
@@ -5651,6 +6434,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Pricing",
@@ -5703,11 +6489,300 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Pricing History",
         "tags": [
           "pricing"
+        ]
+      }
+    },
+    "/v1/provider-credentials": {
+      "get": {
+        "description": "List runtime-stored providers. Keys are never returned, only ``last4``.",
+        "operationId": "list_stored_providers_v1_provider_credentials_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StoredProviderResponse"
+                  },
+                  "title": "Response List Stored Providers V1 Provider Credentials Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Stored Providers",
+        "tags": [
+          "providers"
+        ]
+      },
+      "post": {
+        "description": "Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY.",
+        "operationId": "create_stored_provider_v1_provider_credentials_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStoredProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredProviderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Stored Provider",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/provider-credentials/test": {
+      "post": {
+        "description": "Test provider credentials without storing them (for the add/edit form).\n\nResolves the implementation from ``provider_type`` (honoring the\n``*-compatible`` aliases) or the ``instance`` name, then lists the provider's\nmodels with the supplied credentials. Nothing is persisted and the key is\nnever echoed.",
+        "operationId": "test_provider_connection_v1_provider_credentials_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestProviderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Provider Connection",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/provider-credentials/{instance}": {
+      "delete": {
+        "description": "Delete a stored provider. A config.yml provider cannot be deleted here.",
+        "operationId": "delete_stored_provider_v1_provider_credentials__instance__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "title": "Instance",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Stored Provider",
+        "tags": [
+          "providers"
+        ]
+      },
+      "patch": {
+        "description": "Update a stored provider. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it. The row is locked ``FOR UPDATE``\nso the ``expected_updated_at`` check and the write it guards are atomic.",
+        "operationId": "update_stored_provider_v1_provider_credentials__instance__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "title": "Instance",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStoredProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredProviderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Stored Provider",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/provider-credentials/{instance}/test": {
+      "post": {
+        "description": "Verify a stored provider's key by listing its models, without exposing the key.",
+        "operationId": "test_stored_provider_v1_provider_credentials__instance__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "required": true,
+            "schema": {
+              "title": "Instance",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestProviderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Stored Provider",
+        "tags": [
+          "providers"
         ]
       }
     },
@@ -5730,6 +6805,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Providers",
@@ -5738,9 +6816,43 @@
         ]
       }
     },
+    "/v1/providers/catalog": {
+      "get": {
+        "description": "List every known provider for the add-provider picker.\n\nNetwork-free and config-independent: the full any-llm provider set with each\none's display name, credential env var, default endpoint, and whether it\nneeds a key. Master-key gated because it is operator-facing dashboard data.",
+        "operationId": "provider_catalog_v1_providers_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KnownProviderSchema"
+                  },
+                  "title": "Response Provider Catalog V1 Providers Catalog Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Provider Catalog",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
     "/v1/rerank": {
       "post": {
-        "description": "Rerank documents by relevance to a query.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+        "description": "Rerank documents by relevance to a query.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
         "operationId": "create_rerank_v1_rerank_post",
         "requestBody": {
           "content": {
@@ -5775,6 +6887,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Rerank",
@@ -5820,6 +6935,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create Response",
@@ -5847,6 +6965,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get Settings",
@@ -5892,6 +7013,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Update Settings",
@@ -6014,6 +7138,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Usage",
@@ -6080,6 +7207,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "List Users",
@@ -6125,6 +7255,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Create User",
@@ -6166,6 +7299,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Delete User",
@@ -6212,6 +7348,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get User",
@@ -6268,6 +7407,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Update User",
@@ -6343,6 +7485,9 @@
         "security": [
           {
             "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
           }
         ],
         "summary": "Get User Usage",
