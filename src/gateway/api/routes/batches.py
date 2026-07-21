@@ -574,11 +574,22 @@ async def retrieve_batch_results(
     # Recorded batches are accounted exactly once: the first completed retrieval
     # claims the accounting slot, logs usage, and folds the cost into the owner's
     # spend; later retrievals (retries, polling clients) return results without
-    # re-billing. Legacy batches with no record keep the prior behavior (log every
-    # retrieval, no spend fold), since they cannot be deduplicated without a record.
-    should_account = True
-    if record is not None:
+    # re-billing. The claim and the spend fold commit together (below), so if the
+    # spend fold fails or the process dies mid-flight the claim rolls back and a
+    # later retrieval re-accounts, rather than marking the batch accounted but
+    # never billing it.
+    #
+    # A retrieval that finds billable tokens but no pricing row (cost is None)
+    # does not claim the slot, so once pricing exists a later retrieval still
+    # folds the spend once. Legacy batches with no record keep the prior behavior
+    # (log every retrieval, no spend fold), since they cannot be deduplicated.
+    pricing_missing = record is not None and bool(total_tokens) and cost is None
+    if pricing_missing:
+        should_account = False
+    elif record is not None:
         should_account = await claim_batch_accounting(db, batch_id)
+    else:
+        should_account = True
 
     if should_account:
         await log_batch_usage(
@@ -593,8 +604,13 @@ async def retrieve_batch_results(
             total_tokens=total_tokens,
             cost=cost,
         )
-        if record is not None and cost and user_id:
-            await record_external_spend(db, user_id, cost)
+        if record is not None:
+            if cost and user_id:
+                # Folds the spend and commits the claim in one transaction.
+                await record_external_spend(db, user_id, cost)
+            else:
+                # Nothing to bill (no cost/owner); still persist the one-time claim.
+                await db.commit()
 
     return {
         "results": [

@@ -910,6 +910,64 @@ def test_recorded_batch_results_accounted_once(
     assert user_resp.json()["spend"] == pytest.approx(expected_cost)
 
 
+def test_recorded_batch_results_defers_accounting_until_pricing_exists(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A retrieval before pricing exists must not burn the one-time slot.
+
+    With billable tokens but no ModelPricing row, cost is None; the batch stays
+    unaccounted so a later retrieval, once pricing is added, still logs usage and
+    folds spend exactly once.
+    """
+    user_id = api_key_obj["user_id"]
+    batch_id = _create_recorded_batch(client, api_key_header)
+
+    tokens = CompletionUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)
+
+    # First retrieval with no pricing configured: cost is None, so nothing is
+    # billed and the accounting slot is left unclaimed.
+    retrieve_patch, results_patch = _completed_results_patches(tokens)
+    with retrieve_patch, results_patch:
+        before_pricing = client.get(f"/v1/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+    assert before_pricing.status_code == 200
+
+    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    assert [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"] == []
+    user_resp = client.get(f"/v1/users/{user_id}", headers=master_key_header)
+    assert user_resp.json()["spend"] == pytest.approx(0.0)
+
+    # Add pricing, then retrieve again (and once more): now it accounts exactly once.
+    pricing_resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+        },
+        headers=master_key_header,
+    )
+    assert pricing_resp.status_code == 200
+
+    retrieve_patch, results_patch = _completed_results_patches(tokens)
+    with retrieve_patch, results_patch:
+        first = client.get(f"/v1/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+        second = client.get(f"/v1/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) == 1
+
+    expected_cost = 100 / 1_000_000 * 1.0 + 50 / 1_000_000 * 2.0
+    assert results_logs[0]["cost"] == pytest.approx(expected_cost)
+    user_resp = client.get(f"/v1/users/{user_id}", headers=master_key_header)
+    assert user_resp.json()["spend"] == pytest.approx(expected_cost)
+
+
 def test_unrecorded_batch_results_logs_every_retrieval(
     client: TestClient,
     master_key_header: dict[str, str],

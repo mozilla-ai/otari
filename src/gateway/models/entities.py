@@ -393,10 +393,13 @@ class BatchRecord(Base):
     id: Mapped[str] = mapped_column(primary_key=True)
     # Instance/provider name the batch was created against (echoed to clients).
     provider: Mapped[str] = mapped_column()
-    # Billed owner, stamped from the authenticated principal at creation. CASCADE:
-    # deleting the user drops the ownership record (the user's keys are gone too,
-    # and usage_logs remain the billing history).
-    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    # Billed owner, stamped from the authenticated principal at creation. Non-null:
+    # this record is the strict ownership anchor, so it must always name an owner.
+    # CASCADE: deleting the user drops the ownership record (the user's keys are
+    # gone too, and usage_logs remain the billing history).
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # SET NULL: a key may be revoked while its batch is still in flight.
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
     model: Mapped[str] = mapped_column()

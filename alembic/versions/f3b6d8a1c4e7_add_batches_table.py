@@ -24,7 +24,7 @@ def upgrade() -> None:
         "batches",
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("provider", sa.String(), nullable=False),
-        sa.Column("user_id", sa.String(), nullable=True),
+        sa.Column("user_id", sa.String(), nullable=False),
         sa.Column("api_key_id", sa.String(), nullable=True),
         sa.Column("model", sa.String(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),

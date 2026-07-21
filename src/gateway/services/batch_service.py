@@ -76,6 +76,13 @@ async def claim_batch_accounting(db: AsyncSession, batch_id: str) -> bool:
     clients). Only the winning caller logs usage and folds the batch cost into
     the user's spend, so repeated retrievals of the same completed batch do not
     double-count.
+
+    This does not commit: the caller commits the claim in the same transaction
+    as the spend fold, so the two are atomic. If the spend fold fails (or the
+    process dies) before that commit, the claim rolls back and a later retrieval
+    re-accounts, rather than leaving the batch marked-accounted-but-unbilled. The
+    UPDATE still takes the row lock immediately, so a concurrent claim on the same
+    batch blocks and then sees ``results_accounted_at`` set, returning False.
     """
     result = await db.execute(
         update(BatchRecord)
@@ -83,5 +90,6 @@ async def claim_batch_accounting(db: AsyncSession, batch_id: str) -> bool:
         .values(results_accounted_at=datetime.now(UTC))
         .execution_options(synchronize_session=False)
     )
-    await db.commit()
+    # getattr with a default: mypy sees .execute() as Result (no rowcount);
+    # rowcount lives on CursorResult. Matches reserve_budget/_cas_reset_user_budget.
     return bool(getattr(result, "rowcount", 0))
