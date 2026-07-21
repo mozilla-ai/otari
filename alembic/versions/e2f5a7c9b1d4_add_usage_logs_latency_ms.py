@@ -1,7 +1,7 @@
 """Add usage_logs latency_ms column and status/timestamp index.
 
 Revision ID: e2f5a7c9b1d4
-Revises: d1e4b8c6f0a3
+Revises: e5a7c9d1b3f4
 Create Date: 2026-07-20 18:10:00.000000
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e2f5a7c9b1d4"
-down_revision: str | Sequence[str] | None = "d1e4b8c6f0a3"
+down_revision: str | Sequence[str] | None = "e5a7c9d1b3f4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
