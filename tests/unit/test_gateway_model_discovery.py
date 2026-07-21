@@ -14,6 +14,7 @@ from gateway.services.model_discovery_service import (
     ProviderDiscovery,
     _supports_list_models,
     discover_all_models,
+    discover_models_with_status,
     discover_provider_models,
 )
 
@@ -587,3 +588,47 @@ class TestDiscoveryStallGuards:
         assert late.error == "NEW"  # did not ride the stale in-flight
         assert cache._store["p"].result.error == "NEW"  # stale result did not repopulate
         assert calls == 2
+
+    @pytest.mark.asyncio
+    async def test_returned_discovery_is_isolated_from_cache(self) -> None:
+        """Mutating a returned discovery must not corrupt the cached entry."""
+        cache = ModelCache()
+
+        async def disc() -> ProviderDiscovery:
+            return ProviderDiscovery(provider="p", models=[_make_model("a")], error=None)
+
+        first = await cache.get_or_discover("p", positive_ttl=300, negative_ttl=30, discover=disc)
+        first.models.append(_make_model("b"))
+        first.error = "tampered"
+
+        second = await cache.get_or_discover("p", positive_ttl=300, negative_ttl=30, discover=disc)
+        assert [m.id for m in second.models] == ["a"]
+        assert second.error is None
+
+    @pytest.mark.asyncio
+    async def test_one_provider_raising_does_not_sink_the_listing(self) -> None:
+        """A provider whose discovery raises is dropped/surfaced, never propagated.
+
+        discover_models_with_status feeds the operator's /v1/models/discoverable,
+        which awaits it with no guard, so an escaped exception must not 500 it.
+        """
+        config = self._config({"good": {"api_key": "x"}, "bad": {"api_key": "y"}})
+
+        async def flaky(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+            if instance == "bad":
+                raise RuntimeError("boom")
+            return ProviderDiscovery(provider=instance, models=[_make_model("m", owned_by=instance)])
+
+        from gateway.services import model_discovery_service as mds
+
+        with (
+            patch.object(mds, "get_model_cache", return_value=ModelCache()),
+            patch.object(mds, "_discover_uncached", side_effect=flaky),
+        ):
+            all_models = await discover_all_models(config)
+            statuses = await discover_models_with_status(config)
+
+        assert [name for name, _ in all_models] == ["good"]  # bad dropped from catalog
+        by_provider = {d.provider: d for d in statuses}
+        assert by_provider["good"].error is None
+        assert by_provider["bad"].error is not None  # surfaced as an error, not raised

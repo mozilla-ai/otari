@@ -29,9 +29,10 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.provider_kwargs import get_provider_kwargs
 
-# Ad-hoc credential tests (unsaved providers) are not config-bound, so they use
-# this fixed bound rather than ``model_discovery_timeout_seconds``. It matches
-# that field's default so behaviour is consistent whether or not creds are saved.
+# Fallback bound for ad-hoc credential tests when a caller does not pass one. The
+# route passes ``model_discovery_timeout_seconds`` so the saved and unsaved paths
+# agree even when an operator raises the configured timeout; this default only
+# applies to direct callers (e.g. tests).
 _ADHOC_DISCOVERY_TIMEOUT_SECONDS = 10.0
 
 
@@ -42,6 +43,16 @@ class ProviderDiscovery:
     provider: str
     models: list[Model]
     error: str | None = None
+
+
+def _copy_discovery(discovery: ProviderDiscovery) -> ProviderDiscovery:
+    """Shallow copy so the cache stays immutable from the outside.
+
+    The cache stores one canonical result per provider; every read hands back a
+    copy so a caller mutating ``.models`` or ``.error`` cannot corrupt the cached
+    entry (or the view another concurrent awaiter holds).
+    """
+    return ProviderDiscovery(provider=discovery.provider, models=list(discovery.models), error=discovery.error)
 
 
 @dataclass
@@ -135,20 +146,21 @@ class ModelCache:
         """
         cached = self._fresh(provider, positive_ttl, negative_ttl)
         if cached is not None:
-            return cached
+            return _copy_discovery(cached)
 
         async with self._lock:
             cached = self._fresh(provider, positive_ttl, negative_ttl)
             if cached is not None:
-                return cached
+                return _copy_discovery(cached)
             task = self._inflight.get(provider)
             if task is None:
                 task = asyncio.ensure_future(self._run(provider, discover))
                 self._inflight[provider] = task
 
         # shield so one caller's cancellation does not abort the shared discovery
-        # that other callers are still awaiting.
-        return await asyncio.shield(task)
+        # that other callers are still awaiting. Copy on the way out so the cached
+        # entry (stored by _run) is never handed to a caller by reference.
+        return _copy_discovery(await asyncio.shield(task))
 
     async def _run(
         self,
@@ -162,7 +174,9 @@ class ModelCache:
                 # Cache only if still the registered in-flight: a clear() (e.g. a
                 # credential change) between start and finish detaches us, and this
                 # now-stale result must neither repopulate the cache nor clobber a
-                # newer discovery's entry.
+                # newer discovery's entry. Storing ``result`` directly is safe
+                # because ``get_or_discover`` hands every caller a copy, so no
+                # external reference to this stored object survives.
                 if self._inflight.get(provider) is task:
                     self._store[provider] = _CacheEntry(result=result, cached_at=time.monotonic())
             return result
@@ -322,12 +336,15 @@ async def test_provider_credentials(
     api_key: str | None = None,
     api_base: str | None = None,
     client_args: dict[str, object] | None = None,
+    timeout: float = _ADHOC_DISCOVERY_TIMEOUT_SECONDS,
 ) -> ProviderDiscovery:
     """List models for ad-hoc credentials without storing them.
 
     Backs the dashboard's "test connection" before a provider is saved. Reports
     failure rather than raising, and never echoes the api key (only sanitized,
     capped provider errors, which may include the api_base but never the key).
+    ``timeout`` defaults to the module bound; the route passes
+    ``model_discovery_timeout_seconds`` so the saved and unsaved paths agree.
     """
     if not _supports_list_models(impl_name):
         return ProviderDiscovery(
@@ -353,7 +370,7 @@ async def test_provider_credentials(
                 api_base=api_base,
                 client_args=client_args,
             ),
-            timeout=_ADHOC_DISCOVERY_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except Exception as exc:
         # Class only in the log (see _discover_uncached); the capped
@@ -371,8 +388,23 @@ async def discover_models_with_status(config: GatewayConfig) -> list[ProviderDis
     listing still has to be able to see what their own credentials can reach.
     """
     instances = list(config.providers)
-    results = await asyncio.gather(*(discover_provider_models(config, name) for name in instances))
-    return list(results)
+    # return_exceptions so one provider that somehow escapes _discover_uncached
+    # cannot 500 the whole operator listing (this route awaits with no guard);
+    # surface it as a per-provider error instead. Real cancellation still bubbles.
+    results = await asyncio.gather(
+        *(discover_provider_models(config, name) for name in instances),
+        return_exceptions=True,
+    )
+    discoveries: list[ProviderDiscovery] = []
+    for name, result in zip(instances, results, strict=True):
+        if isinstance(result, BaseException):
+            if not isinstance(result, Exception):
+                raise result
+            logger.warning("Model discovery raised for provider '%s': %s", name, result)
+            discoveries.append(ProviderDiscovery(provider=name, models=[], error=_short_error(result)))
+        else:
+            discoveries.append(result)
+    return discoveries
 
 
 async def discover_all_models(
@@ -398,10 +430,20 @@ async def discover_all_models(
     # Each instance goes through the shared cache + single-flight path, so a
     # failing provider is dialed at most once per negative-TTL window and the
     # concurrent discoverable listing reuses the same in-flight call.
-    results = await asyncio.gather(*(discover_provider_models(config, name) for name in instances))
+    # return_exceptions so a single provider cannot abort the catalog build; real
+    # cancellation still bubbles.
+    results = await asyncio.gather(
+        *(discover_provider_models(config, name) for name in instances),
+        return_exceptions=True,
+    )
 
     result_models: list[tuple[str, Model]] = []
-    for discovery in results:
+    for name, discovery in zip(instances, results, strict=True):
+        if isinstance(discovery, BaseException):
+            if not isinstance(discovery, Exception):
+                raise discovery
+            logger.warning("Model discovery raised for provider '%s': %s", name, discovery)
+            continue
         # A failed provider comes back with error set and no models: drop it from
         # the API catalog so one bad provider does not blank the whole listing.
         result_models.extend((discovery.provider, model) for model in discovery.models)
