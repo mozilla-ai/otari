@@ -19,7 +19,7 @@ For full request/response schemas, see the [OpenAPI spec](public/openapi.json) o
 
 ### Standalone
 
-- Preferred header: `Otari-Key: Bearer <token>`
+- Preferred header: `Otari-Key: <token>` (a `Bearer` prefix is also accepted)
 - `Authorization: Bearer <token>` is also accepted
 
 Regular API endpoints use an API key. Management endpoints use the master key.

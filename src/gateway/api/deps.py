@@ -74,16 +74,20 @@ def reset_config() -> None:
 
 
 def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
-    """Extract and validate Bearer token from request header.
+    """Extract the API token from the request headers.
 
-    Checks the canonical Otari-Key header first, then the standard
-    Authorization header, and finally the raw x-api-key header used by
-    Anthropic-native clients (no Bearer prefix).
+    The canonical Otari-Key header carries the token directly. A ``Bearer ``
+    prefix is accepted and stripped for back-compat, but is not required: a header
+    named for the key holds the raw token, matching the ``x-api-key`` convention
+    and the snippet the dashboard hands out. The standard Authorization header
+    still requires the Bearer scheme. Finally the raw x-api-key header is honored
+    (Anthropic-native clients).
     """
-    auth_header = request.headers.get(API_KEY_HEADER)
-    if not auth_header:
-        auth_header = request.headers.get("Authorization")
+    value = request.headers.get(API_KEY_HEADER)
+    if value:
+        return value[7:] if value.startswith("Bearer ") else value
 
+    auth_header = request.headers.get("Authorization")
     if auth_header:
         if not auth_header.startswith("Bearer "):
             record_auth_failure("invalid_format")

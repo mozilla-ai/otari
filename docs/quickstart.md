@@ -60,7 +60,7 @@ Use your master key (the one you set in `config.yml`) to create an API key for m
  
 ```bash
 curl -X POST http://localhost:8000/v1/keys \
-  -H "Otari-Key: Bearer your-secret-master-key" \
+  -H "Otari-Key: your-secret-master-key" \
   -H "Content-Type: application/json" \
   -d '{"key_name": "quickstart"}'
 ```
@@ -75,7 +75,7 @@ Otari is OpenAI-compatible, so any standard client works. With curl:
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
-  -H "Otari-Key: Bearer <your-api-key>" \
+  -H "Otari-Key: <your-api-key>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai:gpt-4o-mini",
