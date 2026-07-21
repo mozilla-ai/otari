@@ -211,7 +211,10 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
   const [name, setName] = useState("");
 
   const selected = catalog.data?.find((p) => p.id === providerId);
-  const needsKey = selected?.requires_api_key ?? true;
+  const envKeyPresent = selected?.env_key_present ?? false;
+  // The key is only mandatory when the provider needs one and its env var is not
+  // already set on the server; any-llm falls back to that env var otherwise.
+  const needsKey = (selected?.requires_api_key ?? true) && !envKeyPresent;
   const renamed = name.trim() !== "" && name.trim() !== providerId;
   const nameHasDelimiter = /[:/]/.test(name);
   // Require the key when the chosen provider says it needs one; keyless local
@@ -257,7 +260,9 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
           selected
             ? needsKey
               ? `${selected.name}'s endpoint is built in — just add your key.`
-              : `${selected.name} needs no API key.`
+              : envKeyPresent
+                ? `${selected.env_key} is set on the server, so a key is optional here. Paste one to override it.`
+                : `${selected.name} needs no API key.`
             : "Stored encrypted. Requires OTARI_SECRET_KEY on the server."
         }
       />
