@@ -15,7 +15,7 @@ import {
 import type { ModelMetadata, ProviderCapabilities, ProviderInfo } from "@/api/types";
 import { ModelComboBox } from "@/components/ModelComboBox";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
-import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/components/ui";
+import { ConfirmButton, ErrorBanner, errorMessage, FilterSelect, InfoBanner, PageHeader } from "@/components/ui";
 import { formatContext, formatCost, formatNumber, formatReleaseDate } from "@/lib/format";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
 
@@ -606,33 +606,6 @@ function SearchInput({ value, onChange, placeholder }: { value: string; onChange
       aria-label={placeholder}
       className="w-full max-w-xs rounded-md border border-[var(--otari-line)] bg-white px-3 py-1.5 text-sm focus:border-[var(--otari-brand)] focus:outline-none"
     />
-  );
-}
-
-function FilterSelect({
-  ariaLabel,
-  value,
-  onChange,
-  options,
-}: {
-  ariaLabel: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <select
-      aria-label={ariaLabel}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="rounded-md border border-[var(--otari-line)] bg-white px-2 py-1.5 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
-    >
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
   );
 }
 
