@@ -41,6 +41,7 @@ class Tool(StrEnum):
 
     CODE_EXECUTION = auto()  # -> "otari_code_execution"
     WEB_SEARCH = auto()  # -> "otari_web_search"
+    MEMORY = auto()  # -> "otari_memory"
 
 
 def _is_web_search_tool_type(type_value: Any) -> bool:
@@ -53,6 +54,17 @@ def _is_web_search_tool_type(type_value: Any) -> bool:
     if not isinstance(type_value, str):
         return False
     return type_value == Tool.WEB_SEARCH
+
+
+def _is_memory_tool_type(type_value: Any) -> bool:
+    """Recognise the explicit gateway-managed memory tool type.
+
+    Matches only ``"otari_memory"``. There is no provider-named passthrough for memory: it is
+    a platform capability, so anything else stays in ``tools[]`` and reaches the provider.
+    """
+    if not isinstance(type_value, str):
+        return False
+    return type_value == Tool.MEMORY
 
 
 def _is_code_execution_tool_type(type_value: Any) -> bool:
@@ -174,6 +186,17 @@ def _extract_web_search_tool(
     ``tools[]`` and reach the upstream provider unchanged.
     """
     return _extract_first_matching_tool(tools, _is_web_search_tool_type)
+
+
+def _extract_memory_tool(
+    tools: list[dict[str, Any]] | None,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
+    """Pull the first ``{"type": "otari_memory"}`` entry out of ``tools``.
+
+    Only the explicit gateway-managed type is extracted (and run against the platform memory
+    endpoints). Everything else stays in ``tools[]`` and reaches the upstream provider.
+    """
+    return _extract_first_matching_tool(tools, _is_memory_tool_type)
 
 
 def _resolve_web_search_purpose_hint(tool_entry: dict[str, Any] | None) -> str | None:

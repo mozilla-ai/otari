@@ -67,6 +67,7 @@ from gateway.api.routes._platform import (
     _resolve_platform_code_execution,
     _resolve_platform_credentials,
     _resolve_platform_mcp_servers,
+    _resolve_platform_memory,
     _resolve_platform_web_search,
     run_platform_attempts,
 )
@@ -76,6 +77,7 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._tools import (
     _build_web_search_backend,
     _extract_code_execution_tool,
+    _extract_memory_tool,
     _extract_web_search_tool,
     _resolve_sandbox_purpose_hint,
 )
@@ -97,6 +99,7 @@ from gateway.services.budget_service import (
     refund_reservation,
     reserve_budget,
 )
+from gateway.services.composite_backend import CompositeToolBackend
 from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_client import MCPClientPool
 from gateway.services.mcp_loop import (
@@ -105,6 +108,7 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
+from gateway.services.memory_backend import MemoryBackend
 from gateway.services.model_access import effective_allowlist, is_model_allowed, model_not_allowed_detail
 from gateway.services.pricing_service import (
     find_model_pricing,
@@ -161,6 +165,8 @@ WEB_SEARCH_CONFLICT_DETAIL = (
     "otari_web_search cannot be combined with otari_code_execution or mcp_servers in the same request yet; pick one."
 )
 WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
+MEMORY_HYBRID_ONLY_DETAIL = "otari_memory is only available in hybrid mode"
+MEMORY_NOT_ENABLED_DETAIL = "memory is not enabled for this workspace"
 SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
 MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed code-execution policy"
 SANDBOX_UNREACHABLE_DETAIL = "code_execution sandbox unreachable — check OTARI_SANDBOX_URL"
@@ -706,6 +712,11 @@ class ToolContext:
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
         web_search_auth_token: str | None,
+        use_memory: bool,
+        memory_tool_entry: dict[str, Any] | None,
+        memory_url: str | None,
+        memory_gateway_token: str | None,
+        memory_user_token: str | None,
         remaining_user_tools: list[dict[str, Any]] | None,
         max_tool_iterations: int,
         tools_header: str | None,
@@ -719,17 +730,26 @@ class ToolContext:
         self.web_search_tool_entry = web_search_tool_entry
         self.web_search_url = web_search_url
         self.web_search_auth_token = web_search_auth_token
+        self.use_memory = use_memory
+        self.memory_tool_entry = memory_tool_entry
+        self.memory_url = memory_url
+        self.memory_gateway_token = memory_gateway_token
+        self.memory_user_token = memory_user_token
         self.remaining_user_tools = remaining_user_tools
         self.max_tool_iterations = max_tool_iterations
         self.tools_header = tools_header
 
     @property
     def tools_extracted(self) -> bool:
-        return self.sandbox_tool_entry is not None or self.web_search_tool_entry is not None
+        return (
+            self.sandbox_tool_entry is not None
+            or self.web_search_tool_entry is not None
+            or self.memory_tool_entry is not None
+        )
 
     @property
     def use_tool_loop(self) -> bool:
-        return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search
+        return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search or self.use_memory
 
 
 async def _validate_mcp_server_urls(
@@ -909,6 +929,35 @@ async def prepare_gateway_tools(
                         if isinstance(request_options, dict)
                         else workspace_options
                     )
+
+        # Memory is the one gateway tool designed to coexist with the others: an agent can
+        # research (MCP / web search) or run code AND recall/store memories in the same loop.
+        # So it is extracted independently and never conflicts with the primary backend; the
+        # dispatch layer composes it alongside whichever other backend is active. It is
+        # platform-only (the mem0 engine + tenant data live there and it needs the user token
+        # to resolve the workspace + member), so it is hybrid-mode only.
+        memory_tool_entry, remaining_user_tools = _extract_memory_tool(remaining_user_tools)
+        use_memory = False
+        memory_url: str | None = None
+        memory_gateway_token: str | None = None
+        memory_user_token: str | None = None
+        if memory_tool_entry is not None:
+            if not ctx.hybrid_mode:
+                raise adapter.error(400, MEMORY_HYBRID_ONLY_DETAIL, ErrorKind.INVALID_REQUEST)
+            assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
+            platform_base = ctx.config.platform.get("base_url")
+            if not platform_base:
+                raise adapter.error(502, "Hybrid mode is misconfigured", ErrorKind.API)
+            # Platform owns per-workspace memory enablement: 403 when the workspace has it off.
+            memory_policy = await _resolve_platform_memory(config=ctx.config, user_token=ctx.user_token)
+            if not memory_policy.get("enabled"):
+                raise adapter.error(403, MEMORY_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
+            use_memory = True
+            memory_url = f"{platform_base.rstrip('/')}/gateway/memory"
+            # Memory needs both tokens (dual-auth): the gateway token proves machine identity,
+            # the user token resolves the caller's workspace + member. Both go to the platform.
+            memory_gateway_token = ctx.config.platform_token
+            memory_user_token = ctx.user_token
     except HTTPException:
         await release_reservation(ctx)
         raise
@@ -923,6 +972,11 @@ async def prepare_gateway_tools(
         web_search_tool_entry=web_search_tool_entry,
         web_search_url=web_search_url,
         web_search_auth_token=web_search_auth_token,
+        use_memory=use_memory,
+        memory_tool_entry=memory_tool_entry,
+        memory_url=memory_url,
+        memory_gateway_token=memory_gateway_token,
+        memory_user_token=memory_user_token,
         remaining_user_tools=remaining_user_tools,
         max_tool_iterations=min(
             max_tool_iterations or DEFAULT_MAX_TOOL_ITERATIONS,
@@ -1067,6 +1121,51 @@ async def _log_failure_and_refund(
 # ---------------------------------------------------------------------------
 
 
+def _build_tool_backends(tool_ctx: ToolContext) -> list[ToolBackend]:
+    """Instantiate the (unentered) tool backends active for this request.
+
+    At most one of MCP / sandbox / web_search is active (they are mutually exclusive), plus
+    the memory backend when requested. The list order determines how tools and purpose hints
+    are presented to the model (primary backend first, then memory). Callers wrap the list in
+    a :class:`CompositeToolBackend` and enter it where the desired open-time semantics apply
+    (eagerly before a stream, or lazily inside the stream generator for MCP).
+    """
+    backends: list[ToolBackend] = []
+    if tool_ctx.mcp_server_configs:
+        backends.append(MCPClientPool(tool_ctx.mcp_server_configs))
+    elif tool_ctx.use_sandbox:
+        assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
+        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry)
+        backends.append(
+            SandboxBackend(
+                sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint, auth_token=tool_ctx.sandbox_auth_token
+            )
+        )
+    elif tool_ctx.use_web_search:
+        assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
+        assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
+        backends.append(
+            _build_web_search_backend(
+                base_url=tool_ctx.web_search_url,
+                tool_entry=tool_ctx.web_search_tool_entry,
+                auth_token=tool_ctx.web_search_auth_token,
+            )
+        )
+    if tool_ctx.use_memory:
+        assert tool_ctx.memory_url is not None  # guaranteed by the memory opt-in
+        assert tool_ctx.memory_user_token is not None  # guaranteed by the hybrid-mode memory opt-in
+        memory_hint = tool_ctx.memory_tool_entry.get("purpose_hint") if tool_ctx.memory_tool_entry else None
+        backends.append(
+            MemoryBackend(
+                base_url=tool_ctx.memory_url,
+                gateway_token=tool_ctx.memory_gateway_token,
+                user_token=tool_ctx.memory_user_token,
+                purpose_hint=memory_hint,
+            )
+        )
+    return backends
+
+
 async def dispatch_non_stream(
     *,
     adapter: FormatAdapter[ResultT, Any],
@@ -1074,49 +1173,29 @@ async def dispatch_non_stream(
     call_kwargs: dict[str, Any],
     on_first_response: Callable[[], None] | None = None,
 ) -> ResultT:
-    """Non-streaming dispatch: plain provider call, or the matching tool-loop
-    backend (MCP pool / sandbox / web_search) opened for the duration of the
-    loop.
+    """Non-streaming dispatch: plain provider call, or the active tool-loop backends
+    (any of MCP pool / sandbox / web_search, optionally plus memory) composed into one
+    pool opened for the duration of the loop.
     """
     if not tool_ctx.use_tool_loop:
         return await adapter.call_provider(call_kwargs)
 
-    if tool_ctx.mcp_server_configs:
-        async with MCPClientPool(tool_ctx.mcp_server_configs) as pool:
-            kwargs = adapter.inject_hints(call_kwargs, pool.purpose_hints(), header=tool_ctx.tools_header)
-            return await adapter.run_tool_loop(kwargs, pool, tool_ctx.max_tool_iterations, on_first_response)
-
-    if tool_ctx.use_sandbox:
-        assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry)
-        async with SandboxBackend(
-            sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint, auth_token=tool_ctx.sandbox_auth_token
-        ) as backend:
-            kwargs = adapter.inject_hints(call_kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
-            return await adapter.run_tool_loop(kwargs, backend, tool_ctx.max_tool_iterations, on_first_response)
-
-    assert tool_ctx.use_web_search
-    assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-    assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
-    async with _build_web_search_backend(
-        base_url=tool_ctx.web_search_url,
-        tool_entry=tool_ctx.web_search_tool_entry,
-        auth_token=tool_ctx.web_search_auth_token,
-    ) as web_backend:
-        kwargs = adapter.inject_hints(call_kwargs, web_backend.purpose_hints(), header=tool_ctx.tools_header)
-        return await adapter.run_tool_loop(kwargs, web_backend, tool_ctx.max_tool_iterations, on_first_response)
+    async with CompositeToolBackend(_build_tool_backends(tool_ctx)) as pool:
+        kwargs = adapter.inject_hints(call_kwargs, pool.purpose_hints(), header=tool_ctx.tools_header)
+        return await adapter.run_tool_loop(kwargs, pool, tool_ctx.max_tool_iterations, on_first_response)
 
 
-async def _lazy_mcp_stream(
+async def _lazy_composite_stream(
     adapter: FormatAdapter[Any, ChunkT],
     kwargs: dict[str, Any],
-    configs: list[McpServerConfig],
+    composite: CompositeToolBackend,
     tool_ctx: ToolContext,
 ) -> AsyncIterator[ChunkT]:
-    # The MCP pool is entered lazily inside the generator: a dial failure
-    # surfaces once the client starts pulling events. Sandbox / web_search use
-    # the eager-open path below for a pre-200 HTTP error instead.
-    async with MCPClientPool(configs) as pool:
+    # Used when the MCP pool is one of the active backends: the composite (and so the pool)
+    # is entered lazily inside the generator, so an MCP dial failure surfaces once the client
+    # starts pulling events. Sandbox / web_search / memory-only use the eager-open path below
+    # for a pre-200 HTTP error instead.
+    async with composite as pool:
         hinted = adapter.inject_hints(kwargs, pool.purpose_hints(), header=tool_ctx.tools_header)
         async for event in adapter.open_tool_loop_stream(hinted, pool, tool_ctx.max_tool_iterations):
             yield event
@@ -1157,28 +1236,16 @@ async def open_stream(
     if not tool_ctx.use_tool_loop:
         return await adapter.open_provider_stream(kwargs)
 
+    composite = CompositeToolBackend(_build_tool_backends(tool_ctx))
+
+    # MCP present → enter lazily inside the generator (preserves the mid-stream dial-failure
+    # semantics). Otherwise (sandbox / web_search / memory-only) enter eagerly so an
+    # unreachable backend surfaces as HTTP 502 before the SSE response commits to 200.
     if tool_ctx.mcp_server_configs:
-        return _lazy_mcp_stream(adapter, kwargs, tool_ctx.mcp_server_configs, tool_ctx)
+        return _lazy_composite_stream(adapter, kwargs, composite, tool_ctx)
 
-    if tool_ctx.use_sandbox:
-        assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry)
-        sandbox_backend = SandboxBackend(
-            sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint, auth_token=tool_ctx.sandbox_auth_token
-        )
-        await sandbox_backend.__aenter__()  # may raise SandboxNotReachableError
-        return _eager_backend_stream(adapter, kwargs, sandbox_backend, tool_ctx)
-
-    assert tool_ctx.use_web_search
-    assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-    assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
-    web_search_backend = _build_web_search_backend(
-        base_url=tool_ctx.web_search_url,
-        tool_entry=tool_ctx.web_search_tool_entry,
-        auth_token=tool_ctx.web_search_auth_token,
-    )
-    await web_search_backend.__aenter__()  # may raise WebSearchNotReachableError
-    return _eager_backend_stream(adapter, kwargs, web_search_backend, tool_ctx)
+    await composite.__aenter__()  # may raise SandboxNotReachableError / WebSearchNotReachableError
+    return _eager_backend_stream(adapter, kwargs, composite, tool_ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -1571,30 +1638,16 @@ async def run_streaming_with_fallback(
     backend_stack = AsyncExitStack()
     pool_for_loop: Any = None
     try:
-        if tool_ctx.mcp_server_configs:
-            pool_for_loop = await backend_stack.enter_async_context(MCPClientPool(tool_ctx.mcp_server_configs))
-        elif tool_ctx.use_sandbox:
-            assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-            sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry)
-            pool_for_loop = await backend_stack.enter_async_context(
-                SandboxBackend(
-                    sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint, auth_token=tool_ctx.sandbox_auth_token
-                ),
-            )
-        elif tool_ctx.use_web_search:
-            assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400
-            assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
-            pool_for_loop = await backend_stack.enter_async_context(
-                _build_web_search_backend(
-                    base_url=tool_ctx.web_search_url,
-                    tool_entry=tool_ctx.web_search_tool_entry,
-                    auth_token=tool_ctx.web_search_auth_token,
-                ),
-            )
+        # Every active backend (including the MCP pool) is opened eagerly here, once, on a
+        # stack shared across attempts, so gateway-side dependency failures surface as a normal
+        # HTTP error. The composite wraps whichever backends are active (a primary tool plus
+        # optional memory) into one pool.
+        backends = _build_tool_backends(tool_ctx)
+        if backends:
+            pool_for_loop = await backend_stack.enter_async_context(CompositeToolBackend(backends))
     except BaseException:
         # Eager-open failure (e.g. SandboxNotReachableError): propagate so the
-        # route handler maps it to the existing HTTP status. Nothing to clean
-        # up on the stack yet because the entry failed.
+        # route handler maps it to the existing HTTP status.
         await backend_stack.aclose()
         raise
 

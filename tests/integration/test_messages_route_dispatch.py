@@ -28,6 +28,15 @@ from any_llm.types.messages import (
 )
 from fastapi.testclient import TestClient
 
+from gateway.services.composite_backend import CompositeToolBackend
+
+
+def _assert_pool_wraps(pool_seen: list[Any], backend: Any) -> None:
+    assert len(pool_seen) == 1
+    pool = pool_seen[0]
+    assert isinstance(pool, CompositeToolBackend)
+    assert pool._entered == [backend]
+
 
 def _text_response(text: str = "ok") -> MessageResponse:
     return MessageResponse(
@@ -256,7 +265,7 @@ def test_code_execution_dispatches_through_sandbox_backend(
 
     assert resp.status_code == 200
     assert resp.json()["content"][0]["text"] == "via-sandbox-loop"
-    assert pool_seen == [fake_backend], "loop didn't receive the SandboxBackend"
+    _assert_pool_wraps(pool_seen, fake_backend)
 
 
 def test_web_search_dispatches_through_web_search_backend(
@@ -298,7 +307,7 @@ def test_web_search_dispatches_through_web_search_backend(
 
     assert resp.status_code == 200
     assert resp.json()["content"][0]["text"] == "via-web-search-loop"
-    assert pool_seen == [fake_backend], "loop didn't receive the WebSearchBackend"
+    _assert_pool_wraps(pool_seen, fake_backend)
 
 
 # ---------- provider-named keyword passthrough ----------
@@ -709,7 +718,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
 
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("text/event-stream")
-    assert pool_seen == [fake_backend], "tool loop didn't receive the SandboxBackend"
+    _assert_pool_wraps(pool_seen, fake_backend)
 
 
 def test_stream_sandbox_unreachable_returns_502_anthropic_body(
