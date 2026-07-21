@@ -262,8 +262,20 @@ export function ActivityPage() {
     void count.refetch();
   };
 
-  const rangeStart = total === 0 ? 0 : page * PAGE_SIZE + 1;
+  // Anchored on the rows actually on screen, not the total, so the range stays
+  // truthful when the count request failed and `total` is therefore 0.
+  const hasRows = rows.length > 0;
+  const rangeStart = hasRows ? page * PAGE_SIZE + 1 : 0;
   const rangeEnd = page * PAGE_SIZE + rows.length;
+  // Without a total, show just the visible range: "0 of 0" would contradict the
+  // rows on screen.
+  const pagerLabel = !count.data
+    ? hasRows
+      ? `${rangeStart}–${rangeEnd}`
+      : "0"
+    : total === 0
+      ? "0 of 0"
+      : `${rangeStart}–${rangeEnd} of ${total.toLocaleString()}`;
   // Prefer the exact total, but fall back to "a full page came back, so there is
   // probably more" when the count request failed. Otherwise a failed count would
   // strand the operator on page 1 with rows they cannot reach.
@@ -400,7 +412,7 @@ export function ActivityPage() {
       {/* Pager */}
       <div className="flex items-center justify-between gap-3">
         <span className="inline-flex items-center gap-2 text-sm text-[var(--otari-muted)]">
-          {total === 0 ? "0 of 0" : `${rangeStart}–${rangeEnd} of ${total.toLocaleString()}`}
+          {pagerLabel}
           {usage.isFetching ? <Spinner size="sm" /> : null}
         </span>
         <span className="inline-flex gap-1.5">

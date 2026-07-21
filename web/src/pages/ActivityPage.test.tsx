@@ -170,6 +170,10 @@ describe("ActivityPage", () => {
 
     await screen.findAllByText("gpt-4o");
     expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+    // The range must reflect the rows on screen rather than reading "0 of 0",
+    // which would contradict the 50 visible rows.
+    expect(screen.getByText("1–50")).toBeInTheDocument();
+    expect(screen.queryByText("0 of 0")).not.toBeInTheDocument();
   });
 
   it("shows the paginator range and total", async () => {
