@@ -2572,6 +2572,97 @@
         "title": "ProviderCapabilitiesSchema",
         "type": "object"
       },
+      "ProviderHealthResponse": {
+        "description": "Provider connectivity across the whole gateway, for the health monitor.\n\nCarries per-provider results plus the ``healthy`` / ``total`` counts and the\nmost recent ``checked_at`` so the overview page can render a summary tile\nwithout re-deriving them.",
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 time of the most recent per-provider check (null if none yet).",
+            "title": "Checked At"
+          },
+          "healthy": {
+            "description": "How many providers are currently reachable.",
+            "title": "Healthy",
+            "type": "integer"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderHealthSchema"
+            },
+            "title": "Providers",
+            "type": "array"
+          },
+          "total": {
+            "description": "How many providers are configured.",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "providers",
+          "healthy",
+          "total"
+        ],
+        "title": "ProviderHealthResponse",
+        "type": "object"
+      },
+      "ProviderHealthSchema": {
+        "description": "One provider instance's reachability, from the model-discovery test path.",
+        "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 wall-clock time the provider's reachability was last checked (null if never).",
+            "title": "Checked At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sanitized provider error when unreachable.",
+            "title": "Error"
+          },
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "model_count": {
+            "description": "Number of models the last successful listing returned.",
+            "title": "Model Count",
+            "type": "integer"
+          },
+          "ok": {
+            "description": "True when the provider's credentials could list models.",
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "instance",
+          "ok",
+          "model_count"
+        ],
+        "title": "ProviderHealthSchema",
+        "type": "object"
+      },
       "ProviderInfoSchema": {
         "description": "Static, network-free metadata for one configured provider instance.",
         "properties": {
@@ -7078,6 +7169,58 @@
           }
         ],
         "summary": "Provider Catalog",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/providers/health": {
+      "get": {
+        "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.",
+        "operationId": "provider_health_v1_providers_health_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderHealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Provider Health",
         "tags": [
           "providers"
         ]

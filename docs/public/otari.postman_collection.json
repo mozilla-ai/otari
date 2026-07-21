@@ -1639,6 +1639,33 @@
               "raw": "{{baseUrl}}/v1/providers/catalog"
             }
           }
+        },
+        {
+          "name": "Provider Health",
+          "request": {
+            "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "providers",
+                "health"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "refresh",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/providers/health?refresh="
+            }
+          }
         }
       ],
       "name": "providers"

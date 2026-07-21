@@ -252,6 +252,24 @@ class GatewayConfig(BaseSettings):
         ge=0,
         description="TTL in seconds for the in-memory model discovery cache (0 disables caching)",
     )
+    model_discovery_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        description=(
+            "Per-provider timeout in seconds for a live model-discovery (list_models) "
+            "call. Bounds how long an unreachable or slow provider can stall discovery "
+            "before it is treated as failed and the declared models: fallback is used."
+        ),
+    )
+    model_discovery_negative_ttl_seconds: float = Field(
+        default=30.0,
+        ge=0,
+        description=(
+            "How long a failed model-discovery result is remembered before the provider "
+            "is dialed again, in seconds. Stops an unreachable provider from being re-tried "
+            "on every request (0 disables negative caching, restoring retry-every-time)."
+        ),
+    )
     models_dev_metadata: bool = Field(
         default=True,
         description=(

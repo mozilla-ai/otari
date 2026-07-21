@@ -5,7 +5,9 @@ import {
   useCreateStoredProvider,
   useDeleteStoredProvider,
   useProviderCatalog,
+  useProviderHealth,
   useProviders,
+  useRecheckProviderHealth,
   useSettings,
   useStoredProviders,
   useTestProviderCredentials,
@@ -15,6 +17,7 @@ import {
 } from "@/api/hooks";
 import type {
   CreateStoredProviderRequest,
+  ProviderHealth,
   ProviderInfo,
   StoredProvider,
   TestProviderResult,
@@ -23,6 +26,7 @@ import type {
 import { Field } from "@/components/Field";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ConfirmButton, ErrorBanner, errorMessage, PageHeader } from "@/components/ui";
+import { formatRelative } from "@/lib/format";
 
 // WebkitTextSecurity masks the value like a password field without being one.
 // It is non-standard, so it is absent from React's CSSProperties type.
@@ -564,6 +568,60 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
   );
 }
 
+// A provider's reachability, from the shared model-discovery health path. Config
+// providers (no per-row Test button) get a status here too, not just stored ones.
+// Semantic status surface: raw Tailwind palette classes, matching TestOutcome and
+// ErrorBanner rather than the --otari-* chrome.
+function HealthPill({ health }: { health: ProviderHealth | undefined }) {
+  if (!health) {
+    return <span className="text-xs text-[var(--otari-muted)]">—</span>;
+  }
+  const styles = health.ok
+    ? "border-green-200 bg-green-50 text-green-700"
+    : "border-red-200 bg-red-50 text-red-700";
+  // The last-checked time lives in the top summary banner; the row just shows the
+  // status. The error (and time) stay available on hover as the pill's tooltip.
+  const checked = health.checked_at ? `Last checked ${formatRelative(health.checked_at)}` : "Not checked yet";
+  const title = health.ok ? checked : `${health.error ?? "Unreachable"} · ${checked}`;
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${styles}`}
+    >
+      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${health.ok ? "bg-green-500" : "bg-red-500"}`} />
+      {health.ok ? "Reachable" : "Unreachable"}
+    </span>
+  );
+}
+
+// A one-line "N of M providers reachable" summary with a live re-check, above the
+// table. The healthy/total counts come precomputed from the gateway, and the
+// same counts feed the overview page's summary tile (issue #302).
+function HealthSummary({ healthy, total, checkedAt }: { healthy: number; total: number; checkedAt: string | null }) {
+  const allHealthy = healthy === total;
+  const recheck = useRecheckProviderHealth();
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)] px-4 py-2.5 text-sm">
+      <span aria-hidden className={`h-2 w-2 rounded-full ${allHealthy ? "bg-green-500" : "bg-red-500"}`} />
+      <span className="font-medium text-[var(--otari-ink)]">
+        {healthy} of {total} provider{total === 1 ? "" : "s"} reachable
+      </span>
+      {checkedAt ? (
+        <span className="text-[var(--otari-muted)]">Last checked {formatRelative(checkedAt)}</span>
+      ) : null}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="ml-auto"
+        isDisabled={recheck.isPending}
+        onPress={() => recheck.mutate()}
+      >
+        {recheck.isPending ? "Re-checking…" : "Re-check all"}
+      </Button>
+    </div>
+  );
+}
+
 function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
   return (
     <li className="flex gap-3">
@@ -644,6 +702,7 @@ export function ProvidersPage() {
   const meta = useProviders();
   const stored = useStoredProviders();
   const settings = useSettings();
+  const health = useProviderHealth();
   const deleteProvider = useDeleteStoredProvider();
   const testProvider = useTestStoredProvider();
   const updateSettings = useUpdateSettings();
@@ -653,6 +712,7 @@ export function ProvidersPage() {
   const [tests, setTests] = useState<Record<string, TestState>>({});
 
   const rows = buildRows(meta.data?.providers, stored.data);
+  const healthByInstance = new Map((health.data?.providers ?? []).map((item) => [item.instance, item]));
   const loading = meta.isLoading || stored.isLoading;
   const editingProvider = stored.data?.find((p) => p.instance === editing) ?? null;
   const needsPricing = settings.data?.require_pricing === true && settings.data.default_pricing === false;
@@ -693,7 +753,9 @@ export function ProvidersPage() {
       />
 
       <ErrorBanner
-        error={meta.error ?? stored.error ?? settings.error ?? updateSettings.error ?? deleteProvider.error}
+        error={
+          meta.error ?? stored.error ?? settings.error ?? health.error ?? updateSettings.error ?? deleteProvider.error
+        }
       />
 
       {showOnboarding ? (
@@ -714,6 +776,10 @@ export function ProvidersPage() {
       {addOpen ? <AddProviderForm onClose={() => setAddOpen(false)} /> : null}
       {editingProvider ? <EditProviderForm provider={editingProvider} onClose={() => setEditing(null)} /> : null}
 
+      {!loading && rows.length > 0 && health.data && health.data.total > 0 ? (
+        <HealthSummary healthy={health.data.healthy} total={health.data.total} checkedAt={health.data.checked_at} />
+      ) : null}
+
       <Table>
         <THead>
           <tr>
@@ -721,14 +787,15 @@ export function ProvidersPage() {
             <Th>Type</Th>
             <Th>Source</Th>
             <Th>API key</Th>
+            <Th>Status</Th>
             <Th className="text-right">Actions</Th>
           </tr>
         </THead>
         <tbody>
           {loading ? (
-            <LoadingRow colSpan={5} />
+            <LoadingRow colSpan={6} />
           ) : rows.length === 0 ? (
-            <TableMessage colSpan={5}>No providers yet. Add your first provider to start serving models.</TableMessage>
+            <TableMessage colSpan={6}>No providers yet. Add your first provider to start serving models.</TableMessage>
           ) : (
             rows.map((row) => (
               <Tr key={row.instance}>
@@ -766,6 +833,9 @@ export function ProvidersPage() {
                   ) : (
                     "config.yml"
                   )}
+                </Td>
+                <Td>
+                  <HealthPill health={healthByInstance.get(row.instance)} />
                 </Td>
                 <Td>
                   {row.source === "stored" ? (
