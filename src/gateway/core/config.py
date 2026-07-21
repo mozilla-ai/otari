@@ -58,6 +58,13 @@ ENV_BRIDGED_FIELDS = (
 )
 
 
+# Allowed values for the enum config fields. Defined once so the field
+# validators and the runtime-settings layer (which lets the dashboard hot-change
+# these) agree on the accepted set.
+STREAM_MISSING_USAGE_POLICIES = ("estimate", "fail", "allow_free")
+VISION_STRATEGIES = ("describe", "ocr", "off")
+
+
 class _NonScalarField(Exception):
     """Raised when a config field is not a simple scalar settable from a plain env string."""
 
@@ -619,9 +626,8 @@ class GatewayConfig(BaseSettings):
     @classmethod
     def _validate_stream_missing_usage_policy(cls, value: str) -> str:
         normalized = value.strip().lower()
-        allowed = {"estimate", "fail", "allow_free"}
-        if normalized not in allowed:
-            msg = f"stream_missing_usage_policy must be one of {sorted(allowed)}, got '{value}'"
+        if normalized not in STREAM_MISSING_USAGE_POLICIES:
+            msg = f"stream_missing_usage_policy must be one of {sorted(STREAM_MISSING_USAGE_POLICIES)}, got '{value}'"
             raise ValueError(msg)
         return normalized
 
@@ -629,9 +635,8 @@ class GatewayConfig(BaseSettings):
     @classmethod
     def _validate_vision_strategy(cls, value: str) -> str:
         normalized = value.strip().lower()
-        allowed = {"describe", "ocr", "off"}
-        if normalized not in allowed:
-            msg = f"vision_strategy must be one of {sorted(allowed)}, got '{value}'"
+        if normalized not in VISION_STRATEGIES:
+            msg = f"vision_strategy must be one of {sorted(VISION_STRATEGIES)}, got '{value}'"
             raise ValueError(msg)
         return normalized
 

@@ -743,6 +743,116 @@
         "title": "ChatCompletionRequest",
         "type": "object"
       },
+      "ConfigField": {
+        "description": "One effective config value surfaced to the dashboard's config viewer.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "exclusive_minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclusive Minimum"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "minimum": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "settable": {
+            "title": "Settable",
+            "type": "boolean"
+          },
+          "type": {
+            "enum": [
+              "bool",
+              "int",
+              "float",
+              "str",
+              "list"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "value",
+          "type",
+          "settable",
+          "group"
+        ],
+        "title": "ConfigField",
+        "type": "object"
+      },
       "CountTokensRequest": {
         "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the input fields that affect the token\ncount, minus ``max_tokens`` and the streaming/sampling controls, since the\nendpoint only counts input tokens. Clients such as Claude Code call this on\nevery turn to keep their prompt within the model's context window.",
         "properties": {
@@ -1394,8 +1504,15 @@
         "type": "object"
       },
       "GatewaySettings": {
-        "description": "Operator-facing runtime settings surfaced to the dashboard.",
+        "description": "Operator-facing runtime settings surfaced to the dashboard.\n\nThe top-level flags are kept for the callers that read them directly\n(pricing warnings, the models/providers pages); ``config`` is the full\nread-only view with the settable/startup-only marking.",
         "properties": {
+          "config": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigField"
+            },
+            "title": "Config",
+            "type": "array"
+          },
           "default_pricing": {
             "title": "Default Pricing",
             "type": "boolean"
@@ -1422,7 +1539,8 @@
           "version",
           "model_discovery",
           "default_pricing",
-          "require_pricing"
+          "require_pricing",
+          "config"
         ],
         "title": "GatewaySettings",
         "type": "object"
@@ -3573,8 +3691,20 @@
         "type": "object"
       },
       "UpdateSettingsRequest": {
-        "description": "Toggle one or more runtime settings. Omitted fields are left unchanged.",
+        "description": "Change one or more runtime settings. Omitted fields are left unchanged.\n\nOnly the hot-changeable subset is accepted; startup-only fields are not\nsettable over the API (they are display-only in the dashboard).",
         "properties": {
+          "budget_estimate_default_output_tokens": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Estimate Default Output Tokens"
+          },
           "default_pricing": {
             "anyOf": [
               {
@@ -3586,6 +3716,29 @@
             ],
             "title": "Default Pricing"
           },
+          "file_understanding_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Understanding Enabled"
+          },
+          "model_cache_ttl_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Cache Ttl Seconds"
+          },
           "model_discovery": {
             "anyOf": [
               {
@@ -3596,6 +3749,130 @@
               }
             ],
             "title": "Model Discovery"
+          },
+          "model_discovery_negative_ttl_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Discovery Negative Ttl Seconds"
+          },
+          "model_discovery_timeout_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Discovery Timeout Seconds"
+          },
+          "models_dev_cache_ttl_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models Dev Cache Ttl Seconds"
+          },
+          "models_dev_metadata": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models Dev Metadata"
+          },
+          "reject_user_mismatch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject User Mismatch"
+          },
+          "require_pricing": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Require Pricing"
+          },
+          "stream_missing_usage_policy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "estimate",
+                  "fail",
+                  "allow_free"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream Missing Usage Policy"
+          },
+          "vision_describe_max_tokens": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vision Describe Max Tokens"
+          },
+          "vision_describe_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vision Describe Model"
+          },
+          "vision_strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "describe",
+                  "ocr",
+                  "off"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vision Strategy"
           }
         },
         "title": "UpdateSettingsRequest",
@@ -7358,7 +7635,7 @@
         ]
       },
       "patch": {
-        "description": "Persist and apply runtime setting toggles.\n\nEach provided flag is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Master-key gated: these change\nhow the gateway meters and lists models.",
+        "description": "Persist and apply runtime setting changes.\n\nEach provided field is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Master-key gated: these change\nhow the gateway meters and lists models.",
         "operationId": "update_settings_v1_settings_patch",
         "requestBody": {
           "content": {

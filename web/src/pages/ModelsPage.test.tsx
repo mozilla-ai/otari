@@ -35,6 +35,7 @@ const SETTINGS: GatewaySettings = {
   model_discovery: true,
   default_pricing: true,
   require_pricing: false,
+  config: [],
 };
 
 function catalogModel(

@@ -450,16 +450,53 @@ export interface UpdateUserRequest {
   metadata?: Record<string, unknown> | null;
 }
 
+export type ConfigFieldType = "bool" | "int" | "float" | "str" | "list";
+
+// One effective config value in the full config viewer. `settable` fields can be
+// changed at runtime (they hot-apply); the rest are startup-only, display only.
+export interface ConfigField {
+  key: string;
+  value: boolean | number | string | string[] | null;
+  type: ConfigFieldType;
+  settable: boolean;
+  group: string;
+  description?: string | null;
+  options?: string[] | null;
+  // Numeric lower bounds (settable numeric fields only), so the input can gate
+  // the value the same way the backend validator does.
+  minimum?: number | null; // inclusive (ge)
+  exclusive_minimum?: number | null; // gt
+}
+
 export interface GatewaySettings {
   mode: string;
   version: string;
   model_discovery: boolean;
   default_pricing: boolean;
   require_pricing: boolean;
+  config: ConfigField[];
 }
 
-// Toggle one or more runtime settings. Omitted fields are left unchanged.
+export type StreamMissingUsagePolicy = "estimate" | "fail" | "allow_free";
+export type VisionStrategy = "describe" | "ocr" | "off";
+
+// Change one or more runtime settings. Omitted fields are left unchanged. Only
+// the hot-changeable subset is accepted; startup-only fields are display-only.
+// vision_describe_model is nullable: send null to clear it.
 export interface UpdateSettingsRequest {
   model_discovery?: boolean;
   default_pricing?: boolean;
+  require_pricing?: boolean;
+  reject_user_mismatch?: boolean;
+  models_dev_metadata?: boolean;
+  file_understanding_enabled?: boolean;
+  model_cache_ttl_seconds?: number;
+  models_dev_cache_ttl_seconds?: number;
+  vision_describe_max_tokens?: number;
+  budget_estimate_default_output_tokens?: number;
+  model_discovery_timeout_seconds?: number;
+  model_discovery_negative_ttl_seconds?: number;
+  stream_missing_usage_policy?: StreamMissingUsagePolicy;
+  vision_strategy?: VisionStrategy;
+  vision_describe_model?: string | null;
 }
