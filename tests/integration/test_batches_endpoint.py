@@ -823,6 +823,177 @@ def test_retrieve_batch_results_records_tokens_and_cost(
 
 
 # ---------------------------------------------------------------------------
+# Batches table — idempotent accounting, spend folding, strict ownership (#290)
+# ---------------------------------------------------------------------------
+
+
+def _completed_results_patches(tokens: CompletionUsage | None = None) -> tuple[Any, Any]:
+    """Patches returning a completed batch plus a single successful result."""
+    mock_completion = MagicMock()
+    mock_completion.model = "gpt-4o-mini"
+    mock_completion.usage = tokens
+    mock_completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
+    mock_result = BatchResult(results=[BatchResultItem(custom_id="req-1", result=mock_completion, error=None)])
+    return (
+        patch(
+            "gateway.api.routes.batches.aretrieve_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(status="completed"),
+        ),
+        patch("gateway.api.routes.batches.aretrieve_batch_results", new_callable=AsyncMock, return_value=mock_result),
+    )
+
+
+def _create_recorded_batch(
+    client: TestClient,
+    headers: dict[str, str],
+    *,
+    batch_id: str = "batch_abc123",
+    **body_overrides: Any,
+) -> str:
+    """Create a batch through the endpoint so a batches-table record exists."""
+    with (
+        patch(
+            "gateway.api.routes.batches.acreate_batch",
+            new_callable=AsyncMock,
+            return_value=_mock_batch(id=batch_id),
+        ),
+        patch("gateway.api.routes.batches.AnyLLM.get_provider_class", return_value=_SupportsBatch),
+    ):
+        resp = client.post("/v1/batches", json=_create_batch_body(**body_overrides), headers=headers)
+    assert resp.status_code == 200
+    created_id: str = resp.json()["id"]
+    return created_id
+
+
+def test_recorded_batch_results_accounted_once(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A recorded batch logs usage and folds spend exactly once across retries."""
+    user_id = api_key_obj["user_id"]
+    pricing_resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+        },
+        headers=master_key_header,
+    )
+    assert pricing_resp.status_code == 200
+
+    batch_id = _create_recorded_batch(client, api_key_header)
+
+    retrieve_patch, results_patch = _completed_results_patches(
+        CompletionUsage(prompt_tokens=100, completion_tokens=50, total_tokens=150)
+    )
+    with retrieve_patch, results_patch:
+        first = client.get(f"/v1/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+        second = client.get(f"/v1/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+
+    # Both retrievals return the results; only the first bills.
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) == 1
+
+    expected_cost = 100 / 1_000_000 * 1.0 + 50 / 1_000_000 * 2.0
+    assert results_logs[0]["cost"] == pytest.approx(expected_cost)
+
+    user_resp = client.get(f"/v1/users/{user_id}", headers=master_key_header)
+    assert user_resp.status_code == 200
+    assert user_resp.json()["spend"] == pytest.approx(expected_cost)
+
+
+def test_unrecorded_batch_results_logs_every_retrieval(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """Legacy batches with no record keep the prior log-every-retrieval behavior."""
+    user_id = api_key_obj["user_id"]
+
+    # No create call -> no batches-table record; falls to the metadata fallback.
+    retrieve_patch, results_patch = _completed_results_patches(
+        CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+    )
+    with retrieve_patch, results_patch:
+        first = client.get("/v1/batches/legacy_batch/results?provider=openai", headers=api_key_header)
+        second = client.get("/v1/batches/legacy_batch/results?provider=openai", headers=api_key_header)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) == 2
+
+
+def test_recorded_batch_strict_ownership_ignores_missing_metadata(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """A recorded batch is owner-only even when the provider drops the metadata marker."""
+    batch_id = _create_recorded_batch(client, api_key_header)
+
+    other_key_resp = client.post(
+        "/v1/keys",
+        json={"key_name": "other", "user_id": "batch-other-user"},
+        headers=master_key_header,
+    )
+    assert other_key_resp.status_code == 200
+    other_header = {API_KEY_HEADER: f"Bearer {other_key_resp.json()['key']}"}
+
+    # Provider returns the batch without the ownership marker: the record alone
+    # must keep a foreign key out (the metadata fallback would fail open).
+    no_marker = _mock_batch(id=batch_id, status="completed", metadata=None)
+    with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock, return_value=no_marker):
+        foreign = client.get(f"/v1/batches/{batch_id}?provider=openai", headers=other_header)
+        owner = client.get(f"/v1/batches/{batch_id}?provider=openai", headers=api_key_header)
+
+    assert foreign.status_code == 404
+    assert owner.status_code == 200
+
+
+def test_recorded_batch_list_hides_foreign_without_metadata(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """List filtering uses the records table, so an unmarked foreign batch is hidden."""
+    other_key_resp = client.post(
+        "/v1/keys",
+        json={"key_name": "other-list", "user_id": "batch-list-other"},
+        headers=master_key_header,
+    )
+    assert other_key_resp.status_code == 200
+    other_header = {API_KEY_HEADER: f"Bearer {other_key_resp.json()['key']}"}
+
+    own_id = _create_recorded_batch(client, api_key_header, batch_id="batch_own")
+    foreign_id = _create_recorded_batch(client, other_header, batch_id="batch_foreign")
+
+    # Both batches come back from the provider without the metadata marker.
+    listed = [
+        _mock_batch(id=own_id, metadata=None),
+        _mock_batch(id=foreign_id, metadata=None),
+    ]
+    with patch("gateway.api.routes.batches.alist_batches", new_callable=AsyncMock, return_value=listed):
+        resp = client.get("/v1/batches?provider=openai", headers=api_key_header)
+
+    assert resp.status_code == 200
+    ids = [item["id"] for item in resp.json()["data"]]
+    assert own_id in ids
+    assert foreign_id not in ids
+
+
+# ---------------------------------------------------------------------------
 # Hybrid mode — batch endpoints not registered
 # ---------------------------------------------------------------------------
 

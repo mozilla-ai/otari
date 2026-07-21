@@ -375,6 +375,37 @@ class FileObject(Base):
         }
 
 
+class BatchRecord(Base):
+    """Ownership and accounting record for an asynchronous batch job.
+
+    Written at creation time so results accounting can be made idempotent (bill
+    and log once, on the first completed retrieval), the batch cost can be folded
+    into ``users.spend``, and ownership can be enforced without depending on the
+    provider round-tripping the ``otari_user_id`` metadata marker. Batches created
+    before this table existed carry no record and fall back to the
+    metadata-anchored ownership path in ``api/routes/batches.py``.
+    """
+
+    __tablename__ = "batches"
+
+    # Provider-assigned batch id (globally unique per provider), used as the
+    # lookup key on retrieve/cancel/results.
+    id: Mapped[str] = mapped_column(primary_key=True)
+    # Instance/provider name the batch was created against (echoed to clients).
+    provider: Mapped[str] = mapped_column()
+    # Billed owner, stamped from the authenticated principal at creation. CASCADE:
+    # deleting the user drops the ownership record (the user's keys are gone too,
+    # and usage_logs remain the billing history).
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    # SET NULL: a key may be revoked while its batch is still in flight.
+    api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
+    model: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    # NULL until the first completed results retrieval accounts the batch; the
+    # atomic NULL -> now transition is the idempotency gate for billing/logging.
+    results_accounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class BudgetResetLog(Base):
     """Budget reset log model for tracking budget resets."""
 

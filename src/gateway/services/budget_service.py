@@ -301,6 +301,20 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     await db.commit()
 
 
+async def record_external_spend(db: AsyncSession, user_id: str, cost: float) -> None:
+    """Fold already-incurred cost into ``users.spend`` outside the reservation flow.
+
+    Used by asynchronous billable paths (batch results) where the create-time
+    reservation has already been reconciled and no live hold exists at the point
+    the cost becomes known. This deliberately does not enforce the budget: the
+    spend has already happened upstream at the provider, so it is recorded, not
+    gated. Writing goes through :func:`reconcile_reservation` (with an empty
+    handle) so ``users.spend`` still has a single writer.
+    """
+    handle = ReservationHandle(user_id=user_id, estimate=0.0, reserved=False, strategy="disabled")
+    await reconcile_reservation(db, handle, cost)
+
+
 async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> None:
     """Release a reservation without recording spend (e.g. provider failure)."""
     if not handle.reserved:
