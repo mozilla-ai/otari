@@ -45,7 +45,7 @@ function SecretField({
   description?: string;
 }) {
   return (
-    <TextField value={value} onChange={onChange} className="flex flex-col gap-1">
+    <TextField value={value} onChange={onChange} className="flex max-w-md flex-col gap-1">
       <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>
       {/* Deliberately NOT type="password": Chrome flags password fields on non-HTTPS
           origins ("this form is not secure, login entered here may be compromised")
@@ -130,7 +130,7 @@ function ProviderComboBox({
           setText("");
         }
       }}
-      className="flex flex-col gap-1"
+      className="flex max-w-md flex-col gap-1"
     >
       <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>
       <ComboBox.InputGroup>
@@ -186,7 +186,7 @@ function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProvider
             Connected. {test.data.model_count} model{test.data.model_count === 1 ? "" : "s"} available.
           </span>
         ) : (
-          <span className="block max-w-md truncate text-xs text-red-700" title={test.data.error ?? undefined}>
+          <span className="block max-w-md break-words text-xs text-red-700">
             {test.data.error ?? "Connection failed."}
           </span>
         )
@@ -292,6 +292,9 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
           {create.isPending ? "Adding…" : "Add provider"}
         </Button>
+        <Button variant="ghost" onPress={onClose}>
+          Cancel
+        </Button>
         <ConnectionTest
           getPayload={() =>
             providerId === ""
@@ -383,6 +386,9 @@ function CustomProviderForm({ onClose }: { onClose: () => void }) {
         <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
           {create.isPending ? "Adding…" : "Add provider"}
         </Button>
+        <Button variant="ghost" onPress={onClose}>
+          Cancel
+        </Button>
         <ConnectionTest
           getPayload={() =>
             name.trim() === "" || apiBase.trim() === ""
@@ -431,9 +437,6 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
               </button>
             ))}
           </div>
-          <Button size="sm" variant="ghost" onPress={onClose}>
-            Close
-          </Button>
         </div>
         {tab === "known" ? <KnownProviderForm onClose={onClose} /> : <CustomProviderForm onClose={onClose} />}
       </Card.Content>
@@ -555,7 +558,7 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
     );
   }
   return (
-    <span className="block max-w-xs truncate text-xs text-red-700" title={state.error ?? undefined}>
+    <span className="block max-w-xs break-words text-xs text-red-700">
       {state.error ?? "Connection failed."}
     </span>
   );

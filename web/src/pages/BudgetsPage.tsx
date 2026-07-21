@@ -152,12 +152,7 @@ function BudgetForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold text-[var(--otari-ink)]">{title}</div>
-          <Button size="sm" variant="ghost" onPress={onClose}>
-            Close
-          </Button>
-        </div>
+        <div className="text-sm font-semibold text-[var(--otari-ink)]">{title}</div>
         <ErrorBanner error={error} />
         <Field
           label="Name (optional)"
@@ -190,9 +185,12 @@ function BudgetForm({
             users={assignUsers}
           />
         ) : null}
-        <div>
+        <div className="flex gap-2">
           <Button variant="primary" isDisabled={isPending || !parsed.valid} onPress={submit}>
             {isPending ? "Saving…" : submitLabel}
+          </Button>
+          <Button variant="ghost" onPress={onClose}>
+            Cancel
           </Button>
         </div>
       </Card.Content>

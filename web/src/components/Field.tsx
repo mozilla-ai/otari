@@ -24,7 +24,7 @@ export function Field({
   autoFocus,
 }: FieldProps) {
   return (
-    <TextField value={value} onChange={onChange} isRequired={isRequired} className="flex flex-col gap-1">
+    <TextField value={value} onChange={onChange} isRequired={isRequired} className="flex max-w-md flex-col gap-1">
       {/* No manual "*": HeroUI marks a required field's label through CSS
           ([data-required=true] > .label::after), so adding one renders two. */}
       <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>

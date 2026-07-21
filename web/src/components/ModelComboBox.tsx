@@ -102,7 +102,9 @@ export function ModelComboBox({
         }
       }}
       isRequired={isRequired}
-      className="flex flex-col gap-1"
+      // Cap the width so the field and its dropdown trigger stay within easy
+      // reach instead of stretching across a wide form.
+      className="flex max-w-md flex-col gap-1"
     >
       {/* HeroUI marks a required field's label through CSS; see Field. */}
       <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>
