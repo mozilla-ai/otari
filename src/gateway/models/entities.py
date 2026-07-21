@@ -111,7 +111,9 @@ class User(Base):
     # ``spend + reserved``; reservations are reconciled into ``spend`` (actual
     # cost) on success or released on failure. See gateway.services.budget_service.
     reserved: Mapped[float] = mapped_column(default=0.0, server_default="0")
-    budget_id: Mapped[str | None] = mapped_column(ForeignKey("budgets.budget_id"))
+    # Indexed: the budgets list groups users by this column to build each budget's
+    # usage rollup, so an unindexed FK turns that page into a users table scan.
+    budget_id: Mapped[str | None] = mapped_column(ForeignKey("budgets.budget_id"), index=True)
     # Default model access-list every one of this user's keys inherits when the
     # key has no list of its own. null = unrestricted, [] = deny all, else
     # canonical instance:model entries (see services/model_access.py). A key may
@@ -368,7 +370,9 @@ class BudgetResetLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), index=True)
-    budget_id: Mapped[str] = mapped_column(ForeignKey("budgets.budget_id"))
+    # Indexed: the reset-log drill-down filters on this column, and the table only
+    # grows, so an unindexed FK degrades that endpoint to a full scan over time.
+    budget_id: Mapped[str] = mapped_column(ForeignKey("budgets.budget_id"), index=True)
     previous_spend: Mapped[float] = mapped_column()
     reset_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     next_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

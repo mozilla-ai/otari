@@ -168,7 +168,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"input\": \"string\",\n  \"voice\": \"string\"\n}"
             },
-            "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "description": "OpenAI-compatible audio speech (TTS) endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [
               {
                 "key": "Content-Type",
@@ -192,7 +192,7 @@
         {
           "name": "Create Transcription",
           "request": {
-            "description": "OpenAI-compatible audio transcription endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "description": "OpenAI-compatible audio transcription endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [],
             "method": "POST",
             "url": {
@@ -263,7 +263,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"requests\": [\n    {\n      \"custom_id\": \"string\",\n      \"body\": {}\n    }\n  ]\n}"
             },
-            "description": "Create a batch of LLM requests for asynchronous processing.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "description": "Create a batch of LLM requests for asynchronous processing.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [
               {
                 "key": "Content-Type",
@@ -606,7 +606,7 @@
               },
               "raw": "{\n  \"model\": \"openai:gpt-4o-mini\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Hello from Otari!\"\n    }\n  ]\n}"
             },
-            "description": "OpenAI-compatible chat completions endpoint.\n\nSupports both streaming and non-streaming responses.\nHandles reasoning content from otari providers.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "description": "OpenAI-compatible chat completions endpoint.\n\nSupports both streaming and non-streaming responses.\nHandles reasoning content from otari providers.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [
               {
                 "key": "Content-Type",
@@ -644,7 +644,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"input\": \"string\"\n}"
             },
-            "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "description": "OpenAI-compatible embeddings endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [
               {
                 "key": "Content-Type",
@@ -839,7 +839,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"prompt\": \"string\"\n}"
             },
-            "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "description": "OpenAI-compatible image generation endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [
               {
                 "key": "Content-Type",
@@ -909,7 +909,7 @@
               },
               "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"user_id\": \"string\"\n}"
             },
-            "description": "Create a new API key.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, a new user will be created automatically and the key will be associated with it.",
+            "description": "Create a new API key.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.",
             "header": [
               {
                 "key": "Content-Type",
@@ -1230,7 +1230,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"input\": \"string\"\n}"
             },
-            "description": "OpenAI-compatible moderations endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "description": "OpenAI-compatible moderations endpoint.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [
               {
                 "key": "Content-Type",
@@ -1657,7 +1657,7 @@
               },
               "raw": "{\n  \"model\": \"string\",\n  \"query\": \"string\",\n  \"documents\": [\n    \"string\"\n  ]\n}"
             },
-            "description": "Rerank documents by relevance to a query.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use virtual user created with API key",
+            "description": "Rerank documents by relevance to a query.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
             "header": [
               {
                 "key": "Content-Type",

@@ -58,7 +58,7 @@ async def create_moderation(
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
-    - API key without user field: Use virtual user created with API key
+    - API key without user field: Use the shared "default" user
     """
 
     # Moderations is exempt from require_pricing: it is free at most providers

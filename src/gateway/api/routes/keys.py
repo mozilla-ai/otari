@@ -112,7 +112,9 @@ async def create_key(
     Requires master key authentication.
 
     If user_id is provided, the key will be associated with that user (creates user if it doesn't exist).
-    If user_id is not provided, a new user will be created automatically and the key will be associated with it.
+    If user_id is not provided, the key is associated with the shared "default" user, which is created
+    on first use. Keys without an explicit owner therefore share one identity, and so share budget,
+    usage, and files.
     """
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)

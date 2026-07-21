@@ -201,7 +201,7 @@ async def create_batch(
     Authentication modes:
     - Master key + user field: Use specified user (must exist)
     - API key + user field: Use specified user (must exist)
-    - API key without user field: Use virtual user created with API key
+    - API key without user field: Use the shared "default" user
     """
     api_key, is_master_key = auth_result
     api_key_id = api_key.id if api_key else None
