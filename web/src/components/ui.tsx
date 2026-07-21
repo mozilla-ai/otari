@@ -94,3 +94,57 @@ export function ConfirmButton({
     </Button>
   );
 }
+
+const FILTER_SELECT_CLASS =
+  "rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none";
+
+// Token-styled native select for page filter bars. Pass `label` (+ `id`) for a
+// visible label, or `ariaLabel` alone for a compact control. Prefer `options`
+// for static lists; use `children` when options are grouped or conditional.
+export function FilterSelect({
+  id,
+  label,
+  ariaLabel,
+  value,
+  onChange,
+  options,
+  children,
+}: {
+  id?: string;
+  label?: string;
+  ariaLabel?: string;
+  value: string;
+  onChange: (value: string) => void;
+  options?: { value: string; label: string }[];
+  children?: ReactNode;
+}) {
+  const select = (
+    <select
+      id={id}
+      aria-label={label ? undefined : ariaLabel}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className={FILTER_SELECT_CLASS}
+    >
+      {options
+        ? options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))
+        : children}
+    </select>
+  );
+
+  if (label) {
+    return (
+      <div className="flex flex-col gap-1">
+        <label htmlFor={id} className="text-xs font-medium text-[var(--otari-muted)]">
+          {label}
+        </label>
+        {select}
+      </div>
+    );
+  }
+  return select;
+}

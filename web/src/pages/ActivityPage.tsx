@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { useUsageCount, useUsageLogs, useUsers } from "@/api/hooks";
 import type { UsageEntry, UsageFilters } from "@/api/types";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
-import { ErrorBanner, PageHeader } from "@/components/ui";
+import { ErrorBanner, FilterSelect, PageHeader } from "@/components/ui";
 
 // ---------- formatting ----------
 
@@ -161,37 +161,6 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
         <DetailField label="Total time">{formatLatency(entry.latency_ms)}</DetailField>
         <DetailField label="Request ID">{entry.id}</DetailField>
       </div>
-    </div>
-  );
-}
-
-// A token-styled select matching the app's other filter controls.
-function FilterSelect({
-  id,
-  label,
-  value,
-  onChange,
-  children,
-}: {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={id} className="text-xs font-medium text-[var(--otari-muted)]">
-        {label}
-      </label>
-      <select
-        id={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)]"
-      >
-        {children}
-      </select>
     </div>
   );
 }
