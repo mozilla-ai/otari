@@ -11,6 +11,7 @@ import { KeysPage } from "@/pages/KeysPage";
 import { ModelsPage } from "@/pages/ModelsPage";
 import { ProvidersPage } from "@/pages/ProvidersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { UsagePage } from "@/pages/UsagePage";
 import { UsersPage } from "@/pages/UsersPage";
 
 export default function App() {
@@ -30,6 +31,7 @@ export default function App() {
           <Route path="users" element={<UsersPage />} />
           <Route path="budgets" element={<BudgetsPage />} />
           <Route path="activity" element={<ActivityPage />} />
+          <Route path="usage" element={<UsagePage />} />
           <Route path="models" element={<ModelsPage />} />
           <Route path="aliases" element={<AliasesPage />} />
           <Route path="settings" element={<SettingsPage />} />

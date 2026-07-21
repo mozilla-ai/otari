@@ -334,6 +334,9 @@ export interface UsageEntry {
 // query params to /v1/usage and /v1/usage/count.
 export interface UsageFilters {
   start_date?: string;
+  // Upper bound (exclusive). Omitted for a live "up to now" window; set by the
+  // analytics previous-period query so its window does not overlap the current one.
+  end_date?: string;
   status?: string;
   model?: string;
   endpoint?: string;
@@ -344,6 +347,55 @@ export interface UsageFilters {
 // from the list so /v1/usage stays a bare array for external export consumers.
 export interface UsageCount {
   total: number;
+}
+
+// Time-series granularity for the analytics summary.
+export type UsageBucket = "hour" | "day";
+
+// Grand totals over the summary window (from /v1/usage/summary).
+export interface UsageTotals {
+  cost: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  request_count: number;
+  error_count: number;
+  // Mean server-side latency over rows that recorded one; null when none did.
+  avg_latency_ms: number | null;
+}
+
+// One breakdown row (a model, a user, or an API key). `key` is null both for the
+// synthesized fold row (`is_other: true`) and for usage whose grouping column was
+// NULL, e.g. a since-deleted user (`is_other: false`); `is_other` tells them apart.
+export interface UsageGroupRow {
+  key: string | null;
+  cost: number;
+  tokens: number;
+  requests: number;
+  is_other: boolean;
+}
+
+// One time bucket. `bucket_start` is canonical ISO-8601 UTC (`...Z`).
+export interface UsageSeriesPoint {
+  bucket_start: string;
+  cost: number;
+  tokens: number;
+  requests: number;
+}
+
+// Aggregated spend/volume for the Usage & analytics page. `start_date`/`end_date`
+// echo the (clamped) window the server actually aggregated over.
+export interface UsageSummary {
+  start_date: string;
+  end_date: string;
+  bucket: UsageBucket;
+  totals: UsageTotals;
+  by_model: UsageGroupRow[];
+  by_user: UsageGroupRow[];
+  by_api_key: UsageGroupRow[];
+  series: UsageSeriesPoint[];
 }
 
 // One per-user budget reset event (the spend that was cleared and when the next

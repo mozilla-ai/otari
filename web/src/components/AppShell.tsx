@@ -74,6 +74,17 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    to: "/usage",
+    section: "observability",
+    label: "Usage",
+    icon: (
+      // A bar chart: aggregate spend and volume over time, beside the activity log.
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+        <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     to: "/providers",
     section: "catalog",
     label: "Providers",

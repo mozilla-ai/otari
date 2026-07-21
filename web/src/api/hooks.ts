@@ -28,9 +28,11 @@ import type {
   UpdateSettingsRequest,
   UpdateStoredProviderRequest,
   UpdateUserRequest,
+  UsageBucket,
   UsageCount,
   UsageEntry,
   UsageFilters,
+  UsageSummary,
   User,
   CreateUserRequest,
 } from "@/api/types";
@@ -540,6 +542,7 @@ export function useDeleteUser() {
 function usageParams(filters: UsageFilters): URLSearchParams {
   const params = new URLSearchParams();
   if (filters.start_date) params.set("start_date", filters.start_date);
+  if (filters.end_date) params.set("end_date", filters.end_date);
   if (filters.status) params.set("status", filters.status);
   if (filters.model) params.set("model", filters.model);
   if (filters.endpoint) params.set("endpoint", filters.endpoint);
@@ -574,4 +577,32 @@ export function useUsageCount(filters: UsageFilters) {
     placeholderData: keepPreviousData,
     staleTime: 10_000,
   });
+}
+
+// ---------- usage analytics summary ----------
+
+// Aggregated spend/tokens/requests for the Usage page. Shares the activity
+// filter serialization and adds the time-series bucket. `enabled` lets a caller
+// skip the request (e.g. the previous-period query when the range is unbounded,
+// so there is nothing to compare against). staleTime is longer than the live
+// Activity log's: an aggregate over days moves slowly and need not refetch on
+// every focus.
+export function useUsageSummary(filters: UsageFilters, bucket: UsageBucket, enabled = true) {
+  return useQuery({
+    queryKey: [USAGE, "summary", filters, bucket],
+    queryFn: () => {
+      const params = usageParams(filters);
+      params.set("bucket", bucket);
+      return apiFetch<UsageSummary>(`/v1/usage/summary?${params.toString()}`);
+    },
+    enabled,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+}
+
+// The authenticated URL for the CSV export of the current filter set. The page
+// downloads it via apiFetchBlob (the master key can't ride on a plain anchor).
+export function usageSummaryCsvUrl(filters: UsageFilters): string {
+  return `/v1/usage/summary.csv?${usageParams(filters).toString()}`;
 }

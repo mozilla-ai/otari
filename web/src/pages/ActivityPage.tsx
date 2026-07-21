@@ -1,11 +1,12 @@
 import { Button, Spinner } from "@heroui/react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 
-import { useUsageCount, useUsageLogs, useUsers } from "@/api/hooks";
+import { useUsageCount, useUsageLogs, useUsageSummary, useUsers } from "@/api/hooks";
 import type { UsageEntry, UsageFilters } from "@/api/types";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
-import { ErrorBanner, FilterSelect, PageHeader } from "@/components/ui";
+import { ErrorBanner, FilterComboBox, FilterSelect, PageHeader } from "@/components/ui";
 
 // ---------- formatting ----------
 
@@ -171,15 +172,20 @@ const COLS = 7;
 
 export function ActivityPage() {
   const users = useUsers();
+  // Drill-down from the Usage page arrives with model / user_id / start_date /
+  // status in the query string; seed the initial filter state from it (once, on
+  // mount) so the log opens pre-filtered on what the operator clicked.
+  const [searchParams] = useSearchParams();
+  const initialStart = searchParams.get("start_date") ?? undefined;
 
-  const [rangeSeconds, setRangeSeconds] = useState<number | null>(DAY_S);
+  const [rangeSeconds, setRangeSeconds] = useState<number | null>(initialStart ? null : DAY_S);
   // Snapshotted when a range is picked (and on refresh), so the query key is
   // stable across renders instead of recomputing "now" every render.
-  const [startDate, setStartDate] = useState<string | undefined>(() => isoAgo(DAY_S));
-  const [statusFilter, setStatusFilter] = useState("");
-  const [modelFilter, setModelFilter] = useState("");
+  const [startDate, setStartDate] = useState<string | undefined>(() => initialStart ?? isoAgo(DAY_S));
+  const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") ?? "");
+  const [modelFilter, setModelFilter] = useState(() => searchParams.get("model") ?? "");
   const [endpointFilter, setEndpointFilter] = useState("");
-  const [userFilter, setUserFilter] = useState("");
+  const [userFilter, setUserFilter] = useState(() => searchParams.get("user_id") ?? "");
   const [page, setPage] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -201,6 +207,24 @@ export function ActivityPage() {
 
   const usage = useUsageLogs(filters, page, PAGE_SIZE);
   const count = useUsageCount(filters);
+
+  // Model suggestions: models with usage in the current window (the other filters
+  // applied, the model filter itself omitted so the full list stays offered). The
+  // picker still accepts any typed model, so one outside this window is reachable.
+  const modelSuggestFilters: UsageFilters = useMemo(
+    () => ({
+      start_date: startDate,
+      status: statusFilter || undefined,
+      endpoint: endpointFilter || undefined,
+      user_id: userFilter || undefined,
+    }),
+    [startDate, statusFilter, endpointFilter, userFilter],
+  );
+  const modelSummary = useUsageSummary(modelSuggestFilters, "day");
+  // Derived from query data, not mirrored into state. modelSuggestFilters omits
+  // the model filter, so the list is always the full set of in-window models.
+  const modelOptions =
+    modelSummary.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
 
   const rows = usage.data ?? [];
   const total = count.data?.total ?? 0;
@@ -300,27 +324,27 @@ export function ActivityPage() {
               </option>
             ))}
           </FilterSelect>
-          <FilterSelect id="filter-user" label="User" value={userFilter} onChange={setUserFilter}>
-            <option value="">All users</option>
-            {(users.data ?? []).map((u) => (
-              <option key={u.user_id} value={u.user_id}>
-                {u.alias ?? u.user_id}
-              </option>
-            ))}
-          </FilterSelect>
-          <div className="flex flex-col gap-1">
-            <label htmlFor="filter-model" className="text-xs font-medium text-[var(--otari-muted)]">
-              Model
-            </label>
-            <input
-              id="filter-model"
-              value={modelFilter}
-              onChange={(e) => setModelFilter(e.target.value)}
-              placeholder="exact name, e.g. gemini-2.5-flash"
-              title="Exact match on the model recorded in the log (the resolved target, without a provider prefix)."
-              className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)]"
-            />
-          </div>
+          <FilterComboBox
+            label="User"
+            value={userFilter}
+            onChange={setUserFilter}
+            placeholder="All users"
+            options={(users.data ?? []).map((u) => ({
+              value: u.user_id,
+              label: u.alias ? `${u.alias} (${u.user_id})` : u.user_id,
+            }))}
+          />
+          <FilterComboBox
+            label="Model"
+            value={modelFilter}
+            onChange={setModelFilter}
+            allowsCustom
+            placeholder="Any model"
+            options={(modelFilter && !modelOptions.includes(modelFilter)
+              ? [modelFilter, ...modelOptions]
+              : modelOptions
+            ).map((m) => ({ value: m, label: m }))}
+          />
           {anyFilter ? (
             <Button size="sm" variant="ghost" onPress={clearFilters}>
               Clear filters

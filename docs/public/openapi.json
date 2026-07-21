@@ -3906,6 +3906,47 @@
         "title": "UsageEntry",
         "type": "object"
       },
+      "UsageGroupRow": {
+        "description": "One breakdown row (a model, a user, or an API key).\n\n``key`` is None both for the synthesized fold row (``is_other=True``) and for a\nreal group whose column was NULL (e.g. usage from a since-deleted user, with\n``is_other=False``). ``is_other`` disambiguates the two so the UI does not\nmislabel deleted-user usage as the fold.",
+        "properties": {
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "is_other": {
+            "default": false,
+            "title": "Is Other",
+            "type": "boolean"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "cost",
+          "tokens",
+          "requests"
+        ],
+        "title": "UsageGroupRow",
+        "type": "object"
+      },
       "UsageLogResponse": {
         "description": "Response model for usage log.",
         "properties": {
@@ -4046,6 +4087,160 @@
           "latency_ms"
         ],
         "title": "UsageLogResponse",
+        "type": "object"
+      },
+      "UsageSeriesPoint": {
+        "description": "One time bucket. ``bucket_start`` is canonical ISO-8601 UTC (``...Z``),\nidentical across SQLite and PostgreSQL for the same underlying instant.",
+        "properties": {
+          "bucket_start": {
+            "title": "Bucket Start",
+            "type": "string"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bucket_start",
+          "cost",
+          "tokens",
+          "requests"
+        ],
+        "title": "UsageSeriesPoint",
+        "type": "object"
+      },
+      "UsageSummary": {
+        "description": "Aggregate spend/volume for the Usage & analytics page.",
+        "properties": {
+          "bucket": {
+            "enum": [
+              "hour",
+              "day"
+            ],
+            "title": "Bucket",
+            "type": "string"
+          },
+          "by_api_key": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By Api Key",
+            "type": "array"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By Model",
+            "type": "array"
+          },
+          "by_user": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By User",
+            "type": "array"
+          },
+          "end_date": {
+            "title": "End Date",
+            "type": "string"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/UsageSeriesPoint"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "start_date": {
+            "title": "Start Date",
+            "type": "string"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/UsageTotals"
+          }
+        },
+        "required": [
+          "start_date",
+          "end_date",
+          "bucket",
+          "totals",
+          "by_model",
+          "by_user",
+          "by_api_key",
+          "series"
+        ],
+        "title": "UsageSummary",
+        "type": "object"
+      },
+      "UsageTotals": {
+        "description": "Grand totals over the filtered window.",
+        "properties": {
+          "avg_latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Latency Ms"
+          },
+          "cache_read_tokens": {
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "completion_tokens": {
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "error_count": {
+            "title": "Error Count",
+            "type": "integer"
+          },
+          "prompt_tokens": {
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "request_count": {
+            "title": "Request Count",
+            "type": "integer"
+          },
+          "total_tokens": {
+            "title": "Total Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "cost",
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "cache_read_tokens",
+          "cache_write_tokens",
+          "request_count",
+          "error_count",
+          "avg_latency_ms"
+        ],
+        "title": "UsageTotals",
         "type": "object"
       },
       "UserResponse": {
@@ -7531,6 +7726,324 @@
           }
         ],
         "summary": "Count Usage",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/usage/summary": {
+      "get": {
+        "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key\n(top rows plus a reconciling ``other`` fold), and a UTC-bucketed time series.",
+        "operationId": "usage_summary_v1_usage_summary_get",
+        "parameters": [
+          {
+            "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "Filter to a single user",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single user",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Filter to a single status (e.g. 'success' or 'error')",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single status (e.g. 'success' or 'error')",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter to a single model",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single model",
+              "title": "Model"
+            }
+          },
+          {
+            "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+            "in": "query",
+            "name": "endpoint",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+              "title": "Endpoint"
+            }
+          },
+          {
+            "description": "Time-series granularity: 'hour' or 'day'",
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "day",
+              "description": "Time-series granularity: 'hour' or 'day'",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "title": "Bucket",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Usage Summary",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/usage/summary.csv": {
+      "get": {
+        "description": "Download the per-model / per-user / per-key breakdown as CSV.\n\nA dedicated route rather than a ``format=csv`` flag on ``/summary`` so that\nendpoint keeps a single JSON response model and a clean OpenAPI schema. The\nexport is **uncapped** (no top-N fold): finance wants every row. Kept separate\nfrom the bare-array ``/v1/usage`` contract, which is untouched.",
+        "operationId": "usage_summary_csv_v1_usage_summary_csv_get",
+        "parameters": [
+          {
+            "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "Filter to a single user",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single user",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Filter to a single status (e.g. 'success' or 'error')",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single status (e.g. 'success' or 'error')",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter to a single model",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single model",
+              "title": "Model"
+            }
+          },
+          {
+            "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+            "in": "query",
+            "name": "endpoint",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+              "title": "Endpoint"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Usage Summary Csv",
         "tags": [
           "usage"
         ]
