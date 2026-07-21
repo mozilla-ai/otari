@@ -26,8 +26,9 @@ function mockApi(aliases: AliasResponse[] = ALIASES) {
     if (url.includes("/v1/aliases")) {
       if (method === "POST") {
         const body = JSON.parse(String(init?.body)) as { name: string; target: string };
+        const existing = list.findIndex((alias) => alias.name === body.name);
         const row: AliasResponse = { ...body, source: "stored", created_at: null, updated_at: null };
-        list = [...list, row];
+        list = existing >= 0 ? list.map((alias, i) => (i === existing ? row : alias)) : [...list, row];
         return jsonResponse(row);
       }
       if (method === "DELETE") {
@@ -102,6 +103,28 @@ describe("AliasesPage", () => {
 
     const del = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "DELETE");
     expect(String(del?.[0])).toContain("/v1/aliases/smart");
+  });
+
+  it("edits a stored alias target", async () => {
+    const fetchMock = mockApi([
+      { name: "smart", target: "anthropic:claude-opus-4", source: "stored", created_at: null, updated_at: null },
+    ]);
+    const user = userEvent.setup();
+    renderPage(<AliasesPage />);
+
+    const row = (await screen.findByText("smart")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    const targetInput = screen.getByRole("combobox", { name: /target/i });
+    await user.clear(targetInput);
+    await user.type(targetInput, "openai:gpt-4o");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) => String(u).includes("/v1/aliases") && (init?.method ?? "") === "POST",
+    );
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: "smart", target: "openai:gpt-4o" });
   });
 
   it("refuses an alias name that could be mistaken for a model key", async () => {
