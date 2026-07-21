@@ -269,8 +269,9 @@ export function ActivityPage() {
 
       <ErrorBanner error={usage.error ?? count.error} />
 
-      {/* Filters */}
-      <div className="flex flex-col gap-3">
+      {/* Filters. The time-range presets share a row with the filter boxes when the
+          window is wide enough, and wrap onto their own line when it is not. */}
+      <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-wrap gap-2">
           {TIME_PRESETS.map((preset) => (
             <Button

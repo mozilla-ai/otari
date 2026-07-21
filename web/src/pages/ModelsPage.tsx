@@ -204,9 +204,12 @@ function PriceModelForm({ onClose }: { onClose: () => void }) {
           <MoneyInput value={output} onChange={setOutput} ariaLabel="Output price per million" />
         </div>
       </div>
-      <div>
+      <div className="flex gap-2">
         <Button variant="primary" isDisabled={!canSubmit || setPricing.isPending} onPress={submit}>
           {setPricing.isPending ? "Saving…" : "Save price"}
+        </Button>
+        <Button variant="ghost" onPress={onClose}>
+          Cancel
         </Button>
       </div>
     </div>
@@ -1232,12 +1235,7 @@ export function ModelsPage() {
             {showPriceForm ? (
               <Card>
                 <Card.Content className="flex flex-col gap-4 p-5">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-[var(--otari-ink)]">Price a model not listed here</div>
-                    <Button size="sm" variant="ghost" onPress={() => setShowPriceForm(false)}>
-                      Close
-                    </Button>
-                  </div>
+                  <div className="text-sm font-semibold text-[var(--otari-ink)]">Price a model not listed here</div>
                   <PriceModelForm onClose={() => setShowPriceForm(false)} />
                 </Card.Content>
               </Card>

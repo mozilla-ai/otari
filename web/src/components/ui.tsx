@@ -50,12 +50,16 @@ export function InfoBanner({ tone = "info", children }: { tone?: "info" | "warni
 
 export function PageHeader({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="flex flex-col gap-3">
       <div>
         <h1 className="text-xl font-semibold text-[var(--otari-ink)]">{title}</h1>
         {description ? <p className="mt-1 text-sm text-[var(--otari-muted)]">{description}</p> : null}
       </div>
-      {action}
+      {/* The primary action sits on its own left-aligned row under the heading,
+          so it stays near the sidebar the operator just came from rather than
+          across the page at the top right. Wrapped so the button keeps its
+          natural size instead of stretching in this flex column. */}
+      {action ? <div className="flex flex-wrap gap-2">{action}</div> : null}
     </div>
   );
 }

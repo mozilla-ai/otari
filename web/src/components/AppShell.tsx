@@ -5,6 +5,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { NavLink, Outlet } from "react-router-dom";
 
 import { useAuth } from "@/auth/AuthContext";
+import { ConnectionStatus } from "@/components/ConnectionStatus";
 import { PricingWarning } from "@/components/PricingWarning";
 import { UpdatePrompt } from "@/components/UpdatePrompt";
 
@@ -232,6 +233,7 @@ export function AppShell() {
         </Button>
       </header>
       <UpdatePrompt />
+      <ConnectionStatus />
       <PricingWarning />
       <div className="flex min-h-0 flex-1">
         <aside
