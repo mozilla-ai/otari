@@ -291,7 +291,10 @@ async def _apply_write(db: AsyncSession, config: GatewayConfig, instance: str) -
 
 
 @router.post("/provider-credentials/test", dependencies=[Depends(verify_master_key)])
-async def test_provider_connection(request: TestProviderRequest) -> TestProviderResponse:
+async def test_provider_connection(
+    request: TestProviderRequest,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> TestProviderResponse:
     """Test provider credentials without storing them (for the add/edit form).
 
     Resolves the implementation from ``provider_type`` (honoring the
@@ -314,6 +317,7 @@ async def test_provider_connection(request: TestProviderRequest) -> TestProvider
         api_key=request.api_key,
         api_base=request.api_base,
         client_args=request.client_args,
+        timeout=config.model_discovery_timeout_seconds,
     )
     return TestProviderResponse(ok=result.error is None, model_count=len(result.models), error=result.error)
 
