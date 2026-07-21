@@ -14,6 +14,7 @@ const BASE: GatewaySettings = {
   model_discovery: true,
   default_pricing: false,
   require_pricing: true,
+  config: [],
 };
 
 function jsonResponse(body: unknown, status = 200): Response {

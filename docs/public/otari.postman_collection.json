@@ -1774,9 +1774,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"default_pricing\": false,\n  \"model_discovery\": false\n}"
+              "raw": "{\n  \"budget_estimate_default_output_tokens\": 0,\n  \"default_pricing\": false,\n  \"file_understanding_enabled\": false,\n  \"model_cache_ttl_seconds\": 0,\n  \"model_discovery\": false,\n  \"model_discovery_negative_ttl_seconds\": 0,\n  \"model_discovery_timeout_seconds\": 0,\n  \"models_dev_cache_ttl_seconds\": 0,\n  \"models_dev_metadata\": false,\n  \"reject_user_mismatch\": false,\n  \"require_pricing\": false,\n  \"stream_missing_usage_policy\": \"estimate\",\n  \"vision_describe_max_tokens\": 0,\n  \"vision_describe_model\": \"string\",\n  \"vision_strategy\": \"describe\"\n}"
             },
-            "description": "Persist and apply runtime setting toggles.\n\nEach provided flag is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Master-key gated: these change\nhow the gateway meters and lists models.",
+            "description": "Persist and apply runtime setting changes.\n\nEach provided field is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Master-key gated: these change\nhow the gateway meters and lists models.",
             "header": [
               {
                 "key": "Content-Type",
