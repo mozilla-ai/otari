@@ -146,19 +146,24 @@ async def list_budgets(
     result = await db.execute(select(Budget).offset(skip).limit(limit))
     budgets = result.scalars().all()
 
-    # One grouped query for the whole page instead of a per-budget aggregate,
-    # so listing N budgets stays a fixed two queries rather than N+1.
-    usage_rows = await db.execute(
-        select(
-            User.budget_id,
-            func.count(),
-            func.coalesce(func.sum(User.spend), 0.0),
-            func.coalesce(func.sum(User.reserved), 0.0),
+    # One grouped query for the whole page instead of a per-budget aggregate, so
+    # listing N budgets stays a fixed two queries rather than N+1. Scoped to the
+    # page's ids: grouping over every budgeted user and then discarding all but
+    # this page would make each call pay for the whole users table.
+    page_ids = [budget.budget_id for budget in budgets]
+    usage: dict[str, tuple[int, float, float]] = {}
+    if page_ids:
+        usage_rows = await db.execute(
+            select(
+                User.budget_id,
+                func.count(),
+                func.coalesce(func.sum(User.spend), 0.0),
+                func.coalesce(func.sum(User.reserved), 0.0),
+            )
+            .where(User.budget_id.in_(page_ids), User.deleted_at.is_(None))
+            .group_by(User.budget_id)
         )
-        .where(User.budget_id.is_not(None), User.deleted_at.is_(None))
-        .group_by(User.budget_id)
-    )
-    usage = {row[0]: (int(row[1]), float(row[2]), float(row[3])) for row in usage_rows}
+        usage = {row[0]: (int(row[1]), float(row[2]), float(row[3])) for row in usage_rows}
 
     return [
         BudgetResponse.from_model(
