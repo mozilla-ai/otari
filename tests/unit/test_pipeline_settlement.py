@@ -431,7 +431,7 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
 async def test_tool_misconfiguration_400_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
     settlement = _Settlement()
     settlement.install(monkeypatch)
-    monkeypatch.delenv("GATEWAY_SANDBOX_URL", raising=False)
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
 
     ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation())
     with pytest.raises(HTTPException) as exc_info:

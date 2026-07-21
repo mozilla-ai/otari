@@ -25,12 +25,9 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # Get database URL from config (if already set programmatically) or environment variables
-# Priority: Programmatically set URL -> OTARI_DATABASE_URL -> GATEWAY_DATABASE_URL -> DATABASE_URL -> default
+# Priority: Programmatically set URL -> OTARI_DATABASE_URL -> DATABASE_URL -> default
 database_url = config.get_main_option("sqlalchemy.url") or (
-    os.getenv("OTARI_DATABASE_URL")
-    or os.getenv("GATEWAY_DATABASE_URL")
-    or os.getenv("DATABASE_URL")
-    or "sqlite:///./otari.db"
+    os.getenv("OTARI_DATABASE_URL") or os.getenv("DATABASE_URL") or "sqlite:///./otari.db"
 )
 # Normalized here rather than at each call site so every entry point is covered:
 # `otari migrate`, auto_migrate on startup, and a bare `alembic upgrade head`

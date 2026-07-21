@@ -1091,7 +1091,7 @@ def test_hybrid_mode_web_search_403_when_disabled(
 ) -> None:
     """An `otari_web_search` request whose workspace has web search disabled
     is rejected with 403 before any provider call."""
-    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://searxng:8080")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
 
     async def fake_post_platform(
         url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
@@ -1124,7 +1124,7 @@ def test_hybrid_mode_web_search_merges_workspace_config(
 ) -> None:
     """When enabled, the resolved workspace config is merged into the tool
     entry with per-request values winning over workspace defaults."""
-    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://searxng:8080")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
     _FakeWebSearchBackend.last_tool_entry = None
     _FakeWebSearchBackend.last_auth_token = None
 
@@ -1195,11 +1195,11 @@ def test_hybrid_mode_web_search_forwards_token_to_platform_backend(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When GATEWAY_WEB_SEARCH_URL points at the platform itself, the gateway
+    """When OTARI_WEB_SEARCH_URL points at the platform itself, the gateway
     forwards its platform token as X-Gateway-Token so the platform-hosted
     backend can authenticate it. (Non-platform backends get no token.)"""
     # platform_client's base_url is http://platform.test/api/v1.
-    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://platform.test/api/v1/gateway/web-search")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://platform.test/api/v1/gateway/web-search")
     _FakeWebSearchBackend.last_auth_token = None
 
     async def fake_post_platform(
@@ -1252,7 +1252,7 @@ def test_hybrid_mode_web_search_empty_request_list_keeps_workspace_policy(
     """A request `allowed_domains: []` reads as "no preference" and must NOT clear
     the workspace allow-list — empty/falsy per-request values fall back to the
     workspace value instead of overriding it."""
-    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://searxng:8080")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://searxng:8080")
     _FakeWebSearchBackend.last_tool_entry = None
 
     async def fake_post_platform(

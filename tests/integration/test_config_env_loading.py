@@ -18,7 +18,6 @@ def test_load_config_loads_provider_env_vars_from_dotenv(tmp_path: Path, monkeyp
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OTARI_MASTER_KEY", raising=False)
-    monkeypatch.delenv("GATEWAY_MASTER_KEY", raising=False)
 
     config = load_config()
 
@@ -97,18 +96,38 @@ def test_load_config_reads_otari_prefixed_env_aliases(tmp_path: Path, monkeypatc
     assert config.bootstrap_api_key is False
 
 
-def test_load_config_prefers_otari_prefix_over_gateway_aliases(
+def test_load_config_treats_empty_otari_scalar_env_as_unset(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # A blank OTARI_MASTER_KEY (common from container templating) must read as
+    # unset, not "". An empty master key otherwise lets an empty bearer token
+    # satisfy the master-key check on the shared auth path.
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("{}\n", encoding="utf-8")
 
-    monkeypatch.setenv("OTARI_PORT", "9001")
-    monkeypatch.setenv("GATEWAY_PORT", "7000")
+    monkeypatch.setenv("OTARI_MASTER_KEY", "")
 
     config = load_config(str(config_file))
 
-    assert config.port == 9001
+    assert config.master_key is None
+
+
+def test_load_config_ignores_legacy_gateway_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The GATEWAY_ prefix was removed after the Otari rename deprecation window;
+    # it no longer configures anything, so a value set only under GATEWAY_ falls
+    # back to the field default.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("{}\n", encoding="utf-8")
+
+    monkeypatch.delenv("OTARI_PORT", raising=False)
+    monkeypatch.delenv("OTARI_BUDGET_STRATEGY", raising=False)
+    monkeypatch.setenv("GATEWAY_PORT", "7000")
+    monkeypatch.setenv("GATEWAY_BUDGET_STRATEGY", "cas")
+
+    config = load_config(str(config_file))
+
+    assert config.port == 8000
+    assert config.budget_strategy == "for_update"
 
 
 def test_load_config_otari_prefix_covers_all_scalar_fields(
@@ -131,21 +150,6 @@ def test_load_config_otari_prefix_covers_all_scalar_fields(
     assert config.db_pool_timeout == 12.5
 
 
-def test_load_config_honors_legacy_gateway_prefix(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # The GATEWAY_ prefix predates the rename to Otari and must keep working.
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("{}\n", encoding="utf-8")
-
-    monkeypatch.delenv("OTARI_BUDGET_STRATEGY", raising=False)
-    monkeypatch.setenv("GATEWAY_BUDGET_STRATEGY", "cas")
-    monkeypatch.setenv("GATEWAY_PORT", "7100")
-
-    config = load_config(str(config_file))
-
-    assert config.budget_strategy == "cas"
-    assert config.port == 7100
-
-
 def test_load_config_promotes_service_level_fields_from_otari_prefix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -155,13 +159,6 @@ def test_load_config_promotes_service_level_fields_from_otari_prefix(
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("{}\n", encoding="utf-8")
 
-    for legacy in (
-        "GATEWAY_SANDBOX_URL",
-        "GATEWAY_GUARDRAILS_URL",
-        "GATEWAY_WEB_SEARCH_MAX_RESULTS",
-        "GATEWAY_MCP_ALLOW_LOOPBACK",
-    ):
-        monkeypatch.delenv(legacy, raising=False)
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:9000")
     monkeypatch.setenv("OTARI_GUARDRAILS_URL", "http://guardrails:8000")
     monkeypatch.setenv("OTARI_WEB_SEARCH_MAX_RESULTS", "7")
@@ -177,10 +174,11 @@ def test_load_config_promotes_service_level_fields_from_otari_prefix(
     assert config.mcp_allow_loopback is False
 
 
-def test_load_config_service_level_fields_honor_legacy_gateway_prefix(
+def test_load_config_service_level_fields_ignore_legacy_gateway_prefix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Promoting these knobs must not break their legacy GATEWAY_ env names.
+    # The legacy GATEWAY_ names for these service-level knobs were removed and no
+    # longer populate the fields; the defaults stand.
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("{}\n", encoding="utf-8")
 
@@ -191,8 +189,8 @@ def test_load_config_service_level_fields_honor_legacy_gateway_prefix(
 
     config = load_config(str(config_file))
 
-    assert config.sandbox_url == "http://legacy-sandbox:9000"
-    assert config.mcp_allow_private_hosts is True
+    assert config.sandbox_url is None
+    assert config.mcp_allow_private_hosts is False
 
 
 def test_load_config_rejects_invalid_service_level_field(
@@ -223,11 +221,8 @@ def test_load_config_bridges_yaml_service_fields_into_env(
     )
     for var in (
         "OTARI_SANDBOX_URL",
-        "GATEWAY_SANDBOX_URL",
         "OTARI_MCP_ALLOW_LOOPBACK",
-        "GATEWAY_MCP_ALLOW_LOOPBACK",
         "OTARI_WEB_SEARCH_MAX_RESULTS",
-        "GATEWAY_WEB_SEARCH_MAX_RESULTS",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -259,22 +254,19 @@ def test_load_config_env_wins_over_yaml_for_bridged_fields(
 def test_load_config_does_not_bridge_fields_absent_from_yaml(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A field populated only from the legacy GATEWAY_ env var is not bridged:
-    # the read sites already see that variable, and leaving it alone keeps
-    # env-only deployments byte-for-byte identical (including nonstandard
-    # boolean spellings the strict gate parsers treat differently).
+    # The bridge only injects YAML-set promoted fields into the environment. A
+    # field populated only from its OTARI_ env var is already visible to the
+    # otari_env() read sites, so load_config leaves the environment untouched.
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("{}\n", encoding="utf-8")
 
-    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://legacy-sandbox:9000")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://env-sandbox:9000")
 
     with mock.patch.dict(os.environ):
         config = load_config(str(config_file))
 
-        assert config.sandbox_url == "http://legacy-sandbox:9000"
-        assert "OTARI_SANDBOX_URL" not in os.environ
-        assert otari_env("SANDBOX_URL") == "http://legacy-sandbox:9000"
+        assert config.sandbox_url == "http://env-sandbox:9000"
+        assert otari_env("SANDBOX_URL") == "http://env-sandbox:9000"
 
 
 @pytest.mark.asyncio
@@ -291,9 +283,7 @@ async def test_yaml_ssrf_gates_round_trip_through_env_bridge(
     )
     for var in (
         "OTARI_MCP_ALLOW_PRIVATE_HOSTS",
-        "GATEWAY_MCP_ALLOW_PRIVATE_HOSTS",
         "OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS",
-        "GATEWAY_WEB_SEARCH_ALLOW_PRIVATE_HOSTS",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -357,8 +347,6 @@ def test_load_config_rejects_hybrid_mode_without_token(tmp_path: Path, monkeypat
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("mode: hybrid\n", encoding="utf-8")
     monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-    monkeypatch.delenv("OTARI_PLATFORM_TOKEN", raising=False)
-    monkeypatch.delenv("ANY_LLM_PLATFORM_TOKEN", raising=False)
 
     with pytest.raises(ValueError, match="OTARI_AI_TOKEN"):
         load_config(str(config_file))
@@ -389,7 +377,7 @@ def test_load_config_rejects_standalone_mode_when_token_is_set(
     config_file.write_text("mode: standalone\n", encoding="utf-8")
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
 
-    with pytest.raises(ValueError, match="conflicts with a platform token"):
+    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
         load_config(str(config_file))
 
 
@@ -402,7 +390,7 @@ def test_load_config_rejects_standalone_mode_from_env_when_token_is_set(
     monkeypatch.setenv("OTARI_MODE", "standalone")
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
 
-    with pytest.raises(ValueError, match="conflicts with a platform token"):
+    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
         load_config(str(config_file))
 
 
@@ -412,8 +400,6 @@ def test_load_config_honors_explicit_standalone_without_token(
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("mode: standalone\n", encoding="utf-8")
     monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-    monkeypatch.delenv("OTARI_PLATFORM_TOKEN", raising=False)
-    monkeypatch.delenv("ANY_LLM_PLATFORM_TOKEN", raising=False)
 
     config = load_config(str(config_file))
 
@@ -428,8 +414,6 @@ def test_load_config_unset_mode_without_token_is_standalone(
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("", encoding="utf-8")
     monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
-    monkeypatch.delenv("OTARI_PLATFORM_TOKEN", raising=False)
-    monkeypatch.delenv("ANY_LLM_PLATFORM_TOKEN", raising=False)
 
     config = load_config(str(config_file))
 
@@ -451,32 +435,23 @@ def test_load_config_accepts_legacy_platform_mode_alias(tmp_path: Path, monkeypa
     assert config.effective_mode == "hybrid"
 
 
-def test_load_config_accepts_legacy_platform_token_aliases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    config_file = tmp_path / "gateway.yml"
-    config_file.write_text("", encoding="utf-8")
-
-    monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "legacy-token")
-
-    config = load_config(str(config_file))
-
-    assert config.is_hybrid_mode
-    assert config.platform_token == "legacy-token"
-
-
-def test_load_config_prefers_otari_ai_token_over_legacy_aliases(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("legacy_token_var", ["OTARI_PLATFORM_TOKEN", "ANY_LLM_PLATFORM_TOKEN"])
+def test_load_config_ignores_legacy_platform_token_aliases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy_token_var: str
 ) -> None:
+    # The pre-rename platform-token env aliases were removed: only OTARI_AI_TOKEN
+    # selects hybrid mode now, so a legacy alias alone leaves the gateway
+    # standalone.
     config_file = tmp_path / "gateway.yml"
     config_file.write_text("", encoding="utf-8")
 
-    monkeypatch.setenv("OTARI_AI_TOKEN", "new-token")
-    monkeypatch.setenv("OTARI_PLATFORM_TOKEN", "old-token")
-    monkeypatch.setenv("ANY_LLM_PLATFORM_TOKEN", "older-token")
+    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
+    monkeypatch.setenv(legacy_token_var, "legacy-token")
 
     config = load_config(str(config_file))
 
-    assert config.is_hybrid_mode
-    assert config.platform_token == "new-token"
+    assert not config.is_hybrid_mode
+    assert config.platform_token is None
 
 
 def _isolate_structured_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

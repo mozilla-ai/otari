@@ -9,7 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
-from gateway.core.config import API_KEY_HEADER, LEGACY_API_KEY_HEADERS, X_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, get_db
 from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
@@ -76,17 +76,11 @@ def reset_config() -> None:
 def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
     """Extract and validate Bearer token from request header.
 
-    Checks the canonical Otari-Key header first, then the legacy
-    AnyLLM-Key / X-AnyLLM-Key aliases (back-compat), then the standard
+    Checks the canonical Otari-Key header first, then the standard
     Authorization header, and finally the raw x-api-key header used by
     Anthropic-native clients (no Bearer prefix).
     """
     auth_header = request.headers.get(API_KEY_HEADER)
-    if not auth_header:
-        for legacy in LEGACY_API_KEY_HEADERS:
-            auth_header = request.headers.get(legacy)
-            if auth_header:
-                break
     if not auth_header:
         auth_header = request.headers.get("Authorization")
 

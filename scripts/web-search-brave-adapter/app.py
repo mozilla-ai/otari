@@ -7,7 +7,7 @@ The gateway's ``WebSearchBackend`` speaks one protocol: it issues
 
 Brave's API has a different shape and its own auth header, so this thin
 service translates between the two. Point the gateway at it with
-``GATEWAY_WEB_SEARCH_URL=http://brave-adapter:8080``; the Brave key lives
+``OTARI_WEB_SEARCH_URL=http://brave-adapter:8080``; the Brave key lives
 here, never in the gateway.
 
 Each result's ``content`` is Brave's snippet; ``extracted_content`` is left

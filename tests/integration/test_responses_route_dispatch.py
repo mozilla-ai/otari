@@ -225,7 +225,7 @@ def test_code_execution_dispatches_through_sandbox_backend(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     pool_seen: list[Any] = []
 
@@ -265,7 +265,7 @@ def test_web_search_dispatches_through_web_search_backend(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
 
     pool_seen: list[Any] = []
 
@@ -313,7 +313,7 @@ def test_provider_code_execution_passes_through_to_upstream(
     gateway. They stay in ``tools[]`` and reach ``aresponses`` so the provider
     runs the code server-side — even when no gateway sandbox is configured.
     """
-    monkeypatch.delenv("GATEWAY_SANDBOX_URL", raising=False)
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
     captured: dict[str, Any] = {}
 
     async def fake_aresponses(**kwargs: Any) -> Response:
@@ -342,7 +342,7 @@ def test_provider_web_search_passes_through_to_upstream(
 ) -> None:
     """Provider-named web_search keywords pass through to the provider even
     when no gateway web_search backend is configured."""
-    monkeypatch.delenv("GATEWAY_WEB_SEARCH_URL", raising=False)
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
     captured: dict[str, Any] = {}
 
     async def fake_aresponses(**kwargs: Any) -> Response:
@@ -370,7 +370,7 @@ def test_code_execution_without_sandbox_env_returns_400(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("GATEWAY_SANDBOX_URL", raising=False)
+    monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
     resp = client.post(
         "/v1/responses",
         json={
@@ -389,7 +389,7 @@ def test_code_execution_combined_with_mcp_servers_returns_400(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
     resp = client.post(
         "/v1/responses",
         json={
@@ -409,8 +409,8 @@ def test_web_search_combined_with_sandbox_returns_400(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
-    monkeypatch.setenv("GATEWAY_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
     resp = client.post(
         "/v1/responses",
         json={
@@ -435,7 +435,7 @@ def test_max_tool_iterations_exceeded_returns_422(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     from gateway.services.mcp_loop_responses import MaxToolIterationsExceeded
 
@@ -475,7 +475,7 @@ def test_sandbox_unreachable_returns_502(
     api_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     from gateway.services.sandbox_backend import SandboxNotReachableError
 
@@ -632,7 +632,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
     returns ``self``. The fake here mirrors that by having ``__aenter__``
     return the same outer mock and exposing ``purpose_hints`` on it.
     """
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     pool_seen: list[Any] = []
 
@@ -677,7 +677,7 @@ def test_stream_sandbox_unreachable_returns_502(
     documented detail rather than a 500 (which is what would happen if the
     streaming dispatch wasn't wrapped in the error-mapping try/except).
     """
-    monkeypatch.setenv("GATEWAY_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://127.0.0.1:9999/sandbox")
 
     from gateway.services.sandbox_backend import SandboxNotReachableError
 
