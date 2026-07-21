@@ -90,12 +90,7 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-semibold text-[var(--otari-ink)]">Create user</div>
-          <Button size="sm" variant="ghost" onPress={onClose}>
-            Close
-          </Button>
-        </div>
+        <div className="text-sm font-semibold text-[var(--otari-ink)]">Create user</div>
         <ErrorBanner error={create.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -119,13 +114,16 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
             setScopeValid(valid);
           }}
         />
-        <div>
+        <div className="flex gap-2">
           <Button
             variant="primary"
             isDisabled={create.isPending || !scopeValid || userId.trim() === ""}
             onPress={submit}
           >
             {create.isPending ? "Creating…" : "Create user"}
+          </Button>
+          <Button variant="ghost" onPress={onClose}>
+            Cancel
           </Button>
         </div>
       </Card.Content>

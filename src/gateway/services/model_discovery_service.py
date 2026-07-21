@@ -145,8 +145,16 @@ class ProviderDiscovery:
 _ERROR_MAX_CHARS = 300
 
 
-def _short_error(exc: BaseException) -> str:
+def _short_error(exc: BaseException, provider: str | None = None) -> str:
     message = str(exc).strip() or exc.__class__.__name__
+    # any-llm prefixes a provider error with a "[provider]" tag (e.g.
+    # "[anthropic] No anthropic API key provided…"). Every surface that shows this
+    # is already provider-specific, so the tag is redundant noise; drop it when it
+    # names the provider being tested. Any other bracketed text is left intact.
+    if provider and message.startswith(f"[{provider}]"):
+        # Re-apply the class-name fallback: a message that was only the tag (e.g.
+        # "[anthropic]") strips to "", which would render as a blank error.
+        message = message[len(provider) + 2 :].lstrip() or exc.__class__.__name__
     if len(message) > _ERROR_MAX_CHARS:
         return message[: _ERROR_MAX_CHARS - 1] + "…"
     return message
@@ -187,7 +195,7 @@ async def discover_provider_models(config: GatewayConfig, instance: str) -> Prov
         # or endpoint in the message. The capped text still reaches the
         # master-key caller in the response, where it is a useful diagnostic.
         logger.info("Model discovery failed for instance '%s' (%s)", instance, type(exc).__name__)
-        return ProviderDiscovery(provider=instance, models=[], error=_short_error(exc))
+        return ProviderDiscovery(provider=instance, models=[], error=_short_error(exc, provider=impl))
 
     cache.set(instance, models)
     return ProviderDiscovery(provider=instance, models=models)
@@ -231,7 +239,7 @@ async def test_provider_credentials(
         # Class only in the log (see discover_provider_models); the capped
         # message still goes back to the master-key caller who owns the key.
         logger.info("Provider connection test failed for '%s' (%s)", impl_name, type(exc).__name__)
-        return ProviderDiscovery(provider=impl_name, models=[], error=_short_error(exc))
+        return ProviderDiscovery(provider=impl_name, models=[], error=_short_error(exc, provider=impl_name))
     return ProviderDiscovery(provider=impl_name, models=list(models))
 
 

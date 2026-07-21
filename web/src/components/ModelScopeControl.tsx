@@ -186,7 +186,9 @@ export function ModelScopeControl({
               onSelectionChange={(key) => {
                 if (key != null) addEntry(String(key));
               }}
-              className="flex flex-col gap-1"
+              // Cap the width so the field and its dropdown trigger stay within
+              // easy reach instead of stretching across a wide form.
+              className="flex max-w-md flex-col gap-1"
             >
               <ComboBox.InputGroup>
                 <Input aria-label="Add a model" placeholder="Search providers, models, aliases…" autoComplete="off" />

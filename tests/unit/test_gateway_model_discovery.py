@@ -9,7 +9,9 @@ from any_llm.types.model import Model
 
 from gateway.core.config import GatewayConfig
 from gateway.services.model_discovery_service import (
+    _ERROR_MAX_CHARS,
     ModelCache,
+    _short_error,
     _supports_list_models,
     discover_all_models,
 )
@@ -23,6 +25,40 @@ def _make_model(model_id: str, owned_by: str = "openai", created: int = 17000000
 # ---------------------------------------------------------------------------
 # ModelCache tests
 # ---------------------------------------------------------------------------
+
+
+class TestShortError:
+    def test_strips_matching_provider_tag(self) -> None:
+        # any-llm prefixes provider errors with "[provider] "; it is redundant
+        # in the dashboard's provider-specific surfaces, so it is dropped.
+        exc = ValueError("[anthropic] No anthropic API key provided.")
+        assert _short_error(exc, provider="anthropic") == "No anthropic API key provided."
+
+    def test_keeps_tag_without_provider(self) -> None:
+        exc = ValueError("[anthropic] No anthropic API key provided.")
+        assert _short_error(exc) == "[anthropic] No anthropic API key provided."
+
+    def test_keeps_tag_for_a_different_provider(self) -> None:
+        # Only the provider being tested is stripped; any other bracketed text stays.
+        exc = ValueError("[anthropic] boom")
+        assert _short_error(exc, provider="openai") == "[anthropic] boom"
+
+    def test_falls_back_to_class_name_for_empty_message(self) -> None:
+        assert _short_error(ValueError()) == "ValueError"
+
+    def test_falls_back_to_class_name_when_message_is_only_the_tag(self) -> None:
+        # Stripping the tag off a bare "[anthropic]" (or "[anthropic]   ") must not
+        # leave an empty string, which would render as a blank error.
+        assert _short_error(ValueError("[anthropic]"), provider="anthropic") == "ValueError"
+        assert _short_error(ValueError("[anthropic]   "), provider="anthropic") == "ValueError"
+
+    def test_caps_long_message_after_stripping_tag(self) -> None:
+        body = "x" * (_ERROR_MAX_CHARS + 50)
+        result = _short_error(ValueError(f"[anthropic] {body}"), provider="anthropic")
+        assert len(result) == _ERROR_MAX_CHARS
+        assert result.endswith("…")
+        # The tag was removed before the cap, so none of it survives.
+        assert not result.startswith("[anthropic]")
 
 
 class TestModelCache:
