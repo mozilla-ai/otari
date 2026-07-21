@@ -1,5 +1,6 @@
 """Unit tests for the model discovery cache and service."""
 
+import asyncio
 import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -12,6 +13,7 @@ from gateway.services.model_discovery_service import (
     ModelCache,
     _supports_list_models,
     discover_all_models,
+    discover_provider_models,
 )
 
 
@@ -91,7 +93,7 @@ class TestModelCache:
         returned.append(_make_model("gpt-3.5"))
 
         # Internal cache should still have only 1 model.
-        assert len(cache._store["openai"].models) == 1
+        assert len(cache._store["openai"].result.models) == 1
 
     def test_set_copies_list(self) -> None:
         """Mutating the original list should not affect the cached copy."""
@@ -381,3 +383,170 @@ class TestDiscoverAllModels:
 
         assert result == [("edge", result[0][1])]
         assert result[0][1].id == "m1"
+
+
+class TestDiscoveryStallGuards:
+    """Regressions for the discovery stall / over-calling that hung a DELETE.
+
+    Several defects compounded: a live ``list_models`` call had no timeout, so an
+    unreachable provider blocked for the client's default (~60s); the cache lock
+    was held across the whole fanout, serializing consumers; failures were never
+    cached, so a broken provider was re-dialed on every request; and concurrent
+    consumers each fired their own call. The fix bounds the call, caches failures
+    (negative TTL), and single-flights concurrent discoveries of one provider.
+    """
+
+    def _config(
+        self,
+        providers: dict[str, Any],
+        timeout: float = 10.0,
+        negative_ttl: float = 30.0,
+    ) -> GatewayConfig:
+        return GatewayConfig(
+            providers=providers,
+            model_discovery=True,
+            model_cache_ttl_seconds=300,
+            model_discovery_timeout_seconds=timeout,
+            model_discovery_negative_ttl_seconds=negative_ttl,
+        )
+
+    @pytest.mark.asyncio
+    async def test_unreachable_provider_bounded_by_timeout(self) -> None:
+        """A provider whose list_models never returns is dropped after the timeout.
+
+        The whole call is wrapped in a generous 2s guard: if the per-provider
+        timeout regressed, the inner 5s sleep would trip that guard and fail the
+        test instead of hanging the suite.
+        """
+        config = self._config({"openai": {"api_key": "sk-test"}}, timeout=0.05)
+
+        async def never_returns(provider: Any, **kwargs: Any) -> list[Model]:
+            await asyncio.sleep(5)
+            return [_make_model("unreachable")]
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=ModelCache()),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", side_effect=never_returns),
+            patch("gateway.services.model_discovery_service.get_provider_kwargs", return_value={"api_key": "sk-test"}),
+        ):
+            result = await asyncio.wait_for(discover_all_models(config), timeout=2)
+
+        # No declared models: fallback, so the timed-out provider is dropped.
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_slow_provider_does_not_block_concurrent_discovery(self) -> None:
+        """The cache lock is not held across the network fanout.
+
+        Two concurrent ``discover_all_models`` calls share one cache (hence one
+        lock). The slow call is started first, so under the old code (lock held
+        across the fetch) it would acquire the lock and pin the fast call behind
+        it, completing first. With the fix the fast call finishes first.
+        """
+        cache = ModelCache()
+        order: list[str] = []
+
+        async def fake_discover(name: str, cfg: GatewayConfig) -> tuple[str, list[Model]]:
+            if name == "slow":
+                await asyncio.sleep(0.3)
+            order.append(name)
+            return name, [_make_model(f"{name}-m", owned_by=name)]
+
+        slow_cfg = self._config({"slow": {"api_key": "x"}})
+        fast_cfg = self._config({"fast": {"api_key": "y"}})
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service._discover_for_provider", side_effect=fake_discover),
+        ):
+            slow_task = asyncio.create_task(discover_all_models(slow_cfg))
+            fast_task = asyncio.create_task(discover_all_models(fast_cfg))
+            await asyncio.gather(slow_task, fast_task)
+
+        assert order[0] == "fast"
+
+    @pytest.mark.asyncio
+    async def test_failure_is_negatively_cached(self) -> None:
+        """A failed provider is remembered, not re-dialed on every call."""
+        config = self._config({"openai": {"api_key": "sk-test"}}, negative_ttl=30.0)
+        cache = ModelCache()
+        calls = 0
+
+        async def failing(provider: Any, **kwargs: Any) -> list[Model]:
+            nonlocal calls
+            calls += 1
+            raise ConnectionError("unreachable")
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", side_effect=failing),
+            patch("gateway.services.model_discovery_service.get_provider_kwargs", return_value={"api_key": "sk-test"}),
+        ):
+            first = await discover_provider_models(config, "openai")
+            second = await discover_provider_models(config, "openai")
+            assert calls == 1  # the negative cache prevented a second dial
+            assert first.error is not None
+            assert second.error is not None
+
+            # Expire the negative entry; the next call re-dials.
+            cache._store["openai"].cached_at -= 31
+            await discover_provider_models(config, "openai")
+            assert calls == 2
+
+    @pytest.mark.asyncio
+    async def test_negative_ttl_zero_disables_caching(self) -> None:
+        """Setting the negative TTL to 0 restores retry-every-time."""
+        config = self._config({"openai": {"api_key": "sk-test"}}, negative_ttl=0.0)
+        cache = ModelCache()
+        calls = 0
+
+        async def failing(provider: Any, **kwargs: Any) -> list[Model]:
+            nonlocal calls
+            calls += 1
+            raise ConnectionError("unreachable")
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", side_effect=failing),
+            patch("gateway.services.model_discovery_service.get_provider_kwargs", return_value={"api_key": "sk-test"}),
+        ):
+            await discover_provider_models(config, "openai")
+            await discover_provider_models(config, "openai")
+
+        assert calls == 2
+
+    @pytest.mark.asyncio
+    async def test_concurrent_callers_share_one_upstream_call(self) -> None:
+        """Concurrent discoveries of the same provider dial it once (single-flight).
+
+        This is what stops /v1/models and /v1/models/discoverable from each firing
+        a full fanout when the Models page mounts both at once.
+        """
+        config = self._config({"openai": {"api_key": "sk-test"}})
+        cache = ModelCache()
+        calls = 0
+
+        async def slow_list(provider: Any, **kwargs: Any) -> list[Model]:
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.2)
+            return [_make_model("gpt-4o")]
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", side_effect=slow_list),
+            patch("gateway.services.model_discovery_service.get_provider_kwargs", return_value={"api_key": "sk-test"}),
+        ):
+            a, b = await asyncio.gather(
+                discover_provider_models(config, "openai"),
+                discover_provider_models(config, "openai"),
+            )
+
+        assert calls == 1
+        assert [m.id for m in a.models] == ["gpt-4o"]
+        assert [m.id for m in b.models] == ["gpt-4o"]
