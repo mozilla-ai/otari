@@ -9,6 +9,7 @@ from gateway.services.secret_box import (
     encrypt_secret,
     generate_secret_key,
     secret_box_configured,
+    validate_secret_key,
 )
 
 
@@ -31,6 +32,24 @@ def test_invalid_key_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", "not-a-valid-fernet-key")
     with pytest.raises(SecretBoxUnavailableError):
         encrypt_secret("x")
+
+
+def test_validate_secret_key_allows_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    monkeypatch.delenv("GATEWAY_SECRET_KEY", raising=False)
+    validate_secret_key()
+
+
+def test_validate_secret_key_allows_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    validate_secret_key()
+
+
+def test_validate_secret_key_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", "not-a-valid-fernet-key")
+    with pytest.raises(SecretBoxUnavailableError) as excinfo:
+        validate_secret_key()
+    assert "not-a-valid-fernet-key" not in str(excinfo.value)
 
 
 def test_wrong_key_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:

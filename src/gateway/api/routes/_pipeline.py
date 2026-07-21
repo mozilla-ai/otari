@@ -83,7 +83,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
 from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
-from gateway.metrics import record_cost, record_tokens
+from gateway.metrics import record_abandoned_attempt, record_cost, record_tokens
 from gateway.model_labeling import relabel_model
 from gateway.models.entities import UsageLog
 from gateway.models.guardrails import GuardrailConfig
@@ -1631,6 +1631,7 @@ async def run_streaming_with_fallback(
             session_label,
         )
         pending_error_reports.append((attempt.attempt_id, "error", None, failure.error_class))
+        record_abandoned_attempt(attempt.provider, attempt.model, failure.reason, attempt.position)
         logger.warning(
             "Streaming attempt failed request_id=%s position=%d provider=%s model=%s error=%s",
             route.request_id,

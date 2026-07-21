@@ -9,6 +9,7 @@ from gateway.metrics import (
     REGISTRY,
     MetricsMiddleware,
     metrics_endpoint,
+    record_abandoned_attempt,
     record_auth_failure,
     record_budget_exceeded,
     record_cost,
@@ -79,6 +80,30 @@ def test_record_auth_failure_increments_counter() -> None:
     record_auth_failure("unit-test-reason")
 
     assert _sample("gateway_auth_failures_total", labels) - before == 1.0
+
+
+def test_record_abandoned_attempt_increments_counter() -> None:
+    labels = {"provider": "ab-prov", "model": "ab-model", "reason": "timeout", "position": "0"}
+    before = _sample("gateway_abandoned_attempts_total", labels)
+
+    record_abandoned_attempt("ab-prov", "ab-model", "timeout", 0)
+
+    assert _sample("gateway_abandoned_attempts_total", labels) - before == 1.0
+
+
+def test_record_abandoned_attempt_labels_by_reason_and_position() -> None:
+    """Each (reason, position) pair is its own series so operators can spot which
+    plan entry and failure phase dominates the fallback waste."""
+    build_labels = {"provider": "ab-prov2", "model": "ab-model2", "reason": "build_error", "position": "1"}
+    upstream_labels = {"provider": "ab-prov2", "model": "ab-model2", "reason": "upstream_error", "position": "2"}
+    before_build = _sample("gateway_abandoned_attempts_total", build_labels)
+    before_upstream = _sample("gateway_abandoned_attempts_total", upstream_labels)
+
+    record_abandoned_attempt("ab-prov2", "ab-model2", "build_error", 1)
+    record_abandoned_attempt("ab-prov2", "ab-model2", "upstream_error", 2)
+
+    assert _sample("gateway_abandoned_attempts_total", build_labels) - before_build == 1.0
+    assert _sample("gateway_abandoned_attempts_total", upstream_labels) - before_upstream == 1.0
 
 
 def test_config_enable_metrics_defaults_to_false() -> None:
