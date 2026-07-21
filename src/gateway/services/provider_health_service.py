@@ -15,11 +15,20 @@ The overview page (issue #302) consumes this as a summary tile, so the counts
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.model_discovery_service import discover_provider_models, get_model_cache
+
+# A forced refresh only clears the cached listing when the provider's last dial is
+# older than this. clear(instance) also detaches the in-flight discovery, so
+# without this a burst of concurrent "Re-check all" refreshes would each start an
+# independent dial per provider and defeat the discovery subsystem's single-flight
+# coalescing. The window is short so a deliberate re-check after a fix still forces
+# a fresh dial; a credential write already clears the cache for its instance
+# (`_apply_write`), so fixing a key through the dashboard is unaffected either way.
+_REFRESH_DEBOUNCE_SECONDS = 5.0
 
 
 @dataclass
@@ -34,6 +43,20 @@ class ProviderHealth:
     checked_at: datetime | None = None
 
 
+def _refresh_should_redial(instance: str) -> bool:
+    """Whether a forced refresh should clear the cache and re-dial ``instance``.
+
+    True when the instance has never been checked or its last dial is older than
+    the debounce window; False when a recent dial should be reused so rapid
+    re-checks coalesce onto one in-flight discovery instead of each starting their
+    own.
+    """
+    checked_at = get_model_cache().checked_at(instance)
+    if checked_at is None:
+        return True
+    return datetime.now(UTC) - checked_at >= timedelta(seconds=_REFRESH_DEBOUNCE_SECONDS)
+
+
 async def check_provider_health(
     config: GatewayConfig,
     instance: str,
@@ -42,11 +65,14 @@ async def check_provider_health(
 ) -> ProviderHealth:
     """Report one instance's reachability via the shared model-discovery path.
 
-    ``refresh`` clears the cached listing for this instance first, forcing a live
-    re-dial (the same cache clear the stored-provider test uses), so an operator's
-    explicit "re-check now" is a fresh probe rather than a cached verdict.
+    ``refresh`` forces a live re-dial by clearing the cached listing first (the
+    same cache clear the stored-provider test uses), so an operator's explicit
+    "re-check now" is a fresh probe rather than a cached verdict. A refresh that
+    lands within ``_REFRESH_DEBOUNCE_SECONDS`` of the last dial is coalesced onto
+    that recent result instead, so a burst of re-checks keeps the discovery
+    subsystem's single-flight coalescing rather than detaching the in-flight task.
     """
-    if refresh:
+    if refresh and _refresh_should_redial(instance):
         get_model_cache().clear(instance)
     discovery = await discover_provider_models(config, instance)
     return ProviderHealth(

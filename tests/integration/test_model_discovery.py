@@ -638,10 +638,14 @@ def test_provider_health_refresh_forces_a_live_recheck(
     discovery_master_header: dict[str, str],
 ) -> None:
     """refresh=true clears the cache, so a now-broken provider is re-dialed, not served a stale verdict."""
+    from datetime import UTC, datetime, timedelta
+
     from any_llm.types.model import Model
 
-    # Prime a healthy listing for openai, as if a recent check had succeeded.
+    # Prime a healthy listing whose dial is older than the refresh debounce window,
+    # as if a check had succeeded a while ago, so a forced refresh actually re-dials.
     get_model_cache().set("openai", [Model(**_make_openai_model("gpt-4o"))])
+    get_model_cache()._store["openai"].checked_at = datetime.now(UTC) - timedelta(seconds=60)
 
     def always_fail(**kwargs: Any) -> list[Any]:
         raise RuntimeError("provider down")
@@ -671,6 +675,41 @@ def test_provider_health_refresh_forces_a_live_recheck(
     refreshed_openai = next(p for p in refreshed.json()["providers"] if p["instance"] == "openai")
     assert refreshed_openai["ok"] is False
     assert "provider down" in refreshed_openai["error"]
+
+
+def test_provider_health_refresh_is_debounced_within_the_window(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """A refresh moments after a recent dial is coalesced onto it, not re-dialed."""
+    from any_llm.types.model import Model
+
+    # A freshly dialed healthy listing (checked_at == now); a refresh within the
+    # debounce window must reuse it rather than clear the cache and dial again.
+    get_model_cache().set("openai", [Model(**_make_openai_model("gpt-4o"))])
+
+    def always_fail(**kwargs: Any) -> list[Any]:
+        raise RuntimeError("provider down")
+
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            side_effect=always_fail,
+        ),
+    ):
+        refreshed = two_provider_client.get(
+            "/v1/providers/health?refresh=true", headers=discovery_master_header
+        )
+
+    # Debounced: the recent healthy listing is served, not a fresh failed dial.
+    refreshed_openai = next(p for p in refreshed.json()["providers"] if p["instance"] == "openai")
+    assert refreshed_openai["ok"] is True
+    assert refreshed_openai["model_count"] == 1
 
 
 def test_provider_health_requires_master_key(

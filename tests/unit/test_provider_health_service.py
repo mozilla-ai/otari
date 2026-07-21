@@ -2,11 +2,14 @@
 
 The service is a thin view over ``discover_provider_models`` (the existing
 per-provider test path); these tests pin the mapping from a discovery result to a
-``ProviderHealth``, the concurrent fan-out, the forced-refresh cache clear, and
-the honest wall-clock ``checked_at`` read from the discovery cache.
+``ProviderHealth``, the concurrent fan-out, the forced-refresh cache clear (and
+its debounce), and the honest wall-clock ``checked_at`` read from the discovery
+cache.
 """
 
-from datetime import datetime
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -60,13 +63,9 @@ async def test_unreachable_provider_is_unhealthy_and_keeps_error() -> None:
     assert health.error == "authentication failed"
 
 
-@pytest.mark.asyncio
-async def test_refresh_clears_the_cache_before_dialing() -> None:
-    get_model_cache().clear()
-    config = _config({"openai": {"api_key": "x"}})
-    # Prime a stale cached listing; refresh must clear it before the new dial.
-    get_model_cache().set("openai", [_model("stale")])
-
+@contextmanager
+def _spy_on_clear() -> Iterator[list[str | None]]:
+    """Record every clear(instance) call while still clearing for real."""
     cleared: list[str | None] = []
     real_clear = get_model_cache().clear
 
@@ -74,12 +73,59 @@ async def test_refresh_clears_the_cache_before_dialing() -> None:
         cleared.append(instance)
         real_clear(instance)
 
-    async def discover(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
-        return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
+    with patch.object(get_model_cache(), "clear", side_effect=spy_clear):
+        yield cleared
+
+
+async def _noop_discover(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+    return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
+
+
+@pytest.mark.asyncio
+async def test_refresh_clears_the_cache_when_the_last_dial_is_stale() -> None:
+    get_model_cache().clear()
+    config = _config({"openai": {"api_key": "x"}})
+    # Prime a cached listing whose dial is older than the debounce window, so a
+    # forced refresh must clear it before re-dialing.
+    get_model_cache().set("openai", [_model("stale")])
+    get_model_cache()._store["openai"].checked_at = datetime.now(UTC) - timedelta(seconds=60)
 
     with (
-        patch.object(get_model_cache(), "clear", side_effect=spy_clear),
-        patch.object(phs, "discover_provider_models", side_effect=discover),
+        _spy_on_clear() as cleared,
+        patch.object(phs, "discover_provider_models", side_effect=_noop_discover),
+    ):
+        await phs.check_provider_health(config, "openai", refresh=True)
+
+    assert cleared == ["openai"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_is_debounced_within_the_window() -> None:
+    """A refresh right after a recent dial is coalesced, not re-cleared/re-dialed."""
+    get_model_cache().clear()
+    config = _config({"openai": {"api_key": "x"}})
+    # A freshly dialed listing (checked_at == now); a refresh within the window
+    # must reuse it instead of clearing the cache and detaching single-flight.
+    get_model_cache().set("openai", [_model("gpt-4o")])
+
+    with (
+        _spy_on_clear() as cleared,
+        patch.object(phs, "discover_provider_models", side_effect=_noop_discover),
+    ):
+        await phs.check_provider_health(config, "openai", refresh=True)
+
+    assert cleared == []  # debounced: the recent dial is reused
+
+
+@pytest.mark.asyncio
+async def test_refresh_redials_a_provider_never_checked() -> None:
+    """A refresh for a provider with no cached dial re-dials (no debounce to apply)."""
+    get_model_cache().clear()
+    config = _config({"openai": {"api_key": "x"}})
+
+    with (
+        _spy_on_clear() as cleared,
+        patch.object(phs, "discover_provider_models", side_effect=_noop_discover),
     ):
         await phs.check_provider_health(config, "openai", refresh=True)
 
