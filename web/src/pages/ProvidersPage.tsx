@@ -753,7 +753,9 @@ export function ProvidersPage() {
       />
 
       <ErrorBanner
-        error={meta.error ?? stored.error ?? settings.error ?? updateSettings.error ?? deleteProvider.error}
+        error={
+          meta.error ?? stored.error ?? settings.error ?? health.error ?? updateSettings.error ?? deleteProvider.error
+        }
       />
 
       {showOnboarding ? (

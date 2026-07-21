@@ -71,11 +71,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 // Build a health response, defaulting every provider in `meta` to reachable so
 // tests that don't care about health still get a well-formed payload.
 function healthResponse(providers: ProviderHealth[]): ProviderHealthResponse {
+  // Mirror the backend: the summary checked_at is the most recent per-provider
+  // checked_at, or null when no provider has ever been checked.
+  const checkedAts = providers.map((p) => p.checked_at).filter((t): t is string => t !== null);
   return {
     providers,
     healthy: providers.filter((p) => p.ok).length,
     total: providers.length,
-    checked_at: providers.length > 0 ? "2026-07-21T00:00:00+00:00" : null,
+    checked_at: checkedAts.length > 0 ? checkedAts.sort().at(-1)! : null,
   };
 }
 

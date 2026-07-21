@@ -6,11 +6,13 @@ reuses ``discover_provider_models`` (the same call that backs the per-provider
 provider is "healthy" when its credentials can list models, which is exactly what
 that path already answers, cached and single-flighted.
 
-The ``checked_at`` on each result is the wall-clock time the underlying dial was
-made (read from the discovery cache), so a status served from cache honestly
-reports when the provider was last reached, not when the dashboard last asked.
-The overview page (issue #302) consumes this as a summary tile, so the counts
-(``healthy`` / ``total``) are computed here and kept reusable.
+The ``checked_at`` on each result is the wall-clock time the provider's
+reachability was last evaluated (read from the discovery cache): a live dial for
+most providers, or the moment a config-declared ``models:`` fallback was cached
+for a backend that cannot list models. Either way it reflects when the gateway
+last produced this verdict, not when the dashboard asked. The overview page
+(issue #302) consumes this as a summary tile, so the counts (``healthy`` /
+``total``) are computed here and kept reusable.
 """
 
 import asyncio
@@ -39,7 +41,7 @@ class ProviderHealth:
     ok: bool
     model_count: int
     error: str | None = None
-    # Wall-clock time the underlying dial was made (None if never checked yet).
+    # Wall-clock time reachability was last evaluated (None if never checked yet).
     checked_at: datetime | None = None
 
 

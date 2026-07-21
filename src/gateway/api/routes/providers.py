@@ -164,7 +164,7 @@ class ProviderHealthSchema(BaseModel):
     error: str | None = Field(default=None, description="Sanitized provider error when unreachable.")
     checked_at: str | None = Field(
         default=None,
-        description="ISO 8601 wall-clock time the provider was last dialed (null if never).",
+        description="ISO 8601 wall-clock time the provider's reachability was last checked (null if never).",
     )
 
 
