@@ -91,14 +91,19 @@ class ModelCache:
     def clear(self, provider: str | None = None) -> None:
         """Invalidate one or all cached results.
 
-        Only the completed cache is dropped; an in-flight discovery is left to
-        finish (it repopulates on completion). Callers that need a re-read after
-        a credential change simply see a miss and re-discover.
+        Also detaches any in-flight discovery, so a caller arriving after the
+        clear starts a fresh one instead of riding a result computed from the
+        now-stale credentials. The detached task still finishes for callers that
+        were already awaiting it, but it no longer repopulates the cache (see
+        ``_run``). This is what keeps the post-write "test connection" a live
+        check rather than the pre-change listing.
         """
         if provider is None:
             self._store.clear()
+            self._inflight.clear()
         else:
             self._store.pop(provider, None)
+            self._inflight.pop(provider, None)
 
     def _fresh(self, provider: str, positive_ttl: float, negative_ttl: float) -> ProviderDiscovery | None:
         """Return the cached result if still fresh under the applicable TTL."""
@@ -150,14 +155,21 @@ class ModelCache:
         provider: str,
         discover: Callable[[], Awaitable[ProviderDiscovery]],
     ) -> ProviderDiscovery:
+        task = asyncio.current_task()
         try:
             result = await discover()
             async with self._lock:
-                self._store[provider] = _CacheEntry(result=result, cached_at=time.monotonic())
+                # Cache only if still the registered in-flight: a clear() (e.g. a
+                # credential change) between start and finish detaches us, and this
+                # now-stale result must neither repopulate the cache nor clobber a
+                # newer discovery's entry.
+                if self._inflight.get(provider) is task:
+                    self._store[provider] = _CacheEntry(result=result, cached_at=time.monotonic())
             return result
         finally:
             async with self._lock:
-                self._inflight.pop(provider, None)
+                if self._inflight.get(provider) is task:
+                    self._inflight.pop(provider, None)
 
 
 # Module-level singleton shared across requests within a worker process.

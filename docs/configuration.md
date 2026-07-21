@@ -79,6 +79,8 @@ pricing:
 | `budget_estimate_default_output_tokens` | int | `1024` | Output-token count assumed when reserving budget for a request with no declared max output; reconciled to actual usage on completion. |
 | `model_discovery` | bool | `true` | Auto-discover models from configured providers for `GET /v1/models`. |
 | `model_cache_ttl_seconds` | int | `300` | TTL for the in-memory model-discovery cache (`0` disables caching). |
+| `model_discovery_timeout_seconds` | float | `10.0` | Per-provider timeout for a live model-discovery (`list_models`) call. Bounds how long an unreachable or slow provider can stall discovery before it is treated as failed. |
+| `model_discovery_negative_ttl_seconds` | float | `30.0` | How long a failed model-discovery result is remembered before the provider is dialed again, so an unreachable provider is not re-tried on every request (`0` disables negative caching). |
 | `files_enabled` | bool | `true` | Enable the `/v1/files` upload/storage endpoints (standalone mode). |
 | `files_backend` | string | `"local"` | Blob backend for uploaded file bytes (`"local"` filesystem for now). |
 | `files_local_dir` | string | `"./otari-files"` | Directory the `local` files backend writes uploaded bytes to. |

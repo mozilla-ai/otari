@@ -11,6 +11,7 @@ from any_llm.types.model import Model
 from gateway.core.config import GatewayConfig
 from gateway.services.model_discovery_service import (
     ModelCache,
+    ProviderDiscovery,
     _supports_list_models,
     discover_all_models,
     discover_provider_models,
@@ -550,3 +551,39 @@ class TestDiscoveryStallGuards:
         assert calls == 1
         assert [m.id for m in a.models] == ["gpt-4o"]
         assert [m.id for m in b.models] == ["gpt-4o"]
+
+    @pytest.mark.asyncio
+    async def test_clear_during_inflight_forces_fresh_discovery(self) -> None:
+        """clear() detaches an in-flight discovery so a later caller re-fetches.
+
+        Models a credential change (or a Test) landing while a discovery is in
+        flight: the stale in-flight result must neither be served to nor cached
+        for callers that arrive after the clear, so the post-write "test
+        connection" stays a live check.
+        """
+        cache = ModelCache()
+        calls = 0
+
+        async def stale() -> ProviderDiscovery:
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.2)
+            return ProviderDiscovery(provider="p", models=[], error="OLD")
+
+        async def fresh() -> ProviderDiscovery:
+            nonlocal calls
+            calls += 1
+            await asyncio.sleep(0.02)
+            return ProviderDiscovery(provider="p", models=[], error="NEW")
+
+        inflight = asyncio.ensure_future(
+            cache.get_or_discover("p", positive_ttl=300, negative_ttl=30, discover=stale)
+        )
+        await asyncio.sleep(0.02)  # let the stale discovery register as in-flight
+        cache.clear("p")  # a credential change invalidates it
+        late = await cache.get_or_discover("p", positive_ttl=300, negative_ttl=30, discover=fresh)
+        await inflight
+
+        assert late.error == "NEW"  # did not ride the stale in-flight
+        assert cache._store["p"].result.error == "NEW"  # stale result did not repopulate
+        assert calls == 2
