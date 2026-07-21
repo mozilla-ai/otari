@@ -221,12 +221,10 @@ export function ActivityPage() {
     [startDate, statusFilter, endpointFilter, userFilter],
   );
   const modelSummary = useUsageSummary(modelSuggestFilters, "day");
-  const [modelOptions, setModelOptions] = useState<string[]>([]);
-  useEffect(() => {
-    if (modelSummary.data?.by_model) {
-      setModelOptions(modelSummary.data.by_model.filter((r) => r.key !== null).map((r) => r.key as string));
-    }
-  }, [modelSummary.data]);
+  // Derived from query data, not mirrored into state. modelSuggestFilters omits
+  // the model filter, so the list is always the full set of in-window models.
+  const modelOptions =
+    modelSummary.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
 
   const rows = usage.data ?? [];
   const total = count.data?.total ?? 0;

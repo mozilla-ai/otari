@@ -182,8 +182,13 @@ def test_summary_series_day_buckets_are_canonical_utc(
         },
     ).json()
     series = {p["bucket_start"]: p["requests"] for p in body["series"]}
-    # Both same-UTC-day rows collapse into one bucket keyed at UTC midnight.
-    assert series == {"2025-01-01T00:00:00Z": 2, "2025-01-02T00:00:00Z": 1}
+    # Window [Dec 31, Jan 3) at day granularity => 3 dense buckets; both same-UTC-day
+    # rows collapse into Jan 1, and the empty leading day is zero-filled.
+    assert series == {
+        "2024-12-31T00:00:00Z": 0,
+        "2025-01-01T00:00:00Z": 2,
+        "2025-01-02T00:00:00Z": 1,
+    }
 
 
 def test_summary_series_hour_buckets(
@@ -206,7 +211,12 @@ def test_summary_series_hour_buckets(
         },
     ).json()
     series = {p["bucket_start"]: p["requests"] for p in body["series"]}
-    assert series == {"2025-03-01T10:00:00Z": 2, "2025-03-01T11:00:00Z": 1}
+    # Window [Mar 1 00:00, Mar 2 00:00) at hour granularity => 24 dense buckets, the
+    # two active hours populated and the rest zero-filled.
+    assert len(series) == 24
+    assert series["2025-03-01T10:00:00Z"] == 2
+    assert series["2025-03-01T11:00:00Z"] == 1
+    assert series["2025-03-01T09:00:00Z"] == 0
 
 
 def test_summary_defaults_to_last_30_days(
@@ -227,6 +237,53 @@ def test_summary_defaults_to_last_30_days(
 def test_summary_rejects_unknown_bucket(client: TestClient, master_key_header: dict[str, str]) -> None:
     resp = client.get(SUMMARY_PATH, headers=master_key_header, params={"bucket": "week"})
     assert resp.status_code == 422
+
+
+def test_summary_accepts_naive_start_date(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # An offset-less ISO datetime (advertised as valid) parses naive; the endpoint
+    # must treat it as UTC, not 500 on comparing it to the aware "now".
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(db_session, user_id="naive", timestamp=now, cost=0.05, total_tokens=1)
+    db_session.commit()
+
+    resp = client.get(
+        SUMMARY_PATH,
+        headers=master_key_header,
+        params={"user_id": "naive", "start_date": "2020-01-01T00:00:00"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["totals"]["request_count"] == 1
+
+
+def test_summary_series_zero_fills_empty_buckets(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # Usage only on day 1 and day 4 of a 4-day window; the gap days must appear as
+    # zero buckets so the chart's x-axis stays linear in time.
+    _make_log(db_session, user_id="dense", timestamp=datetime(2025, 6, 1, 12, tzinfo=UTC), cost=0.01, total_tokens=1)
+    _make_log(db_session, user_id="dense", timestamp=datetime(2025, 6, 4, 12, tzinfo=UTC), cost=0.02, total_tokens=1)
+    db_session.commit()
+
+    body = client.get(
+        SUMMARY_PATH,
+        headers=master_key_header,
+        params={
+            "user_id": "dense",
+            "bucket": "day",
+            "start_date": "2025-06-01T00:00:00Z",
+            "end_date": "2025-06-05T00:00:00Z",
+        },
+    ).json()
+    series = body["series"]
+    assert [p["bucket_start"] for p in series] == [
+        "2025-06-01T00:00:00Z",
+        "2025-06-02T00:00:00Z",
+        "2025-06-03T00:00:00Z",
+        "2025-06-04T00:00:00Z",
+    ]
+    assert [p["requests"] for p in series] == [1, 0, 0, 1]
 
 
 def test_csv_export_shape_and_reconciliation(

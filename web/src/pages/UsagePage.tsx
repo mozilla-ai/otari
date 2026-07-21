@@ -313,16 +313,13 @@ export function UsagePage() {
   const totals = data?.totals;
   const prevTotals = previousFilters !== null ? previous.data?.totals : undefined;
 
-  // Options for the model typeahead: the models that actually have usage in the
-  // current window. Captured only while no model filter is applied (a filtered
-  // summary collapses by_model to the single selected model); the last full list
-  // is retained so you can switch models without clearing first.
-  const [modelOptions, setModelOptions] = useState<string[]>([]);
-  useEffect(() => {
-    if (!modelFilter && data?.by_model) {
-      setModelOptions(data.by_model.filter((r) => r.key !== null).map((r) => r.key as string));
-    }
-  }, [modelFilter, data]);
+  // Model typeahead options: the in-window models. Sourced from a summary that
+  // omits the model filter, so the list stays complete when a model is selected,
+  // and derived directly from query data rather than mirrored into state.
+  const modelSuggestFilters: UsageFilters = useMemo(() => ({ ...filters, model: undefined }), [filters]);
+  const modelSuggest = useUsageSummary(modelSuggestFilters, preset.bucket);
+  const modelOptions =
+    modelSuggest.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
 
   const userOptions = (users.data ?? []).map((u) => ({
     value: u.user_id,

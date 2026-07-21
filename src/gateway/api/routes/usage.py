@@ -255,7 +255,15 @@ def _resolve_window(start_date: datetime | None, end_date: datetime | None) -> t
     A summary must never scan an unbounded log: absent a start we look back
     ``_DEFAULT_SUMMARY_LOOKBACK``; a span wider than ``_MAX_SUMMARY_SPAN`` has its
     start pulled forward so the aggregates stay bounded by the timestamp index.
+
+    An offset-less ISO datetime (which the query params advertise as valid) parses
+    to a naive value; ``now(UTC)`` is aware. Comparing or subtracting the two would
+    raise, so naive bounds are assumed UTC and made aware first.
     """
+    if start_date is not None and start_date.tzinfo is None:
+        start_date = start_date.replace(tzinfo=UTC)
+    if end_date is not None and end_date.tzinfo is None:
+        end_date = end_date.replace(tzinfo=UTC)
     end = end_date or datetime.now(UTC)
     start = start_date if start_date is not None else end - _DEFAULT_SUMMARY_LOOKBACK
     if start > end:
@@ -378,6 +386,72 @@ async def _breakdown(
     return result
 
 
+async def _summary_context(
+    db: AsyncSession,
+    *,
+    start_date: datetime | None,
+    end_date: datetime | None,
+    user_id: str | None,
+    status: str | None,
+    model: str | None,
+    endpoint: str | None,
+) -> tuple[datetime, datetime, list[ColumnElement[bool]], UsageTotals]:
+    """Resolve the bounded window, the shared WHERE conditions, and the grand
+    totals: the common preamble both summary endpoints run, kept in one place so a
+    fix (like the naive-datetime handling in ``_resolve_window``) lands once.
+    """
+    start, end = _resolve_window(start_date, end_date)
+    conditions = _usage_filters(
+        start_date=start,
+        end_date=end,
+        user_id=user_id,
+        status=status,
+        model=model,
+        endpoint=endpoint,
+    )
+    totals = await _totals(db, conditions)
+    return start, end, conditions, totals
+
+
+# Upper bound on zero-filled series points, so a pathological range/bucket combo
+# (e.g. hourly over a year) cannot balloon the payload; beyond it the endpoint
+# returns the sparse populated buckets instead.
+_MAX_SERIES_POINTS = 1000
+
+
+def _dense_series(
+    start: datetime,
+    end: datetime,
+    bucket: Bucket,
+    rows: list[tuple[str, float, int, int]],
+) -> list[UsageSeriesPoint]:
+    """Fill every bucket in ``[floor(start), end)`` so the chart's x-axis is linear
+    in time. ``GROUP BY`` omits empty buckets, so without this a sparse range (say
+    usage on day 1 and day 20 of a month) would render as two adjacent bars and
+    misread the trend. Falls back to the sparse buckets past ``_MAX_SERIES_POINTS``.
+    """
+    populated = {key: (cost, tokens, requests) for key, cost, tokens, requests in rows}
+    step = timedelta(hours=1) if bucket == "hour" else timedelta(days=1)
+    if bucket == "hour":
+        cursor = start.replace(minute=0, second=0, microsecond=0)
+        fmt = "%Y-%m-%dT%H:00:00Z"
+    else:
+        cursor = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        fmt = "%Y-%m-%dT00:00:00Z"
+    points: list[UsageSeriesPoint] = []
+    while cursor < end:
+        if len(points) >= _MAX_SERIES_POINTS:
+            return [
+                UsageSeriesPoint(bucket_start=key, cost=cost, tokens=tokens, requests=requests)
+                for key, (cost, tokens, requests) in sorted(populated.items())
+            ]
+        key = cursor.strftime(fmt)
+        cost, tokens, requests = populated.get(key, (0.0, 0, 0))
+        points.append(UsageSeriesPoint(bucket_start=key, cost=cost, tokens=tokens, requests=requests))
+        cursor += step
+    return points
+
+
 @router.get("/summary", dependencies=[Depends(verify_master_key)])
 async def usage_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -396,16 +470,15 @@ async def usage_summary(
     timestamp index. Returns grand totals, breakdowns by model / user / API key
     (top rows plus a reconciling ``other`` fold), and a UTC-bucketed time series.
     """
-    start, end = _resolve_window(start_date, end_date)
-    conditions = _usage_filters(
-        start_date=start,
-        end_date=end,
+    start, end, conditions, totals = await _summary_context(
+        db,
+        start_date=start_date,
+        end_date=end_date,
         user_id=user_id,
         status=status,
         model=model,
         endpoint=endpoint,
     )
-    totals = await _totals(db, conditions)
     by_model = await _breakdown(db, UsageLog.model, conditions, totals, limit=_BREAKDOWN_TOP_N)
     by_user = await _breakdown(db, UsageLog.user_id, conditions, totals, limit=_BREAKDOWN_TOP_N)
     by_api_key = await _breakdown(db, UsageLog.api_key_id, conditions, totals, limit=_BREAKDOWN_TOP_N)
@@ -421,18 +494,11 @@ async def usage_summary(
             )
             .where(*conditions)
             .group_by(expr)
-            .order_by(expr)
         )
     ).all()
-    series = [
-        UsageSeriesPoint(
-            bucket_start=_canonical_bucket(row[0], bucket),
-            cost=float(row[1]),
-            tokens=int(row[2]),
-            requests=int(row[3]),
-        )
-        for row in series_rows
-    ]
+    # Zero-fill empty buckets so the chart is time-linear (GROUP BY drops gaps).
+    populated = [(_canonical_bucket(row[0], bucket), float(row[1]), int(row[2]), int(row[3])) for row in series_rows]
+    series = _dense_series(start, end, bucket, populated)
 
     return UsageSummary(
         start_date=start.isoformat(),
@@ -475,16 +541,15 @@ async def usage_summary_csv(
     export is **uncapped** (no top-N fold): finance wants every row. Kept separate
     from the bare-array ``/v1/usage`` contract, which is untouched.
     """
-    start, end = _resolve_window(start_date, end_date)
-    conditions = _usage_filters(
-        start_date=start,
-        end_date=end,
+    _start, _end, conditions, totals = await _summary_context(
+        db,
+        start_date=start_date,
+        end_date=end_date,
         user_id=user_id,
         status=status,
         model=model,
         endpoint=endpoint,
     )
-    totals = await _totals(db, conditions)
     dimensions = (
         ("model", await _breakdown(db, UsageLog.model, conditions, totals, limit=None)),
         ("user", await _breakdown(db, UsageLog.user_id, conditions, totals, limit=None)),
