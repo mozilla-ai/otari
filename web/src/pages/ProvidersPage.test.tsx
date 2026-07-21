@@ -214,6 +214,7 @@ describe("ProvidersPage", () => {
           env_key: "OPENAI_API_KEY",
           default_api_base: "https://api.openai.com/v1",
           requires_api_key: true,
+          env_key_present: false,
         },
       ],
     });
@@ -239,6 +240,7 @@ describe("ProvidersPage", () => {
           env_key: "OPENAI_API_KEY",
           default_api_base: "https://api.openai.com/v1",
           requires_api_key: true,
+          env_key_present: false,
         },
       ],
     });
@@ -258,6 +260,47 @@ describe("ProvidersPage", () => {
 
     await user.type(screen.getByLabelText("API key"), "sk-live-xxxx");
     expect(submit).toBeEnabled();
+  });
+
+  it("lets a key-requiring provider submit without a key when its env var is already set", async () => {
+    const fetchMock = mockApi({
+      stored: [storedProvider("anthropic", "0000")],
+      catalog: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          env_key: "OPENAI_API_KEY",
+          default_api_base: "https://api.openai.com/v1",
+          requires_api_key: true,
+          env_key_present: true,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••0000");
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+
+    await user.type(screen.getByPlaceholderText("Search providers…"), "OpenAI");
+    await user.click(await screen.findByRole("option", { name: /OpenAI/ }));
+    // Close the combobox popover, which otherwise aria-hides the submit button.
+    await user.keyboard("{Escape}");
+
+    // The field is optional and the copy explains the env fallback.
+    expect(screen.getByText(/OPENAI_API_KEY is set on the server/)).toBeInTheDocument();
+    expect(screen.getByLabelText("API key (optional)")).toBeInTheDocument();
+
+    // Submit with no key: the server stores none and any-llm reads OPENAI_API_KEY.
+    const submit = screen.getByRole("button", { name: "Add provider" });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) => String(u).endsWith("/v1/provider-credentials") && (init?.method ?? "") === "POST",
+    );
+    expect(post).toBeDefined();
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ instance: "openai", api_key: null });
   });
 
   it("shows the welcome onboarding when no provider is configured", async () => {

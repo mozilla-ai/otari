@@ -1710,6 +1710,12 @@
             "description": "Env var the SDK reads this provider's key from.",
             "title": "Env Key"
           },
+          "env_key_present": {
+            "default": false,
+            "description": "True when env_key is already set on the server, so a pasted key is optional (env fallback).",
+            "title": "Env Key Present",
+            "type": "boolean"
+          },
           "id": {
             "description": "any-llm provider id, used as the default instance name.",
             "title": "Id",

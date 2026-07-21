@@ -132,6 +132,10 @@ class KnownProviderSchema(BaseModel):
     env_key: str | None = Field(default=None, description="Env var the SDK reads this provider's key from.")
     default_api_base: str | None = Field(default=None, description="Built-in endpoint; blank means the SDK's default.")
     requires_api_key: bool = Field(description="False for keyless local backends (Ollama, llama.cpp).")
+    env_key_present: bool = Field(
+        default=False,
+        description="True when env_key is already set on the server, so a pasted key is optional (env fallback).",
+    )
 
 
 def _to_known_schema(provider: KnownProvider) -> KnownProviderSchema:
@@ -141,6 +145,7 @@ def _to_known_schema(provider: KnownProvider) -> KnownProviderSchema:
         env_key=provider.env_key,
         default_api_base=provider.default_api_base,
         requires_api_key=provider.requires_api_key,
+        env_key_present=provider.env_key_present,
     )
 
 

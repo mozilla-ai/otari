@@ -4,9 +4,16 @@ These read only the bundled any-llm and genai-prices datasets, so they need no
 database or network.
 """
 
+import pytest
+
 from gateway.core.config import GatewayConfig
 from gateway.services.pricing_service import model_context_window
-from gateway.services.provider_metadata_service import list_provider_info, provider_info
+from gateway.services.provider_metadata_service import (
+    KnownProvider,
+    list_known_providers,
+    list_provider_info,
+    provider_info,
+)
 
 
 def _config(providers: dict[str, dict[str, object]]) -> GatewayConfig:
@@ -76,3 +83,43 @@ def test_list_provider_info_sorted_by_instance() -> None:
     )
     names = [info.instance for info in list_provider_info(config)]
     assert names == ["anthropic", "openai"]
+
+
+def _known_by_id(providers: list[KnownProvider]) -> dict[str, KnownProvider]:
+    return {p.id: p for p in providers}
+
+
+def test_known_provider_env_key_present_false_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A key-based provider whose env var is unset reports env_key_present False."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    openai = _known_by_id(list_known_providers())["openai"]
+
+    assert openai.env_key == "OPENAI_API_KEY"
+    assert openai.requires_api_key is True
+    assert openai.env_key_present is False
+
+
+def test_known_provider_env_key_present_true_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A key-based provider whose env var is set reports env_key_present True."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    openai = _known_by_id(list_known_providers())["openai"]
+
+    assert openai.requires_api_key is True
+    assert openai.env_key_present is True
+
+
+def test_known_provider_env_key_present_false_for_blank_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A whitespace-only env var counts as absent, not a usable key."""
+    monkeypatch.setenv("OPENAI_API_KEY", "   ")
+    openai = _known_by_id(list_known_providers())["openai"]
+
+    assert openai.env_key_present is False
+
+
+def test_known_provider_keyless_backend_never_present() -> None:
+    """A keyless backend (ollama) has no env var, so env_key_present stays False."""
+    ollama = _known_by_id(list_known_providers())["ollama"]
+
+    assert ollama.env_key is None
+    assert ollama.requires_api_key is False
+    assert ollama.env_key_present is False

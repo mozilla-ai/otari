@@ -168,6 +168,9 @@ export interface KnownProvider {
   env_key: string | null;
   default_api_base: string | null;
   requires_api_key: boolean;
+  // True when env_key is already set on the server, so a pasted key is optional
+  // (any-llm falls back to the environment variable).
+  env_key_present: boolean;
 }
 
 // Per-model metadata from the public models.dev catalog, for the detail panel.

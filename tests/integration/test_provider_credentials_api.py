@@ -202,8 +202,11 @@ def test_catalog_lists_known_providers(client: TestClient, master_key_header: di
     assert "openai" in by_id
     assert by_id["openai"]["requires_api_key"] is True
     assert by_id["openai"]["default_api_base"]  # openai has an explicit built-in base
-    # Keyless local backends are reported as not requiring a key.
+    # env_key_present reports whether the provider's env var is populated on the server.
+    assert isinstance(by_id["openai"]["env_key_present"], bool)
+    # Keyless local backends are reported as not requiring a key, and never present.
     assert by_id["ollama"]["requires_api_key"] is False
+    assert by_id["ollama"]["env_key_present"] is False
 
 
 def test_catalog_requires_master_key(client: TestClient) -> None:

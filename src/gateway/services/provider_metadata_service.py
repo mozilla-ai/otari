@@ -15,6 +15,7 @@ call, which the dashboard already has from GET /v1/models/discoverable and can
 join client-side.
 """
 
+import os
 from dataclasses import dataclass, field
 
 from any_llm import AnyLLM, LLMProvider
@@ -152,6 +153,10 @@ class KnownProvider:
     env_key: str | None = None
     default_api_base: str | None = None
     requires_api_key: bool = True
+    # Whether ``env_key`` is already populated in the gateway's environment. When
+    # true, any-llm can read the key from the env, so the add-provider form can
+    # treat a pasted key as optional. Always False when there is no ``env_key``.
+    env_key_present: bool = False
 
 
 def list_known_providers() -> list[KnownProvider]:
@@ -183,6 +188,7 @@ def list_known_providers() -> list[KnownProvider]:
                 env_key=env_key,
                 default_api_base=_clean(getattr(cls, "API_BASE", None)),
                 requires_api_key=env_key is not None,
+                env_key_present=env_key is not None and bool((os.getenv(env_key) or "").strip()),
             )
         )
     return sorted(result, key=lambda provider: provider.name.lower())
