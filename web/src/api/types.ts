@@ -312,6 +312,9 @@ export interface UsageEntry {
 // query params to /v1/usage and /v1/usage/count.
 export interface UsageFilters {
   start_date?: string;
+  // Upper bound (exclusive). Omitted for a live "up to now" window; set by the
+  // analytics previous-period query so its window does not overlap the current one.
+  end_date?: string;
   status?: string;
   model?: string;
   endpoint?: string;
@@ -342,13 +345,14 @@ export interface UsageTotals {
 }
 
 // One breakdown row (a model, a user, or an API key). `key` is null both for the
-// synthesized "other" fold row and for usage whose grouping column was NULL
-// (e.g. a since-deleted user).
+// synthesized fold row (`is_other: true`) and for usage whose grouping column was
+// NULL, e.g. a since-deleted user (`is_other: false`); `is_other` tells them apart.
 export interface UsageGroupRow {
   key: string | null;
   cost: number;
   tokens: number;
   requests: number;
+  is_other: boolean;
 }
 
 // One time bucket. `bucket_start` is canonical ISO-8601 UTC (`...Z`).

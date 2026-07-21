@@ -211,13 +211,19 @@ class UsageTotals(BaseModel):
 
 
 class UsageGroupRow(BaseModel):
-    """One breakdown row (a model, a user, or an API key). ``key`` is None for
-    rows whose grouping column is NULL (e.g. usage from a since-deleted user)."""
+    """One breakdown row (a model, a user, or an API key).
+
+    ``key`` is None both for the synthesized fold row (``is_other=True``) and for a
+    real group whose column was NULL (e.g. usage from a since-deleted user, with
+    ``is_other=False``). ``is_other`` disambiguates the two so the UI does not
+    mislabel deleted-user usage as the fold.
+    """
 
     key: str | None
     cost: float
     tokens: int
     requests: int
+    is_other: bool = False
 
 
 class UsageSeriesPoint(BaseModel):
@@ -366,6 +372,7 @@ async def _breakdown(
                     cost=totals.cost - sum(r.cost for r in result),
                     tokens=totals.total_tokens - sum(r.tokens for r in result),
                     requests=residual_requests,
+                    is_other=True,
                 )
             )
     return result

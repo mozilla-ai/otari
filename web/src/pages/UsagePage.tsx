@@ -126,18 +126,22 @@ function BreakdownTable({ title, rows, totalCost, emptyLabel, onDrill, loading }
             <TableMessage colSpan={3}>{emptyLabel}</TableMessage>
           ) : (
             visible.map((row, index) => {
-              const isOther = row.key === null;
+              const isOther = row.is_other;
+              // A real group can also have a null key (usage from a since-deleted
+              // user); it is shown as "(unknown)" and, like the fold, is not a
+              // drill target because there is no id to filter on.
+              const drillable = !isOther && row.key !== null;
               const share = totalCost > 0 ? row.cost / totalCost : 0;
               return (
                 <Tr
-                  // "other" has a null key; index keeps the row key stable and unique.
-                  key={row.key ?? `__other_${index}`}
-                  onClick={isOther ? undefined : () => onDrill(row.key as string)}
+                  // Null keys (fold or deleted-user) collide; index keeps it unique.
+                  key={row.key ?? `__null_${index}`}
+                  onClick={drillable ? () => onDrill(row.key as string) : undefined}
                 >
                   <Td className="text-[var(--otari-ink)]">
                     <div className="flex flex-col gap-1">
                       <span className="truncate">
-                        {isOther ? `Other (${row.requests.toLocaleString()} req)` : row.key}
+                        {isOther ? `Other (${row.requests.toLocaleString()} req)` : (row.key ?? "(unknown)")}
                       </span>
                       {/* Share-of-total bar. Width is data-driven, so it rides an
                           inline style like the Table's computed column widths. */}
@@ -458,7 +462,7 @@ export function UsagePage() {
             <StatCard
               label="Spend"
               value={totals ? formatUSD(totals.cost) : "—"}
-              hint={<DeltaHint fraction={deltaFraction(totals?.cost ?? 0, prevTotals?.cost)} />}
+              hint={totals ? <DeltaHint fraction={deltaFraction(totals.cost, prevTotals?.cost)} /> : null}
             />
             <StatCard
               label="Requests"
@@ -480,7 +484,7 @@ export function UsagePage() {
             <StatCard
               label="Tokens"
               value={totals ? formatTokens(totals.total_tokens) : "—"}
-              hint={<DeltaHint fraction={deltaFraction(totals?.total_tokens ?? 0, prevTotals?.total_tokens)} />}
+              hint={totals ? <DeltaHint fraction={deltaFraction(totals.total_tokens, prevTotals?.total_tokens)} /> : null}
             />
             <StatCard label="Avg latency" value={totals ? formatLatency(totals.avg_latency_ms) : "—"} />
           </div>

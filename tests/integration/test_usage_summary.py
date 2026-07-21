@@ -151,7 +151,10 @@ def test_summary_top_n_fold_reconciles(
     assert len(by_model) == 101  # 100 named + 1 folded
     other = by_model[-1]
     assert other["key"] is None
+    assert other["is_other"] is True
     assert other["requests"] == 5
+    # Named rows are never marked as the fold, even if their key were null.
+    assert all(row["is_other"] is False for row in by_model[:-1])
     assert sum(r["requests"] for r in by_model) == body["totals"]["request_count"] == 105
     assert sum(r["cost"] for r in by_model) == pytest.approx(body["totals"]["cost"])
 

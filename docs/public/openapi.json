@@ -3816,11 +3816,16 @@
         "type": "object"
       },
       "UsageGroupRow": {
-        "description": "One breakdown row (a model, a user, or an API key). ``key`` is None for\nrows whose grouping column is NULL (e.g. usage from a since-deleted user).",
+        "description": "One breakdown row (a model, a user, or an API key).\n\n``key`` is None both for the synthesized fold row (``is_other=True``) and for a\nreal group whose column was NULL (e.g. usage from a since-deleted user, with\n``is_other=False``). ``is_other`` disambiguates the two so the UI does not\nmislabel deleted-user usage as the fold.",
         "properties": {
           "cost": {
             "title": "Cost",
             "type": "number"
+          },
+          "is_other": {
+            "default": false,
+            "title": "Is Other",
+            "type": "boolean"
           },
           "key": {
             "anyOf": [

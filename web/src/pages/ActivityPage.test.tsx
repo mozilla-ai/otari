@@ -64,7 +64,7 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number } = {}) {
           error_count: 0,
           avg_latency_ms: null,
         },
-        by_model: models.map((m) => ({ key: m, cost: 0, tokens: 0, requests: 0 })),
+        by_model: models.map((m) => ({ key: m, cost: 0, tokens: 0, requests: 0, is_other: false })),
         by_user: [],
         by_api_key: [],
         series: [],

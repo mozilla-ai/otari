@@ -507,6 +507,7 @@ export function useDeleteUser() {
 function usageParams(filters: UsageFilters): URLSearchParams {
   const params = new URLSearchParams();
   if (filters.start_date) params.set("start_date", filters.start_date);
+  if (filters.end_date) params.set("end_date", filters.end_date);
   if (filters.status) params.set("status", filters.status);
   if (filters.model) params.set("model", filters.model);
   if (filters.endpoint) params.set("endpoint", filters.endpoint);

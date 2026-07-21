@@ -26,13 +26,13 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
       avg_latency_ms: 820,
     },
     by_model: [
-      { key: "gpt-5.6", cost: 820, tokens: 8_000_000, requests: 42_000 },
-      { key: "claude-sonnet-5", cost: 310, tokens: 3_000_000, requests: 28_000 },
-      { key: null, cost: 110.5, tokens: 1_400_000, requests: 14_000 },
+      { key: "gpt-5.6", cost: 820, tokens: 8_000_000, requests: 42_000, is_other: false },
+      { key: "claude-sonnet-5", cost: 310, tokens: 3_000_000, requests: 28_000, is_other: false },
+      { key: null, cost: 110.5, tokens: 1_400_000, requests: 14_000, is_other: true },
     ],
     by_user: [
-      { key: "alice", cost: 900.5, tokens: 8_000_000, requests: 50_000 },
-      { key: "bob", cost: 340, tokens: 4_400_000, requests: 34_000 },
+      { key: "alice", cost: 900.5, tokens: 8_000_000, requests: 50_000, is_other: false },
+      { key: "bob", cost: 340, tokens: 4_400_000, requests: 34_000, is_other: false },
     ],
     by_api_key: [],
     series: [
@@ -97,6 +97,20 @@ describe("UsagePage", () => {
     expect(screen.getByText("12.4M")).toBeInTheDocument();
     // 1764 / 84000 = 2.1% errors.
     expect(screen.getByText(/2\.1% errors/)).toBeInTheDocument();
+  });
+
+  it("queries the previous period with a bounded end_date for deltas", async () => {
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("gpt-5.6");
+
+    const summaryCalls = fetchMock.mock.calls
+      .map(([u]) => String(u))
+      .filter((u) => u.includes("/usage/summary") && !u.includes(".csv"));
+    // The default 30d preset fires a current window (no end_date, "up to now")
+    // and a previous window whose end_date is pinned so it does not overlap.
+    expect(summaryCalls.some((u) => u.includes("end_date="))).toBe(true);
+    expect(summaryCalls.some((u) => !u.includes("end_date="))).toBe(true);
   });
 
   it("lists spend by model with a reconciling 'other' fold row", async () => {
