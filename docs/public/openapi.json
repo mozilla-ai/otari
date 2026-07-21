@@ -3635,6 +3635,20 @@
         "title": "UpdateUserRequest",
         "type": "object"
       },
+      "UsageCount": {
+        "description": "Total number of usage logs matching a set of filters.",
+        "properties": {
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total"
+        ],
+        "title": "UsageCount",
+        "type": "object"
+      },
       "UsageEntry": {
         "description": "A single usage log entry.",
         "properties": {
@@ -3712,6 +3726,17 @@
             "title": "Id",
             "type": "string"
           },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
           "model": {
             "title": "Model",
             "type": "string"
@@ -3784,7 +3809,8 @@
           "cache_write_tokens",
           "cost",
           "status",
-          "error_message"
+          "error_message",
+          "latency_ms"
         ],
         "title": "UsageEntry",
         "type": "object"
@@ -3843,6 +3869,17 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
           },
           "model": {
             "title": "Model",
@@ -3914,7 +3951,8 @@
           "total_tokens",
           "cost",
           "status",
-          "error_message"
+          "error_message",
+          "latency_ms"
         ],
         "title": "UsageLogResponse",
         "type": "object"
@@ -7026,7 +7064,7 @@
     },
     "/v1/usage": {
       "get": {
-        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range and user. Paginated via skip/limit.\nTimestamps accept either ISO 8601 strings or Unix epoch seconds (numeric).",
+        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, and endpoint.\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
         "operationId": "list_usage_v1_usage_get",
         "parameters": [
           {
@@ -7083,6 +7121,60 @@
               ],
               "description": "Filter to a single user",
               "title": "User Id"
+            }
+          },
+          {
+            "description": "Filter to a single status (e.g. 'success' or 'error')",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single status (e.g. 'success' or 'error')",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter to a single model",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single model",
+              "title": "Model"
+            }
+          },
+          {
+            "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+            "in": "query",
+            "name": "endpoint",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+              "title": "Endpoint"
             }
           },
           {
@@ -7144,6 +7236,158 @@
           }
         ],
         "summary": "List Usage",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/usage/count": {
+      "get": {
+        "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load.",
+        "operationId": "count_usage_v1_usage_count_get",
+        "parameters": [
+          {
+            "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "Filter to a single user",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single user",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Filter to a single status (e.g. 'success' or 'error')",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single status (e.g. 'success' or 'error')",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter to a single model",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single model",
+              "title": "Model"
+            }
+          },
+          {
+            "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+            "in": "query",
+            "name": "endpoint",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+              "title": "Endpoint"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageCount"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Count Usage",
         "tags": [
           "usage"
         ]

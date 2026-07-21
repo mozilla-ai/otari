@@ -93,6 +93,7 @@ class UsageLogResponse(BaseModel):
     cost: float | None
     status: str
     error_message: str | None
+    latency_ms: int | None
 
     @classmethod
     def from_model(cls, log: UsageLog) -> "UsageLogResponse":
@@ -110,6 +111,7 @@ class UsageLogResponse(BaseModel):
             cost=log.cost,
             status=log.status,
             error_message=log.error_message,
+            latency_ms=log.latency_ms,
         )
 
 

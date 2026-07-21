@@ -379,6 +379,7 @@ class RequestContext:
         user_id: str | None,
         rate_limit_info: RateLimitInfo | None,
         reservation: ReservationHandle | None,
+        started_at: float,
         resolved_provider: ResolvedProvider | None = None,
     ) -> None:
         self.config = config
@@ -391,6 +392,9 @@ class RequestContext:
         self.user_id = user_id
         self.rate_limit_info = rate_limit_info
         self.reservation = reservation
+        # Monotonic clock reading taken at the very start of the handler
+        # preamble; used to compute the usage log's latency_ms at settlement.
+        self.started_at = started_at
         # Standalone-only: the provider selector resolved once for the
         # pricing/budget gate in `resolve_request_context`. Route handlers
         # reuse this for dispatch instead of calling `resolve_provider_selector`
@@ -470,6 +474,9 @@ async def _bill_vision_side_call(
         return
     # Key the side-call's usage/pricing on the instance, matching how the main
     # request is billed (the vision call itself routes via the same resolver).
+    # latency_ms is intentionally left NULL: this row bills the describe model as
+    # its own side-call, so the enclosing request's duration would misattribute
+    # the caller's wall-clock to it.
     cost = await log_usage(
         db=db,
         log_writer=log_writer,
@@ -530,6 +537,9 @@ async def resolve_request_context(
     metered and billed here as committed spend (the call already happened, so it
     is not gated or refundable).
     """
+    # Earliest point in the shared handler preamble; anchors the request's
+    # latency_ms (measured monotonically, so it is immune to wall-clock steps).
+    started_at = time.monotonic()
     hybrid_mode = config.is_hybrid_mode
     route: ResolvedRoute | None = None
     user_token: str | None = None
@@ -683,6 +693,7 @@ async def resolve_request_context(
         user_id=user_id,
         rate_limit_info=rate_limit_info,
         reservation=reservation,
+        started_at=started_at,
         resolved_provider=resolved_provider,
     )
 
@@ -940,6 +951,18 @@ async def prepare_gateway_tools(
 # ---------------------------------------------------------------------------
 
 
+def _elapsed_ms(started_at: float | None) -> int | None:
+    """Milliseconds elapsed since a monotonic ``started_at`` reading.
+
+    Returns ``None`` when no start was captured (e.g. write paths with no
+    meaningful request duration), so the usage log records NULL rather than a
+    misleading zero.
+    """
+    if started_at is None:
+        return None
+    return round((time.monotonic() - started_at) * 1000)
+
+
 async def log_usage(
     db: AsyncSession,
     log_writer: LogWriter,
@@ -952,6 +975,7 @@ async def log_usage(
     usage_override: CompletionUsage | None = None,
     error: str | None = None,
     cost_override: float | None = None,
+    latency_ms: int | None = None,
 ) -> float | None:
     """Log API usage to the database and return the computed cost.
 
@@ -971,6 +995,8 @@ async def log_usage(
         usage_override: Usage data for streaming requests
         error: Error message (if failed)
         cost_override: Fixed amount to record when billing without provider usage
+        latency_ms: Total server-side request duration in milliseconds, or None
+            when the caller has no meaningful duration to record
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent.
@@ -986,6 +1012,7 @@ async def log_usage(
         endpoint=endpoint,
         status="success" if error is None else "error",
         error_message=error,
+        latency_ms=latency_ms,
     )
 
     usage_data = usage_override
@@ -1058,6 +1085,7 @@ async def _log_failure_and_refund(
         endpoint=adapter.endpoint,
         user_id=ctx.user_id,
         error=error,
+        latency_ms=_elapsed_ms(ctx.started_at),
     )
     if ctx.reservation is not None:
         await refund_reservation(ctx.db, ctx.reservation)
@@ -1230,6 +1258,7 @@ def build_streaming_response(
     user_id: str | None,
     rate_limit_info: RateLimitInfo | None,
     reservation: ReservationHandle | None,
+    started_at: float | None = None,
     platform_correlation_id: str | None = None,
     platform_request_id: str | None = None,
     session_label: str | None = None,
@@ -1276,6 +1305,7 @@ def build_streaming_response(
             endpoint=adapter.endpoint,
             user_id=user_id,
             usage_override=usage_data,
+            latency_ms=_elapsed_ms(started_at),
         )
         if reservation is not None:
             await reconcile_reservation(db, reservation, actual_cost or 0.0)
@@ -1295,6 +1325,7 @@ def build_streaming_response(
                 provider=provider,
                 endpoint=adapter.endpoint,
                 user_id=user_id,
+                latency_ms=_elapsed_ms(started_at),
             )
             await refund_reservation(db, reservation)
             return
@@ -1310,6 +1341,7 @@ def build_streaming_response(
             user_id=user_id,
             error="stream completed without usage data" if policy == "fail" else None,
             cost_override=reservation.estimate,
+            latency_ms=_elapsed_ms(started_at),
         )
         await reconcile_reservation(db, reservation, reservation.estimate)
 
@@ -1338,6 +1370,7 @@ def build_streaming_response(
             endpoint=adapter.endpoint,
             user_id=user_id,
             error=error,
+            latency_ms=_elapsed_ms(started_at),
         )
         if reservation is not None:
             await refund_reservation(db, reservation)
@@ -1481,6 +1514,7 @@ async def run_single_attempt_stream(
         user_id=ctx.user_id,
         rate_limit_info=ctx.rate_limit_info,
         reservation=ctx.reservation,
+        started_at=ctx.started_at,
         platform_correlation_id=platform_correlation_id,
         platform_request_id=platform_request_id,
         session_label=session_label,
@@ -1882,6 +1916,7 @@ async def run_standalone_non_stream(
                     endpoint=adapter.endpoint,
                     user_id=ctx.user_id,
                     usage_override=usage_data,
+                    latency_ms=_elapsed_ms(ctx.started_at),
                 )
             if ctx.reservation is not None:
                 await reconcile_reservation(ctx.db, ctx.reservation, actual_cost or 0.0)

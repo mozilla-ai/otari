@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiFetch } from "@/api/client";
 import type {
@@ -27,6 +27,9 @@ import type {
   UpdateSettingsRequest,
   UpdateStoredProviderRequest,
   UpdateUserRequest,
+  UsageCount,
+  UsageEntry,
+  UsageFilters,
   User,
   CreateUserRequest,
 } from "@/api/types";
@@ -46,6 +49,7 @@ const BUILD = "build";
 const KEYS = "keys";
 const BUDGETS = "budgets";
 const USERS = "users";
+const USAGE = "usage";
 
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
@@ -491,5 +495,48 @@ export function useDeleteUser() {
       // Deleting a user deactivates its keys server-side.
       void queryClient.invalidateQueries({ queryKey: [KEYS] });
     },
+  });
+}
+
+// ---------- activity / request log ----------
+
+// Serialize the activity-log filters into query params, dropping empty values so
+// the query key and the request URL stay stable across renders.
+function usageParams(filters: UsageFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  if (filters.start_date) params.set("start_date", filters.start_date);
+  if (filters.status) params.set("status", filters.status);
+  if (filters.model) params.set("model", filters.model);
+  if (filters.endpoint) params.set("endpoint", filters.endpoint);
+  if (filters.user_id) params.set("user_id", filters.user_id);
+  return params;
+}
+
+// One page of usage-log rows for the Activity viewer, newest first.
+// `placeholderData: keepPreviousData` keeps the current page on screen while the
+// next loads, so paging does not flash empty.
+export function useUsageLogs(filters: UsageFilters, page: number, pageSize: number) {
+  return useQuery({
+    queryKey: [USAGE, "list", filters, page, pageSize],
+    queryFn: () => {
+      const params = usageParams(filters);
+      params.set("skip", String(page * pageSize));
+      params.set("limit", String(pageSize));
+      return apiFetch<UsageEntry[]>(`/v1/usage?${params.toString()}`);
+    },
+    placeholderData: keepPreviousData,
+    // A request log moves constantly; keep it fresh but don't refetch on every focus.
+    staleTime: 10_000,
+  });
+}
+
+// Total rows matching the same filters, for the paginator's "N of M". A separate
+// request so /v1/usage stays a bare array; run alongside the list.
+export function useUsageCount(filters: UsageFilters) {
+  return useQuery({
+    queryKey: [USAGE, "count", filters],
+    queryFn: () => apiFetch<UsageCount>(`/v1/usage/count?${usageParams(filters).toString()}`),
+    placeholderData: keepPreviousData,
+    staleTime: 10_000,
   });
 }

@@ -323,3 +323,68 @@ def test_spend_incremented_via_reconciliation(
     assert user is not None
     assert user.spend == pytest.approx(7.5)
     assert float(user.reserved) == pytest.approx(0.0)  # hold released
+
+
+def test_successful_request_records_latency(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_messages: list[dict[str, str]],
+    db_session: Session,
+) -> None:
+    """A successful billable request records a non-negative latency_ms on its
+    usage log (the activity viewer's "Total time" column)."""
+    client.post("/v1/users", json={"user_id": "latency-user"}, headers=master_key_header)
+
+    mock_response = ChatCompletion(
+        id="chatcmpl-latency",
+        object="chat.completion",
+        created=0,
+        model=MODEL_NAME,
+        choices=[
+            Choice(
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content="hi"),
+                finish_reason="stop",
+            )
+        ],
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+    async def _mock_acompletion(**kwargs: Any) -> ChatCompletion:
+        return mock_response
+
+    with patch("gateway.api.routes.chat.acompletion") as mock_acompletion:
+        mock_acompletion.side_effect = _mock_acompletion
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": MODEL_NAME, "messages": test_messages, "user": "latency-user"},
+            headers=master_key_header,
+        )
+    assert response.status_code == 200
+
+    log = db_session.query(UsageLog).filter(UsageLog.user_id == "latency-user").first()
+    assert log is not None
+    assert log.latency_ms is not None
+    assert log.latency_ms >= 0
+
+
+def test_failed_request_records_latency(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+    test_messages: list[dict[str, str]],
+    db_session: Session,
+) -> None:
+    """The failure path also records latency_ms (never negative)."""
+    response = client.post(
+        "/v1/chat/completions",
+        json={"model": "gemini:invalid-model", "messages": test_messages},
+        headers=api_key_header,
+    )
+    assert response.status_code == 502
+
+    log = db_session.query(UsageLog).filter(UsageLog.api_key_id == api_key_obj["id"]).first()
+    assert log is not None
+    assert log.status == "error"
+    assert log.latency_ms is not None
+    assert log.latency_ms >= 0

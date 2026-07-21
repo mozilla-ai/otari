@@ -4,6 +4,7 @@ import { useProviders } from "@/api/hooks";
 import { useAuth } from "@/auth/AuthContext";
 import { AppShell } from "@/components/AppShell";
 import { Login } from "@/components/Login";
+import { ActivityPage } from "@/pages/ActivityPage";
 import { AliasesPage } from "@/pages/AliasesPage";
 import { BudgetsPage } from "@/pages/BudgetsPage";
 import { KeysPage } from "@/pages/KeysPage";
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="keys" element={<KeysPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="budgets" element={<BudgetsPage />} />
+          <Route path="activity" element={<ActivityPage />} />
           <Route path="models" element={<ModelsPage />} />
           <Route path="aliases" element={<AliasesPage />} />
           <Route path="settings" element={<SettingsPage />} />

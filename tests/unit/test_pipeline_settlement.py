@@ -15,6 +15,7 @@ platform-fallback streaming paths. These tests pin that contract:
 """
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -80,6 +81,7 @@ def _ctx(
         user_id="user-1",
         rate_limit_info=None,
         reservation=reservation,
+        started_at=time.monotonic(),
     )
 
 

@@ -16,6 +16,7 @@ detail (it is preserved on the usage log's ``error_message``).
 
 from __future__ import annotations
 
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -27,7 +28,7 @@ from fastapi import HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes._pipeline import _raise_for_unresolvable_model, rate_limit_headers
+from gateway.api.routes._pipeline import _elapsed_ms, _raise_for_unresolvable_model, rate_limit_headers
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -162,6 +163,9 @@ async def run_passthrough(
     Returns:
         The provider result plus the resolved selector and rate-limit headers.
     """
+    # Anchor request latency at the earliest point in the scaffold (monotonic,
+    # so it is immune to wall-clock steps); recorded on the usage log below.
+    started_at = time.monotonic()
     api_key, is_master_key = auth_result
     api_key_id = api_key.id if api_key else None
 
@@ -229,6 +233,7 @@ async def run_passthrough(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            latency_ms=_elapsed_ms(started_at),
         )
 
         cost = compute_cost(result, pricing) if compute_cost else None
@@ -252,6 +257,7 @@ async def run_passthrough(
             endpoint=endpoint,
             status="error",
             error_message=str(e),
+            latency_ms=_elapsed_ms(started_at),
         )
         await log_writer.put(error_log)
         await refund_reservation(db, reservation)

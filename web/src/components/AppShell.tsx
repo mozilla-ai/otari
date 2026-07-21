@@ -47,17 +47,31 @@ interface NavItem {
   icon: ReactNode;
 }
 
-// Sidebar groups, in display order. "Catalog" is what the gateway serves
-// (providers, their models, and aliases over them); "Access" is who may call it
-// (keys today; users/budgets later); "system" holds standalone config with no
-// header. Grouping keeps the list legible as the dashboard grows.
+// Sidebar groups, in display order. "Observability" is what the gateway did
+// (the request log today; usage analytics and an overview dashboard later) and
+// leads the sidebar; "Catalog" is what the gateway serves (providers, their
+// models, and aliases over them); "Access" is who may call it (keys, users,
+// budgets); "system" holds standalone config with no header. Grouping keeps the
+// list legible as the dashboard grows.
 const NAV_SECTIONS: { key: string; label?: string }[] = [
+  { key: "observability", label: "Observability" },
   { key: "catalog", label: "Catalog" },
   { key: "access", label: "Access" },
   { key: "system" },
 ];
 
 const NAV: NavItem[] = [
+  {
+    to: "/activity",
+    section: "observability",
+    label: "Activity",
+    icon: (
+      // A pulse/activity line: the per-request log of what the gateway served.
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+        <path d="M3 12h4l2.5-6 4 12 2.5-6H21" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
   {
     to: "/providers",
     section: "catalog",
