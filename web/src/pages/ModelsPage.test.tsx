@@ -503,7 +503,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    await user.click(screen.getByRole("button", { name: /Input \$ \/ 1M/ }));
+    await user.click(screen.getByRole("button", { name: /In \/ Out \$ \/ 1M/ }));
 
     const order = modelOrder();
     const miniIndex = order.findIndex((text) => text.includes("gpt-4o-mini"));
@@ -650,17 +650,44 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("anthropic:claude-sonnet-4");
 
-    expect(screen.getByRole("columnheader", { name: "Cache read $ / 1M" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Cache write $ / 1M" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Cache r / w $ / 1M" })).toBeInTheDocument();
 
+    // The cache cell shows both numbers as clickable edit affordances.
     const row = tableRow("anthropic:claude-sonnet-4");
-    expect(within(row).getByText("$0.30")).toBeInTheDocument();
-    expect(within(row).getByText("$3.75")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Edit cache read price for anthropic:claude-sonnet-4" })).toHaveTextContent(
+      "$0.30",
+    );
+    expect(
+      within(row).getByRole("button", { name: "Edit cache write price for anthropic:claude-sonnet-4" }),
+    ).toHaveTextContent("$3.75");
 
     const detail = await selectModel(user, "anthropic:claude-sonnet-4");
     expect(within(detail).getByText("Cache read")).toBeInTheDocument();
     expect(within(detail).getByText("$0.30 / 1M")).toBeInTheDocument();
     expect(within(detail).getByText("$3.75 / 1M")).toBeInTheDocument();
+  });
+
+  it("opens the inline editor by clicking a price number and saves cache rates", async () => {
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    const row = tableRow("openai:gpt-4o");
+    await user.click(within(row).getByRole("button", { name: "Edit input price for openai:gpt-4o" }));
+
+    // The inline editor row appears with all four fields.
+    const cacheRead = await screen.findByLabelText("Cache read price for openai:gpt-4o");
+    await user.type(cacheRead, "0.3");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "POST");
+    expect(String(call?.[0])).toContain("/v1/pricing");
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+      model_key: "openai:gpt-4o",
+      cache_read_price_per_million: 0.3,
+    });
   });
 
   it("does not prompt to backfill usage after setting a price", async () => {

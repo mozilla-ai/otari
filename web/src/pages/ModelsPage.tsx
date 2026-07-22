@@ -818,6 +818,47 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
   );
 }
 
+// A price pair (input/output or cache read/write) shown as two clickable
+// numbers in one cell. Clicking either opens the row's inline editor, so the
+// table stays narrow without hiding the edit affordance. Stops propagation so
+// the click edits the price rather than only selecting the row.
+function PriceCell({
+  primary,
+  secondary,
+  rowKey,
+  primaryLabel,
+  secondaryLabel,
+  onEdit,
+}: {
+  primary: number | null;
+  secondary: number | null;
+  rowKey: string;
+  primaryLabel: string;
+  secondaryLabel: string;
+  onEdit: () => void;
+}) {
+  const number = (value: number | null, label: string) => (
+    <button
+      type="button"
+      aria-label={`Edit ${label} price for ${rowKey}`}
+      className="tabular-nums hover:text-[var(--otari-brand-dark)] hover:underline"
+      onClick={(event) => {
+        event.stopPropagation();
+        onEdit();
+      }}
+    >
+      {value == null ? "—" : formatCost(value)}
+    </button>
+  );
+  return (
+    <span className="inline-flex items-center justify-end gap-1">
+      {number(primary, primaryLabel)}
+      <span className="text-[var(--otari-muted)]">/</span>
+      {number(secondary, secondaryLabel)}
+    </span>
+  );
+}
+
 function ModelTable({
   rows,
   isLoading,
@@ -847,67 +888,63 @@ function ModelTable({
           <Th>Provider</Th>
           <SortableTh label="Context" col="context" sort={sort} onSort={onSort} align="right" />
           <SortableTh
-            label="Input $ / 1M"
+            label="In / Out $ / 1M"
             col="input"
             sort={sort}
             onSort={onSort}
             align="right"
             info={<PricingInfo />}
           />
-          <SortableTh label="Output $ / 1M" col="output" sort={sort} onSort={onSort} align="right" />
-          <Th className="text-right">Cache read $ / 1M</Th>
-          <Th className="text-right">Cache write $ / 1M</Th>
-          <Th className="text-right">Price</Th>
+          <Th className="text-right">Cache r / w $ / 1M</Th>
         </Tr>
       </THead>
       <tbody>
         {isLoading ? (
-          <LoadingRow colSpan={8} />
+          <LoadingRow colSpan={5} />
         ) : rows.length > 0 ? (
-          rows.map((row) => (
-            <Fragment key={row.key}>
-              <Tr onClick={() => onSelect(row.key)} selected={row.key === selectedKey}>
-                <Td className="font-medium break-all">{row.model}</Td>
-                <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
-                <Td className="text-right tabular-nums text-[var(--otari-muted)]">
-                  {formatContext(row.contextWindow)}
-                </Td>
-                <Td className="text-right tabular-nums">
-                  {row.inputPrice == null ? "—" : formatCost(row.inputPrice)}
-                </Td>
-                <Td className="text-right tabular-nums">
-                  {row.outputPrice == null ? "—" : formatCost(row.outputPrice)}
-                </Td>
-                <Td className="text-right tabular-nums">
-                  {row.cacheReadPrice == null ? "—" : formatCost(row.cacheReadPrice)}
-                </Td>
-                <Td className="text-right tabular-nums">
-                  {row.cacheWritePrice == null ? "—" : formatCost(row.cacheWritePrice)}
-                </Td>
-                <Td className="text-right">
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-[var(--otari-brand-dark)] hover:underline"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onSetPricingKey(pricingKey === row.key ? null : row.key);
-                    }}
-                  >
-                    {row.source === "configured" ? "Edit" : "Set price"}
-                  </button>
-                </Td>
-              </Tr>
-              {pricingKey === row.key ? (
-                <tr className="border-b border-[var(--otari-line)] bg-[var(--otari-bg)] last:border-b-0">
-                  <td colSpan={8}>
-                    <InlinePriceForm row={row} onClose={() => onSetPricingKey(null)} />
-                  </td>
-                </tr>
-              ) : null}
-            </Fragment>
-          ))
+          rows.map((row) => {
+            const edit = () => onSetPricingKey(pricingKey === row.key ? null : row.key);
+            return (
+              <Fragment key={row.key}>
+                <Tr onClick={() => onSelect(row.key)} selected={row.key === selectedKey}>
+                  <Td className="font-medium break-all">{row.model}</Td>
+                  <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
+                  <Td className="text-right tabular-nums text-[var(--otari-muted)]">
+                    {formatContext(row.contextWindow)}
+                  </Td>
+                  <Td className="text-right">
+                    <PriceCell
+                      primary={row.inputPrice}
+                      secondary={row.outputPrice}
+                      rowKey={row.key}
+                      primaryLabel="input"
+                      secondaryLabel="output"
+                      onEdit={edit}
+                    />
+                  </Td>
+                  <Td className="text-right">
+                    <PriceCell
+                      primary={row.cacheReadPrice}
+                      secondary={row.cacheWritePrice}
+                      rowKey={row.key}
+                      primaryLabel="cache read"
+                      secondaryLabel="cache write"
+                      onEdit={edit}
+                    />
+                  </Td>
+                </Tr>
+                {pricingKey === row.key ? (
+                  <tr className="border-b border-[var(--otari-line)] bg-[var(--otari-bg)] last:border-b-0">
+                    <td colSpan={5}>
+                      <InlinePriceForm row={row} onClose={() => onSetPricingKey(null)} />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })
         ) : (
-          <TableMessage colSpan={8}>{empty}</TableMessage>
+          <TableMessage colSpan={5}>{empty}</TableMessage>
         )}
       </tbody>
     </Table>

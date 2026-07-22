@@ -362,6 +362,8 @@ async def list_models(
                 pricing=ModelPricingInfo(
                     input_price_per_million=pricing.input_price_per_million,
                     output_price_per_million=pricing.output_price_per_million,
+                    cache_read_price_per_million=pricing.cache_read_price_per_million,
+                    cache_write_price_per_million=pricing.cache_write_price_per_million,
                 )
                 if pricing
                 else None,
@@ -558,6 +560,8 @@ async def get_model(
             pricing=ModelPricingInfo(
                 input_price_per_million=pricing.input_price_per_million,
                 output_price_per_million=pricing.output_price_per_million,
+                cache_read_price_per_million=pricing.cache_read_price_per_million,
+                cache_write_price_per_million=pricing.cache_write_price_per_million,
             )
             if pricing
             else None,
