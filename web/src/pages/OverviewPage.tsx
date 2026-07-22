@@ -131,9 +131,8 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
         budget={budget}
         errStatus={err.status}
         errRate={err.rate}
-        // The strip evaluates health + budgets + error rate; only claim "all
-        // clear" once all three loaded successfully, so it never contradicts the
-        // ErrorBanner or announces normalcy before anything has loaded.
+        // The strip evaluates health, budgets, and error rate only after all
+        // three load successfully, avoiding transient or false alerts.
         ready={health.isSuccess && budgets.isSuccess && period.isSuccess}
         failed={health.isError || budgets.isError || period.isError}
       />
