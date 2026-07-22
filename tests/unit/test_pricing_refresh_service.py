@@ -1,14 +1,12 @@
 """Tests for explicit genai-prices snapshot refreshes."""
 
-from copy import deepcopy
-from decimal import Decimal
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
+from genai_prices import data as genai_data
 from genai_prices.data_snapshot import DataSnapshot, get_snapshot
-from genai_prices.types import ModelPrice
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,46 +19,58 @@ _PERSISTED_SNAPSHOT = (
 )
 
 
-def _snapshot_with_changed_price() -> tuple[DataSnapshot, str]:
-    snapshot = deepcopy(get_snapshot())
-    for provider in snapshot.providers:
-        for model in provider.models:
-            if isinstance(model.prices, ModelPrice) and model.prices.input_mtok is not None:
-                model.prices.input_mtok = Decimal("987.654")
-                return snapshot, f"{provider.id}:{model.id}"
-    raise AssertionError("Expected bundled genai-prices data to include a directly priced model")
+def _snapshot_with_changed_price() -> tuple[DataSnapshot, str, str]:
+    raw_snapshot = _PERSISTED_SNAPSHOT.replace('"input_mtok":"1"', '"input_mtok":"987.654"')
+    providers = genai_data.providers_schema.validate_json(raw_snapshot)
+    return DataSnapshot(providers=providers, from_auto_update=True), "test:model", raw_snapshot
 
 
 @pytest.mark.asyncio
 async def test_refresh_requires_confirmation_before_changing_active_prices(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A fetched snapshot remains pending until an operator confirms it."""
+    """A reviewed snapshot survives into a separate confirmation session."""
 
     active_snapshot = get_snapshot()
-    latest_snapshot, model_key = _snapshot_with_changed_price()
+    latest_snapshot, model_key, raw_snapshot = _snapshot_with_changed_price()
     monkeypatch.setattr(
         pricing_refresh_service,
         "_fetch_latest_snapshot",
-        lambda: pricing_refresh_service._PendingSnapshot(latest_snapshot, _PERSISTED_SNAPSHOT),
+        lambda: pricing_refresh_service._PendingSnapshot(latest_snapshot, raw_snapshot),
     )
 
-    preview = await pricing_refresh_service.prepare_price_refresh()
+    preview_session = AsyncMock(spec=AsyncSession)
+    preview_session.get.return_value = None
 
-    assert preview.changed_count >= 1
-    assert any(change.model_key == model_key and change.change == "changed" for change in preview.changes)
+    preview = await pricing_refresh_service.prepare_price_refresh(preview_session)
+
+    assert preview.added_count >= 1
     assert get_snapshot() is active_snapshot
 
-    session = AsyncMock(spec=AsyncSession)
-    session.get.return_value = None
+    pending = preview_session.add.call_args.args[0]
+    assert isinstance(pending, PricingSnapshot)
+    assert pending.source == pricing_refresh_service.GENAI_PRICES_PENDING_SOURCE
+    assert pending.snapshot == raw_snapshot
+    preview_session.commit.assert_awaited_once()
 
-    assert await pricing_refresh_service.confirm_price_refresh(session) is True
-    assert get_snapshot() is latest_snapshot
-    session.add.assert_called_once()
-    stored = session.add.call_args.args[0]
+    result = SimpleNamespace(scalar_one_or_none=lambda: pending)
+    confirmation_session = AsyncMock(spec=AsyncSession)
+    confirmation_session.execute.return_value = result
+    confirmation_session.get.return_value = None
+
+    assert await pricing_refresh_service.confirm_price_refresh(confirmation_session) is True
+    assert pricing_refresh_service._snapshot_prices(get_snapshot(), preview.fetched_at)[model_key] == (
+        pricing_refresh_service._snapshot_prices(latest_snapshot, preview.fetched_at)[model_key]
+    )
+    confirmation_session.add.assert_called_once()
+    stored = confirmation_session.add.call_args.args[0]
     assert isinstance(stored, PricingSnapshot)
     assert stored.source == pricing_refresh_service.GENAI_PRICES_SOURCE
-    assert stored.snapshot == _PERSISTED_SNAPSHOT
-    session.commit.assert_awaited_once()
-    assert await pricing_refresh_service.confirm_price_refresh(session) is False
+    assert stored.snapshot == raw_snapshot
+    confirmation_session.delete.assert_awaited_once_with(pending)
+    confirmation_session.commit.assert_awaited_once()
+
+    no_pending = AsyncMock(spec=AsyncSession)
+    no_pending.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: None)
+    assert await pricing_refresh_service.confirm_price_refresh(no_pending) is False
 
 
 @pytest.mark.asyncio
@@ -83,14 +93,20 @@ async def test_failed_snapshot_persistence_keeps_the_active_prices(monkeypatch: 
     """A database failure cannot activate a snapshot that was not saved."""
 
     active_snapshot = get_snapshot()
-    latest_snapshot, _ = _snapshot_with_changed_price()
+    latest_snapshot, _, _ = _snapshot_with_changed_price()
     monkeypatch.setattr(
         pricing_refresh_service,
         "_fetch_latest_snapshot",
         lambda: pricing_refresh_service._PendingSnapshot(latest_snapshot, _PERSISTED_SNAPSHOT),
     )
-    await pricing_refresh_service.prepare_price_refresh()
+    preview_session = AsyncMock(spec=AsyncSession)
+    preview_session.get.return_value = None
+    await pricing_refresh_service.prepare_price_refresh(preview_session)
+    pending = preview_session.add.call_args.args[0]
+
+    result = SimpleNamespace(scalar_one_or_none=lambda: pending)
     session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = result
     session.get.return_value = None
     session.commit.side_effect = SQLAlchemyError("database unavailable")
 

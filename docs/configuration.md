@@ -303,9 +303,9 @@ hundreds of models across the major providers. With it on, common models (for ex
 `anthropic:claude-sonnet-4-6`) are priced without any configuration, so `require_pricing` does not reject
 them. The defaults are bundled with the installed package; no network access is used by default. A master-key
 operator can use **Check for price updates** in dashboard **Settings** to fetch the latest upstream snapshot, review
-the added, changed, and removed rates, and explicitly accept or reject it. Accepted snapshots are stored in the
-database with source `genai-prices` and restored after a restart. Stored custom prices always take precedence and
-are not changed by a refresh.
+the added, changed, and removed rates, and explicitly accept or reject it. Pending reviews and accepted snapshots are
+stored in the database, so the decision survives a restart. The accepted snapshot uses source `genai-prices`. Stored
+custom prices always take precedence and are not changed by a refresh.
 
 It is opt-in because a billing gateway should generally charge on rates you control: community estimates can
 lag or differ from real provider rates, and turning this on changes what `require_pricing: true` guarantees

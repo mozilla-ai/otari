@@ -3,7 +3,6 @@
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from threading import Lock
 
 import httpx2
 from genai_prices import data as genai_data
@@ -19,16 +18,13 @@ from gateway.services.pricing_service import reset_price_cache
 
 _PREVIEW_CHANGE_LIMIT = 100
 GENAI_PRICES_SOURCE = "genai-prices"
-_refresh_lock = Lock()
+GENAI_PRICES_PENDING_SOURCE = "genai-prices-pending"
 
 
 @dataclass(frozen=True)
 class _PendingSnapshot:
     snapshot: DataSnapshot
     raw_snapshot: str
-
-
-_pending_snapshot: _PendingSnapshot | None = None
 
 
 class PricingRefreshError(Exception):
@@ -115,8 +111,8 @@ def _fetch_latest_snapshot() -> _PendingSnapshot:
     )
 
 
-async def prepare_price_refresh() -> PricingRefreshPreview:
-    """Fetch and hold a new snapshot until an operator confirms it."""
+async def prepare_price_refresh(session: AsyncSession) -> PricingRefreshPreview:
+    """Fetch and persist a new snapshot until an operator confirms it."""
 
     try:
         latest = await asyncio.to_thread(_fetch_latest_snapshot)
@@ -124,48 +120,73 @@ async def prepare_price_refresh() -> PricingRefreshPreview:
         raise PricingRefreshError("Unable to fetch the latest genai-prices data") from exc
 
     fetched_at = datetime.now(UTC)
-    with _refresh_lock:
-        global _pending_snapshot
-        _pending_snapshot = latest
-        return _build_preview(get_snapshot(), latest.snapshot, fetched_at)
+    preview = _build_preview(get_snapshot(), latest.snapshot, fetched_at)
+    pending_row = await session.get(PricingSnapshot, GENAI_PRICES_PENDING_SOURCE)
+    if pending_row is None:
+        session.add(PricingSnapshot(source=GENAI_PRICES_PENDING_SOURCE, snapshot=latest.raw_snapshot))
+    else:
+        pending_row.snapshot = latest.raw_snapshot
+    try:
+        await session.commit()
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise PricingRefreshError("Unable to save the latest genai-prices data") from exc
+    return preview
 
 
 async def confirm_price_refresh(session: AsyncSession) -> bool:
     """Persist and activate the pending snapshot, returning false when absent."""
 
-    global _pending_snapshot
-    with _refresh_lock:
-        pending = _pending_snapshot
-        if pending is None:
-            return False
+    pending_row = (
+        await session.execute(
+            select(PricingSnapshot)
+            .where(PricingSnapshot.source == GENAI_PRICES_PENDING_SOURCE)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if pending_row is None:
+        return False
+    try:
+        providers = genai_data.providers_schema.validate_json(pending_row.snapshot)
+    except ValueError as exc:
+        raise PricingRefreshError("The pending genai-prices data is invalid") from exc
 
-    row = await session.get(PricingSnapshot, GENAI_PRICES_SOURCE)
-    if row is None:
-        session.add(PricingSnapshot(source=GENAI_PRICES_SOURCE, snapshot=pending.raw_snapshot))
+    snapshot = DataSnapshot(providers=providers, from_auto_update=True)
+    active_row = await session.get(PricingSnapshot, GENAI_PRICES_SOURCE)
+    if active_row is None:
+        session.add(PricingSnapshot(source=GENAI_PRICES_SOURCE, snapshot=pending_row.snapshot))
     else:
-        row.snapshot = pending.raw_snapshot
+        active_row.snapshot = pending_row.snapshot
+    await session.delete(pending_row)
     try:
         await session.commit()
     except SQLAlchemyError as exc:
         await session.rollback()
         raise PricingRefreshError("Unable to save the latest genai-prices data") from exc
 
-    with _refresh_lock:
-        set_custom_snapshot(pending.snapshot)
-        if _pending_snapshot is pending:
-            _pending_snapshot = None
+    set_custom_snapshot(snapshot)
     reset_price_cache()
     return True
 
 
-def reject_price_refresh() -> bool:
+async def reject_price_refresh(session: AsyncSession) -> bool:
     """Discard the pending snapshot without changing active pricing."""
 
-    global _pending_snapshot
-    with _refresh_lock:
-        if _pending_snapshot is None:
-            return False
-        _pending_snapshot = None
+    pending_row = (
+        await session.execute(
+            select(PricingSnapshot)
+            .where(PricingSnapshot.source == GENAI_PRICES_PENDING_SOURCE)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if pending_row is None:
+        return False
+    await session.delete(pending_row)
+    try:
+        await session.commit()
+    except SQLAlchemyError as exc:
+        await session.rollback()
+        raise PricingRefreshError("Unable to discard the pending genai-prices data") from exc
     return True
 
 
@@ -188,10 +209,7 @@ async def load_persisted_price_snapshot(session: AsyncSession) -> None:
 
 
 def reset_price_refresh_state() -> None:
-    """Restore bundled pricing and discard a pending refresh, for app tests."""
+    """Restore bundled pricing for app tests."""
 
-    global _pending_snapshot
-    with _refresh_lock:
-        _pending_snapshot = None
-        set_custom_snapshot(None)
+    set_custom_snapshot(None)
     reset_price_cache()

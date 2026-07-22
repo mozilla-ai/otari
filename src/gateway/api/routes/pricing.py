@@ -140,7 +140,7 @@ async def preview_pricing_refresh(
     """Fetch the latest defaults and hold them for operator review."""
 
     try:
-        preview = await prepare_price_refresh()
+        preview = await prepare_price_refresh(db)
     except PricingRefreshError:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -191,10 +191,19 @@ async def confirm_pricing_refresh(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(verify_master_key)],
 )
-async def reject_pricing_refresh() -> None:
+async def reject_pricing_refresh(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
     """Discard a reviewed default-price snapshot without applying it."""
 
-    if not reject_price_refresh():
+    try:
+        rejected = await reject_price_refresh(db)
+    except PricingRefreshError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to discard the pending genai-prices data",
+        ) from None
+    if not rejected:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending genai-prices refresh to reject")
 
 

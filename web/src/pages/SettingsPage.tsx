@@ -607,7 +607,7 @@ function PricingRefreshSection() {
             <div className="min-w-0">
               <div className="text-sm font-medium text-[var(--otari-ink)]">genai-prices defaults</div>
               <p className="mt-1 max-w-3xl text-sm text-[var(--otari-muted)]">
-                Fetch the latest upstream catalog, inspect every proposed price change, then accept or reject it. Accepted
+                Fetch the latest upstream catalog, review the proposed change summary, then accept or reject it. Accepted
                 data is stored as <code>genai-prices</code>; custom prices remain separate and always take precedence.
               </p>
             </div>

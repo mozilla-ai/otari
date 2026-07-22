@@ -27,7 +27,7 @@ def test_preview_pricing_refresh_reports_protected_custom_prices(
     )
     assert configured.status_code == 200
 
-    async def preview() -> PricingRefreshPreview:
+    async def preview(_: object) -> PricingRefreshPreview:
         return PricingRefreshPreview(
             fetched_at=datetime.now(UTC),
             added_count=1,
