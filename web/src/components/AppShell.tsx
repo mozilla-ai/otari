@@ -46,6 +46,9 @@ interface NavItem {
   label: string;
   section: string;
   icon: ReactNode;
+  // NavLink matches by prefix; the index route ("/") needs `end` or it stays
+  // highlighted on every page.
+  end?: boolean;
 }
 
 // Sidebar groups, in display order. "Observability" is what the gateway did
@@ -55,6 +58,7 @@ interface NavItem {
 // budgets); "system" holds standalone config with no header. Grouping keeps the
 // list legible as the dashboard grows.
 const NAV_SECTIONS: { key: string; label?: string }[] = [
+  { key: "home" },
   { key: "observability", label: "Observability" },
   { key: "catalog", label: "Catalog" },
   { key: "access", label: "Access" },
@@ -62,6 +66,22 @@ const NAV_SECTIONS: { key: string; label?: string }[] = [
 ];
 
 const NAV: NavItem[] = [
+  {
+    to: "/",
+    section: "home",
+    label: "Overview",
+    // The index/home, so it leads the sidebar above the grouped sections.
+    end: true,
+    icon: (
+      // Four panes: an at-a-glance dashboard of the gateway.
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+        <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" strokeLinejoin="round" />
+        <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" strokeLinejoin="round" />
+        <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" strokeLinejoin="round" />
+        <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
   {
     to: "/activity",
     section: "observability",
@@ -314,6 +334,7 @@ export function AppShell() {
                       <NavLink
                         key={item.to}
                         to={item.to}
+                        end={item.end}
                         aria-label={collapsed ? item.label : undefined}
                         title={collapsed ? item.label : undefined}
                         className={({ isActive }) =>

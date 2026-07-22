@@ -1,18 +1,82 @@
 import { Button, Card, ComboBox, Input, Label, ListBox, ListBoxItem } from "@heroui/react";
 import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
+import { NavLink } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
+import { formatPct } from "@/lib/format";
 
-export function StatCard({ label, value, hint }: { label: string; value: ReactNode; hint?: ReactNode }) {
-  return (
-    <Card className="flex-1 min-w-[180px]">
-      <Card.Content className="flex flex-col gap-1 p-5">
-        <span className="text-xs font-medium uppercase tracking-wide text-[var(--otari-muted)]">{label}</span>
+// A tile's attention status. Colors mirror the banner precedent (ErrorBanner
+// red-*, InfoBanner amber-*) and add emerald for the healthy state. Color is
+// never the only signal: a status tile also carries a word/icon via `statusLabel`.
+export type StatStatus = "ok" | "warn" | "alert";
+
+const STAT_STATUS: Record<StatStatus, { accent: string; pill: string }> = {
+  ok: { accent: "border-l-emerald-500", pill: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  warn: { accent: "border-l-amber-500", pill: "border-amber-200 bg-amber-50 text-amber-800" },
+  alert: { accent: "border-l-red-500", pill: "border-red-200 bg-red-50 text-red-700" },
+};
+
+export function StatCard({
+  label,
+  value,
+  hint,
+  status,
+  statusLabel,
+  to,
+}: {
+  label: string;
+  value: ReactNode;
+  hint?: ReactNode;
+  status?: StatStatus;
+  // A short word (and/or icon) shown as a pill beside the value. Required to be a
+  // non-color signal so status is legible without hue (colorblind operators).
+  statusLabel?: ReactNode;
+  // When set, the whole tile is a keyboard-focusable link to this route.
+  to?: string;
+}) {
+  const accent = status ? `border-l-4 ${STAT_STATUS[status].accent}` : "";
+  const body = (
+    <Card.Content className="flex flex-col gap-1 p-5">
+      <span className="text-xs font-medium uppercase tracking-wide text-[var(--otari-muted)]">{label}</span>
+      <span className="flex flex-wrap items-center gap-2">
         <span className="text-2xl font-semibold text-[var(--otari-ink)]">{value}</span>
-        {hint ? <span className="text-xs text-[var(--otari-muted)]">{hint}</span> : null}
-      </Card.Content>
-    </Card>
+        {status && statusLabel ? (
+          <span
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${STAT_STATUS[status].pill}`}
+          >
+            {statusLabel}
+          </span>
+        ) : null}
+      </span>
+      {hint ? <span className="text-xs text-[var(--otari-muted)]">{hint}</span> : null}
+    </Card.Content>
+  );
+  const cardClass = `flex-1 min-w-[180px] ${accent}`;
+  if (to) {
+    return (
+      <Card className={`${cardClass} transition-colors hover:border-[var(--otari-brand)]`}>
+        <NavLink
+          to={to}
+          className="block rounded-[inherit] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)]"
+        >
+          {body}
+        </NavLink>
+      </Card>
+    );
+  }
+  return <Card className={cardClass}>{body}</Card>;
+}
+
+// Period-over-period change hint. Pairs an arrow glyph with the number (never hue
+// alone) so direction reads without color. null hides it (no comparable previous).
+export function DeltaHint({ fraction }: { fraction: number | null }) {
+  if (fraction === null) return null;
+  const arrow = fraction > 0 ? "▲" : fraction < 0 ? "▼" : "•";
+  return (
+    <span className="text-[var(--otari-muted)]">
+      {arrow} {formatPct(Math.abs(fraction))} vs prev
+    </span>
   );
 }
 

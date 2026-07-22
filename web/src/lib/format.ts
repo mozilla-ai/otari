@@ -82,6 +82,37 @@ export function formatDateTime(iso: string | null | undefined): string {
   return date.toLocaleString();
 }
 
+// Compact USD for aggregate tiles: cents precision (not the per-request 4dp that
+// formatCost uses), so four+ figure totals stay readable. Non-null: callers guard
+// nullable per-request costs (e.g. `cost === null ? "—" : formatUsd(cost)`).
+const usdCompact = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 2,
+});
+
+export function formatUsd(value: number): string {
+  return usdCompact.format(value);
+}
+
+// Compact token counts for aggregate tiles: 12.4M / 84.2k / 512.
+export function formatTokens(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(value);
+}
+
+export function formatPct(fraction: number): string {
+  return `${(fraction * 100).toFixed(1)}%`;
+}
+
+// Period-over-period change. null when there is no comparable previous value
+// (unbounded range, or a previous value of zero which would divide by zero).
+export function deltaFraction(current: number, previous: number | undefined): number | null {
+  if (previous === undefined || previous === 0) return null;
+  return (current - previous) / previous;
+}
+
 export function formatRelative(iso: string | null | undefined, now: number = Date.now()): string {
   if (!iso) {
     return "never";
