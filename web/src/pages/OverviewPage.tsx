@@ -96,9 +96,9 @@ export function OverviewPage() {
   const activeUsers = (users.data ?? []).filter((u) => !u.blocked).length;
 
   // Surface the first load error across the tile queries so a broken master key
-  // or backend does not just leave a wall of "—".
-  const loadError =
-    today.error ?? period.error ?? health.error ?? budgets.error ?? keys.error ?? users.error ?? recent.error;
+  // or backend does not just leave a wall of "—". Recent activity is excluded: it
+  // renders its own inline banner, so including it here would double-report.
+  const loadError = today.error ?? period.error ?? health.error ?? budgets.error ?? keys.error ?? users.error;
 
   return (
     <div className="flex flex-col gap-6">
