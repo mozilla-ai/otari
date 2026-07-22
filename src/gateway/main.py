@@ -141,10 +141,13 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # converge, the same way aliases and provider credentials do.
             price_refresher = asyncio.create_task(run_price_snapshot_refresher())
 
-        await log_writer.start()
-        app.state.log_writer = log_writer
-
+        # Start the writer inside the try so a failure here still runs the cleanup
+        # below; the refresher tasks are already created and would otherwise leak.
+        log_writer_started = False
         try:
+            await log_writer.start()
+            log_writer_started = True
+            app.state.log_writer = log_writer
             yield
         finally:
             if alias_refresher is not None:
@@ -161,7 +164,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 price_refresher.cancel()
                 with suppress(asyncio.CancelledError):
                     await price_refresher
-            await log_writer.stop()
+            # Only stop a writer that actually started; if start() raised there is
+            # nothing to stop, but the refreshers above still needed cancelling.
+            if log_writer_started:
+                await log_writer.stop()
 
     return lifespan
 
