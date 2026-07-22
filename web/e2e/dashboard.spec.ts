@@ -13,8 +13,8 @@ async function login(page: Page): Promise<void> {
   await page.goto("/");
   await page.locator('input[type="password"]').fill(MASTER_KEY);
   await page.locator('input[type="password"]').press("Enter");
-  // The sidebar appears once authenticated, regardless of which page the index
-  // redirect lands on.
+  // The sidebar appears once authenticated, regardless of the index landing
+  // page.
   await expect(nav(page).getByRole("link", { name: "Providers" })).toBeVisible();
 }
 
@@ -22,13 +22,15 @@ async function login(page: Page): Promise<void> {
 test.describe.configure({ mode: "serial" });
 
 test.describe("dashboard core flows", () => {
-  test("first-run onboarding is shown before any provider exists", async ({ page }) => {
+  test("first-run overview guides the operator to provider setup", async ({ page }) => {
     await login(page);
-    await expect(page.getByText("Welcome to Otari")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    await expect(page.getByText("Get started with Otari")).toBeVisible();
   });
 
   test("add a provider from onboarding, and it appears in the table", async ({ page }) => {
     await login(page);
+    await page.getByRole("button", { name: "Add your first provider" }).click();
     await expect(page.getByText("Welcome to Otari")).toBeVisible();
 
     await page.getByRole("button", { name: "Add your first provider" }).click();
