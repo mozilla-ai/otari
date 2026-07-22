@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
+import * as apiClient from "@/api/client";
 import type {
   AliasResponse,
   DiscoverableModelsResponse,
@@ -174,20 +174,9 @@ function renderWithClient(ui: ReactElement, initialEntries: string[] = ["/"]) {
   );
 }
 
-function notFound(): Response {
-  return new Response(JSON.stringify({ detail: "Model not found" }), {
-    status: 404,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
-}
-
 function mockApi(
   opts: {
-    post?: (url: string) => Response;
+    post?: (url: string) => unknown;
     catalog?: ModelListResponse;
     pricing?: PricingResponse[];
     aliases?: AliasResponse[];
@@ -195,39 +184,39 @@ function mockApi(
     metadata?: ModelMetadataResponse;
   } = {},
 ) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+  return vi.spyOn(apiClient, "apiFetch").mockImplementation(async (input, init) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
     if (method === "POST") {
-      return opts.post ? opts.post(url) : jsonResponse(PRICED);
+      return (opts.post ? opts.post(url) : PRICED) as never;
     }
     if (method === "DELETE") {
-      return jsonResponse(null);
+      return null as never;
     }
     if (url.includes("/v1/settings")) {
-      return jsonResponse(SETTINGS);
+      return SETTINGS as never;
     }
     // Specific /v1/models/* routes before the /v1/models/ catch-all (which 404s,
     // matching the server's route order).
     if (url.includes("/v1/models/discoverable")) {
-      return jsonResponse(opts.discoverable ?? DISCOVERABLE);
+      return (opts.discoverable ?? DISCOVERABLE) as never;
     }
     if (url.includes("/v1/models/metadata")) {
-      return jsonResponse(opts.metadata ?? METADATA);
+      return (opts.metadata ?? METADATA) as never;
     }
     if (url.includes("/v1/aliases")) {
-      return jsonResponse(opts.aliases ?? ALIASES);
+      return (opts.aliases ?? ALIASES) as never;
     }
     if (url.includes("/v1/models/")) {
-      return notFound();
+      throw new Error("Model not found");
     }
     if (url.includes("/v1/models")) {
-      return jsonResponse(opts.catalog ?? CATALOG);
+      return (opts.catalog ?? CATALOG) as never;
     }
     if (url.includes("/v1/pricing")) {
-      return jsonResponse(opts.pricing ?? [PRICED]);
+      return (opts.pricing ?? [PRICED]) as never;
     }
-    return jsonResponse([]);
+    return [] as never;
   });
 }
 
@@ -246,14 +235,14 @@ function modelOrder(): string[] {
 
 describe("ModelsPage", () => {
   beforeEach(() => {
-    setMasterKey("test-master-key");
+    apiClient.setMasterKey("test-master-key");
     // The page persists sort choice in localStorage; start each test clean so
     // one test's sort does not leak into the next.
     window.localStorage.clear();
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    setMasterKey(null);
+    apiClient.setMasterKey(null);
     window.localStorage.clear();
   });
 
@@ -679,6 +668,27 @@ describe("ModelsPage", () => {
     expect(within(row).getByRole("button", { name: "Edit input price for openai:gpt-4o" })).toHaveTextContent("$5.00");
     expect(within(row).getByRole("button", { name: "Edit pricing policy for openai:gpt-4o" })).toHaveTextContent(
       "1 tier · ≥ 200K",
+    );
+  });
+
+  it("orders pricing-policy thresholds by their underlying token count", async () => {
+    mockApi({
+      pricing: [
+        {
+          ...PRICED,
+          pricing_tiers: [
+            { min_input_tokens: 1_000_000, input_price_per_million: 6 },
+            { min_input_tokens: 999_000, input_price_per_million: 5 },
+          ],
+        },
+      ],
+    });
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    expect(within(tableRow("openai:gpt-4o")).getByRole("button", { name: "Edit pricing policy for openai:gpt-4o" })).toHaveTextContent(
+      "2 tiers · ≥ 999K, 1M",
     );
   });
 

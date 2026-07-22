@@ -924,9 +924,9 @@ function CachingCell({ rates, rowKey, onEdit }: { rates: EffectiveRates; rowKey:
 }
 
 function PricingPolicyCell({ row, onEdit }: { row: ModelRow; onEdit: () => void }) {
-  const thresholds = row.pricingTiers
+  const thresholds = [...row.pricingTiers]
+    .sort((a, b) => a.min_input_tokens - b.min_input_tokens)
     .map((tier) => formatContext(tier.min_input_tokens))
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const label =
     thresholds.length === 0
       ? "Base only"

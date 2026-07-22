@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
@@ -14,6 +15,7 @@ from gateway.log_config import logger
 from gateway.metrics import record_budget_exceeded
 from gateway.models.entities import Budget, BudgetResetLog, ModelPricing, User
 from gateway.repositories.users_repository import get_active_user
+from gateway.services.metered_pricing import estimate_metered_cost
 from gateway.services.pricing_service import find_model_pricing
 
 
@@ -135,14 +137,16 @@ def estimate_cost(
     prompt_chars: int,
     max_output_tokens: int | None,
     default_output_tokens: int,
+    cache_write_ttl: Literal["5m", "1h"] | None = None,
 ) -> float:
     """Estimate request cost up front for budget pre-debit.
 
     There is no tokenizer in the gateway, so prompt tokens are approximated as
     ``chars / 4`` (a common rough heuristic). Output tokens default to the
     request's declared max, falling back to ``default_output_tokens`` when the
-    caller leaves the output unbounded. The estimate is intentionally an
-    upper-ish bound; it is reconciled to actual usage on completion.
+    caller leaves the output unbounded. Explicit Anthropic cache creation is
+    conservatively reserved as a possible additional input meter. The estimate
+    is reconciled to actual usage on completion.
     """
     if pricing is None:
         return 0.0
@@ -152,9 +156,12 @@ def estimate_cost(
     # so a hostile max_output_tokens can't produce a negative estimate.
     output_tokens = max_output_tokens if max_output_tokens is not None else default_output_tokens
     output_tokens = max(output_tokens, 0)
-    return (prompt_tokens / 1_000_000) * pricing.input_price_per_million + (
-        output_tokens / 1_000_000
-    ) * pricing.output_price_per_million
+    return estimate_metered_cost(
+        pricing,
+        estimated_input_tokens=prompt_tokens,
+        estimated_output_tokens=output_tokens,
+        cache_write_ttl=cache_write_ttl,
+    )
 
 
 async def reserve_budget(

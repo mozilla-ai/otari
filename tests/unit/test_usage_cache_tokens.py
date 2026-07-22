@@ -8,7 +8,7 @@ from any_llm.types.completion import (
 )
 
 from gateway.api.routes.chat import _ChatAdapter
-from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter
+from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter, _requested_cache_write_ttl
 from gateway.api.routes.responses import _usage_to_completion_usage
 from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
 
@@ -17,6 +17,19 @@ def test_gateway_usage_defaults_to_zero() -> None:
     usage = GatewayUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
     assert usage.cache_read_tokens == 0
     assert usage.cache_write_tokens == 0
+
+
+def test_requested_cache_write_ttl_detects_nested_and_top_level_controls() -> None:
+    assert _requested_cache_write_ttl({"type": "ephemeral"}) == "5m"
+    assert _requested_cache_write_ttl([{"cache_control": {"type": "ephemeral", "ttl": "1h"}}]) == "1h"
+    assert (
+        _requested_cache_write_ttl(
+            {"cache_control": {"type": "ephemeral"}},
+            [{"cache_control": {"type": "ephemeral", "ttl": "1h"}}],
+        )
+        == "1h"
+    )
+    assert _requested_cache_write_ttl({"type": "text", "text": "uncached"}) is None
 
 
 def test_from_completion_usage_reads_cached_tokens_fallback() -> None:

@@ -25,7 +25,7 @@ from any_llm.types.completion import CompletionUsage
 from pydantic import ValidationError
 
 from gateway.api.routes._pipeline import _compute_cost
-from gateway.core.config import PricingConfig
+from gateway.core.config import PricingConfig, PricingTierConfig
 from gateway.core.usage import GatewayUsage
 from gateway.models.entities import ModelPricing
 
@@ -365,4 +365,13 @@ def test_pricing_config_rejects_negative_cache_rate() -> None:
             input_price_per_million=30.0,
             output_price_per_million=60.0,
             cache_read_price_per_million=-1.0,
+        )
+
+
+def test_pricing_config_rejects_tier_without_rate_override() -> None:
+    with pytest.raises(ValidationError, match="pricing tier must override at least one price field"):
+        PricingConfig(
+            input_price_per_million=1,
+            output_price_per_million=2,
+            pricing_tiers=[PricingTierConfig(min_input_tokens=200_000)],
         )

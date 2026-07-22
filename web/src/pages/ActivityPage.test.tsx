@@ -132,7 +132,7 @@ describe("ActivityPage", () => {
     expect(within(batch).getByText("—")).toBeInTheDocument();
   });
 
-  it("expands an error row to show the full error text and a copy affordance", async () => {
+  it("expands an error row without exposing provider diagnostics", async () => {
     const user = userEvent.setup();
     mockApi({ rows: [entry({ status: "error", error_message: "provider exploded: quota exceeded" })] });
     renderPage(<ActivityPage />);
@@ -141,8 +141,9 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("error")).toBeInTheDocument();
 
     await user.click(row);
-    expect(screen.getByText("provider exploded: quota exceeded")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(screen.getByText("The provider returned an error. Inspect gateway logs for details.")).toBeInTheDocument();
+    expect(screen.queryByText("provider exploded: quota exceeded")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
   });
 
   it("reports copying only after the clipboard write succeeds", async () => {

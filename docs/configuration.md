@@ -335,8 +335,7 @@ written to the database.
 
 Limitations when enabled:
 
-- **Tiered pricing** is flattened to the base rate, so a request that crosses a context tier is billed at
-  the base (a small under or over charge for very large requests).
+- **Tiered pricing** is retained from the dataset and applied when a request crosses a configured context threshold.
 - A **provider-agnostic match** is attempted when the exact provider is not in the dataset; an ambiguous
   model *name* could resolve to a different provider's rate. Prefer configuring such models explicitly.
 - **HuggingFace** is modeled per inference backend, so a model is priced only when you pin a backend with

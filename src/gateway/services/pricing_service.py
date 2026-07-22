@@ -212,9 +212,9 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
     Whether this fallback runs at all is the caller's decision (the
     ``default_pricing`` config field, gating ``find_model_pricing``).
 
-    Caveats: a model with tiered ("cliff") pricing is billed at its base rate, and
-    a provider-agnostic match (below) may resolve an ambiguous model *name* to a
-    different provider's rate.
+    Tiered ("cliff") pricing retains its context thresholds. A provider-agnostic
+    match (below) may resolve an ambiguous model *name* to a different provider's
+    rate.
     """
 
     calc = _resolve_genai_price(provider, model, as_of)

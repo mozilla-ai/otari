@@ -117,24 +117,6 @@ export async function copyToClipboard(
   }
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <Button
-      size="sm"
-      variant="ghost"
-      onPress={async () => {
-        if (await copyToClipboard(text)) {
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
-        }
-      }}
-    >
-      {copied ? "Copied" : "Copy"}
-    </Button>
-  );
-}
-
 function DetailField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5">
@@ -144,8 +126,8 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-// The expandable detail panel for one request: the full error text (copyable)
-// plus the metadata that does not fit the row.
+// The expandable detail panel for one request: a safe error summary plus the
+// metadata that does not fit the row. Provider diagnostics stay server-side.
 function RequestDetail({ entry }: { entry: UsageEntry }) {
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
@@ -153,12 +135,11 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
         <div className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
-              Error (provider-reported)
+              Error
             </span>
-            <CopyButton text={entry.error_message} />
           </div>
           <pre className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-red-50 p-3 text-xs whitespace-pre-wrap break-all text-red-700">
-            {entry.error_message}
+            The provider returned an error. Inspect gateway logs for details.
           </pre>
         </div>
       ) : null}

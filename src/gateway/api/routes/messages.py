@@ -1,7 +1,7 @@
 import math
 import uuid
 from collections.abc import AsyncIterator, Callable
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from any_llm import LLMProvider, amessages
 from any_llm.types.completion import CompletionUsage
@@ -208,6 +208,32 @@ def _cache_write_1h_tokens(usage: Any) -> int:
     return getattr(cache_creation, "ephemeral_1h_input_tokens", 0) or 0
 
 
+def _requested_cache_write_ttl(*values: Any) -> Literal["5m", "1h"] | None:
+    """Return the longest explicitly requested Anthropic cache-write TTL."""
+    found_cache_write = False
+
+    def visit(value: Any) -> bool:
+        nonlocal found_cache_write
+        if isinstance(value, dict):
+            cache_control = value.get("cache_control")
+            if value.get("type") == "ephemeral":
+                found_cache_write = True
+                if value.get("ttl") == "1h":
+                    return True
+            if isinstance(cache_control, dict) and cache_control.get("type") == "ephemeral":
+                found_cache_write = True
+                if cache_control.get("ttl") == "1h":
+                    return True
+            return any(visit(child) for child in value.values())
+        if isinstance(value, list):
+            return any(visit(item) for item in value)
+        return False
+
+    if any(visit(value) for value in values):
+        return "1h"
+    return "5m" if found_cache_write else None
+
+
 class _MessagesAdapter:
     """Anthropic Messages edges of the shared pipeline.
 
@@ -368,6 +394,12 @@ async def create_message(
             user_id_from_request=str(user_from_metadata) if user_from_metadata else None,
             estimate_prompt_chars=len(str(request.messages)) + len(str(request.system or "")),
             estimate_max_output_tokens=request.max_tokens,
+            estimate_cache_write_ttl=_requested_cache_write_ttl(
+                request.cache_control,
+                request.system,
+                request.messages,
+                request.tools,
+            ),
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             normalize_messages=_normalize,

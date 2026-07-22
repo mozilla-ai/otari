@@ -35,7 +35,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import Any, Generic, NamedTuple, NoReturn, Protocol, TypeVar
+from typing import Any, Generic, Literal, NamedTuple, NoReturn, Protocol, TypeVar
 from urllib.parse import ParseResult, urlparse
 
 import httpx
@@ -511,6 +511,7 @@ async def resolve_request_context(
     estimate_max_output_tokens: int | None,
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
+    estimate_cache_write_ttl: Literal["5m", "1h"] | None = None,
     normalize_messages: Callable[
         [str, LLMProvider | None, str, str | None], Awaitable[tuple[int, CompletionUsage | None]]
     ]
@@ -617,6 +618,7 @@ async def resolve_request_context(
             prompt_chars=estimate_prompt_chars,
             max_output_tokens=estimate_max_output_tokens,
             default_output_tokens=config.budget_estimate_default_output_tokens,
+            cache_write_ttl=estimate_cache_write_ttl,
         )
         # Reserve first so user/blocked/budget rejections (404/403) take
         # precedence over the missing-pricing rejection (402); refund if we
@@ -663,6 +665,7 @@ async def resolve_request_context(
                     prompt_chars=post_chars,
                     max_output_tokens=estimate_max_output_tokens,
                     default_output_tokens=config.budget_estimate_default_output_tokens,
+                    cache_write_ttl=estimate_cache_write_ttl,
                 )
                 await increase_reservation(
                     db,

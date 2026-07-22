@@ -85,6 +85,19 @@ class PricingTierConfig(BaseModel):
     cache_write_price_per_million: float | None = Field(default=None, ge=0)
     cache_write_1h_price_per_million: float | None = Field(default=None, ge=0)
 
+    @model_validator(mode="after")
+    def validate_has_rate_override(self) -> "PricingTierConfig":
+        rates = (
+            self.input_price_per_million,
+            self.output_price_per_million,
+            self.cache_read_price_per_million,
+            self.cache_write_price_per_million,
+            self.cache_write_1h_price_per_million,
+        )
+        if all(rate is None for rate in rates):
+            raise ValueError("pricing tier must override at least one price field")
+        return self
+
 
 class PricingConfig(BaseModel):
     """Model pricing configuration."""

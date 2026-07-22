@@ -1,7 +1,7 @@
 """Provider-neutral token meters and threshold-aware pricing helpers."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from gateway.core.usage import (
     cache_read_tokens_of,
@@ -60,7 +60,7 @@ def billable_usage(usage: Any) -> BillableUsage:
     )
 
 
-def effective_rates(pricing: ModelPricing, total_input_tokens: int) -> dict[str, float | None]:
+def effective_rates(pricing: ModelPricing, total_input_tokens: int | float) -> dict[str, float | None]:
     """Select base or whole-request threshold rates for a usage event."""
     rates = {field: getattr(pricing, field) for field in RATE_FIELDS}
     tiers = pricing.pricing_tiers or []
@@ -73,6 +73,43 @@ def effective_rates(pricing: ModelPricing, total_input_tokens: int) -> dict[str,
         if value is not None:
             rates[field] = float(value)
     return rates
+
+
+def estimate_metered_cost(
+    pricing: ModelPricing,
+    *,
+    estimated_input_tokens: float,
+    estimated_output_tokens: int,
+    cache_write_ttl: Literal["5m", "1h"] | None = None,
+) -> float:
+    """Conservatively price a request before provider usage is available.
+
+    A requested Anthropic cache entry is reported as an additional input meter,
+    not as a discounted portion of ordinary prompt input. Until the provider
+    reports its exact meter, reserve for every estimated prompt token becoming
+    a cache write. This also selects threshold rates from the corresponding
+    total billable input.
+    """
+    input_tokens = max(estimated_input_tokens, 0.0)
+    output_tokens = max(estimated_output_tokens, 0)
+    cache_write_tokens = input_tokens if cache_write_ttl is not None else 0.0
+    rates = effective_rates(pricing, input_tokens + cache_write_tokens)
+
+    input_rate = rates["input_price_per_million"]
+    output_rate = rates["output_price_per_million"]
+    assert input_rate is not None
+    assert output_rate is not None
+    cost = (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000
+
+    if cache_write_ttl == "1h":
+        cache_write_rate = rates["cache_write_1h_price_per_million"]
+        if cache_write_rate is None:
+            cache_write_rate = rates["cache_write_price_per_million"]
+    else:
+        cache_write_rate = rates["cache_write_price_per_million"]
+    if cache_write_rate is not None:
+        cost += cache_write_tokens * cache_write_rate / 1_000_000
+    return cost
 
 
 def calculate_metered_cost(

@@ -285,6 +285,8 @@ def test_set_pricing_persists_context_tiers_and_1h_cache_rate(
                 "min_input_tokens": 200000,
                 "input_price_per_million": 6.0,
                 "output_price_per_million": 22.5,
+                "cache_read_price_per_million": None,
+                "cache_write_price_per_million": None,
                 "cache_write_1h_price_per_million": 12.0,
             }
         ],
