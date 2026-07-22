@@ -881,7 +881,9 @@ export function ModelsPage() {
 
   // A provider clicked on the Providers page arrives as ?provider=<instance>,
   // pre-selecting that provider's filter so the list shows only their models.
-  const [providerFilter, setProviderFilter] = useState(searchParams.get("provider") ?? "all");
+  // An empty param (e.g. /models?provider=) collapses to "all"; an unknown one
+  // is reset below once the catalogue loads.
+  const [providerFilter, setProviderFilter] = useState(searchParams.get("provider") || "all");
   const [pricingFilter, setPricingFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [capabilityFilter, setCapabilityFilter] = useState("all");
@@ -1000,6 +1002,19 @@ export function ModelsPage() {
     const names = Array.from(new Set(modelRows.map((row) => row.provider))).sort((a, b) => a.localeCompare(b));
     return [{ value: "all", label: "All providers" }, ...names.map((name) => ({ value: name, label: name }))];
   }, [modelRows]);
+
+  // A ?provider= value seeded from the URL may name a provider with no models,
+  // or a stale/misspelled one. The native <select> would then render blank and
+  // the table would show zero rows, a confusing dead end. Once the catalogue has
+  // loaded (options beyond "all"), drop an unknown value back to "all".
+  useEffect(() => {
+    if (providerFilter === "all" || providerOptions.length <= 1) {
+      return;
+    }
+    if (!providerOptions.some((option) => option.value === providerFilter)) {
+      setProviderFilter("all");
+    }
+  }, [providerOptions, providerFilter]);
 
   const query = search.trim().toLowerCase();
   const minContextValue = Number(minContext) || 0;

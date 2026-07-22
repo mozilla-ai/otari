@@ -402,6 +402,19 @@ describe("ModelsPage", () => {
     expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
   });
 
+  it("falls back to all providers when the URL names an unknown provider", async () => {
+    mockApi();
+
+    renderWithClient(<ModelsPage />, ["/models?provider=doesnotexist"]);
+    await screen.findByText("anthropic:claude-sonnet-4");
+
+    // A stale/misspelled ?provider= resets to "all" once the catalogue loads,
+    // so the select is usable and every provider's models remain visible.
+    expect(screen.getByLabelText("Filter by provider")).toHaveValue("all");
+    expect(within(table()).getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
+    expect(within(table()).getByText("openai:gpt-4o")).toBeInTheDocument();
+  });
+
   it("filters to custom prices only", async () => {
     mockApi();
     const user = userEvent.setup();
