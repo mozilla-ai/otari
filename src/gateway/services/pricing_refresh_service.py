@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-import httpx2
+import httpx
 from genai_prices import data as genai_data
 from genai_prices.data_snapshot import DataSnapshot, get_snapshot, set_custom_snapshot
 from genai_prices.update_prices import DEFAULT_UPDATE_URL, UpdatePrices
@@ -101,7 +101,16 @@ def _fetch_latest_snapshot() -> _PendingSnapshot:
     """Fetch the upstream snapshot without activating it."""
 
     updater = UpdatePrices()
-    response = httpx2.get(DEFAULT_UPDATE_URL, timeout=updater.request_timeout)
+    # genai-prices exposes its default timeout as an httpx2 object; mirror it onto
+    # httpx (the client the rest of the gateway uses) so behavior is unchanged.
+    upstream_timeout = updater.request_timeout
+    timeout = httpx.Timeout(
+        connect=upstream_timeout.connect,
+        read=upstream_timeout.read,
+        write=upstream_timeout.write,
+        pool=upstream_timeout.pool,
+    )
+    response = httpx.get(DEFAULT_UPDATE_URL, timeout=timeout)
     response.raise_for_status()
     raw_snapshot = response.content.decode("utf-8")
     providers = genai_data.providers_schema.validate_json(raw_snapshot)

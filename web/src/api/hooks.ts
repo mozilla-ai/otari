@@ -676,9 +676,3 @@ export function useUsageSummary(filters: UsageFilters, bucket: UsageBucket, enab
     staleTime: 30_000,
   });
 }
-
-// The authenticated URL for the CSV export of the current filter set. The page
-// downloads it via apiFetchBlob (the master key can't ride on a plain anchor).
-export function usageSummaryCsvUrl(filters: UsageFilters): string {
-  return `/v1/usage/summary.csv?${usageParams(filters).toString()}`;
-}

@@ -99,29 +99,3 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   return (await response.json()) as T;
 }
-
-// Authenticated fetch that returns the raw body as a Blob, for file downloads
-// (e.g. the usage CSV export) where the response is not JSON. Shares the same
-// Bearer key and 401/403 sign-out handling as apiFetch.
-export async function apiFetchBlob(path: string): Promise<Blob> {
-  const headers = new Headers();
-  if (masterKey) {
-    headers.set("Authorization", `Bearer ${masterKey}`);
-  }
-
-  let response: Response;
-  try {
-    response = await fetch(path, { headers });
-  } catch {
-    throw new ApiError(0, "Network error: could not reach the gateway.");
-  }
-
-  if (response.status === 401 || response.status === 403) {
-    unauthorizedHandler?.();
-    throw new ApiError(response.status, await extractErrorMessage(response));
-  }
-  if (!response.ok) {
-    throw new ApiError(response.status, await extractErrorMessage(response));
-  }
-  return response.blob();
-}
