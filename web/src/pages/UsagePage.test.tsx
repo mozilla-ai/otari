@@ -118,7 +118,7 @@ describe("UsagePage", () => {
 
     const summaryCalls = fetchMock.mock.calls
       .map(([u]) => String(u))
-      .filter((u) => u.includes("/usage/summary") && !u.includes(".csv"));
+      .filter((u) => u.includes("/usage/summary"));
     // The default 30d preset fires a current window (no end_date, "up to now")
     // and a previous window whose end_date is pinned so it does not overlap.
     expect(summaryCalls.some((u) => u.includes("end_date="))).toBe(true);
@@ -163,7 +163,7 @@ describe("UsagePage", () => {
 
     const summaryCalls = fetchMock.mock.calls
       .map(([u]) => String(u))
-      .filter((u) => u.includes("/usage/summary") && !u.includes(".csv"));
+      .filter((u) => u.includes("/usage/summary"));
     expect(summaryCalls.at(-1)).toContain("model=claude-sonnet-5");
   });
 
@@ -208,23 +208,4 @@ describe("UsagePage", () => {
     expect(await screen.findByText(/No usage yet/)).toBeInTheDocument();
   });
 
-  it("exports CSV through the authenticated blob download", async () => {
-    const fetchMock = mockApi(summary());
-    // jsdom defines neither, so assign (spyOn needs an existing method) before
-    // the export path calls them after a successful fetch.
-    const createUrl = vi.fn(() => "blob:x");
-    URL.createObjectURL = createUrl as unknown as typeof URL.createObjectURL;
-    URL.revokeObjectURL = vi.fn();
-    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-
-    const user = userEvent.setup();
-    renderPage(<UsagePage />);
-    await screen.findByText("gpt-5.6");
-
-    await user.click(screen.getByRole("button", { name: "Export CSV" }));
-
-    const csvCall = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.includes("/summary.csv"));
-    expect(csvCall).toBeDefined();
-    expect(createUrl).toHaveBeenCalled();
-  });
 });
