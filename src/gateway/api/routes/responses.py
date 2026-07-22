@@ -115,24 +115,28 @@ def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
     provider SDK's raw-body extension.
     """
     if isinstance(value, list):
-        cleaned_items: list[Any] = []
-        changed = False
-        for item in value:
+        cleaned_items: list[Any] | None = None
+        for index, item in enumerate(value):
             cleaned_item, item_changed = _split_codex_input_metadata(item)
-            cleaned_items.append(cleaned_item)
-            changed = changed or item_changed
-        return (cleaned_items if changed else value), changed
+            if item_changed:
+                if cleaned_items is None:
+                    cleaned_items = list(value)
+                cleaned_items[index] = cleaned_item
+        return (cleaned_items if cleaned_items is not None else value), cleaned_items is not None
     if isinstance(value, dict):
-        cleaned_fields: dict[str, Any] = {}
-        changed = False
+        cleaned_fields: dict[str, Any] | None = None
         for key, item in value.items():
             if key == _CODEX_INPUT_METADATA_FIELD:
-                changed = True
+                if cleaned_fields is None:
+                    cleaned_fields = dict(value)
+                cleaned_fields.pop(key)
                 continue
             cleaned_item, item_changed = _split_codex_input_metadata(item)
-            cleaned_fields[key] = cleaned_item
-            changed = changed or item_changed
-        return (cleaned_fields if changed else value), changed
+            if item_changed:
+                if cleaned_fields is None:
+                    cleaned_fields = dict(value)
+                cleaned_fields[key] = cleaned_item
+        return (cleaned_fields if cleaned_fields is not None else value), cleaned_fields is not None
     return value, False
 
 
@@ -292,8 +296,9 @@ class _ResponsesAdapter:
         merged_model = kwargs.pop("model")
         provider_str, model_str = merged_model.split(":", 1)
         kwargs["model"] = model_str
-        kwargs["provider"] = LLMProvider(provider_str)
-        return kwargs
+        provider = LLMProvider(provider_str)
+        kwargs["provider"] = provider
+        return _with_codex_extra_body(kwargs, provider)
 
 
 _ADAPTER = _ResponsesAdapter()
