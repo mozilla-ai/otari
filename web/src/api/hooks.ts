@@ -407,6 +407,7 @@ export function useConfirmPricingRefresh() {
   return useMutation({
     mutationFn: () => apiFetch("/v1/pricing/refresh/confirm", { method: "POST" }),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PRICING] });
       void queryClient.invalidateQueries({ queryKey: [MODELS] });
       void queryClient.invalidateQueries({ queryKey: [PROVIDERS] });
     },

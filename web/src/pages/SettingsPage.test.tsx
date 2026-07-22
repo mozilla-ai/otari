@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -271,7 +271,9 @@ describe("SettingsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Accept price updates" }));
 
-    expect(screen.queryByRole("alertdialog", { name: "Review default price updates" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog", { name: "Review default price updates" })).not.toBeInTheDocument(),
+    );
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) => String(url).endsWith("/v1/pricing/refresh/confirm") && init?.method === "POST",
@@ -290,7 +292,9 @@ describe("SettingsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Reject changes" }));
 
-    expect(screen.queryByRole("alertdialog", { name: "Review default price updates" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog", { name: "Review default price updates" })).not.toBeInTheDocument(),
+    );
     expect(
       fetchMock.mock.calls.some(
         ([url, init]) => String(url).endsWith("/v1/pricing/refresh/reject") && init?.method === "POST",
