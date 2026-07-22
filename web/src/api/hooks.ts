@@ -23,9 +23,12 @@ import type {
   SetPricingRequest,
   StoredProvider,
   TestProviderResult,
+  TestServiceResponse,
+  ToolSettingsResponse,
   UpdateBudgetRequest,
   UpdateKeyRequest,
   UpdateSettingsRequest,
+  UpdateToolSettingsRequest,
   UpdateStoredProviderRequest,
   UpdateUserRequest,
   UsageBucket,
@@ -40,6 +43,7 @@ import type {
 const MODELS = "models";
 const PRICING = "pricing";
 const SETTINGS = "settings";
+const TOOL_SETTINGS = "tool-settings";
 const ALIASES = "aliases";
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
@@ -286,6 +290,37 @@ export function useUpdateSettings() {
       void queryClient.invalidateQueries({ queryKey: [MODELS] });
       void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] });
     },
+  });
+}
+
+export function useToolSettings() {
+  return useQuery({
+    queryKey: [TOOL_SETTINGS],
+    queryFn: () => apiFetch<ToolSettingsResponse>("/v1/tool-settings"),
+    staleTime: 60_000,
+  });
+}
+
+export function useUpdateToolSettings() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateToolSettingsRequest) =>
+      apiFetch<ToolSettingsResponse>("/v1/tool-settings", { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: (data) => {
+      queryClient.setQueryData([TOOL_SETTINGS], data);
+    },
+  });
+}
+
+// Probe a (typically unsaved) service URL for reachability. Read-only, so it
+// invalidates nothing.
+export function useTestService() {
+  return useMutation({
+    mutationFn: ({ service, url }: { service: string; url: string }) =>
+      apiFetch<TestServiceResponse>(`/v1/tool-settings/${encodeURIComponent(service)}/test`, {
+        method: "POST",
+        body: JSON.stringify({ url }),
+      }),
   });
 }
 

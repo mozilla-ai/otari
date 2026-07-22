@@ -18,12 +18,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from enum import StrEnum, auto
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.services.web_search_backend import WebSearchBackend
+
+if TYPE_CHECKING:
+    from gateway.core.config import GatewayConfig
 
 
 class Tool(StrEnum):
@@ -116,14 +119,19 @@ def _strip_gateway_fields(
     return fields
 
 
-def _resolve_sandbox_purpose_hint(sandbox_tool_entry: dict[str, Any] | None) -> str | None:
+def _resolve_sandbox_purpose_hint(
+    sandbox_tool_entry: dict[str, Any] | None,
+    config: GatewayConfig | None = None,
+) -> str | None:
     """Resolve the per-tool ``purpose_hint`` for the sandbox.
 
-    Priority: tool entry's ``purpose_hint`` → ``OTARI_SANDBOX_PURPOSE_HINT``
-    env → ``None`` (SandboxBackend falls back to its built-in default).
+    Priority: tool entry's ``purpose_hint`` → the effective config value
+    (dashboard override / ``OTARI_SANDBOX_PURPOSE_HINT`` env / YAML) → ``None``
+    (SandboxBackend falls back to its built-in default).
     """
     return (
         (sandbox_tool_entry.get("purpose_hint") if sandbox_tool_entry else None)
+        or (config.sandbox_purpose_hint if config is not None else None)
         or otari_env("SANDBOX_PURPOSE_HINT")
         or None
     )
@@ -176,13 +184,21 @@ def _extract_web_search_tool(
     return _extract_first_matching_tool(tools, _is_web_search_tool_type)
 
 
-def _resolve_web_search_purpose_hint(tool_entry: dict[str, Any] | None) -> str | None:
-    """Per-tool entry → ``OTARI_WEB_SEARCH_PURPOSE_HINT`` → ``None`` (backend default)."""
-    return (tool_entry.get("purpose_hint") if tool_entry else None) or otari_env("WEB_SEARCH_PURPOSE_HINT") or None
+def _resolve_web_search_purpose_hint(
+    tool_entry: dict[str, Any] | None,
+    config: GatewayConfig | None = None,
+) -> str | None:
+    """Per-tool entry → effective config (override / env / YAML) → ``None`` (backend default)."""
+    return (
+        (tool_entry.get("purpose_hint") if tool_entry else None)
+        or (config.web_search_purpose_hint if config is not None else None)
+        or otari_env("WEB_SEARCH_PURPOSE_HINT")
+        or None
+    )
 
 
 def _build_web_search_backend(
-    *, base_url: str, tool_entry: dict[str, Any], auth_token: str | None = None
+    *, base_url: str, tool_entry: dict[str, Any], auth_token: str | None = None, config: GatewayConfig | None = None
 ) -> WebSearchBackend:
     """Construct a WebSearchBackend honouring env-level + per-tool config.
 
@@ -198,30 +214,41 @@ def _build_web_search_backend(
     """
     kwargs: dict[str, Any] = {"base_url": base_url}
 
-    engines_str = otari_env("WEB_SEARCH_ENGINES")
+    # Operator knobs resolve from the effective config value (dashboard override /
+    # env / YAML) first, falling back to the env var so pure-env deployments are
+    # unchanged. A dashboard override mutates ``config``, so it hot-applies here.
+    engines_str = (config.web_search_engines if config is not None else None) or otari_env("WEB_SEARCH_ENGINES")
     if engines_str:
         engines = tuple(e.strip() for e in engines_str.split(",") if e.strip())
         if engines:
             kwargs["engines"] = engines
 
-    max_env = otari_env("WEB_SEARCH_MAX_RESULTS")
-    if max_env:
-        try:
-            parsed_max = int(max_env)
-        except ValueError:
-            logger.warning("OTARI_WEB_SEARCH_MAX_RESULTS=%r is not an int; ignoring", max_env)
-        else:
-            if parsed_max >= 1:
-                kwargs["max_results"] = parsed_max
+    config_max = config.web_search_max_results if config is not None else None
+    if config_max is not None:
+        kwargs["max_results"] = config_max
+    else:
+        max_env = otari_env("WEB_SEARCH_MAX_RESULTS")
+        if max_env:
+            try:
+                parsed_max = int(max_env)
+            except ValueError:
+                logger.warning("OTARI_WEB_SEARCH_MAX_RESULTS=%r is not an int; ignoring", max_env)
             else:
-                logger.warning("OTARI_WEB_SEARCH_MAX_RESULTS=%r is not >= 1; ignoring", max_env)
+                if parsed_max >= 1:
+                    kwargs["max_results"] = parsed_max
+                else:
+                    logger.warning("OTARI_WEB_SEARCH_MAX_RESULTS=%r is not >= 1; ignoring", max_env)
     req_max = tool_entry.get("max_results")
     if isinstance(req_max, int) and req_max > 0:
         kwargs["max_results"] = req_max
 
-    extract_env = otari_env("WEB_SEARCH_EXTRACT")
-    if extract_env is not None:
-        kwargs["extract_content"] = extract_env.lower() not in {"0", "false", "no", "off"}
+    config_extract = config.web_search_extract if config is not None else None
+    if config_extract is not None:
+        kwargs["extract_content"] = config_extract
+    else:
+        extract_env = otari_env("WEB_SEARCH_EXTRACT")
+        if extract_env is not None:
+            kwargs["extract_content"] = extract_env.lower() not in {"0", "false", "no", "off"}
 
     allowed = tool_entry.get("allowed_domains")
     if isinstance(allowed, list) and allowed:
@@ -230,7 +257,7 @@ def _build_web_search_backend(
     if isinstance(blocked, list) and blocked:
         kwargs["blocked_domains"] = tuple(str(d) for d in blocked)
 
-    purpose_hint = _resolve_web_search_purpose_hint(tool_entry)
+    purpose_hint = _resolve_web_search_purpose_hint(tool_entry, config)
     if purpose_hint:
         kwargs["purpose_hint"] = purpose_hint
 

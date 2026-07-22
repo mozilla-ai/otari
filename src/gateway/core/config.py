@@ -48,6 +48,7 @@ ENV_BRIDGED_FIELDS = (
     "guardrails_url",
     "tools_header",
     "sandbox_purpose_hint",
+    "web_search_url",
     "web_search_purpose_hint",
     "web_search_engines",
     "web_search_max_results",
@@ -384,6 +385,14 @@ class GatewayConfig(BaseSettings):
         description=(
             "Default purpose hint forwarded to the sandbox backend when an otari_code_execution "
             "tool entry does not supply its own."
+        ),
+    )
+    web_search_url: str | None = Field(
+        default=None,
+        description=(
+            "Base URL of the web-search backend (SearXNG instance or a search adapter) for "
+            "otari_web_search tools. When unset, otari_web_search requests are rejected with 400. "
+            "docker-compose sets this to the bundled SearXNG container."
         ),
     )
     web_search_purpose_hint: str | None = Field(

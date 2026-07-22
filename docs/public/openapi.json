@@ -3581,6 +3581,119 @@
         "title": "TestProviderResponse",
         "type": "object"
       },
+      "TestServiceRequest": {
+        "description": "A (typically unsaved) URL to probe for reachability.",
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "TestServiceRequest",
+        "type": "object"
+      },
+      "TestServiceResponse": {
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "reason"
+        ],
+        "title": "TestServiceResponse",
+        "type": "object"
+      },
+      "ToolSettingField": {
+        "description": "One editable tool/guardrail field surfaced to the dashboard.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "service": {
+            "enum": [
+              "web_search",
+              "sandbox",
+              "guardrails"
+            ],
+            "title": "Service",
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "url",
+              "str",
+              "int",
+              "bool"
+            ],
+            "title": "Type",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "service",
+          "type",
+          "value"
+        ],
+        "title": "ToolSettingField",
+        "type": "object"
+      },
+      "ToolSettingsResponse": {
+        "description": "The effective value of every editable tool/guardrail field.",
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ToolSettingField"
+            },
+            "title": "Fields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "title": "ToolSettingsResponse",
+        "type": "object"
+      },
       "UpdateBudgetRequest": {
         "description": "Request model for updating a budget.",
         "properties": {
@@ -3941,6 +4054,106 @@
           }
         },
         "title": "UpdateStoredProviderRequest",
+        "type": "object"
+      },
+      "UpdateToolSettingsRequest": {
+        "description": "Change one or more tool settings. Omitted fields are left unchanged; an\nexplicit ``null`` clears a field back to the configured env/YAML default.",
+        "example": {
+          "web_search_max_results": 5,
+          "web_search_url": "http://searxng:8080"
+        },
+        "properties": {
+          "guardrails_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guardrails Url"
+          },
+          "sandbox_purpose_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Purpose Hint"
+          },
+          "sandbox_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Url"
+          },
+          "web_search_engines": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Web Search Engines"
+          },
+          "web_search_extract": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Web Search Extract"
+          },
+          "web_search_max_results": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Web Search Max Results"
+          },
+          "web_search_purpose_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Web Search Purpose Hint"
+          },
+          "web_search_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Web Search Url"
+          }
+        },
+        "title": "UpdateToolSettingsRequest",
         "type": "object"
       },
       "UpdateUserRequest": {
@@ -7680,6 +7893,145 @@
         "summary": "Update Settings",
         "tags": [
           "settings"
+        ]
+      }
+    },
+    "/v1/tool-settings": {
+      "get": {
+        "description": "Return the effective tool/guardrail settings for the dashboard.",
+        "operationId": "get_tool_settings_v1_tool_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolSettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Tool Settings",
+        "tags": [
+          "tool-settings"
+        ]
+      },
+      "patch": {
+        "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Master-key gated and standalone-only.",
+        "operationId": "update_tool_settings_v1_tool_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateToolSettingsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolSettingsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Tool Settings",
+        "tags": [
+          "tool-settings"
+        ]
+      }
+    },
+    "/v1/tool-settings/{service}/test": {
+      "post": {
+        "description": "Structurally validate a URL and probe it for reachability.\n\nTests the URL in the request body (typically unsaved), so an operator can\nverify before saving. The probe is a plain HTTP GET with a short timeout: any\nHTTP response means the host is reachable; a connection/timeout/DNS error means\nit is not. The operator is trusted (master key), so no SSRF deny-list applies;\nonly the structural check (http/https + host) runs first.",
+        "operationId": "test_service_v1_tool_settings__service__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "title": "Service",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestServiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestServiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Test Service",
+        "tags": [
+          "tool-settings"
         ]
       }
     },

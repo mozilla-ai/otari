@@ -1040,7 +1040,9 @@ class _FakeWebSearchBackend:
     last_tool_entry: dict[str, Any] | None = None
     last_auth_token: str | None = None
 
-    def __init__(self, *, base_url: str, tool_entry: dict[str, Any], auth_token: str | None = None) -> None:
+    def __init__(
+        self, *, base_url: str, tool_entry: dict[str, Any], auth_token: str | None = None, config: Any = None
+    ) -> None:
         type(self).last_tool_entry = dict(tool_entry)
         type(self).last_auth_token = auth_token
 

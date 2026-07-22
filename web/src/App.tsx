@@ -11,6 +11,7 @@ import { KeysPage } from "@/pages/KeysPage";
 import { ModelsPage } from "@/pages/ModelsPage";
 import { ProvidersPage } from "@/pages/ProvidersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { ToolsGuardrailsPage } from "@/pages/ToolsGuardrailsPage";
 import { UsagePage } from "@/pages/UsagePage";
 import { UsersPage } from "@/pages/UsersPage";
 
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="usage" element={<UsagePage />} />
           <Route path="models" element={<ModelsPage />} />
           <Route path="aliases" element={<AliasesPage />} />
+          <Route path="tools" element={<ToolsGuardrailsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
