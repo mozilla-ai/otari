@@ -588,14 +588,14 @@ function PricingRefreshSection() {
   const previewRefresh = usePreviewPricingRefresh();
   const confirmRefresh = useConfirmPricingRefresh();
   const rejectRefresh = useRejectPricingRefresh();
-  const [preview, setPreview] = useState<PricingRefreshPreview | null>(null);
+  const preview = previewRefresh.data;
   const isPending = confirmRefresh.isPending || rejectRefresh.isPending;
 
   const reject = () => {
-    if (preview === null || isPending) {
+    if (preview === undefined || isPending) {
       return;
     }
-    rejectRefresh.mutate(undefined, { onSuccess: () => setPreview(null) });
+    rejectRefresh.mutate(undefined, { onSuccess: previewRefresh.reset });
   };
 
   return (
@@ -615,7 +615,7 @@ function PricingRefreshSection() {
               size="sm"
               variant="outline"
               isDisabled={previewRefresh.isPending || isPending}
-              onPress={() => previewRefresh.mutate(undefined, { onSuccess: setPreview })}
+              onPress={() => previewRefresh.mutate()}
             >
               {previewRefresh.isPending ? "Checking prices…" : "Check for price updates"}
             </Button>
@@ -623,14 +623,14 @@ function PricingRefreshSection() {
           <ErrorBanner error={previewRefresh.error} />
         </Card.Content>
       </Card>
-      <AlertDialog isOpen={preview !== null} onOpenChange={(isOpen) => (!isOpen ? reject() : undefined)}>
+      <AlertDialog isOpen={preview !== undefined} onOpenChange={(isOpen) => (!isOpen ? reject() : undefined)}>
         <AlertDialog.Trigger className="hidden">Review price updates</AlertDialog.Trigger>
         {preview ? (
           <PricingRefreshDialog
             preview={preview}
             error={confirmRefresh.error ?? rejectRefresh.error}
             isPending={isPending}
-            onAccept={() => confirmRefresh.mutate(undefined, { onSuccess: () => setPreview(null) })}
+            onAccept={() => confirmRefresh.mutate(undefined, { onSuccess: previewRefresh.reset })}
             onReject={reject}
           />
         ) : null}
