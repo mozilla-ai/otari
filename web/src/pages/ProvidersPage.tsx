@@ -725,7 +725,7 @@ export function ProvidersPage() {
   const loading = meta.isLoading || stored.isLoading;
   const editingProvider = stored.data?.find((p) => p.instance === editing) ?? null;
   const needsPricing = settings.data?.require_pricing === true && settings.data.default_pricing === false;
-  const showOnboarding = !loading && rows.length === 0;
+  const showOnboarding = !loading && rows.length === 0 && !addOpen;
 
   const runTest = (instance: string) => {
     setTests((prev) => ({ ...prev, [instance]: { status: "pending" } }));
@@ -745,9 +745,9 @@ export function ProvidersPage() {
         title="Providers"
         description="Add provider API keys here to serve models without editing config.yml. Keys are encrypted at rest."
         action={
-          // Hidden while the form is open; the form card has its own Close, so a
-          // second one here would be a redundant close button.
-          addOpen ? null : (
+          // The first-run card supplies its own focused call to action. The form
+          // card has its own Close, so the header action is redundant while open.
+          addOpen || showOnboarding ? null : (
             <Button
               variant="primary"
               onPress={() => {
