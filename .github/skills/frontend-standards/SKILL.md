@@ -65,11 +65,13 @@ Build and check from the repo root:
 
 ## A note on status colors
 
-`web/` uses raw Tailwind palette classes for one narrow case: semantic status surfaces
-(`ErrorBanner` uses `border-red-200 bg-red-50 text-red-700`; `InfoBanner` uses `amber`). That
-is the existing convention, so match it for new alert/status elements rather than reformatting
-them into `--otari-*` tokens. Everything else (brand, surface, text, borders) uses the
-`--otari-*` variables. Don't reach for `bg-white`/`text-gray-900` for general chrome.
+`web/` uses raw Tailwind palette classes for one narrow case: semantic status surfaces. The
+sanctioned triad is `red` for danger/error (`ErrorBanner` uses `border-red-200 bg-red-50
+text-red-700`), `amber` for warning (`InfoBanner`), and `emerald` for healthy/success
+(`StatCard` status pills and the overview all-clear strip). That is the existing convention, so
+match it for new alert/status elements rather than reformatting them into `--otari-*` tokens.
+Everything else (brand, surface, text, borders) uses the `--otari-*` variables. Don't reach for
+`bg-white`/`text-gray-900` for general chrome.
 
 ## Topic guides
 

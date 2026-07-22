@@ -1,6 +1,5 @@
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 
-import { useProviders } from "@/api/hooks";
 import { useAuth } from "@/auth/AuthContext";
 import { AppShell } from "@/components/AppShell";
 import { Login } from "@/components/Login";
@@ -9,6 +8,7 @@ import { AliasesPage } from "@/pages/AliasesPage";
 import { BudgetsPage } from "@/pages/BudgetsPage";
 import { KeysPage } from "@/pages/KeysPage";
 import { ModelsPage } from "@/pages/ModelsPage";
+import { OverviewIndex } from "@/pages/OverviewPage";
 import { ProvidersPage } from "@/pages/ProvidersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { ToolsGuardrailsPage } from "@/pages/ToolsGuardrailsPage";
@@ -26,7 +26,7 @@ export default function App() {
     <HashRouter>
       <Routes>
         <Route element={<AppShell />}>
-          <Route index element={<IndexRedirect />} />
+          <Route index element={<OverviewIndex />} />
           <Route path="providers" element={<ProvidersPage />} />
           <Route path="keys" element={<KeysPage />} />
           <Route path="users" element={<UsersPage />} />
@@ -42,21 +42,4 @@ export default function App() {
       </Routes>
     </HashRouter>
   );
-}
-
-// First run (no provider configured yet) lands on Providers so a new admin is
-// guided to add one; otherwise Models. The providers query is master-key gated,
-// so this only runs once authenticated.
-function IndexRedirect() {
-  const providers = useProviders();
-  if (providers.isLoading) {
-    return null;
-  }
-  // Never strand the index route on a blank screen: if the providers query
-  // failed, fall back to Providers (where the error surfaces and an admin can
-  // add one) rather than rendering nothing forever.
-  if (!providers.isSuccess) {
-    return <Navigate to="/providers" replace />;
-  }
-  return <Navigate to={providers.data.providers.length === 0 ? "/providers" : "/models"} replace />;
 }

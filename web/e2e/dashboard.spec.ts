@@ -3,13 +3,19 @@ import { expect, type Page, test } from "@playwright/test";
 // Matches web/e2e/otari.yml. The login step needs a known key.
 const MASTER_KEY = "e2e-master-key";
 
+// Scope link lookups to the sidebar navigation landmark. The Overview landing
+// page has tile-links whose names substring-collide with sidebar items (e.g.
+// "Providers healthy", "Active users", "No budgets configured"), so an unscoped
+// getByRole("link", { name }) is ambiguous there.
+const nav = (page: Page) => page.getByRole("navigation");
+
 async function login(page: Page): Promise<void> {
   await page.goto("/");
   await page.locator('input[type="password"]').fill(MASTER_KEY);
   await page.locator('input[type="password"]').press("Enter");
   // The sidebar appears once authenticated, regardless of which page the index
   // redirect lands on.
-  await expect(page.getByRole("link", { name: "Providers" })).toBeVisible();
+  await expect(nav(page).getByRole("link", { name: "Providers" })).toBeVisible();
 }
 
 // One shared gateway + DB, so the flows build on each other and must run in order.
@@ -39,7 +45,7 @@ test.describe("dashboard core flows", () => {
   test("navigate the management pages", async ({ page }) => {
     await login(page);
     for (const name of ["Models", "Aliases", "Users", "Budgets", "Settings", "Providers"]) {
-      await page.getByRole("link", { name }).click();
+      await nav(page).getByRole("link", { name }).click();
       // Exact match: the Budgets onboarding heading ("No budgets yet") would
       // otherwise also substring-match the page title.
       await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
@@ -48,7 +54,7 @@ test.describe("dashboard core flows", () => {
 
   test("create a budget", async ({ page }) => {
     await login(page);
-    await page.getByRole("link", { name: "Budgets" }).click();
+    await nav(page).getByRole("link", { name: "Budgets" }).click();
     await page.getByRole("button", { name: "Create your first budget" }).click();
     await page.getByLabel("Name (optional)").fill("e2e-budget");
     await page.getByLabel("Spending limit (USD)").fill("100");
@@ -61,7 +67,7 @@ test.describe("dashboard core flows", () => {
 
   test("create a user and assign the budget", async ({ page }) => {
     await login(page);
-    await page.getByRole("link", { name: "Users" }).click();
+    await nav(page).getByRole("link", { name: "Users" }).click();
     // A bootstrap virtual user already exists (from the first-run key), so use the
     // header action, not the empty-state button. It is removed when the form opens,
     // leaving the form's own "Create user" as the only match.
@@ -79,7 +85,7 @@ test.describe("dashboard core flows", () => {
 
   test("create an API key owned by a chosen user", async ({ page }) => {
     await login(page);
-    await page.getByRole("link", { name: "API keys" }).click();
+    await nav(page).getByRole("link", { name: "API keys" }).click();
     // A bootstrap key already exists, so use the header action, not onboarding.
     await page.getByRole("button", { name: "Create key" }).click();
     await page.getByLabel("Name").fill("ci-bot");
@@ -100,7 +106,7 @@ test.describe("dashboard core flows", () => {
 
   test("create an alias", async ({ page }) => {
     await login(page);
-    await page.getByRole("link", { name: "Aliases" }).click();
+    await nav(page).getByRole("link", { name: "Aliases" }).click();
     await page.getByRole("button", { name: "New alias" }).click();
     await page.getByLabel("Alias name").fill("fast");
     // Target is a model combobox (allows custom values); type the selector, then

@@ -6,37 +6,23 @@ import { apiFetchBlob } from "@/api/client";
 import { useUsageSummary, usageSummaryCsvUrl, useUsers } from "@/api/hooks";
 import type { UsageBucket, UsageFilters, UsageGroupRow, UsageSeriesPoint } from "@/api/types";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
-import { ErrorBanner, FilterComboBox, PageHeader, StatCard } from "@/components/ui";
+import { DeltaHint, ErrorBanner, FilterComboBox, PageHeader, StatCard } from "@/components/ui";
+import { deltaFraction, formatPct, formatTokens, formatUsd } from "@/lib/format";
 
 // ---------- formatting ----------
 
-const usdCompact = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
-
-// Aggregate totals are four+ figures, so cents (not the per-request 4 decimals the
-// Activity page uses) keeps the tiles readable.
-function formatUSD(value: number): string {
-  return usdCompact.format(value);
-}
-
+// Compact currency (formatUsd), token counts (formatTokens), percentages
+// (formatPct) and the period-over-period helpers (deltaFraction / DeltaHint) are
+// shared with the overview page from @/lib/format and @/components/ui. Only the
+// two formatters specific to this page stay local.
 function formatCount(value: number): string {
   return value.toLocaleString();
-}
-
-// Compact token counts: 12.4M / 84.2k / 512.
-function formatTokens(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
-  return String(value);
 }
 
 function formatLatency(ms: number | null): string {
   if (ms === null) return "—";
   if (ms < 1000) return `${Math.round(ms)} ms`;
   return `${(ms / 1000).toFixed(2)} s`;
-}
-
-function formatPct(fraction: number): string {
-  return `${(fraction * 100).toFixed(1)}%`;
 }
 
 // ---------- filter option sets (mirrors ActivityPage, plus 30d for spend) ----------
@@ -66,25 +52,6 @@ const TABLE_TOP_N = 15;
 
 function isoAgo(seconds: number): string {
   return new Date(Date.now() - seconds * 1000).toISOString();
-}
-
-// ---------- delta ----------
-
-// Period-over-period change. null when there is no comparable previous value
-// (unbounded range, or a previous value of zero which would divide by zero).
-function deltaFraction(current: number, previous: number | undefined): number | null {
-  if (previous === undefined || previous === 0) return null;
-  return (current - previous) / previous;
-}
-
-function DeltaHint({ fraction }: { fraction: number | null }) {
-  if (fraction === null) return null;
-  const arrow = fraction > 0 ? "▲" : fraction < 0 ? "▼" : "•";
-  return (
-    <span className="text-[var(--otari-muted)]">
-      {arrow} {formatPct(Math.abs(fraction))} vs prev
-    </span>
-  );
 }
 
 // ---------- breakdown table ----------
@@ -154,7 +121,7 @@ function BreakdownTable({ title, rows, totalCost, emptyLabel, onDrill, loading }
                     </div>
                   </Td>
                   <Td className="text-right tabular-nums text-[var(--otari-muted)]">{formatCount(row.requests)}</Td>
-                  <Td className="text-right tabular-nums text-[var(--otari-ink)]">{formatUSD(row.cost)}</Td>
+                  <Td className="text-right tabular-nums text-[var(--otari-ink)]">{formatUsd(row.cost)}</Td>
                 </Tr>
               );
             })
@@ -190,7 +157,7 @@ function metricValue(point: UsageSeriesPoint, metric: ChartMetric): number {
 }
 
 function formatMetric(value: number, metric: ChartMetric): string {
-  return metric === "cost" ? formatUSD(value) : metric === "tokens" ? formatTokens(value) : formatCount(value);
+  return metric === "cost" ? formatUsd(value) : metric === "tokens" ? formatTokens(value) : formatCount(value);
 }
 
 function formatBucketLabel(iso: string, bucket: UsageBucket): string {
@@ -458,7 +425,7 @@ export function UsagePage() {
           <div className="flex flex-wrap gap-4">
             <StatCard
               label="Spend"
-              value={totals ? formatUSD(totals.cost) : "—"}
+              value={totals ? formatUsd(totals.cost) : "—"}
               hint={totals ? <DeltaHint fraction={deltaFraction(totals.cost, prevTotals?.cost)} /> : null}
             />
             <StatCard
