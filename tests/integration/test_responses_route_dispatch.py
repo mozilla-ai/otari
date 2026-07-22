@@ -101,6 +101,73 @@ def test_bare_string_input_not_corrupted_by_normalization(
     assert captured["input_data"] == prompt
 
 
+def test_codex_metadata_is_forwarded_to_openai_provider(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Codex metadata reaches OpenAI through its supported raw-body extension."""
+    captured: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return _response()
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        resp = client.post(
+            "/v1/responses",
+            json={
+                "model": _MODEL,
+                "client_metadata": {"session_id": "session_123"},
+                "input": [
+                    {
+                        "type": "message",
+                        "role": "developer",
+                        "content": [{"type": "input_text", "text": "Be concise."}],
+                        "internal_chat_message_metadata_passthrough": {"turn_id": "turn_123"},
+                    },
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": "Hello"}],
+                        "internal_chat_message_metadata_passthrough": {"turn_id": "turn_124"},
+                    },
+                ],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["extra_body"] == {
+        "client_metadata": {"session_id": "session_123"},
+        "input": [
+            {
+                "type": "message",
+                "role": "developer",
+                "content": [{"type": "input_text", "text": "Be concise."}],
+                "internal_chat_message_metadata_passthrough": {"turn_id": "turn_123"},
+            },
+            {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Hello"}],
+                "internal_chat_message_metadata_passthrough": {"turn_id": "turn_124"},
+            },
+        ],
+    }
+    assert captured["input_data"] == [
+        {
+            "type": "message",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": "Be concise."}],
+        },
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "Hello"}],
+        },
+    ]
+
+
 def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
     client: TestClient,
     api_key_header: dict[str, str],

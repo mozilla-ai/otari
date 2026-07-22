@@ -29,16 +29,16 @@ from pydantic import BaseModel, Field, create_model
 PARAM_FIELD_RENAMES: dict[str, str] = {"model_id": "model"}
 
 # any-llm's ``*Params`` are provider-call models, so a future any-llm version
-# could add a credential / transport / provider-selection field. Derivation
-# picks up new fields automatically (the point for benign params), but exposing
-# one of these as a client-settable request field would let a caller override an
-# operator-controlled value: the provider-call merge spreads request fields last
-# (e.g. ``{**get_provider_kwargs(...), **request_fields}``), so a client value
-# would win. The gateway resolves these itself (from ``config`` / the platform
-# service), so they must never be derived onto a public request schema, and they
-# are also stripped before forwarding (see ``_tools._strip_gateway_fields``) to
-# cover schemas that allow extra fields (the Responses request uses
-# ``extra="allow"``).
+# could add a credential / transport / provider-selection field or a raw-body
+# extension. Derivation picks up new fields automatically (the point for benign
+# params), but exposing one of these as a client-settable request field would let
+# a caller override an operator-controlled value: the provider-call merge spreads
+# request fields last (e.g. ``{**get_provider_kwargs(...), **request_fields}``),
+# so a client value would win. The gateway resolves these itself (from ``config``
+# / the platform service), so they must never be derived onto a public request
+# schema, and they are also stripped before forwarding (see
+# ``_tools._strip_gateway_fields``) to cover schemas that allow extra fields
+# (the Responses request uses ``extra="allow"``).
 SENSITIVE_PARAM_FIELDS: frozenset[str] = frozenset(
     {
         "api_key",
@@ -49,6 +49,7 @@ SENSITIVE_PARAM_FIELDS: frozenset[str] = frozenset(
         "api_version",
         "client",
         "credentials",
+        "extra_body",
         "aws_access_key_id",
         "aws_secret_access_key",
     }

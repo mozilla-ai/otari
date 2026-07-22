@@ -53,6 +53,9 @@ router = APIRouter(prefix="/v1", tags=["responses"])
 
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in request body"
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
+_CODEX_CLIENT_METADATA_FIELD = "client_metadata"
+_CODEX_INPUT_METADATA_FIELD = "internal_chat_message_metadata_passthrough"
+_CODEX_EXTRA_BODY_FIELD = "_codex_extra_body"
 
 
 class ResponsesRequest(derive_request_base(ResponsesParams)):  # type: ignore[misc]
@@ -100,6 +103,57 @@ def _responses_input_text(value: Any) -> str:
     if isinstance(value, list):
         return latest_user_text(value)
     return text_from_content(value)
+
+
+def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
+    """Return input without Codex metadata and whether any was removed.
+
+    ``any-llm`` validates Responses input against the public OpenAI item
+    shapes, while Codex's private extension must be preserved for OpenAI's
+    own Responses endpoint. The caller sends the cleaned input through the
+    typed path and, where supported, restores the original input via the
+    provider SDK's raw-body extension.
+    """
+    if isinstance(value, list):
+        cleaned_items: list[Any] = []
+        changed = False
+        for item in value:
+            cleaned_item, item_changed = _split_codex_input_metadata(item)
+            cleaned_items.append(cleaned_item)
+            changed = changed or item_changed
+        return (cleaned_items if changed else value), changed
+    if isinstance(value, dict):
+        cleaned_fields: dict[str, Any] = {}
+        changed = False
+        for key, item in value.items():
+            if key == _CODEX_INPUT_METADATA_FIELD:
+                changed = True
+                continue
+            cleaned_item, item_changed = _split_codex_input_metadata(item)
+            cleaned_fields[key] = cleaned_item
+            changed = changed or item_changed
+        return (cleaned_fields if changed else value), changed
+    return value, False
+
+
+def _codex_extra_body(input_data: Any, client_metadata: Any | None) -> tuple[Any, dict[str, Any] | None]:
+    """Prepare Codex metadata for OpenAI's raw Responses request body."""
+    cleaned_input, input_has_codex_metadata = _split_codex_input_metadata(input_data)
+    extra_body: dict[str, Any] = {}
+    if input_has_codex_metadata:
+        extra_body["input"] = input_data
+    if client_metadata is not None:
+        extra_body[_CODEX_CLIENT_METADATA_FIELD] = client_metadata
+    return cleaned_input, extra_body or None
+
+
+def _with_codex_extra_body(fields: dict[str, Any], provider: LLMProvider) -> dict[str, Any]:
+    """Restore Codex extensions only for the OpenAI Responses implementation."""
+    result = {key: value for key, value in fields.items() if key != _CODEX_EXTRA_BODY_FIELD}
+    extra_body = fields.get(_CODEX_EXTRA_BODY_FIELD)
+    if provider == LLMProvider.OPENAI and extra_body is not None:
+        result["extra_body"] = extra_body
+    return result
 
 
 def _usage_to_completion_usage(
@@ -224,9 +278,10 @@ class _ResponsesAdapter:
         kwargs: dict[str, Any] = {"api_key": attempt.api_key}
         if attempt.api_base:
             kwargs["api_base"] = attempt.api_base
+        request_fields = _with_codex_extra_body(base_request_fields, LLMProvider(attempt.provider))
         return {
             **kwargs,
-            **{k: v for k, v in base_request_fields.items() if k != "provider"},
+            **{k: v for k, v in request_fields.items() if k != "provider"},
             "model": attempt.model,
             "provider": LLMProvider(attempt.provider),
         }
@@ -349,10 +404,11 @@ async def create_response(
         tools_extracted=tool_ctx.tools_extracted,
         remaining_user_tools=tool_ctx.remaining_user_tools,
     )
+    client_metadata = request_fields.pop(_CODEX_CLIENT_METADATA_FIELD, None)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_responses_tools(request_fields["tools"])
 
-    input_payload = request_fields.pop("input")
+    input_payload, codex_extra_body = _codex_extra_body(request_fields.pop("input"), client_metadata)
     stream = bool(request_fields.pop("stream", False))
     request_fields.pop("model", None)
     request_fields.pop("user", None)
@@ -369,6 +425,8 @@ async def create_response(
     if not ctx.hybrid_mode:
         base_request_fields["provider"] = provider
     base_request_fields["input_data"] = input_payload
+    if codex_extra_body is not None:
+        base_request_fields[_CODEX_EXTRA_BODY_FIELD] = codex_extra_body
 
     # ------------------------------------------------------------------
     # Streaming path
@@ -399,7 +457,7 @@ async def create_response(
                 raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
 
         # Standalone: single attempt streaming.
-        call_kwargs = {**provider_kwargs, **base_request_fields, "model": model}
+        call_kwargs = {**provider_kwargs, **_with_codex_extra_body(base_request_fields, provider), "model": model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
             ctx=ctx,
@@ -431,7 +489,7 @@ async def create_response(
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
-    call_kwargs = {**provider_kwargs, **base_request_fields, "model": model}
+    call_kwargs = {**provider_kwargs, **_with_codex_extra_body(base_request_fields, provider), "model": model}
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,
         ctx=ctx,
