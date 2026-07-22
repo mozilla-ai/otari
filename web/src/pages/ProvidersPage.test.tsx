@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
@@ -148,7 +149,11 @@ function mockApi(opts: MockOpts = {}) {
 
 function renderPage(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <MemoryRouter>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </MemoryRouter>,
+  );
 }
 
 describe("ProvidersPage", () => {
@@ -400,5 +405,20 @@ describe("ProvidersPage", () => {
 
     expect(await within(row).findByText("Unreachable")).toBeInTheDocument();
     expect(await screen.findByText("0 of 1 provider reachable")).toBeInTheDocument();
+  });
+
+  it("links a provider name to the filtered models page", async () => {
+    mockApi({
+      meta: [providerInfo("openai"), providerInfo("anthropic")],
+    });
+
+    renderPage(<ProvidersPage />);
+
+    // Clicking a provider navigates to the Models page filtered to that provider.
+    const openaiLink = await screen.findByRole("link", { name: "openai" });
+    expect(openaiLink).toHaveAttribute("href", "/models?provider=openai");
+
+    const anthropicLink = screen.getByRole("link", { name: "anthropic" });
+    expect(anthropicLink).toHaveAttribute("href", "/models?provider=anthropic");
   });
 });

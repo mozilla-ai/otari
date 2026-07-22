@@ -198,10 +198,10 @@ function panel(): HTMLElement {
   return screen.getByRole("complementary");
 }
 
-function renderWithClient(ui: ReactElement) {
+function renderWithClient(ui: ReactElement, initialEntries: string[] = ["/"]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
     </MemoryRouter>,
   );
@@ -387,6 +387,32 @@ describe("ModelsPage", () => {
 
     expect(within(table()).getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
     expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
+  });
+
+  it("reads the provider filter from the URL query parameter", async () => {
+    mockApi();
+
+    renderWithClient(<ModelsPage />, ["/models?provider=anthropic"]);
+    await screen.findByText("anthropic:claude-sonnet-4");
+
+    // The provider select is pre-set to the URL's provider, and only that
+    // provider's models are shown.
+    expect(screen.getByLabelText("Filter by provider")).toHaveValue("anthropic");
+    expect(within(table()).getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
+  });
+
+  it("falls back to all providers when the URL names an unknown provider", async () => {
+    mockApi();
+
+    renderWithClient(<ModelsPage />, ["/models?provider=doesnotexist"]);
+    await screen.findByText("anthropic:claude-sonnet-4");
+
+    // A stale/misspelled ?provider= resets to "all" once the catalogue loads,
+    // so the select is usable and every provider's models remain visible.
+    expect(screen.getByLabelText("Filter by provider")).toHaveValue("all");
+    expect(within(table()).getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
+    expect(within(table()).getByText("openai:gpt-4o")).toBeInTheDocument();
   });
 
   it("filters to custom prices only", async () => {
