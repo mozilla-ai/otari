@@ -429,7 +429,7 @@ export function BudgetsPage() {
         title="Budgets"
         description="Define spending limits and reset schedules. Assign a budget to users to enforce it."
         action={
-          addOpen ? null : (
+          addOpen || showOnboarding ? null : (
             <Button
               variant="primary"
               onPress={() => {

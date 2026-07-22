@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,6 +46,7 @@ interface Bodies {
   keys?: unknown;
   users?: unknown;
   logs?: unknown;
+  providers?: unknown;
 }
 
 // Order matters: /v1/usage/summary is matched BEFORE the bare /v1/usage logs
@@ -65,7 +67,7 @@ function mockApi(b: Bodies) {
     if (url.includes("/v1/budgets")) return jsonResponse(b.budgets ?? []);
     if (url.includes("/v1/keys")) return jsonResponse(b.keys ?? []);
     if (url.includes("/v1/users")) return jsonResponse(b.users ?? []);
-    if (url.includes("/v1/providers")) return jsonResponse({ providers: [{ provider: "openai" }] });
+    if (url.includes("/v1/providers")) return jsonResponse({ providers: b.providers ?? [{ provider: "openai" }] });
     if (url.includes("/v1/usage")) return jsonResponse(b.logs ?? []);
     return jsonResponse([]);
   });
@@ -136,7 +138,7 @@ describe("OverviewPage", () => {
     mockApi({ period: { request_count: 0, error_count: 0 } });
     renderPage(<OverviewPage />);
     // No status word for a neutral error-rate tile.
-    expect(await screen.findByText(/All systems normal/)).toBeInTheDocument();
+    expect(await screen.findByText("0/0")).toBeInTheDocument();
     expect(screen.queryByText("Elevated")).not.toBeInTheDocument();
   });
 
@@ -165,15 +167,12 @@ describe("OverviewPage", () => {
     expect(screen.getByText("1 budget over limit")).toBeInTheDocument();
   });
 
-  it("shows the all-clear strip when nothing needs attention", async () => {
+  it("hides the status strip when nothing needs attention", async () => {
     mockApi({ health: { providers: [], healthy: 3, total: 3, checked_at: "2026-07-22T00:00:00Z" } });
     renderPage(<OverviewPage />);
-    // Wait for the providers tile so the health query has resolved before we read
-    // the strip (it renders immediately, then fills in once health loads).
+
     await screen.findByText("3/3");
-    const strip = screen.getByRole("status");
-    expect(strip).toHaveTextContent("All systems normal");
-    expect(strip).toHaveTextContent("3/3 providers healthy");
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("renders a recent-activity row with a null-cost entry, then empty state", async () => {
@@ -223,12 +222,12 @@ describe("OverviewPage", () => {
     expect(screen.getByText(/could not be loaded/)).toBeInTheDocument();
   });
 
-  it("does not announce all-clear while status sources are still loading", async () => {
+  it("hides the status strip while status sources are still loading", async () => {
     // A never-resolving fetch keeps the queries pending.
     vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}));
     renderPage(<OverviewPage />);
-    expect(await screen.findByText(/Checking gateway status/)).toBeInTheDocument();
-    expect(screen.queryByText(/All systems normal/)).not.toBeInTheDocument();
+    expect(await screen.findByText("Overview")).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });
 
@@ -245,12 +244,14 @@ describe("OverviewIndex routing", () => {
     expect(await screen.findByText("Overview")).toBeInTheDocument();
   });
 
-  it("redirects to providers on a fresh gateway with none configured", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      if (String(input).includes("/v1/providers")) return jsonResponse({ providers: [] });
-      return jsonResponse([]);
-    });
+  it("shows a getting-started overview and links to providers on a fresh gateway", async () => {
+    mockApi({ providers: [] });
+    const user = userEvent.setup();
     renderPage(<OverviewIndex />);
+
+    expect(await screen.findByText("Get started with Otari")).toBeInTheDocument();
+    expect(screen.getByText("Overview")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add your first provider" }));
     expect(await screen.findByTestId("loc")).toHaveTextContent("/providers");
   });
 });

@@ -1,5 +1,6 @@
+import { Button, Card } from "@heroui/react";
 import { useEffect, useMemo, useState } from "react";
-import { NavLink, Navigate } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 
 import {
   useBudgets,
@@ -68,25 +69,18 @@ const ERROR_WORDS = { ok: "Healthy", warn: "Elevated", alert: "High" } as const;
 const PROVIDER_WORDS = { ok: "All up", warn: "Degraded", alert: "All down" } as const;
 const BUDGET_WORDS = { ok: "On track", warn: "Near limit", alert: "Over budget" } as const;
 
-// The authenticated index. On a fresh gateway with no provider configured, a new
-// admin is sent to Providers to add one (an all-zeros overview is a poor first
-// run); gating here means the overview's query fan-out never fires on that
-// redirect. The providers query is master-key gated, so this only runs once
-// authenticated.
+// The authenticated index uses the provider list to make the empty gateway a
+// useful getting-started page. The providers query is master-key gated, so this
+// only runs once authenticated.
 export function OverviewIndex() {
   const providers = useProviders();
   if (providers.isLoading) {
     return null;
   }
-  // Never strand the index on a blank screen: a failed providers query falls back
-  // to Providers (where the error surfaces) rather than rendering nothing.
-  if (!providers.isSuccess || providers.data.providers.length === 0) {
-    return <Navigate to="/providers" replace />;
-  }
-  return <OverviewPage />;
+  return <OverviewPage needsSetup={providers.isSuccess && providers.data.providers.length === 0} />;
 }
 
-export function OverviewPage() {
+export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
   const w = useWindows();
 
   const todayFilters = useMemo(() => ({ start_date: w.today }), [w]);
@@ -126,6 +120,8 @@ export function OverviewPage() {
     <div className="flex flex-col gap-6">
       <PageHeader title="Overview" description="At-a-glance spend, traffic, and health across the gateway." />
 
+      {needsSetup ? <GettingStartedPanel /> : null}
+
       <ErrorBanner error={loadError} />
 
       <SystemStatusStrip
@@ -135,9 +131,8 @@ export function OverviewPage() {
         budget={budget}
         errStatus={err.status}
         errRate={err.rate}
-        // The strip evaluates health + budgets + error rate; only claim "all
-        // clear" once all three loaded successfully, so it never contradicts the
-        // ErrorBanner or announces normalcy before anything has loaded.
+        // The strip evaluates health, budgets, and error rate only after all
+        // three load successfully, avoiding transient or false alerts.
         ready={health.isSuccess && budgets.isSuccess && period.isSuccess}
         failed={health.isError || budgets.isError || period.isError}
       />
@@ -204,11 +199,31 @@ export function OverviewPage() {
   );
 }
 
-// A calm one-liner when all clear; otherwise only the things that need attention,
-// each linking to the page that fixes it. This is the attention-router: the
-// operator should not have to scan every tile to learn whether anything is wrong.
-// A neutral, hue-free strip for the states where "all clear" would be dishonest:
-// still loading, or a source query failed (its details are in the ErrorBanner).
+function GettingStartedPanel() {
+  const navigate = useNavigate();
+
+  return (
+    <Card>
+      <Card.Content className="flex flex-col gap-3 p-6">
+        <div>
+          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">Get started with Otari</h2>
+          <p className="mt-1 text-sm text-[var(--otari-muted)]">
+            Add a provider to begin serving models. Once it is configured, this page will show your gateway&rsquo;s
+            traffic, spend, and health.
+          </p>
+        </div>
+        <div>
+          <Button variant="primary" onPress={() => navigate("/providers")}>
+            Add your first provider
+          </Button>
+        </div>
+      </Card.Content>
+    </Card>
+  );
+}
+
+// A neutral, hue-free strip for a failed status source. Its details are also
+// surfaced in the ErrorBanner, but this preserves context at the status area.
 function NeutralStrip({ text }: { text: string }) {
   return (
     <div
@@ -239,14 +254,13 @@ function SystemStatusStrip({
   ready: boolean;
   failed: boolean;
 }) {
-  // Don't announce normalcy we haven't verified: a failed source means the
-  // ErrorBanner is already showing why, and while loading there is nothing to
-  // report yet.
+  // A failed source deserves a visible status message; while loading, wait for
+  // actionable information instead of reserving space for a transient banner.
   if (failed) {
     return <NeutralStrip text="Some status data could not be loaded." />;
   }
   if (!ready) {
-    return <NeutralStrip text="Checking gateway status…" />;
+    return null;
   }
 
   const problems: { text: string; to: string }[] = [];
@@ -264,19 +278,7 @@ function SystemStatusStrip({
   }
 
   if (problems.length === 0) {
-    const providerBit = total > 0 ? `${healthy}/${total} providers healthy` : "no providers configured";
-    // Only claim "within limit" when there is actually a capped budget to judge;
-    // otherwise report what the budget tile reports (e.g. "No budgets configured").
-    const budgetBit = budget.cappedCount > 0 ? "budgets within limit" : budget.label;
-    return (
-      <div
-        role="status"
-        className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
-      >
-        <span aria-hidden>✓</span>
-        <span>All systems normal · {providerBit} · {budgetBit}</span>
-      </div>
-    );
+    return null;
   }
 
   return (

@@ -125,6 +125,7 @@ describe("BudgetsPage", () => {
 
     expect(await screen.findByText("No budgets yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create your first budget" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create budget" })).not.toBeInTheDocument();
   });
 
   it("lists a budget with its limit and humanized reset period", async () => {
