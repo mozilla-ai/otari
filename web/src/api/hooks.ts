@@ -67,7 +67,7 @@ const USAGE = "usage";
 const BUILD_POLL_MS = 60_000;
 // Checking provider health lists models for every configured provider. Keep the
 // automatic probe infrequent; operators can still force an immediate re-check.
-const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000;
+export const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000;
 
 export function useModels() {
   return useQuery({

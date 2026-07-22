@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
+import { PROVIDER_HEALTH_REFRESH_MS } from "@/api/hooks";
 import type {
   GatewaySettings,
   KnownProvider,
@@ -403,7 +404,7 @@ describe("ProvidersPage", () => {
 
     first.unmount();
     client.setQueryData(["provider-health"], healthResponse([{ instance: "openai", ok: true, model_count: 3, error: null, checked_at: null }]), {
-      updatedAt: Date.now() - 31_000,
+      updatedAt: Date.now() - (PROVIDER_HEALTH_REFRESH_MS - 5_000),
     });
     renderPage(<ProvidersPage />, client);
 
