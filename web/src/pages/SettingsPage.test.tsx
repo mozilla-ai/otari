@@ -5,7 +5,8 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
-import type { ConfigField, GatewaySettings } from "@/api/types";
+import type { ConfigField, GatewaySettings, ReencryptProviderCredentialsResult, StoredProvider } from "@/api/types";
+import { AuthProvider } from "@/auth/AuthContext";
 import { SettingsPage, fieldMatches } from "@/pages/SettingsPage";
 
 describe("fieldMatches", () => {
@@ -65,12 +66,30 @@ const SETTINGS: GatewaySettings = {
   model_discovery: true,
   default_pricing: false,
   require_pricing: false,
+  master_key_source: "generated",
   config: CONFIG,
 };
 
+function storedProvider(instance: string, last4: string | null, decryptable = true): StoredProvider {
+  return {
+    instance,
+    provider_type: null,
+    api_base: null,
+    last4,
+    client_args: {},
+    created_at: null,
+    updated_at: "2026-01-01T00:00:00+00:00",
+    decryptable,
+  };
+}
+
 function renderWithClient(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>
+      <AuthProvider>{ui}</AuthProvider>
+    </QueryClientProvider>,
+  );
 }
 
 function jsonResponse(body: unknown): Response {
@@ -80,11 +99,27 @@ function jsonResponse(body: unknown): Response {
 // Serves the settings, and echoes PATCH bodies back merged onto the base (both
 // the top-level flags and the matching config entries) so the UI reflects the
 // change after a round trip, like the real backend.
-function mockApi(initial: GatewaySettings = SETTINGS) {
+function mockApi(
+  initial: GatewaySettings = SETTINGS,
+  stored: StoredProvider[] = [],
+  reencryptResult: ReencryptProviderCredentialsResult = { reencrypted: 1, unreadable: 0 },
+) {
   let current = initial;
+  let storedList = [...stored];
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
-    if (String(input).includes("/v1/settings")) {
+    if (url.includes("/v1/provider-credentials/reencrypt") && method === "POST") {
+      storedList = storedList.map((provider) => ({ ...provider, decryptable: reencryptResult.unreadable === 0 }));
+      return jsonResponse(reencryptResult);
+    }
+    if (url.includes("/v1/provider-credentials")) {
+      return jsonResponse(storedList);
+    }
+    if (url.includes("/v1/settings/master-key/rotate")) {
+      return jsonResponse({ master_key: "otari-mk-new" });
+    }
+    if (url.includes("/v1/settings")) {
       if (method === "PATCH") {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
         current = {
@@ -100,9 +135,13 @@ function mockApi(initial: GatewaySettings = SETTINGS) {
 }
 
 describe("SettingsPage", () => {
-  beforeEach(() => setMasterKey("test-master-key"));
+  beforeEach(() => {
+    window.sessionStorage.setItem("otari.dashboard.masterKey", "test-master-key");
+    setMasterKey("test-master-key");
+  });
   afterEach(() => {
     vi.restoreAllMocks();
+    window.sessionStorage.clear();
     setMasterKey(null);
   });
 
@@ -115,6 +154,8 @@ describe("SettingsPage", () => {
     await screen.findByText(/Version 1.2.3/);
     expect(screen.getByRole("switch", { name: "model_discovery" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("switch", { name: "default_pricing" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Credential security")).toBeInTheDocument();
+    expect(screen.getByText("OTARI_SECRET_KEY=<new-key>,<old-key>")).toBeInTheDocument();
   });
 
   it("patches a setting when its switch is toggled", async () => {
@@ -135,6 +176,63 @@ describe("SettingsPage", () => {
 
     // The switch reflects the new value after the round trip.
     expect(await screen.findByRole("switch", { name: "model_discovery" })).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("regenerates the master key in a one-time dialog without dropping the settings view", async () => {
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<SettingsPage />);
+    await screen.findByText(/Version 1.2.3/);
+
+    await user.click(screen.getByRole("button", { name: "Regenerate" }));
+    expect(screen.getByRole("dialog", { name: "Regenerate master key?" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Regenerate key" }));
+
+    expect(await screen.findByDisplayValue("otari-mk-new")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Master key regenerated" })).toBeInTheDocument();
+    expect(screen.getByText("Credential security")).toBeInTheDocument();
+    expect(window.sessionStorage.getItem("otari.dashboard.masterKey")).toBe("otari-mk-new");
+
+    await user.click(screen.getByRole("button", { name: "I’ve saved this key" }));
+    expect(screen.queryByDisplayValue("otari-mk-new")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("switch", { name: "default_pricing" }));
+    const patch = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "PATCH");
+    expect(new Headers(patch?.[1]?.headers).get("Authorization")).toBe("Bearer otari-mk-new");
+  });
+
+  it("explains when a master key is managed in configuration", async () => {
+    mockApi({ ...SETTINGS, master_key_source: "configured" });
+
+    renderWithClient(<SettingsPage />);
+
+    expect(await screen.findByText(/uses a key managed through OTARI_MASTER_KEY or config.yml/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Managed in configuration" })).toBeDisabled();
+  });
+
+  it("re-encrypts stored provider keys from the Credential security category", async () => {
+    const fetchMock = mockApi(SETTINGS, [storedProvider("openai", "1234")]);
+    const user = userEvent.setup();
+
+    renderWithClient(<SettingsPage />);
+    await screen.findByText("Credential security");
+
+    await user.click(screen.getByRole("button", { name: "Re-encrypt provider keys" }));
+
+    const call = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/v1/provider-credentials/reencrypt") && (init?.method ?? "") === "POST",
+    );
+    expect(call).toBeDefined();
+    expect(await screen.findByText(/Re-encrypted 1 provider key/)).toBeInTheDocument();
+  });
+
+  it("shows unreadable provider key recovery guidance in the Credential security category", async () => {
+    mockApi(SETTINGS, [storedProvider("openai", "1234", false)]);
+
+    renderWithClient(<SettingsPage />);
+
+    expect(await screen.findByText(/1 stored provider key cannot be decrypted/)).toBeInTheDocument();
   });
 
   it("enables default pricing from off", async () => {

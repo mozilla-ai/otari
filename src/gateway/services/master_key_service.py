@@ -85,6 +85,23 @@ async def ensure_master_key(config: GatewayConfig, session: AsyncSession) -> Non
         logger.warning("Could not persist a generated master key; the management API stays locked until one is set.")
 
 
+async def stage_generated_master_key_rotation(session: AsyncSession) -> tuple[str, str]:
+    """Stage a new generated master-key hash and return ``(token, hash)``.
+
+    The plaintext token is returned exactly once for the dashboard to reveal.
+    Callers must commit the session before updating the in-memory config hash so
+    a failed write never invalidates the current key in this worker.
+    """
+    token = generate_master_key()
+    hashed = hash_master_key(token)
+    row = await session.get(RuntimeSetting, MASTER_KEY_HASH_KEY)
+    if row is None:
+        session.add(RuntimeSetting(key=MASTER_KEY_HASH_KEY, value=hashed))
+    else:
+        row.value = hashed
+    return token, hashed
+
+
 def _print_banner(config: GatewayConfig, token: str) -> None:
     host = "localhost" if config.host in ("0.0.0.0", "::", "") else config.host
     url = f"http://{host}:{config.port}/"

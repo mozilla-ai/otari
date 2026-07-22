@@ -9,11 +9,13 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from gateway.api.routes import providers as providers_route
+from gateway.models.entities import ProviderCredential
 from gateway.services.model_discovery_service import ProviderDiscovery
 from gateway.services.provider_store_service import reset_provider_cache
-from gateway.services.secret_box import generate_secret_key
+from gateway.services.secret_box import decrypt_secret, generate_secret_key
 
 
 @pytest.fixture(autouse=True)
@@ -78,6 +80,71 @@ def test_list_flags_undecryptable_key(
     rows = client.get("/v1/provider-credentials", headers=master_key_header).json()
     assert rows[0]["instance"] == "openai"
     assert rows[0]["decryptable"] is False
+
+
+def test_reencrypt_provider_keys_allows_secret_key_retirement(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    old_key, new_key = generate_secret_key(), generate_secret_key()
+    monkeypatch.setenv("OTARI_SECRET_KEY", old_key)
+    _create(client, master_key_header, instance="openai", key="sk-rotate")
+    row = db_session.get(ProviderCredential, "openai")
+    assert row is not None
+    original_ciphertext = row.encrypted_api_key
+
+    monkeypatch.setenv("OTARI_SECRET_KEY", f"{new_key},{old_key}")
+    resp = client.post("/v1/provider-credentials/reencrypt", headers=master_key_header)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"reencrypted": 1, "unreadable": 0}
+
+    db_session.expire_all()
+    row = db_session.get(ProviderCredential, "openai")
+    assert row is not None
+    assert row.encrypted_api_key != original_ciphertext
+    monkeypatch.setenv("OTARI_SECRET_KEY", new_key)
+    assert decrypt_secret(row.encrypted_api_key or "") == "sk-rotate"
+    listed = client.get("/v1/provider-credentials", headers=master_key_header)
+    assert listed.json()[0]["decryptable"] is True
+
+
+def test_reencrypt_reports_unreadable_rows_for_manual_recovery(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_key, new_key = generate_secret_key(), generate_secret_key()
+    monkeypatch.setenv("OTARI_SECRET_KEY", old_key)
+    _create(client, master_key_header, instance="openai", key="sk-lost")
+
+    monkeypatch.setenv("OTARI_SECRET_KEY", new_key)
+    resp = client.post("/v1/provider-credentials/reencrypt", headers=master_key_header)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"reencrypted": 0, "unreadable": 1}
+    listed = client.get("/v1/provider-credentials", headers=master_key_header)
+    assert listed.json()[0]["decryptable"] is False
+
+    recovered = client.patch(
+        "/v1/provider-credentials/openai",
+        json={"api_key": "sk-recovered"},
+        headers=master_key_header,
+    )
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["decryptable"] is True
+    assert recovered.json()["last4"] == "ered"
+
+
+def test_reencrypt_requires_secret_key(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    _create(client, master_key_header, instance="openai", key="sk-stored")
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    monkeypatch.delenv("GATEWAY_SECRET_KEY", raising=False)
+
+    resp = client.post("/v1/provider-credentials/reencrypt", headers=master_key_header)
+    assert resp.status_code == 400
+    assert "OTARI_SECRET_KEY" in resp.json()["detail"]
 
 
 def test_create_duplicate_conflicts(

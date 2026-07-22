@@ -254,6 +254,34 @@ async def save_credential(
     return row
 
 
+async def reencrypt_credentials(db: AsyncSession) -> tuple[int, int]:
+    """Re-encrypt stored provider keys with the current primary OTARI_SECRET_KEY.
+
+    Returns ``(reencrypted, unreadable)``. Rows without a stored key are ignored.
+    If any encrypted key cannot be decrypted with the configured key set, it is
+    left untouched and counted as unreadable so the operator can recover it by
+    replacing that provider's key.
+    """
+    rows = (
+        (await db.execute(select(ProviderCredential).where(ProviderCredential.encrypted_api_key.is_not(None))))
+        .scalars()
+        .all()
+    )
+    reencrypted = 0
+    unreadable = 0
+    for row in rows:
+        if row.encrypted_api_key is None:
+            continue
+        try:
+            plaintext = decrypt_secret(row.encrypted_api_key)
+        except SecretDecryptionError:
+            unreadable += 1
+            continue
+        row.encrypted_api_key = encrypt_secret(plaintext)
+        reencrypted += 1
+    return reencrypted, unreadable
+
+
 async def delete_credential(db: AsyncSession, instance: str) -> bool:
     """Delete a stored credential (staged; caller commits). Returns whether it existed."""
     row = await db.get(ProviderCredential, instance)

@@ -20,6 +20,8 @@ import type {
   PricingResponse,
   ProviderHealthResponse,
   ProvidersResponse,
+  ReencryptProviderCredentialsResult,
+  RotateMasterKeyResponse,
   SetPricingRequest,
   StoredProvider,
   TestProviderResult,
@@ -208,6 +210,15 @@ export function useDeleteStoredProvider() {
   });
 }
 
+export function useReencryptProviderCredentials() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<ReencryptProviderCredentialsResult>("/v1/provider-credentials/reencrypt", { method: "POST" }),
+    onSuccess: () => invalidateProviderViews(queryClient),
+  });
+}
+
 // Tests a stored provider's key by listing its models. Read-only on the server,
 // so it invalidates nothing.
 export function useTestStoredProvider() {
@@ -290,6 +301,12 @@ export function useUpdateSettings() {
       void queryClient.invalidateQueries({ queryKey: [MODELS] });
       void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] });
     },
+  });
+}
+
+export function useRotateMasterKey() {
+  return useMutation({
+    mutationFn: () => apiFetch<RotateMasterKeyResponse>("/v1/settings/master-key/rotate", { method: "POST" }),
   });
 }
 
