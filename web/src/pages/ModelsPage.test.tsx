@@ -690,7 +690,6 @@ describe("ModelsPage", () => {
       },
       pricing: [],
       discoverable: { providers: [] },
-      providers: { providers: [] },
       metadata: { source: "models.dev", available: true, models: {} },
     });
     const user = userEvent.setup();

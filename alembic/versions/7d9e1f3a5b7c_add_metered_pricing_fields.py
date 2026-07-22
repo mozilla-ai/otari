@@ -1,7 +1,7 @@
 """Add metered pricing and usage-audit fields.
 
 Revision ID: 7d9e1f3a5b7c
-Revises: c4d6e8f0a2b4
+Revises: d5f7a9b1c3e5
 Create Date: 2026-07-22 18:00:00.000000
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "7d9e1f3a5b7c"
-down_revision: str | Sequence[str] | None = "c4d6e8f0a2b4"
+down_revision: str | Sequence[str] | None = "d5f7a9b1c3e5"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
