@@ -434,6 +434,17 @@ export function UsagePage() {
                 ) : null
               }
             />
+            <StatCard
+              label="1h cache write"
+              value={totals ? formatTokens(totals.cache_write_1h_tokens ?? 0) : "—"}
+              hint={
+                totals ? (
+                  <DeltaHint
+                    fraction={deltaFraction(totals.cache_write_1h_tokens ?? 0, prevTotals?.cache_write_1h_tokens ?? 0)}
+                  />
+                ) : null
+              }
+            />
             <StatCard label="Avg latency" value={totals ? formatLatency(totals.avg_latency_ms) : "—"} />
           </div>
 

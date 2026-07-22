@@ -48,6 +48,8 @@ class ModelPricingInfo(BaseModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
+    cache_write_1h_price_per_million: float | None = None
+    pricing_tiers: list[dict[str, float | int]] = Field(default_factory=list)
 
 
 class ModelObject(BaseModel):
@@ -187,6 +189,8 @@ def _model_from_pricing(pricing: ModelPricing) -> ModelObject:
             output_price_per_million=pricing.output_price_per_million,
             cache_read_price_per_million=pricing.cache_read_price_per_million,
             cache_write_price_per_million=pricing.cache_write_price_per_million,
+            cache_write_1h_price_per_million=pricing.cache_write_1h_price_per_million,
+            pricing_tiers=pricing.pricing_tiers or [],
         ),
         pricing_source="configured",
         context_window=_context_window_for_key(pricing.model_key),
@@ -215,6 +219,8 @@ def _alias_model(
             output_price_per_million=pricing.output_price_per_million,
             cache_read_price_per_million=pricing.cache_read_price_per_million,
             cache_write_price_per_million=pricing.cache_write_price_per_million,
+            cache_write_1h_price_per_million=pricing.cache_write_1h_price_per_million,
+            pricing_tiers=pricing.pricing_tiers or [],
         )
         if pricing
         else None,
@@ -273,6 +279,8 @@ def _apply_default_pricing(obj: ModelObject, pricing_selector: str | None = None
             output_price_per_million=default.output_price_per_million,
             cache_read_price_per_million=default.cache_read_price_per_million,
             cache_write_price_per_million=default.cache_write_price_per_million,
+            cache_write_1h_price_per_million=default.cache_write_1h_price_per_million,
+            pricing_tiers=default.pricing_tiers or [],
         )
         obj.pricing_source = "default"
 
@@ -364,6 +372,8 @@ async def list_models(
                     output_price_per_million=pricing.output_price_per_million,
                     cache_read_price_per_million=pricing.cache_read_price_per_million,
                     cache_write_price_per_million=pricing.cache_write_price_per_million,
+                    cache_write_1h_price_per_million=pricing.cache_write_1h_price_per_million,
+                    pricing_tiers=pricing.pricing_tiers or [],
                 )
                 if pricing
                 else None,
@@ -562,6 +572,8 @@ async def get_model(
                 output_price_per_million=pricing.output_price_per_million,
                 cache_read_price_per_million=pricing.cache_read_price_per_million,
                 cache_write_price_per_million=pricing.cache_write_price_per_million,
+                cache_write_1h_price_per_million=pricing.cache_write_1h_price_per_million,
+                pricing_tiers=pricing.pricing_tiers or [],
             )
             if pricing
             else None,

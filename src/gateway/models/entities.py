@@ -276,6 +276,10 @@ class ModelPricing(Base):
     # (see log_usage in _pipeline.py).
     cache_read_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
     cache_write_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
+    cache_write_1h_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
+    # Ordered threshold rules. Each rule applies its supplied rates to the
+    # entire request once ``total_input_tokens`` reaches ``min_input_tokens``.
+    pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -292,6 +296,8 @@ class ModelPricing(Base):
             "output_price_per_million": self.output_price_per_million,
             "cache_read_price_per_million": self.cache_read_price_per_million,
             "cache_write_price_per_million": self.cache_write_price_per_million,
+            "cache_write_1h_price_per_million": self.cache_write_1h_price_per_million,
+            "pricing_tiers": self.pricing_tiers,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -323,6 +329,9 @@ class UsageLog(Base):
     total_tokens: Mapped[int | None] = mapped_column()
     cache_read_tokens: Mapped[int | None] = mapped_column()
     cache_write_tokens: Mapped[int | None] = mapped_column()
+    cache_write_1h_tokens: Mapped[int | None] = mapped_column()
+    billing_meters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    pricing_breakdown: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     cost: Mapped[float | None] = mapped_column()
 
     status: Mapped[str] = mapped_column()
@@ -350,6 +359,9 @@ class UsageLog(Base):
             "total_tokens": self.total_tokens,
             "cache_read_tokens": self.cache_read_tokens,
             "cache_write_tokens": self.cache_write_tokens,
+            "cache_write_1h_tokens": self.cache_write_1h_tokens,
+            "billing_meters": self.billing_meters,
+            "pricing_breakdown": self.pricing_breakdown,
             "cost": self.cost,
             "status": self.status,
             "error_message": self.error_message,
@@ -377,9 +389,7 @@ class FileObject(Base):
     bytes: Mapped[int] = mapped_column()
     purpose: Mapped[str] = mapped_column(default="user_data")
     storage_ref: Mapped[str] = mapped_column()
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
 
@@ -420,9 +430,7 @@ class BatchRecord(Base):
     # this record is the strict ownership anchor, so it must always name an owner.
     # CASCADE: deleting the user drops the ownership record (the user's keys are
     # gone too, and usage_logs remain the billing history).
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
     # SET NULL: a key may be revoked while its batch is still in flight.
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
     model: Mapped[str] = mapped_column()

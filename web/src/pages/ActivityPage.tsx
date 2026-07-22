@@ -173,9 +173,22 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
         <DetailField label="Cost">{formatUSD(entry.cost)}</DetailField>
         <DetailField label="Cache read tokens">{formatTokens(entry.cache_read_tokens)}</DetailField>
         <DetailField label="Cache write tokens">{formatTokens(entry.cache_write_tokens)}</DetailField>
+        <DetailField label="1h cache writes">{formatTokens(entry.cache_write_1h_tokens ?? null)}</DetailField>
         <DetailField label="Total time">{formatLatency(entry.latency_ms)}</DetailField>
         <DetailField label="Request ID">{entry.id}</DetailField>
       </div>
+      {entry.pricing_breakdown?.length ? (
+        <div className="flex flex-col gap-2">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">Billed meters</span>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {entry.pricing_breakdown.map((line) => (
+              <DetailField key={line.meter} label={line.meter.replaceAll("_", " ")}>
+                {formatTokens(line.units)} at {formatUSD(line.rate_per_million)} / 1M, {formatUSD(line.cost)}
+              </DetailField>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

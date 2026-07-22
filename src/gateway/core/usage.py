@@ -24,6 +24,7 @@ class GatewayUsage(CompletionUsage):
 
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    cache_write_1h_tokens: int = 0
     cache_tokens_in_prompt: bool = True
     """Whether ``cache_read_tokens`` / ``cache_write_tokens`` are already counted
     within ``prompt_tokens``.
@@ -44,6 +45,7 @@ class GatewayUsage(CompletionUsage):
         *,
         cache_read_tokens: int | None = None,
         cache_write_tokens: int | None = None,
+        cache_write_1h_tokens: int | None = None,
         cache_tokens_in_prompt: bool | None = None,
     ) -> "GatewayUsage":
         """Build a ``GatewayUsage`` from a base ``CompletionUsage`` plus cache counts.
@@ -60,6 +62,8 @@ class GatewayUsage(CompletionUsage):
             cache_read_tokens = cache_read_tokens_of(usage)
         if cache_write_tokens is None:
             cache_write_tokens = cache_write_tokens_of(usage)
+        if cache_write_1h_tokens is None:
+            cache_write_1h_tokens = cache_write_1h_tokens_of(usage)
         if cache_tokens_in_prompt is None:
             cache_tokens_in_prompt = cache_tokens_in_prompt_of(usage)
         return cls(
@@ -70,6 +74,7 @@ class GatewayUsage(CompletionUsage):
             prompt_tokens_details=usage.prompt_tokens_details,
             cache_read_tokens=cache_read_tokens,
             cache_write_tokens=cache_write_tokens,
+            cache_write_1h_tokens=cache_write_1h_tokens,
             cache_tokens_in_prompt=cache_tokens_in_prompt,
         )
 
@@ -91,6 +96,13 @@ def cache_write_tokens_of(usage: CompletionUsage) -> int:
     """Return the cache-write count carried by ``usage`` (0 for non-Anthropic)."""
     if isinstance(usage, GatewayUsage):
         return usage.cache_write_tokens
+    return 0
+
+
+def cache_write_1h_tokens_of(usage: CompletionUsage) -> int:
+    """Return the Anthropic 1-hour cache-write subset carried by ``usage``."""
+    if isinstance(usage, GatewayUsage):
+        return usage.cache_write_1h_tokens
     return 0
 
 

@@ -594,7 +594,7 @@ describe("ModelsPage", () => {
     });
   });
 
-  it("sets cache prices from the detail panel", async () => {
+  it("sets cache, TTL, and long-context prices from the detail panel", async () => {
     const fetchMock = mockApi();
     const user = userEvent.setup();
 
@@ -605,6 +605,11 @@ describe("ModelsPage", () => {
     await user.click(within(detail).getByRole("button", { name: "Edit price" }));
     await user.type(within(detail).getByLabelText("Cache read price for openai:gpt-4o"), "0.3");
     await user.type(within(detail).getByLabelText("Cache write price for openai:gpt-4o"), "3.75");
+    await user.type(within(detail).getByLabelText("1 hour cache write price for openai:gpt-4o"), "6");
+    await user.click(within(detail).getByRole("button", { name: "Add tier" }));
+    await user.clear(within(detail).getByLabelText("Tier context threshold"));
+    await user.type(within(detail).getByLabelText("Tier context threshold"), "200000");
+    await user.type(within(detail).getByLabelText("Tier input price"), "6");
     await user.click(within(detail).getByRole("button", { name: "Save" }));
 
     const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "POST");
@@ -613,6 +618,8 @@ describe("ModelsPage", () => {
       model_key: "openai:gpt-4o",
       cache_read_price_per_million: 0.3,
       cache_write_price_per_million: 3.75,
+      cache_write_1h_price_per_million: 6,
+      pricing_tiers: [{ min_input_tokens: 200000, input_price_per_million: 6 }],
     });
   });
 

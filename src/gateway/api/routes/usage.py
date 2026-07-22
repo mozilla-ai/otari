@@ -48,6 +48,9 @@ class UsageEntry(BaseModel):
     total_tokens: int | None
     cache_read_tokens: int | None
     cache_write_tokens: int | None
+    cache_write_1h_tokens: int | None
+    billing_meters: dict[str, Any] | None
+    pricing_breakdown: list[dict[str, float | int | str]] | None
     cost: float | None
     status: str
     error_message: str | None
@@ -68,6 +71,9 @@ class UsageEntry(BaseModel):
             total_tokens=log.total_tokens,
             cache_read_tokens=log.cache_read_tokens,
             cache_write_tokens=log.cache_write_tokens,
+            cache_write_1h_tokens=log.cache_write_1h_tokens,
+            billing_meters=log.billing_meters,
+            pricing_breakdown=log.pricing_breakdown,
             cost=log.cost,
             status=log.status,
             error_message=log.error_message,
@@ -205,6 +211,7 @@ class UsageTotals(BaseModel):
     total_tokens: int
     cache_read_tokens: int
     cache_write_tokens: int
+    cache_write_1h_tokens: int
     request_count: int
     error_count: int
     avg_latency_ms: float | None
@@ -316,6 +323,7 @@ async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> Us
                 func.coalesce(func.sum(UsageLog.total_tokens), 0),
                 func.coalesce(func.sum(UsageLog.cache_read_tokens), 0),
                 func.coalesce(func.sum(UsageLog.cache_write_tokens), 0),
+                func.coalesce(func.sum(UsageLog.cache_write_1h_tokens), 0),
                 func.count(),
                 func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
                 func.avg(UsageLog.latency_ms),
@@ -329,9 +337,10 @@ async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> Us
         total_tokens=int(row[3]),
         cache_read_tokens=int(row[4]),
         cache_write_tokens=int(row[5]),
-        request_count=int(row[6]),
-        error_count=int(row[7]),
-        avg_latency_ms=float(row[8]) if row[8] is not None else None,
+        cache_write_1h_tokens=int(row[6]),
+        request_count=int(row[7]),
+        error_count=int(row[8]),
+        avg_latency_ms=float(row[9]) if row[9] is not None else None,
     )
 
 

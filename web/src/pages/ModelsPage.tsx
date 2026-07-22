@@ -11,7 +11,7 @@ import {
   useSetPricing,
   useSettings,
 } from "@/api/hooks";
-import type { ModelMetadata } from "@/api/types";
+import type { ModelMetadata, PricingTier } from "@/api/types";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ConfirmButton, ErrorBanner, errorMessage, FilterSelect, InfoBanner, PageHeader } from "@/components/ui";
 import { formatContext, formatCost, formatNumber, formatReleaseDate } from "@/lib/format";
@@ -96,6 +96,8 @@ interface ModelRow {
   outputPrice: number | null;
   cacheReadPrice: number | null;
   cacheWritePrice: number | null;
+  cacheWrite1hPrice: number | null;
+  pricingTiers: PricingTier[];
   source: PriceSource;
 }
 
@@ -118,6 +120,54 @@ function optionalPrice(value: string): number | null {
   return value.trim() === "" ? null : Number(value);
 }
 
+type EditablePricingTier = {
+  id: number;
+  minInputTokens: string;
+  input: string;
+  output: string;
+  cacheRead: string;
+  cacheWrite: string;
+  cacheWrite1h: string;
+};
+
+function editableTiers(tiers: PricingTier[]): EditablePricingTier[] {
+  return tiers.map((tier, index) => ({
+    id: index,
+    minInputTokens: String(tier.min_input_tokens),
+    input: tier.input_price_per_million == null ? "" : String(tier.input_price_per_million),
+    output: tier.output_price_per_million == null ? "" : String(tier.output_price_per_million),
+    cacheRead: tier.cache_read_price_per_million == null ? "" : String(tier.cache_read_price_per_million),
+    cacheWrite: tier.cache_write_price_per_million == null ? "" : String(tier.cache_write_price_per_million),
+    cacheWrite1h: tier.cache_write_1h_price_per_million == null ? "" : String(tier.cache_write_1h_price_per_million),
+  }));
+}
+
+function validTiers(tiers: EditablePricingTier[]): boolean {
+  const thresholds = new Set<number>();
+  return tiers.every((tier) => {
+    const threshold = Number(tier.minInputTokens);
+    const hasOverride = [tier.input, tier.output, tier.cacheRead, tier.cacheWrite, tier.cacheWrite1h].some(
+      (value) => value.trim() !== "",
+    );
+    if (!Number.isInteger(threshold) || threshold <= 0 || thresholds.has(threshold) || !hasOverride) {
+      return false;
+    }
+    thresholds.add(threshold);
+    return [tier.input, tier.output, tier.cacheRead, tier.cacheWrite, tier.cacheWrite1h].every(isValidOptionalPrice);
+  });
+}
+
+function pricingTiers(tiers: EditablePricingTier[]): PricingTier[] {
+  return tiers.map((tier) => ({
+    min_input_tokens: Number(tier.minInputTokens),
+    ...(tier.input.trim() === "" ? {} : { input_price_per_million: Number(tier.input) }),
+    ...(tier.output.trim() === "" ? {} : { output_price_per_million: Number(tier.output) }),
+    ...(tier.cacheRead.trim() === "" ? {} : { cache_read_price_per_million: Number(tier.cacheRead) }),
+    ...(tier.cacheWrite.trim() === "" ? {} : { cache_write_price_per_million: Number(tier.cacheWrite) }),
+    ...(tier.cacheWrite1h.trim() === "" ? {} : { cache_write_1h_price_per_million: Number(tier.cacheWrite1h) }),
+  }));
+}
+
 function MoneyInput({
   value,
   onChange,
@@ -138,6 +188,79 @@ function MoneyInput({
       onChange={(event) => onChange(event.target.value)}
       className="w-28 rounded-md border border-[var(--otari-line)] bg-white px-2 py-1 text-right text-sm tabular-nums focus:border-[var(--otari-brand)] focus:outline-none"
     />
+  );
+}
+
+function PricingTierEditor({
+  tiers,
+  onChange,
+}: {
+  tiers: EditablePricingTier[];
+  onChange: (tiers: EditablePricingTier[]) => void;
+}) {
+  const update = (id: number, field: keyof EditablePricingTier, value: string) => {
+    onChange(tiers.map((tier) => (tier.id === id ? { ...tier, [field]: value } : tier)));
+  };
+  const add = () => {
+    const nextId = tiers.reduce((max, tier) => Math.max(max, tier.id), -1) + 1;
+    onChange([
+      ...tiers,
+      { id: nextId, minInputTokens: "128000", input: "", output: "", cacheRead: "", cacheWrite: "", cacheWrite1h: "" },
+    ]);
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-[var(--otari-line)] p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-medium text-[var(--otari-ink)]">Long-context price tiers</div>
+          <p className="text-xs text-[var(--otari-muted)]">At a threshold, listed rates replace the base rate for the whole request.</p>
+        </div>
+        <Button size="sm" variant="outline" onPress={add}>
+          Add tier
+        </Button>
+      </div>
+      {tiers.map((tier) => (
+        <div key={tier.id} className="flex flex-wrap items-end gap-2 border-t border-[var(--otari-line)] pt-2">
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            Context ≥ tokens
+            <input
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
+              aria-label="Tier context threshold"
+              value={tier.minInputTokens}
+              onChange={(event) => update(tier.id, "minInputTokens", event.target.value)}
+              className="w-28 rounded-md border border-[var(--otari-line)] bg-white px-2 py-1 text-right text-sm tabular-nums focus:border-[var(--otari-brand)] focus:outline-none"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            Input
+            <MoneyInput value={tier.input} onChange={(value) => update(tier.id, "input", value)} ariaLabel="Tier input price" />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            Output
+            <MoneyInput value={tier.output} onChange={(value) => update(tier.id, "output", value)} ariaLabel="Tier output price" />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            Cache read
+            <MoneyInput value={tier.cacheRead} onChange={(value) => update(tier.id, "cacheRead", value)} ariaLabel="Tier cache read price" />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            Cache write
+            <MoneyInput value={tier.cacheWrite} onChange={(value) => update(tier.id, "cacheWrite", value)} ariaLabel="Tier cache write price" />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            1h write
+            <MoneyInput value={tier.cacheWrite1h} onChange={(value) => update(tier.id, "cacheWrite1h", value)} ariaLabel="Tier 1 hour cache write price" />
+          </label>
+          <Button size="sm" variant="ghost" onPress={() => onChange(tiers.filter((item) => item.id !== tier.id))}>
+            Remove
+          </Button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -253,16 +376,26 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
   const [output, setOutput] = useState("");
   const [cacheRead, setCacheRead] = useState("");
   const [cacheWrite, setCacheWrite] = useState("");
+  const [cacheWrite1h, setCacheWrite1h] = useState("");
+  const [tiers, setTiers] = useState<EditablePricingTier[]>([]);
 
   const startEdit = () => {
     setInput(row.inputPrice == null ? "" : String(row.inputPrice));
     setOutput(row.outputPrice == null ? "" : String(row.outputPrice));
     setCacheRead(row.cacheReadPrice == null ? "" : String(row.cacheReadPrice));
     setCacheWrite(row.cacheWritePrice == null ? "" : String(row.cacheWritePrice));
+    setCacheWrite1h(row.cacheWrite1hPrice == null ? "" : String(row.cacheWrite1hPrice));
+    setTiers(editableTiers(row.pricingTiers));
     setEditing(true);
   };
 
-  const canSave = isValidPrice(input) && isValidPrice(output) && isValidOptionalPrice(cacheRead) && isValidOptionalPrice(cacheWrite);
+  const canSave =
+    isValidPrice(input) &&
+    isValidPrice(output) &&
+    isValidOptionalPrice(cacheRead) &&
+    isValidOptionalPrice(cacheWrite) &&
+    isValidOptionalPrice(cacheWrite1h) &&
+    validTiers(tiers);
 
   const save = () => {
     if (!canSave) {
@@ -275,6 +408,8 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
         output_price_per_million: Number(output),
         cache_read_price_per_million: optionalPrice(cacheRead),
         cache_write_price_per_million: optionalPrice(cacheWrite),
+        cache_write_1h_price_per_million: optionalPrice(cacheWrite1h),
+        pricing_tiers: pricingTiers(tiers),
       },
       { onSuccess: () => setEditing(false) },
     );
@@ -299,6 +434,11 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           <span className="text-xs text-[var(--otari-muted)]">Cache write $ / 1M</span>
           <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel={`Cache write price for ${row.key}`} />
         </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-[var(--otari-muted)]">1h cache write $ / 1M</span>
+          <MoneyInput value={cacheWrite1h} onChange={setCacheWrite1h} ariaLabel={`1 hour cache write price for ${row.key}`} />
+        </div>
+        <PricingTierEditor tiers={tiers} onChange={setTiers} />
         <div className="flex items-center gap-2">
           <Button size="sm" variant="primary" isDisabled={setPricing.isPending || !canSave} onPress={save}>
             Save
@@ -318,6 +458,8 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
       <Spec label="Output" value={row.outputPrice == null ? "—" : `${formatCost(row.outputPrice)} / 1M`} />
       <Spec label="Cache read" value={row.cacheReadPrice == null ? "—" : `${formatCost(row.cacheReadPrice)} / 1M`} />
       <Spec label="Cache write" value={row.cacheWritePrice == null ? "—" : `${formatCost(row.cacheWritePrice)} / 1M`} />
+      <Spec label="1h cache write" value={row.cacheWrite1hPrice == null ? "—" : `${formatCost(row.cacheWrite1hPrice)} / 1M`} />
+      <Spec label="Context tiers" value={row.pricingTiers.length ? `${row.pricingTiers.length} configured` : "—"} />
       <div className="flex items-center gap-2 pt-1">
         <Button size="sm" variant="outline" onPress={startEdit}>
           {row.source === "configured" ? "Edit price" : "Set price"}
@@ -590,8 +732,14 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
   const [output, setOutput] = useState(row.outputPrice == null ? "" : String(row.outputPrice));
   const [cacheRead, setCacheRead] = useState(row.cacheReadPrice == null ? "" : String(row.cacheReadPrice));
   const [cacheWrite, setCacheWrite] = useState(row.cacheWritePrice == null ? "" : String(row.cacheWritePrice));
+  const [cacheWrite1h, setCacheWrite1h] = useState(row.cacheWrite1hPrice == null ? "" : String(row.cacheWrite1hPrice));
 
-  const canSave = isValidPrice(input) && isValidPrice(output) && isValidOptionalPrice(cacheRead) && isValidOptionalPrice(cacheWrite);
+  const canSave =
+    isValidPrice(input) &&
+    isValidPrice(output) &&
+    isValidOptionalPrice(cacheRead) &&
+    isValidOptionalPrice(cacheWrite) &&
+    isValidOptionalPrice(cacheWrite1h);
 
   const save = () => {
     if (!canSave) return;
@@ -602,6 +750,7 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
         output_price_per_million: Number(output),
         cache_read_price_per_million: optionalPrice(cacheRead),
         cache_write_price_per_million: optionalPrice(cacheWrite),
+        cache_write_1h_price_per_million: optionalPrice(cacheWrite1h),
       },
       { onSuccess: onClose },
     );
@@ -625,6 +774,10 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
       <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
         Cache write $ / 1M
         <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel={`Cache write price for ${row.key}`} />
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        1h cache write $ / 1M
+        <MoneyInput value={cacheWrite1h} onChange={setCacheWrite1h} ariaLabel={`1 hour cache write price for ${row.key}`} />
       </label>
       <Button size="sm" variant="primary" isDisabled={setPricing.isPending || !canSave} onPress={save}>
         {setPricing.isPending ? "Saving…" : "Save"}
@@ -876,6 +1029,8 @@ export function ModelsPage() {
         outputPrice: priced ? priced.output_price_per_million : (catalogRow?.outputPrice ?? null),
         cacheReadPrice: priced ? priced.cache_read_price_per_million : (catalogRow?.cacheReadPrice ?? null),
         cacheWritePrice: priced ? priced.cache_write_price_per_million : (catalogRow?.cacheWritePrice ?? null),
+        cacheWrite1hPrice: priced ? (priced.cache_write_1h_price_per_million ?? null) : (catalogRow?.cacheWrite1hPrice ?? null),
+        pricingTiers: priced ? (priced.pricing_tiers ?? []) : (catalogRow?.pricingTiers ?? []),
         source: priced ? "configured" : (catalogRow?.source ?? "none"),
       });
     };
@@ -896,6 +1051,8 @@ export function ModelsPage() {
         outputPrice: model.pricing?.output_price_per_million ?? null,
         cacheReadPrice: model.pricing?.cache_read_price_per_million ?? null,
         cacheWritePrice: model.pricing?.cache_write_price_per_million ?? null,
+        cacheWrite1hPrice: model.pricing?.cache_write_1h_price_per_million ?? null,
+        pricingTiers: model.pricing?.pricing_tiers ?? [],
         source: priceStatus,
       });
     }
@@ -934,6 +1091,8 @@ export function ModelsPage() {
           outputPrice: null,
           cacheReadPrice: null,
           cacheWritePrice: null,
+          cacheWrite1hPrice: null,
+          pricingTiers: [],
           source: "none",
         });
       }

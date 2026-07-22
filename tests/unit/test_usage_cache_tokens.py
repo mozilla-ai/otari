@@ -10,7 +10,7 @@ from any_llm.types.completion import (
 from gateway.api.routes.chat import _ChatAdapter
 from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter
 from gateway.api.routes.responses import _usage_to_completion_usage
-from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_tokens_of
+from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
 
 
 def test_gateway_usage_defaults_to_zero() -> None:
@@ -134,6 +134,28 @@ def test_messages_non_stream_captures_read_and_write() -> None:
     assert usage.total_tokens == 120
     assert usage.cache_read_tokens == 40
     assert usage.cache_write_tokens == 15
+
+
+def test_messages_non_stream_captures_1h_cache_write_breakdown() -> None:
+    """Anthropic's optional TTL breakdown is retained for its distinct rate."""
+    from anthropic.types.cache_creation import CacheCreation
+    from anthropic.types.usage import Usage
+    from any_llm.types.messages import MessageResponse
+
+    result = MessageResponse.model_construct(
+        usage=Usage(
+            input_tokens=100,
+            output_tokens=20,
+            cache_creation_input_tokens=15,
+            cache_creation=CacheCreation(ephemeral_5m_input_tokens=5, ephemeral_1h_input_tokens=10),
+        ),
+    )
+
+    usage = _MessagesAdapter().extract_usage(result)
+
+    assert isinstance(usage, GatewayUsage)
+    assert usage.cache_write_tokens == 15
+    assert cache_write_1h_tokens_of(usage) == 10
 
 
 def test_messages_stream_delta_captures_read_and_write() -> None:

@@ -90,6 +90,15 @@ class PricingConfig(BaseModel):
         ge=0,
         description="Price per 1M cache-write (creation) tokens. Anthropic only.",
     )
+    cache_write_1h_price_per_million: float | None = Field(
+        default=None,
+        ge=0,
+        description="Price per 1M Anthropic 1-hour cache-write tokens.",
+    )
+    pricing_tiers: list[dict[str, float | int]] = Field(
+        default_factory=list,
+        description="Whole-request context threshold pricing rules.",
+    )
     effective_at: datetime | None = Field(
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",

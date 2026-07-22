@@ -51,6 +51,39 @@ def _flat_rate(value: Decimal | TieredPrices) -> float:
     return float(value)
 
 
+def _rate_at(value: Decimal | TieredPrices | None, threshold: int) -> float | None:
+    if value is None:
+        return None
+    if not isinstance(value, TieredPrices):
+        return float(value)
+    rate = value.base
+    for tier in value.tiers:
+        if tier.start <= threshold:
+            rate = tier.price
+        else:
+            break
+    return float(rate)
+
+
+def _pricing_tiers(price: object) -> list[dict[str, float | int]]:
+    fields = {
+        "input_price_per_million": getattr(price, "input_mtok"),
+        "output_price_per_million": getattr(price, "output_mtok"),
+        "cache_read_price_per_million": getattr(price, "cache_read_mtok"),
+        "cache_write_price_per_million": getattr(price, "cache_write_mtok"),
+    }
+    thresholds = sorted(
+        {tier.start for value in fields.values() if isinstance(value, TieredPrices) for tier in value.tiers}
+    )
+    return [
+        {
+            "min_input_tokens": threshold,
+            **{field: rate for field, value in fields.items() if (rate := _rate_at(value, threshold)) is not None},
+        }
+        for threshold in thresholds
+    ]
+
+
 def normalize_effective_at(value: datetime | None) -> datetime:
     """Normalize a datetime to an aware UTC timestamp, defaulting to now."""
 
@@ -211,6 +244,7 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
         output_price_per_million=output_rate,
         cache_read_price_per_million=cache_read_rate,
         cache_write_price_per_million=cache_write_rate,
+        pricing_tiers=_pricing_tiers(price),
     )
 
 

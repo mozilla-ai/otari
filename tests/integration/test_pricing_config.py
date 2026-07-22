@@ -175,9 +175,9 @@ def test_pricing_for_unlisted_provider_is_skipped_not_fatal(
         with caplog.at_level(logging.WARNING, logger="gateway"):
             with TestClient(app):
                 # Startup succeeded: the unlisted provider's pricing was skipped, not fatal.
-                skipped = test_db.query(ModelPricing).filter(
-                    ModelPricing.model_key == "anthropic:claude-3-opus"
-                ).first()
+                skipped = (
+                    test_db.query(ModelPricing).filter(ModelPricing.model_key == "anthropic:claude-3-opus").first()
+                )
                 assert skipped is None, "Pricing for an unlisted provider should be skipped"
 
                 # The listed provider's pricing is still loaded.
@@ -188,9 +188,9 @@ def test_pricing_for_unlisted_provider_is_skipped_not_fatal(
         gateway_logger.removeHandler(caplog.handler)
         dispose_override()
 
-    assert any(
-        "Skipping pricing" in record.message and "anthropic" in record.message for record in caplog.records
-    ), "Expected a warning that anthropic pricing was skipped"
+    assert any("Skipping pricing" in record.message and "anthropic" in record.message for record in caplog.records), (
+        "Expected a warning that anthropic pricing was skipped"
+    )
 
 
 def test_pricing_loaded_from_config_normalizes_legacy_slash_format(postgres_url: str, test_db: Session) -> None:
@@ -266,6 +266,55 @@ def test_set_pricing_persists_cache_rates(
     data = resp.json()
     assert data["cache_read_price_per_million"] == 0.3
     assert data["cache_write_price_per_million"] == 3.75
+
+
+def test_set_pricing_persists_context_tiers_and_1h_cache_rate(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The pricing API round-trips TTL-specific and long-context rates."""
+    key = "anthropic:claude-sonnet-4"
+    payload = {
+        "model_key": key,
+        "input_price_per_million": 3.0,
+        "output_price_per_million": 15.0,
+        "cache_write_price_per_million": 3.75,
+        "cache_write_1h_price_per_million": 6.0,
+        "pricing_tiers": [
+            {
+                "min_input_tokens": 200000,
+                "input_price_per_million": 6.0,
+                "output_price_per_million": 22.5,
+                "cache_write_1h_price_per_million": 12.0,
+            }
+        ],
+    }
+    response = client.post("/v1/pricing", json=payload, headers=master_key_header)
+
+    assert response.status_code == 200
+    assert response.json()["cache_write_1h_price_per_million"] == 6.0
+    assert response.json()["pricing_tiers"] == payload["pricing_tiers"]
+
+    # Omission preserves thresholds during a new price version, while explicit
+    # null intentionally removes them.
+    preserved = client.post(
+        "/v1/pricing",
+        json={"model_key": key, "input_price_per_million": 4.0, "output_price_per_million": 16.0},
+        headers=master_key_header,
+    )
+    assert preserved.json()["pricing_tiers"] == payload["pricing_tiers"]
+
+    cleared = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": key,
+            "input_price_per_million": 4.0,
+            "output_price_per_million": 16.0,
+            "pricing_tiers": None,
+        },
+        headers=master_key_header,
+    )
+    assert cleared.json()["pricing_tiers"] == []
 
 
 def test_set_pricing_omitted_cache_rates_preserve_stored_values(
