@@ -70,7 +70,7 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         cache_read_price = pricing_config.cache_read_price_per_million
         cache_write_price = pricing_config.cache_write_price_per_million
         cache_write_1h_price = pricing_config.cache_write_1h_price_per_million
-        pricing_tiers = pricing_config.pricing_tiers
+        pricing_tiers = [tier.model_dump(exclude_none=True) for tier in pricing_config.pricing_tiers]
         effective_at = normalize_effective_at(pricing_config.effective_at)
 
         existing_pricing = (

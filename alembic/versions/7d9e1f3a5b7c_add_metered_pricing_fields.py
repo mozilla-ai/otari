@@ -1,7 +1,7 @@
 """Add metered pricing and usage-audit fields.
 
 Revision ID: 7d9e1f3a5b7c
-Revises: f3b6d8a1c4e7
+Revises: c4d6e8f0a2b4
 Create Date: 2026-07-22 18:00:00.000000
 
 """
