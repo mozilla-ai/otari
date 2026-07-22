@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Navigate } from "react-router-dom";
 
 import {
@@ -24,11 +24,36 @@ const PERIOD_DAYS = 30;
 // hammering every upstream.
 const HEALTH_REFRESH_MS = 60_000;
 
-// Freeze the window bounds once, so the summary queries get a stable queryKey and
-// do not refetch every render (and the vs-prev delta compares a fixed baseline).
+// The operator's current local date, as a stable key. Used to hold the window
+// bounds steady within a day (so query keys don't churn every render) while still
+// letting them advance across midnight.
+function localDayKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+// Window bounds for the summary queries. Held stable within a local day so the
+// query keys don't churn (and the vs-prev delta compares a fixed baseline), but
+// advanced when the tab is refocused on a new day, so a tab left open overnight
+// does not keep aggregating yesterday's "today" or a stale 30-day window.
 // "Today" is LOCAL midnight rendered to an absolute instant, so the operator's
 // wall-clock day is what the server aggregates, not UTC's.
 function useWindows() {
+  const [dayKey, setDayKey] = useState(localDayKey);
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === "visible") {
+        const next = localDayKey();
+        setDayKey((prev) => (prev === next ? prev : next));
+      }
+    };
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("focus", check);
+    return () => {
+      document.removeEventListener("visibilitychange", check);
+      window.removeEventListener("focus", check);
+    };
+  }, []);
   return useMemo(() => {
     const now = Date.now();
     const d = new Date(now);
@@ -37,7 +62,9 @@ function useWindows() {
       periodStart: new Date(now - PERIOD_DAYS * DAY_MS).toISOString(),
       prevStart: new Date(now - 2 * PERIOD_DAYS * DAY_MS).toISOString(),
     };
-  }, []);
+    // dayKey drives the refresh: same day -> same bounds; new day -> re-derive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dayKey]);
 }
 
 // A status tile's short word (paired with the color so status never rides on hue
@@ -113,18 +140,25 @@ export function OverviewPage() {
         budget={budget}
         errStatus={err.status}
         errRate={err.rate}
+        // The strip evaluates health + budgets + error rate; only claim "all
+        // clear" once all three loaded successfully, so it never contradicts the
+        // ErrorBanner or announces normalcy before anything has loaded.
+        ready={health.isSuccess && budgets.isSuccess && period.isSuccess}
+        failed={health.isError || budgets.isError || period.isError}
       />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
-        <StatCard label="Spend today" value={today.isLoading ? "—" : formatUsd(todayTotals?.cost ?? 0)} />
+        {/* Tiles gate on data presence, not isLoading, so a failed query reads as
+            "—" (unknown) rather than a misleading real zero. */}
+        <StatCard label="Spend today" value={todayTotals ? formatUsd(todayTotals.cost) : "—"} />
         <StatCard
           label="Spend, last 30 days"
-          value={period.isLoading ? "—" : formatUsd(periodTotals?.cost ?? 0)}
+          value={periodTotals ? formatUsd(periodTotals.cost) : "—"}
           hint={periodTotals ? <DeltaHint fraction={deltaFraction(periodTotals.cost, prevTotals?.cost)} /> : null}
         />
         <StatCard
           label="Requests, last 30 days"
-          value={period.isLoading ? "—" : formatNumber(periodTotals?.request_count ?? 0)}
+          value={periodTotals ? formatNumber(periodTotals.request_count) : "—"}
           hint={
             periodTotals ? (
               <DeltaHint fraction={deltaFraction(periodTotals.request_count, prevTotals?.request_count)} />
@@ -133,35 +167,31 @@ export function OverviewPage() {
         />
         <StatCard
           label="Error rate, last 30 days"
-          value={period.isLoading ? "—" : err.rate === null ? "—" : formatPct(err.rate)}
+          value={err.rate === null ? "—" : formatPct(err.rate)}
           status={toStatStatus(err.status)}
           statusLabel={err.status === "neutral" ? undefined : ERROR_WORDS[err.status]}
           hint={err.rate !== null ? <DeltaHint fraction={errDelta} /> : null}
         />
         <StatCard
           label="Budget health"
-          value={budgets.isLoading ? "—" : budget.worst ? formatPct(budget.worst.pct) : "—"}
-          status={toStatStatus(budget.status)}
-          statusLabel={budget.status === "neutral" ? undefined : BUDGET_WORDS[budget.status]}
-          hint={budget.worst ? `${budget.label} · worst: ${budget.worst.name}` : budget.label}
+          value={budgets.data ? (budget.worst ? formatPct(budget.worst.pct) : "—") : "—"}
+          status={budgets.data ? toStatStatus(budget.status) : undefined}
+          statusLabel={budgets.data && budget.status !== "neutral" ? BUDGET_WORDS[budget.status] : undefined}
+          hint={budgets.data ? (budget.worst ? `${budget.label} · worst: ${budget.worst.name}` : budget.label) : undefined}
           to="/budgets"
         />
         <StatCard
           label="Providers healthy"
-          value={health.isLoading ? "—" : `${health.data?.healthy ?? 0}/${health.data?.total ?? 0}`}
-          status={toStatStatus(providerHealth)}
-          statusLabel={providerHealth === "neutral" ? undefined : PROVIDER_WORDS[providerHealth]}
+          value={health.data ? `${health.data.healthy}/${health.data.total}` : "—"}
+          status={health.data ? toStatStatus(providerHealth) : undefined}
+          statusLabel={health.data && providerHealth !== "neutral" ? PROVIDER_WORDS[providerHealth] : undefined}
           hint={
-            health.data?.checked_at
-              ? `checked ${formatRelative(health.data.checked_at)}`
-              : health.isLoading
-                ? undefined
-                : "not checked yet"
+            health.data ? (health.data.checked_at ? `checked ${formatRelative(health.data.checked_at)}` : "not checked yet") : undefined
           }
           to="/providers"
         />
-        <StatCard label="Active keys" value={keys.isLoading ? "—" : formatNumber(activeKeys)} to="/keys" />
-        <StatCard label="Active users" value={users.isLoading ? "—" : formatNumber(activeUsers)} to="/users" />
+        <StatCard label="Active keys" value={keys.data ? formatNumber(activeKeys) : "—"} to="/keys" />
+        <StatCard label="Active users" value={users.data ? formatNumber(activeUsers) : "—"} to="/users" />
       </div>
 
       <RecentActivity entries={recent.data ?? []} loading={recent.isLoading} error={recent.error} />
@@ -172,6 +202,19 @@ export function OverviewPage() {
 // A calm one-liner when all clear; otherwise only the things that need attention,
 // each linking to the page that fixes it. This is the attention-router: the
 // operator should not have to scan every tile to learn whether anything is wrong.
+// A neutral, hue-free strip for the states where "all clear" would be dishonest:
+// still loading, or a source query failed (its details are in the ErrorBanner).
+function NeutralStrip({ text }: { text: string }) {
+  return (
+    <div
+      role="status"
+      className="flex items-center gap-2 rounded-xl border border-[var(--otari-line)] bg-[var(--otari-bg)] px-4 py-3 text-sm text-[var(--otari-muted)]"
+    >
+      {text}
+    </div>
+  );
+}
+
 function SystemStatusStrip({
   providerHealth,
   healthy,
@@ -179,6 +222,8 @@ function SystemStatusStrip({
   budget,
   errStatus,
   errRate,
+  ready,
+  failed,
 }: {
   providerHealth: "ok" | "warn" | "alert" | "neutral";
   healthy: number;
@@ -186,7 +231,19 @@ function SystemStatusStrip({
   budget: ReturnType<typeof budgetHealth>;
   errStatus: "ok" | "warn" | "alert" | "neutral";
   errRate: number | null;
+  ready: boolean;
+  failed: boolean;
 }) {
+  // Don't announce normalcy we haven't verified: a failed source means the
+  // ErrorBanner is already showing why, and while loading there is nothing to
+  // report yet.
+  if (failed) {
+    return <NeutralStrip text="Some status data could not be loaded." />;
+  }
+  if (!ready) {
+    return <NeutralStrip text="Checking gateway status…" />;
+  }
+
   const problems: { text: string; to: string }[] = [];
   if ((providerHealth === "warn" || providerHealth === "alert") && total > 0) {
     const down = total - healthy;
@@ -203,13 +260,16 @@ function SystemStatusStrip({
 
   if (problems.length === 0) {
     const providerBit = total > 0 ? `${healthy}/${total} providers healthy` : "no providers configured";
+    // Only claim "within limit" when there is actually a capped budget to judge;
+    // otherwise report what the budget tile reports (e.g. "No budgets configured").
+    const budgetBit = budget.cappedCount > 0 ? "budgets within limit" : budget.label;
     return (
       <div
         role="status"
         className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"
       >
         <span aria-hidden>✓</span>
-        <span>All systems normal · {providerBit} · budgets within limit</span>
+        <span>All systems normal · {providerBit} · {budgetBit}</span>
       </div>
     );
   }

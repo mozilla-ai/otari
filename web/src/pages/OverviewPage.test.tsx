@@ -197,6 +197,18 @@ describe("OverviewPage", () => {
     // The spend tiles still render even though budgets errored (per-tile isolation);
     // both Today and Last-30d read $200.00 with this mock, hence findAllByText.
     expect((await screen.findAllByText("$200.00")).length).toBeGreaterThan(0);
+    // ...and the status strip must NOT claim all-clear while a source query failed
+    // (it would contradict the error banner). It reads as a neutral load-failure line.
+    expect(screen.queryByText(/All systems normal/)).not.toBeInTheDocument();
+    expect(screen.getByText(/could not be loaded/)).toBeInTheDocument();
+  });
+
+  it("does not announce all-clear while status sources are still loading", async () => {
+    // A never-resolving fetch keeps the queries pending.
+    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}));
+    renderPage(<OverviewPage />);
+    expect(await screen.findByText(/Checking gateway status/)).toBeInTheDocument();
+    expect(screen.queryByText(/All systems normal/)).not.toBeInTheDocument();
   });
 });
 
