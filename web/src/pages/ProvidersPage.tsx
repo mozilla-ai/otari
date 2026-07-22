@@ -29,9 +29,8 @@ import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components
 import { ConfirmButton, ErrorBanner, errorMessage, PageHeader } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
 
-// A masked, never-prefilled secret input. Editing a key is "replace, not
-// reveal": the current key is only ever shown as its last 4 digits elsewhere,
-// and a new value is typed into an empty field.
+// A masked, never-prefilled secret input. Native password masking protects
+// Firefox users; self-hosted deployments should use HTTPS to avoid browser warnings.
 function SecretField({
   value,
   onChange,
