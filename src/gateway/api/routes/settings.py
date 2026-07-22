@@ -24,7 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.services.master_key_service import stage_generated_master_key_rotation
+from gateway.services.master_key_service import (
+    MasterKeyRotationConflictError,
+    hash_master_key,
+    stage_generated_master_key_rotation,
+)
 from gateway.services.runtime_settings_service import (
     SETTABLE_KEYS,
     SettingValue,
@@ -348,6 +352,7 @@ async def update_settings(
 async def rotate_master_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    authenticated_key: Annotated[str, Depends(verify_master_key)],
 ) -> RotateMasterKeyResponse:
     """Regenerate the database-backed master key and invalidate the old one.
 
@@ -361,8 +366,11 @@ async def rotate_master_key(
             detail="This gateway uses a configured master key; change OTARI_MASTER_KEY or config.yml and restart.",
         )
     try:
-        token, hashed = await stage_generated_master_key_rotation(db)
+        token, hashed = await stage_generated_master_key_rotation(db, hash_master_key(authenticated_key))
         await db.commit()
+    except MasterKeyRotationConflictError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
     except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None

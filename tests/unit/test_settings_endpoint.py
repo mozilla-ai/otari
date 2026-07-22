@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
+from gateway.api.routes import settings as settings_route
 from gateway.api.routes.settings import _config_fields
 from gateway.core.config import GatewayConfig
 from gateway.main import create_app
@@ -58,6 +59,46 @@ def test_rotate_generated_master_key_invalidates_old_key(tmp_path: Path, monkeyp
         new_response = client.get("/v1/settings", headers={"Authorization": "Bearer otari-mk-new"})
         assert new_response.status_code == 200
         assert new_response.json()["master_key_source"] == "generated"
+
+
+def test_rotate_generated_master_key_rejects_a_stale_rotation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(master_key_service, "generate_master_key", lambda: "otari-mk-old")
+
+    async def _stale_rotation(*_: object) -> tuple[str, str]:
+        raise master_key_service.MasterKeyRotationConflictError(
+            "The master key was already rotated. Reload and try again."
+        )
+
+    monkeypatch.setattr(settings_route, "stage_generated_master_key_rotation", _stale_rotation)
+    config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'stale-master.db'}", require_pricing=False)
+
+    with TestClient(create_app(config)) as client:
+        response = client.post("/v1/settings/master-key/rotate", headers={"Authorization": "Bearer otari-mk-old"})
+    assert response.status_code == 409
+    assert response.json()["detail"] == "The master key was already rotated. Reload and try again."
+
+
+def test_rotation_invalidates_the_old_generated_key_on_another_replica(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tokens = iter(["otari-mk-old", "otari-mk-new"])
+    monkeypatch.setattr(master_key_service, "generate_master_key", lambda: next(tokens))
+    database_url = f"sqlite:///{tmp_path / 'shared-master.db'}"
+    first = GatewayConfig(database_url=database_url, require_pricing=False)
+    second = GatewayConfig(database_url=database_url, require_pricing=False)
+
+    with TestClient(create_app(first)) as first_client:
+        with TestClient(create_app(second)) as second_client:
+            old_auth = {"Authorization": "Bearer otari-mk-old"}
+            rotated = first_client.post("/v1/settings/master-key/rotate", headers=old_auth)
+            assert rotated.status_code == 200, rotated.text
+
+            assert second_client.get("/v1/settings", headers=old_auth).status_code == 401
+            assert second_client.get(
+                "/v1/settings", headers={"Authorization": "Bearer otari-mk-new"}
+            ).status_code == 200
 
 
 def test_settings_reports_pricing_flags(tmp_path: Path) -> None:

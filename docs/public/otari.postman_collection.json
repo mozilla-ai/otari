@@ -1478,6 +1478,25 @@
           }
         },
         {
+          "name": "Reencrypt Stored Provider Keys",
+          "request": {
+            "description": "Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.\n\nOperators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,\nrestarting, running this endpoint, then removing the old key and restarting\nagain. Rows that cannot be decrypted are left untouched and must be recovered\nby replacing the affected provider keys.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "provider-credentials",
+                "reencrypt"
+              ],
+              "raw": "{{baseUrl}}/v1/provider-credentials/reencrypt"
+            }
+          }
+        },
+        {
           "name": "Test Provider Connection",
           "request": {
             "body": {
@@ -1793,6 +1812,26 @@
                 "settings"
               ],
               "raw": "{{baseUrl}}/v1/settings"
+            }
+          }
+        },
+        {
+          "name": "Rotate Master Key",
+          "request": {
+            "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "settings",
+                "master-key",
+                "rotate"
+              ],
+              "raw": "{{baseUrl}}/v1/settings/master-key/rotate"
             }
           }
         }
