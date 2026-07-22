@@ -119,8 +119,10 @@ def test_sensitive_params_are_dropped_when_deriving() -> None:
 
 def test_sensitive_params_are_stripped_before_forwarding() -> None:
     """A client-smuggled sensitive field (e.g. via the Responses ``extra="allow"`` path) is stripped."""
-    stripped = _strip_gateway_fields({"model": "x", "temperature": 0.5, "api_key": "sk-leak", "provider": "evil"})
-    assert "api_key" not in stripped and "provider" not in stripped
+    stripped = _strip_gateway_fields(
+        {"model": "x", "temperature": 0.5, "api_key": "sk-leak", "provider": "evil", "extra_body": {}}
+    )
+    assert "api_key" not in stripped and "provider" not in stripped and "extra_body" not in stripped
     assert stripped == {"model": "x", "temperature": 0.5}
 
 
