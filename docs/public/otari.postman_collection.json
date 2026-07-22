@@ -1802,6 +1802,102 @@
     {
       "item": [
         {
+          "name": "Get Tool Settings",
+          "request": {
+            "description": "Return the effective tool/guardrail settings for the dashboard.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tool-settings"
+              ],
+              "raw": "{{baseUrl}}/v1/tool-settings"
+            }
+          }
+        },
+        {
+          "name": "Update Tool Settings",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"web_search_max_results\": 5,\n  \"web_search_url\": \"http://searxng:8080\"\n}"
+            },
+            "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Master-key gated and standalone-only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tool-settings"
+              ],
+              "raw": "{{baseUrl}}/v1/tool-settings"
+            }
+          }
+        },
+        {
+          "name": "Test Service",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"url\": \"string\"\n}"
+            },
+            "description": "Structurally validate a URL and probe it for reachability.\n\nTests the URL in the request body (typically unsaved), so an operator can\nverify before saving. The probe is a plain HTTP GET with a short timeout: any\nHTTP response means the host is reachable; a connection/timeout/DNS error means\nit is not. The operator is trusted (master key), so no SSRF deny-list applies;\nonly the structural check (http/https + host) runs first.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tool-settings",
+                ":service",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/v1/tool-settings/:service/test",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "service",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "tool-settings"
+    },
+    {
+      "item": [
+        {
           "name": "List Usage",
           "request": {
             "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, and endpoint.\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",

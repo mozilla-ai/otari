@@ -12,6 +12,7 @@ from gateway.services.guardrails import GuardrailsNotReachableError, run_input_g
 from gateway.services.url_safety import UnsafeURLError
 
 if TYPE_CHECKING:
+    from gateway.core.config import GatewayConfig
     from gateway.db import APIKey
 
 
@@ -129,6 +130,7 @@ async def apply_input_guardrails(
     input_text: str,
     *,
     response: Response,
+    config: GatewayConfig | None = None,
 ) -> None:
     """Enforce caller-requested input guardrails before the provider call.
 
@@ -158,7 +160,10 @@ async def apply_input_guardrails(
     if not guardrails:
         return
 
-    default_url = otari_env("GUARDRAILS_URL") or None
+    # Effective guardrails URL: dashboard override / config / env, falling back to
+    # the env var when no config is threaded in (e.g. unit tests). A dashboard
+    # override mutates config, so it hot-applies on the next request.
+    default_url = (config.guardrails_url if config is not None else None) or otari_env("GUARDRAILS_URL") or None
     try:
         verdict = await run_input_guardrails(guardrails, input_text, default_url=default_url)
     except UnsafeURLError as exc:

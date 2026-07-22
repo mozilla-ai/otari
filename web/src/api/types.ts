@@ -500,3 +500,40 @@ export interface UpdateSettingsRequest {
   vision_strategy?: VisionStrategy;
   vision_describe_model?: string | null;
 }
+
+// Built-in tool & guardrail configuration (the service URLs + web-search knobs
+// the Settings page keeps display-only). Editable here, standalone-only.
+export type ToolServiceName = "web_search" | "sandbox" | "guardrails";
+export type ToolSettingType = "url" | "str" | "int" | "bool";
+
+// One editable tool/guardrail field. `value` is the effective value a request
+// would use (URL passwords are masked in the response).
+export interface ToolSettingField {
+  key: string;
+  service: ToolServiceName;
+  type: ToolSettingType;
+  value: boolean | number | string | null;
+  description?: string | null;
+}
+
+export interface ToolSettingsResponse {
+  fields: ToolSettingField[];
+}
+
+// Change one or more tool settings. Omitted fields are unchanged; an explicit
+// null clears a field back to the configured env/YAML default.
+export interface UpdateToolSettingsRequest {
+  web_search_url?: string | null;
+  web_search_engines?: string | null;
+  web_search_max_results?: number | null;
+  web_search_extract?: boolean | null;
+  web_search_purpose_hint?: string | null;
+  sandbox_url?: string | null;
+  sandbox_purpose_hint?: string | null;
+  guardrails_url?: string | null;
+}
+
+export interface TestServiceResponse {
+  ok: boolean;
+  reason: string;
+}

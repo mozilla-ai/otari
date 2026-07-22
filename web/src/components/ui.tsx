@@ -113,6 +113,7 @@ export function FilterSelect({
   onChange,
   options,
   children,
+  disabled,
 }: {
   id?: string;
   label?: string;
@@ -121,6 +122,7 @@ export function FilterSelect({
   onChange: (value: string) => void;
   options?: { value: string; label: string }[];
   children?: ReactNode;
+  disabled?: boolean;
 }) {
   const fallbackId = useId();
   const selectId = id ?? (label ? fallbackId : undefined);
@@ -129,6 +131,7 @@ export function FilterSelect({
       id={selectId}
       aria-label={label ? undefined : ariaLabel}
       value={value}
+      disabled={disabled}
       onChange={(event) => onChange(event.target.value)}
       className={FILTER_SELECT_CLASS}
     >

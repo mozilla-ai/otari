@@ -159,6 +159,20 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    to: "/tools",
+    section: "system",
+    label: "Tools & Guardrails",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+        <path
+          d="M14.7 6.3a4 4 0 0 1 5 5l-8.4 8.4a2 2 0 0 1-2.8 0l-2.2-2.2a2 2 0 0 1 0-2.8z"
+          strokeLinejoin="round"
+        />
+        <path d="M12 9 5 16" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
     to: "/settings",
     section: "system",
     label: "Settings",
