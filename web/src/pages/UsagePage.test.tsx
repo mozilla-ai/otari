@@ -99,6 +99,18 @@ describe("UsagePage", () => {
     expect(screen.getByText(/2\.1% errors/)).toBeInTheDocument();
   });
 
+  it("shows cache read and write totals as tiles", async () => {
+    const base = summary();
+    mockApi(summary({ totals: { ...base.totals, cache_read_tokens: 5_100_000, cache_write_tokens: 2_700_000 } }));
+    renderPage(<UsagePage />);
+
+    // Await a value (loads after the query resolves), not the static label.
+    expect(await screen.findByText("5.1M")).toBeInTheDocument();
+    expect(screen.getByText("2.7M")).toBeInTheDocument();
+    expect(screen.getByText("Cache read")).toBeInTheDocument();
+    expect(screen.getByText("Cache write")).toBeInTheDocument();
+  });
+
   it("queries the previous period with a bounded end_date for deltas", async () => {
     const fetchMock = mockApi(summary());
     renderPage(<UsagePage />);

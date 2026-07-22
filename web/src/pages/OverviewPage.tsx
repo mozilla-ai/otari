@@ -13,7 +13,7 @@ import {
 import type { UsageEntry } from "@/api/types";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { DeltaHint, ErrorBanner, PageHeader, StatCard } from "@/components/ui";
-import { deltaFraction, formatNumber, formatPct, formatRelative, formatUsd } from "@/lib/format";
+import { deltaFraction, formatNumber, formatPct, formatRelative, formatTokens, formatUsd } from "@/lib/format";
 import { budgetHealth, errorRateHealth, providerHealthStatus, toStatStatus } from "@/lib/overview";
 
 const DAY_MS = 86_400_000;
@@ -164,6 +164,16 @@ export function OverviewPage() {
               <DeltaHint fraction={deltaFraction(periodTotals.request_count, prevTotals?.request_count)} />
             ) : null
           }
+        />
+        <StatCard
+          label="Cache reads, last 30 days"
+          value={periodTotals ? formatTokens(periodTotals.cache_read_tokens) : "—"}
+          hint={
+            periodTotals ? (
+              <DeltaHint fraction={deltaFraction(periodTotals.cache_read_tokens, prevTotals?.cache_read_tokens)} />
+            ) : null
+          }
+          to="/usage"
         />
         <StatCard
           label="Error rate, last 30 days"

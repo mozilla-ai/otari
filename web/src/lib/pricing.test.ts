@@ -9,6 +9,8 @@ function row(overrides: Partial<PricingResponse>): PricingResponse {
     effective_at: "2026-01-01T00:00:00Z",
     input_price_per_million: 1,
     output_price_per_million: 2,
+    cache_read_price_per_million: null,
+    cache_write_price_per_million: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,

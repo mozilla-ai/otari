@@ -25,6 +25,8 @@ const PRICED: PricingResponse = {
   effective_at: "2026-01-01T00:00:00Z",
   input_price_per_million: 2.5,
   output_price_per_million: 10,
+  cache_read_price_per_million: null,
+  cache_write_price_per_million: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -44,13 +46,21 @@ function catalogModel(
   source: "configured" | "default" | "none",
   price: [number, number] | null,
   context_window: number | null = null,
+  cache: [number | null, number | null] = [null, null],
 ): ModelObject {
   return {
     id,
     object: "model",
     created: 0,
     owned_by,
-    pricing: price ? { input_price_per_million: price[0], output_price_per_million: price[1] } : null,
+    pricing: price
+      ? {
+          input_price_per_million: price[0],
+          output_price_per_million: price[1],
+          cache_read_price_per_million: cache[0],
+          cache_write_price_per_million: cache[1],
+        }
+      : null,
     pricing_source: source,
     context_window,
   };
@@ -603,6 +613,54 @@ describe("ModelsPage", () => {
       model_key: "openai:gpt-4o",
       input_price_per_million: 4,
     });
+  });
+
+  it("sets cache prices from the detail panel", async () => {
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    const detail = await selectModel(user, "openai:gpt-4o");
+    await user.click(within(detail).getByRole("button", { name: "Edit price" }));
+    await user.type(within(detail).getByLabelText("Cache read price for openai:gpt-4o"), "0.3");
+    await user.type(within(detail).getByLabelText("Cache write price for openai:gpt-4o"), "3.75");
+    await user.click(within(detail).getByRole("button", { name: "Save" }));
+
+    const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "POST");
+    expect(String(call?.[0])).toContain("/v1/pricing");
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+      model_key: "openai:gpt-4o",
+      cache_read_price_per_million: 0.3,
+      cache_write_price_per_million: 3.75,
+    });
+  });
+
+  it("shows configured cache prices in the table and detail panel", async () => {
+    mockApi({
+      catalog: {
+        object: "list",
+        data: [catalogModel("anthropic:claude-sonnet-4", "anthropic", "configured", [3, 15], 200000, [0.3, 3.75])],
+      },
+      pricing: [],
+    });
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("anthropic:claude-sonnet-4");
+
+    expect(screen.getByRole("columnheader", { name: "Cache read $ / 1M" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Cache write $ / 1M" })).toBeInTheDocument();
+
+    const row = tableRow("anthropic:claude-sonnet-4");
+    expect(within(row).getByText("$0.30")).toBeInTheDocument();
+    expect(within(row).getByText("$3.75")).toBeInTheDocument();
+
+    const detail = await selectModel(user, "anthropic:claude-sonnet-4");
+    expect(within(detail).getByText("Cache read")).toBeInTheDocument();
+    expect(within(detail).getByText("$0.30 / 1M")).toBeInTheDocument();
+    expect(within(detail).getByText("$3.75 / 1M")).toBeInTheDocument();
   });
 
   it("does not prompt to backfill usage after setting a price", async () => {

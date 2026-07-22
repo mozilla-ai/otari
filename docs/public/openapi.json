@@ -2445,6 +2445,28 @@
       "ModelPricingInfo": {
         "description": "Pricing information for a model.",
         "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
           "input_price_per_million": {
             "title": "Input Price Per Million",
             "type": "number"

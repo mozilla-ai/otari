@@ -110,12 +110,28 @@ interface ModelRow {
   releaseDate?: string | null;
   inputPrice: number | null;
   outputPrice: number | null;
+  cacheReadPrice: number | null;
+  cacheWritePrice: number | null;
   source: PriceSource;
 }
 
 function isValidPrice(value: string): boolean {
   const parsed = Number(value);
   return value.trim() !== "" && Number.isFinite(parsed) && parsed >= 0;
+}
+
+// Cache rates are optional: an empty field means "no cache price" (cache tokens
+// then bill at the input rate). Empty is valid; any set value must be >= 0.
+function isValidOptionalPrice(value: string): boolean {
+  if (value.trim() === "") {
+    return true;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0;
+}
+
+function optionalPrice(value: string): number | null {
+  return value.trim() === "" ? null : Number(value);
 }
 
 function MoneyInput({
@@ -166,8 +182,15 @@ function PriceModelForm({ onClose }: { onClose: () => void }) {
   const [modelKey, setModelKey] = useState("");
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
+  const [cacheRead, setCacheRead] = useState("");
+  const [cacheWrite, setCacheWrite] = useState("");
 
-  const canSubmit = modelKey.trim() !== "" && isValidPrice(input) && isValidPrice(output);
+  const canSubmit =
+    modelKey.trim() !== "" &&
+    isValidPrice(input) &&
+    isValidPrice(output) &&
+    isValidOptionalPrice(cacheRead) &&
+    isValidOptionalPrice(cacheWrite);
 
   const submit = () => {
     if (!canSubmit) {
@@ -178,6 +201,8 @@ function PriceModelForm({ onClose }: { onClose: () => void }) {
         model_key: modelKey.trim(),
         input_price_per_million: Number(input),
         output_price_per_million: Number(output),
+        cache_read_price_per_million: optionalPrice(cacheRead),
+        cache_write_price_per_million: optionalPrice(cacheWrite),
       },
       { onSuccess: onClose },
     );
@@ -203,7 +228,19 @@ function PriceModelForm({ onClose }: { onClose: () => void }) {
           <span className="text-sm font-medium text-[var(--otari-ink)]">Output $ / 1M</span>
           <MoneyInput value={output} onChange={setOutput} ariaLabel="Output price per million" />
         </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-[var(--otari-ink)]">Cache read $ / 1M</span>
+          <MoneyInput value={cacheRead} onChange={setCacheRead} ariaLabel="Cache read price per million" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-[var(--otari-ink)]">Cache write $ / 1M</span>
+          <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel="Cache write price per million" />
+        </div>
       </div>
+      <p className="text-xs text-[var(--otari-muted)]">
+        Cache rates are optional. Leave them blank to bill cached tokens at the input rate. Cache write applies to
+        Anthropic cache creation.
+      </p>
       <div className="flex gap-2">
         <Button variant="primary" isDisabled={!canSubmit || setPricing.isPending} onPress={submit}>
           {setPricing.isPending ? "Saving…" : "Save price"}
@@ -324,15 +361,21 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
   const [editing, setEditing] = useState(false);
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
+  const [cacheRead, setCacheRead] = useState("");
+  const [cacheWrite, setCacheWrite] = useState("");
 
   const startEdit = () => {
     setInput(row.inputPrice == null ? "" : String(row.inputPrice));
     setOutput(row.outputPrice == null ? "" : String(row.outputPrice));
+    setCacheRead(row.cacheReadPrice == null ? "" : String(row.cacheReadPrice));
+    setCacheWrite(row.cacheWritePrice == null ? "" : String(row.cacheWritePrice));
     setEditing(true);
   };
 
+  const canSave = isValidPrice(input) && isValidPrice(output) && isValidOptionalPrice(cacheRead) && isValidOptionalPrice(cacheWrite);
+
   const save = () => {
-    if (!isValidPrice(input) || !isValidPrice(output)) {
+    if (!canSave) {
       return;
     }
     setPricing.mutate(
@@ -340,6 +383,8 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
         model_key: row.key,
         input_price_per_million: Number(input),
         output_price_per_million: Number(output),
+        cache_read_price_per_million: optionalPrice(cacheRead),
+        cache_write_price_per_million: optionalPrice(cacheWrite),
       },
       { onSuccess: () => setEditing(false) },
     );
@@ -356,13 +401,16 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           <span className="text-xs text-[var(--otari-muted)]">Output $ / 1M</span>
           <MoneyInput value={output} onChange={setOutput} ariaLabel={`Output price for ${row.key}`} />
         </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-[var(--otari-muted)]">Cache read $ / 1M</span>
+          <MoneyInput value={cacheRead} onChange={setCacheRead} ariaLabel={`Cache read price for ${row.key}`} />
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-[var(--otari-muted)]">Cache write $ / 1M</span>
+          <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel={`Cache write price for ${row.key}`} />
+        </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="primary"
-            isDisabled={setPricing.isPending || !isValidPrice(input) || !isValidPrice(output)}
-            onPress={save}
-          >
+          <Button size="sm" variant="primary" isDisabled={setPricing.isPending || !canSave} onPress={save}>
             Save
           </Button>
           <Button size="sm" variant="ghost" isDisabled={setPricing.isPending} onPress={() => setEditing(false)}>
@@ -378,6 +426,8 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
     <div className="flex flex-col gap-2">
       <Spec label="Input" value={row.inputPrice == null ? "—" : `${formatCost(row.inputPrice)} / 1M`} />
       <Spec label="Output" value={row.outputPrice == null ? "—" : `${formatCost(row.outputPrice)} / 1M`} />
+      <Spec label="Cache read" value={row.cacheReadPrice == null ? "—" : `${formatCost(row.cacheReadPrice)} / 1M`} />
+      <Spec label="Cache write" value={row.cacheWritePrice == null ? "—" : `${formatCost(row.cacheWritePrice)} / 1M`} />
       <div className="flex items-center gap-2 pt-1">
         <Button size="sm" variant="outline" onPress={startEdit}>
           {row.source === "configured" ? "Edit price" : "Set price"}
@@ -702,11 +752,21 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
   const deletePricing = useDeletePricing();
   const [input, setInput] = useState(row.inputPrice == null ? "" : String(row.inputPrice));
   const [output, setOutput] = useState(row.outputPrice == null ? "" : String(row.outputPrice));
+  const [cacheRead, setCacheRead] = useState(row.cacheReadPrice == null ? "" : String(row.cacheReadPrice));
+  const [cacheWrite, setCacheWrite] = useState(row.cacheWritePrice == null ? "" : String(row.cacheWritePrice));
+
+  const canSave = isValidPrice(input) && isValidPrice(output) && isValidOptionalPrice(cacheRead) && isValidOptionalPrice(cacheWrite);
 
   const save = () => {
-    if (!isValidPrice(input) || !isValidPrice(output)) return;
+    if (!canSave) return;
     setPricing.mutate(
-      { model_key: row.key, input_price_per_million: Number(input), output_price_per_million: Number(output) },
+      {
+        model_key: row.key,
+        input_price_per_million: Number(input),
+        output_price_per_million: Number(output),
+        cache_read_price_per_million: optionalPrice(cacheRead),
+        cache_write_price_per_million: optionalPrice(cacheWrite),
+      },
       { onSuccess: onClose },
     );
   };
@@ -722,12 +782,15 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
         Output $ / 1M
         <MoneyInput value={output} onChange={setOutput} ariaLabel={`Output price for ${row.key}`} />
       </label>
-      <Button
-        size="sm"
-        variant="primary"
-        isDisabled={setPricing.isPending || !isValidPrice(input) || !isValidPrice(output)}
-        onPress={save}
-      >
+      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        Cache read $ / 1M
+        <MoneyInput value={cacheRead} onChange={setCacheRead} ariaLabel={`Cache read price for ${row.key}`} />
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        Cache write $ / 1M
+        <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel={`Cache write price for ${row.key}`} />
+      </label>
+      <Button size="sm" variant="primary" isDisabled={setPricing.isPending || !canSave} onPress={save}>
         {setPricing.isPending ? "Saving…" : "Save"}
       </Button>
       <Button size="sm" variant="ghost" isDisabled={setPricing.isPending} onPress={onClose}>
@@ -792,12 +855,14 @@ function ModelTable({
             info={<PricingInfo />}
           />
           <SortableTh label="Output $ / 1M" col="output" sort={sort} onSort={onSort} align="right" />
+          <Th className="text-right">Cache read $ / 1M</Th>
+          <Th className="text-right">Cache write $ / 1M</Th>
           <Th className="text-right">Price</Th>
         </Tr>
       </THead>
       <tbody>
         {isLoading ? (
-          <LoadingRow colSpan={6} />
+          <LoadingRow colSpan={8} />
         ) : rows.length > 0 ? (
           rows.map((row) => (
             <Fragment key={row.key}>
@@ -812,6 +877,12 @@ function ModelTable({
                 </Td>
                 <Td className="text-right tabular-nums">
                   {row.outputPrice == null ? "—" : formatCost(row.outputPrice)}
+                </Td>
+                <Td className="text-right tabular-nums">
+                  {row.cacheReadPrice == null ? "—" : formatCost(row.cacheReadPrice)}
+                </Td>
+                <Td className="text-right tabular-nums">
+                  {row.cacheWritePrice == null ? "—" : formatCost(row.cacheWritePrice)}
                 </Td>
                 <Td className="text-right">
                   <button
@@ -828,7 +899,7 @@ function ModelTable({
               </Tr>
               {pricingKey === row.key ? (
                 <tr className="border-b border-[var(--otari-line)] bg-[var(--otari-bg)] last:border-b-0">
-                  <td colSpan={6}>
+                  <td colSpan={8}>
                     <InlinePriceForm row={row} onClose={() => onSetPricingKey(null)} />
                   </td>
                 </tr>
@@ -836,7 +907,7 @@ function ModelTable({
             </Fragment>
           ))
         ) : (
-          <TableMessage colSpan={6}>{empty}</TableMessage>
+          <TableMessage colSpan={8}>{empty}</TableMessage>
         )}
       </tbody>
     </Table>
@@ -935,6 +1006,8 @@ export function ModelsPage() {
         contextWindow: catalogRow?.contextWindow ?? null,
         inputPrice: priced ? priced.input_price_per_million : (catalogRow?.inputPrice ?? null),
         outputPrice: priced ? priced.output_price_per_million : (catalogRow?.outputPrice ?? null),
+        cacheReadPrice: priced ? priced.cache_read_price_per_million : (catalogRow?.cacheReadPrice ?? null),
+        cacheWritePrice: priced ? priced.cache_write_price_per_million : (catalogRow?.cacheWritePrice ?? null),
         source: priced ? "configured" : (catalogRow?.source ?? "none"),
       });
     };
@@ -953,6 +1026,8 @@ export function ModelsPage() {
         contextWindow: model.context_window,
         inputPrice: model.pricing?.input_price_per_million ?? null,
         outputPrice: model.pricing?.output_price_per_million ?? null,
+        cacheReadPrice: model.pricing?.cache_read_price_per_million ?? null,
+        cacheWritePrice: model.pricing?.cache_write_price_per_million ?? null,
         source: priceStatus,
       });
     }
@@ -989,6 +1064,8 @@ export function ModelsPage() {
           releaseDate: metadataByKey[model.key]?.release_date ?? null,
           inputPrice: null,
           outputPrice: null,
+          cacheReadPrice: null,
+          cacheWritePrice: null,
           source: "none",
         });
       }

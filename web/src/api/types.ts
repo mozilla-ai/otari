@@ -11,6 +11,10 @@ export interface DashboardBuild {
 export interface ModelPricingInfo {
   input_price_per_million: number;
   output_price_per_million: number;
+  // Per-1M cached-input rates. Null when the model has no cache pricing set:
+  // OpenAI/Gemini discount rate for reads, Anthropic cache-read / cache-write rates.
+  cache_read_price_per_million: number | null;
+  cache_write_price_per_million: number | null;
 }
 
 export interface ModelObject {
@@ -212,6 +216,8 @@ export interface PricingResponse {
   effective_at: string;
   input_price_per_million: number;
   output_price_per_million: number;
+  cache_read_price_per_million: number | null;
+  cache_write_price_per_million: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -220,6 +226,10 @@ export interface SetPricingRequest {
   model_key: string;
   input_price_per_million: number;
   output_price_per_million: number;
+  // Optional per-1M cached-input rates. Omit or null to leave a model without
+  // cache pricing (cache tokens then bill at the input rate).
+  cache_read_price_per_million?: number | null;
+  cache_write_price_per_million?: number | null;
   effective_at?: string | null;
 }
 

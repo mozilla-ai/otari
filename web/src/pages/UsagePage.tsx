@@ -450,6 +450,24 @@ export function UsagePage() {
               value={totals ? formatTokens(totals.total_tokens) : "—"}
               hint={totals ? <DeltaHint fraction={deltaFraction(totals.total_tokens, prevTotals?.total_tokens)} /> : null}
             />
+            <StatCard
+              label="Cache read"
+              value={totals ? formatTokens(totals.cache_read_tokens) : "—"}
+              hint={
+                totals ? (
+                  <DeltaHint fraction={deltaFraction(totals.cache_read_tokens, prevTotals?.cache_read_tokens)} />
+                ) : null
+              }
+            />
+            <StatCard
+              label="Cache write"
+              value={totals ? formatTokens(totals.cache_write_tokens) : "—"}
+              hint={
+                totals ? (
+                  <DeltaHint fraction={deltaFraction(totals.cache_write_tokens, prevTotals?.cache_write_tokens)} />
+                ) : null
+              }
+            />
             <StatCard label="Avg latency" value={totals ? formatLatency(totals.avg_latency_ms) : "—"} />
           </div>
 
