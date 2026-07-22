@@ -979,6 +979,11 @@ def _compute_cost(pricing: ModelPricing, usage_data: CompletionUsage) -> float:
     configured; when a cache rate is absent, those tokens stay in the uncached
     bucket and are billed at the full input rate rather than being dropped or
     double counted. This mirrors ``ModelPrice.calc_price`` in genai-prices.
+
+    A malformed provider payload (e.g. a cached count larger than
+    ``prompt_tokens`` on the OpenAI shape) is clamped so the uncached remainder
+    can never go negative and produce a negative cost that would credit the
+    user's budget. Cost is therefore always non-negative.
     """
     prompt_tokens = usage_data.prompt_tokens or 0
     completion_tokens = usage_data.completion_tokens or 0
@@ -989,6 +994,14 @@ def _compute_cost(pricing: ModelPricing, usage_data: CompletionUsage) -> float:
         total_input_tokens = prompt_tokens
     else:
         total_input_tokens = prompt_tokens + cache_read + cache_write
+
+    # Defensive clamp: keep the cache buckets inside the input total so the
+    # uncached remainder stays >= 0 even if a provider/adapter reports an
+    # inconsistent payload. For the Anthropic shape the total is built from
+    # these counts, so this is a no-op there; it only bites a broken OpenAI-shape
+    # payload where cached_tokens exceeds prompt_tokens.
+    cache_read = min(cache_read, total_input_tokens)
+    cache_write = min(cache_write, total_input_tokens - cache_read)
 
     read_rate = pricing.cache_read_price_per_million
     write_rate = pricing.cache_write_price_per_million

@@ -226,6 +226,26 @@ def test_anthropic_cache_read_without_write_rate_falls_back_to_input() -> None:
     assert cost == expected
 
 
+def test_malformed_cache_counts_are_clamped_never_negative() -> None:
+    """A broken OpenAI-shape payload where cached tokens exceed prompt_tokens must
+    not drive the uncached remainder negative (which would credit the budget).
+    The cache buckets are clamped to the input total; cost stays >= 0."""
+    pricing = _pricing(cache_read_price_per_million=5.0, cache_write_price_per_million=15.0)
+    usage = GatewayUsage(
+        prompt_tokens=1000,
+        completion_tokens=0,
+        total_tokens=1000,
+        cache_read_tokens=5000,  # nonsense: larger than prompt_tokens
+        cache_write_tokens=5000,
+        cache_tokens_in_prompt=True,  # OpenAI shape: cache is supposed to be a subset
+    )
+    cost = _compute_cost(pricing, usage)
+    # cache_read clamped to 1000, cache_write clamped to 0, uncached clamped to 0.
+    expected = (1000 / 1_000_000) * 5.0
+    assert cost == expected
+    assert cost >= 0
+
+
 def test_convention_flag_drives_discount_vs_additive() -> None:
     """The same token counts price differently by convention: OpenAI discounts
     the cached subset of the prompt, Anthropic adds the cache on top."""
