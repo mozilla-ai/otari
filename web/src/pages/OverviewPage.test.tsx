@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
 import type { UsageSummary } from "@/api/types";
-import { OverviewIndex, OverviewPage } from "@/pages/OverviewPage";
+import { localDayKey, OverviewIndex, OverviewPage } from "@/pages/OverviewPage";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -95,6 +95,15 @@ describe("OverviewPage", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     setMasterKey(null);
+  });
+
+  it("uses a zero-padded, one-based local calendar date as its refresh key", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 0, 5, 12));
+
+    expect(localDayKey()).toBe("2026-01-05");
+
+    vi.useRealTimers();
   });
 
   it("renders distinct today vs 30-day spend, request volume, and error rate", async () => {

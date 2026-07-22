@@ -1,5 +1,5 @@
 import { Button, Card, Chip, ComboBox, Description, Input, Label, ListBox, ListBoxItem, Spinner, TextField } from "@heroui/react";
-import { type CSSProperties, type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
@@ -29,10 +29,6 @@ import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components
 import { ConfirmButton, ErrorBanner, errorMessage, PageHeader } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
 
-// WebkitTextSecurity masks the value like a password field without being one.
-// It is non-standard, so it is absent from React's CSSProperties type.
-const SECRET_MASK_STYLE = { WebkitTextSecurity: "disc" } as CSSProperties;
-
 // A masked, never-prefilled secret input. Editing a key is "replace, not
 // reveal": the current key is only ever shown as its last 4 digits elsewhere,
 // and a new value is typed into an empty field.
@@ -52,13 +48,8 @@ function SecretField({
   return (
     <TextField value={value} onChange={onChange} className="flex max-w-md flex-col gap-1">
       <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>
-      {/* Deliberately NOT type="password": Chrome flags password fields on non-HTTPS
-          origins ("this form is not secure, login entered here may be compromised")
-          and attaches its password manager + username heuristics to sibling fields
-          (the provider picker). A text input masked with -webkit-text-security hides
-          the key without any of that. */}
       <Input
-        type="text"
+        type="password"
         placeholder={placeholder ?? "sk-…"}
         autoComplete="off"
         autoCorrect="off"
@@ -66,7 +57,6 @@ function SecretField({
         spellCheck={false}
         data-1p-ignore
         data-lpignore="true"
-        style={SECRET_MASK_STYLE}
       />
       {description ? <Description className="text-xs text-[var(--otari-muted)]">{description}</Description> : null}
     </TextField>

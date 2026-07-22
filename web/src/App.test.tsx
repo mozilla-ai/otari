@@ -1,8 +1,14 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { apiFetch } from "@/api/client";
 import App from "@/App";
 import { Provider } from "@/provider";
+
+vi.mock("@/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/client")>();
+  return { ...actual, apiFetch: vi.fn() };
+});
 
 vi.mock("@/pages/OverviewPage", async () => {
   await new Promise((resolve) => window.setTimeout(resolve, 20));
@@ -18,7 +24,7 @@ describe("App", () => {
 
   it("shows a loading state while the current route loads", async () => {
     window.sessionStorage.setItem("otari.dashboard.masterKey", "test-master-key");
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify([])));
+    vi.mocked(apiFetch).mockResolvedValue([]);
 
     render(
       <Provider>

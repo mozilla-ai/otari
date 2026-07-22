@@ -196,7 +196,9 @@ describe("ProvidersPage", () => {
     await user.click(screen.getByRole("button", { name: "Custom endpoint" }));
     await user.type(screen.getByLabelText("Name"), "my-llm");
     await user.type(screen.getByLabelText("API base"), "http://box:8000/v1");
-    await user.type(screen.getByLabelText("API key (optional)"), "sk-live-9999");
+    const apiKey = screen.getByLabelText("API key (optional)");
+    expect(apiKey).toHaveAttribute("type", "password");
+    await user.type(apiKey, "sk-live-9999");
     await user.click(screen.getByRole("button", { name: "Add provider" }));
 
     const post = fetchMock.mock.calls.find(
