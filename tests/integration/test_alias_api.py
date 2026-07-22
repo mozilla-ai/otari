@@ -293,7 +293,12 @@ def test_stored_alias_inherits_its_targets_price(client: TestClient) -> None:
     )
 
     entry = client.get("/v1/models/fast", headers=HEADERS).json()
-    assert entry["pricing"] == {"input_price_per_million": 1.0, "output_price_per_million": 5.0}
+    assert entry["pricing"] == {
+        "input_price_per_million": 1.0,
+        "output_price_per_million": 5.0,
+        "cache_read_price_per_million": None,
+        "cache_write_price_per_million": None,
+    }
 
 
 def test_pricing_a_stored_alias_is_rejected(client: TestClient) -> None:
