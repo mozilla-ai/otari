@@ -99,7 +99,11 @@ function PeriodPicker({ value, onChange }: { value: number | null; onChange: (se
             onChange={(raw) => {
               const n = Number(raw.trim());
               const seconds = Math.round(n) * DAY;
-              onChange(raw.trim() === "" || !Number.isFinite(n) || n <= 0 || !Number.isFinite(seconds) ? null : seconds);
+              onChange(
+                raw.trim() === "" || !Number.isFinite(n) || n <= 0 || !Number.isFinite(seconds) || seconds <= 0
+                  ? null
+                  : seconds,
+              );
             }}
             placeholder="14"
             description="Whole days between resets."
@@ -190,7 +194,7 @@ function BudgetForm({
           <Button variant="primary" isDisabled={isPending || !parsed.valid} onPress={submit}>
             {isPending ? "Saving…" : submitLabel}
           </Button>
-          <Button variant="ghost" onPress={onClose}>
+          <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
             Cancel
           </Button>
         </div>

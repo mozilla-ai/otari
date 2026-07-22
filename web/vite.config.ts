@@ -58,7 +58,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           heroui: ["@heroui/react"],
-          react: ["react", "react-dom", "react-dom/client", "react-router-dom"],
+          react: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react-router-dom"],
           "tanstack-query": ["@tanstack/react-query"],
         },
       },

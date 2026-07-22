@@ -94,6 +94,7 @@ describe("OverviewPage", () => {
   beforeEach(() => setMasterKey("test-master-key"));
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
     setMasterKey(null);
   });
 
@@ -102,8 +103,6 @@ describe("OverviewPage", () => {
     vi.setSystemTime(new Date(2026, 0, 5, 12));
 
     expect(localDayKey()).toBe("2026-01-05");
-
-    vi.useRealTimers();
   });
 
   it("renders distinct today vs 30-day spend, request volume, and error rate", async () => {

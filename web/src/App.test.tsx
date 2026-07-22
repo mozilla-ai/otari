@@ -24,7 +24,15 @@ describe("App", () => {
 
   it("shows a loading state while the current route loads", async () => {
     window.sessionStorage.setItem("otari.dashboard.masterKey", "test-master-key");
-    vi.mocked(apiFetch).mockResolvedValue([]);
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      if (path === "/dashboard-build.json") {
+        return { build: "test-build" } as never;
+      }
+      if (path === "/v1/settings") {
+        return { default_pricing: true, require_pricing: false } as never;
+      }
+      return [] as never;
+    });
 
     render(
       <Provider>
