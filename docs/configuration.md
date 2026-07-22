@@ -286,12 +286,12 @@ pricing:
     cache_write_price_per_million: 3.75  # cache-creation (write) rate
 ```
 
-Cache pricing follows the provider inclusion convention:
+Every physical input token is charged exactly once. The input/prompt count is treated as the grand total that *includes* cache reads and writes; the uncached remainder is billed at `input_price_per_million`, and cache tokens are re-priced at their own rate when one is configured. Providers report cache counts two ways, and the gateway normalizes both onto that single model:
 
-- **OpenAI / Gemini**: `cache_read_tokens` is a subset of `prompt_tokens`, so the cached portion is discounted (re-priced at `cache_read_price_per_million` instead of the full `input_price_per_million`) rather than double-counted. `cache_write_tokens` is always 0 for these providers.
-- **Anthropic**: `cache_read_tokens` and `cache_write_tokens` are separate from `prompt_tokens`, so they are billed as additive charges at `cache_read_price_per_million` and `cache_write_price_per_million` respectively.
+- **OpenAI / Gemini**: `cache_read_tokens` is already a subset of `prompt_tokens`, so setting `cache_read_price_per_million` discounts the cached portion (re-priced at the cache rate instead of the full `input_price_per_million`) rather than double-counting it. `cache_write_tokens` is always 0 for these providers.
+- **Anthropic**: `cache_read_tokens` and `cache_write_tokens` are reported separately from `prompt_tokens`, so they are added on top and billed at `cache_read_price_per_million` / `cache_write_price_per_million`. This holds on every turn, including warm-cache reads that create no new cache (`cache_write_tokens` is 0).
 
-When a cache rate is not configured (null), cache tokens are not billed. The same fields are available on the `/v1/pricing` API (`SetPricingRequest` and `PricingResponse`).
+When a cache rate is left unset (null), those cache tokens are not dropped or billed at $0: they remain part of the input total and are billed at `input_price_per_million`, since they are still real input tokens. Set the cache rate to bill them at the provider's discounted cache price. The same fields are available on the `/v1/pricing` API (`SetPricingRequest` and `PricingResponse`).
 
 ### Default pricing
 

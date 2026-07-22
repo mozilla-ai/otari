@@ -81,7 +81,7 @@ from gateway.api.routes._tools import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
-from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
+from gateway.core.usage import cache_read_tokens_of, cache_tokens_in_prompt_of, cache_write_tokens_of
 from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt, record_cost, record_tokens
 from gateway.model_labeling import relabel_model
@@ -960,41 +960,51 @@ async def prepare_gateway_tools(
 def _compute_cost(pricing: ModelPricing, usage_data: CompletionUsage) -> float:
     """Compute standalone-mode cost from provider usage and model pricing.
 
-    Prices prompt, completion, and (when configured) cache tokens. Cache
-    pricing follows the provider inclusion convention:
+    Prices prompt, completion, and (when configured) cache tokens on a single
+    convention borrowed from the genai-prices dataset this project already uses:
+    the input/prompt token count is the grand total that *includes* cache reads
+    and writes, and each physical token is charged exactly once.
 
-    * OpenAI / Gemini: ``cache_read_tokens`` is a subset of ``prompt_tokens``,
-      so the cached portion is discounted (charged at the cache-read rate
-      instead of the full input rate) rather than double-counted.
-      ``cache_write_tokens`` is always 0 here.
-    * Anthropic: ``cache_read_tokens`` and ``cache_write_tokens`` are separate
-      from ``prompt_tokens``, so they are billed as additive charges.
+    Providers report cache tokens two different ways, so usage is normalized
+    first (see :attr:`GatewayUsage.cache_tokens_in_prompt`):
 
-    The convention is detected by whether ``cache_write_tokens`` is present
-    (only Anthropic reports it); otherwise cache reads are treated as a subset
-    of the prompt.
+    * OpenAI / Gemini report cache reads as a subset already inside
+      ``prompt_tokens`` (``cache_tokens_in_prompt`` is ``True``).
+    * Anthropic reports ``input_tokens`` *exclusive* of cache reads/writes and
+      lists them as separate buckets (``cache_tokens_in_prompt`` is ``False``),
+      so they are folded back into the total here.
+
+    Uncached input is then ``total - cache_read - cache_write``, priced at the
+    input rate. Cache reads/writes are charged at their own rate when one is
+    configured; when a cache rate is absent, those tokens stay in the uncached
+    bucket and are billed at the full input rate rather than being dropped or
+    double counted. This mirrors ``ModelPrice.calc_price`` in genai-prices.
     """
     prompt_tokens = usage_data.prompt_tokens or 0
     completion_tokens = usage_data.completion_tokens or 0
     cache_read = cache_read_tokens_of(usage_data)
     cache_write = cache_write_tokens_of(usage_data)
 
-    cost = (prompt_tokens / 1_000_000) * pricing.input_price_per_million + (
-        completion_tokens / 1_000_000
-    ) * pricing.output_price_per_million
+    if cache_tokens_in_prompt_of(usage_data):
+        total_input_tokens = prompt_tokens
+    else:
+        total_input_tokens = prompt_tokens + cache_read + cache_write
 
-    if pricing.cache_read_price_per_million is not None and cache_read > 0:
-        if cache_write > 0:
-            # Anthropic: cache read/write are separate from prompt_tokens.
-            cost += (cache_read / 1_000_000) * pricing.cache_read_price_per_million
-        else:
-            # OpenAI / Gemini: cache_read is a subset of prompt_tokens, so
-            # discount the cached portion by re-pricing it at the cache rate.
-            cost -= (cache_read / 1_000_000) * pricing.input_price_per_million
-            cost += (cache_read / 1_000_000) * pricing.cache_read_price_per_million
+    read_rate = pricing.cache_read_price_per_million
+    write_rate = pricing.cache_write_price_per_million
 
-    if pricing.cache_write_price_per_million is not None and cache_write > 0:
-        cost += (cache_write / 1_000_000) * pricing.cache_write_price_per_million
+    # Only pull a cache bucket out of the uncached-input total when it has its
+    # own price; otherwise it stays billed at the input rate.
+    priced_cache_read = cache_read if read_rate is not None else 0
+    priced_cache_write = cache_write if write_rate is not None else 0
+    uncached_input_tokens = total_input_tokens - priced_cache_read - priced_cache_write
+
+    cost = (uncached_input_tokens / 1_000_000) * pricing.input_price_per_million
+    cost += (completion_tokens / 1_000_000) * pricing.output_price_per_million
+    if read_rate is not None and cache_read > 0:
+        cost += (cache_read / 1_000_000) * read_rate
+    if write_rate is not None and cache_write > 0:
+        cost += (cache_write / 1_000_000) * write_rate
 
     return cost
 
