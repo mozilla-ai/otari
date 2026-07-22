@@ -85,7 +85,7 @@ from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt, record_cost, record_tokens
 from gateway.model_labeling import relabel_model
-from gateway.models.entities import UsageLog
+from gateway.models.entities import ModelPricing, UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
@@ -957,6 +957,48 @@ async def prepare_gateway_tools(
 # ---------------------------------------------------------------------------
 
 
+def _compute_cost(pricing: ModelPricing, usage_data: CompletionUsage) -> float:
+    """Compute standalone-mode cost from provider usage and model pricing.
+
+    Prices prompt, completion, and (when configured) cache tokens. Cache
+    pricing follows the provider inclusion convention:
+
+    * OpenAI / Gemini: ``cache_read_tokens`` is a subset of ``prompt_tokens``,
+      so the cached portion is discounted (charged at the cache-read rate
+      instead of the full input rate) rather than double-counted.
+      ``cache_write_tokens`` is always 0 here.
+    * Anthropic: ``cache_read_tokens`` and ``cache_write_tokens`` are separate
+      from ``prompt_tokens``, so they are billed as additive charges.
+
+    The convention is detected by whether ``cache_write_tokens`` is present
+    (only Anthropic reports it); otherwise cache reads are treated as a subset
+    of the prompt.
+    """
+    prompt_tokens = usage_data.prompt_tokens or 0
+    completion_tokens = usage_data.completion_tokens or 0
+    cache_read = cache_read_tokens_of(usage_data)
+    cache_write = cache_write_tokens_of(usage_data)
+
+    cost = (prompt_tokens / 1_000_000) * pricing.input_price_per_million + (
+        completion_tokens / 1_000_000
+    ) * pricing.output_price_per_million
+
+    if pricing.cache_read_price_per_million is not None and cache_read > 0:
+        if cache_write > 0:
+            # Anthropic: cache read/write are separate from prompt_tokens.
+            cost += (cache_read / 1_000_000) * pricing.cache_read_price_per_million
+        else:
+            # OpenAI / Gemini: cache_read is a subset of prompt_tokens, so
+            # discount the cached portion by re-pricing it at the cache rate.
+            cost -= (cache_read / 1_000_000) * pricing.input_price_per_million
+            cost += (cache_read / 1_000_000) * pricing.cache_read_price_per_million
+
+    if pricing.cache_write_price_per_million is not None and cache_write > 0:
+        cost += (cache_write / 1_000_000) * pricing.cache_write_price_per_million
+
+    return cost
+
+
 def _elapsed_ms(started_at: float | None) -> int | None:
     """Milliseconds elapsed since a monotonic ``started_at`` reading.
 
@@ -1041,9 +1083,7 @@ async def log_usage(
 
         pricing = await find_model_pricing(db, provider, model, as_of=usage_log.timestamp)
         if pricing:
-            cost = (usage_data.prompt_tokens / 1_000_000) * pricing.input_price_per_million + (
-                usage_data.completion_tokens / 1_000_000
-            ) * pricing.output_price_per_million
+            cost = _compute_cost(pricing, usage_data)
             usage_log.cost = cost
             record_cost(str(provider or ""), model, cost)
         else:

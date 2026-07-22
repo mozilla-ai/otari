@@ -197,6 +197,8 @@ def test_pricing_response_from_model() -> None:
     pricing.effective_at = datetime(2025, 2, 1, tzinfo=UTC)
     pricing.input_price_per_million = 30.0
     pricing.output_price_per_million = 60.0
+    pricing.cache_read_price_per_million = 5.0
+    pricing.cache_write_price_per_million = 15.0
     pricing.created_at = datetime(2025, 3, 1, tzinfo=UTC)
     pricing.updated_at = datetime(2025, 3, 2, tzinfo=UTC)
 
@@ -205,5 +207,7 @@ def test_pricing_response_from_model() -> None:
     assert resp.effective_at == "2025-02-01T00:00:00+00:00"
     assert resp.input_price_per_million == 30.0
     assert resp.output_price_per_million == 60.0
+    assert resp.cache_read_price_per_million == 5.0
+    assert resp.cache_write_price_per_million == 15.0
     assert resp.created_at == "2025-03-01T00:00:00+00:00"
     assert resp.updated_at == "2025-03-02T00:00:00+00:00"

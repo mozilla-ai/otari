@@ -67,6 +67,8 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
 
         input_price = pricing_config.input_price_per_million
         output_price = pricing_config.output_price_per_million
+        cache_read_price = pricing_config.cache_read_price_per_million
+        cache_write_price = pricing_config.cache_write_price_per_million
         effective_at = normalize_effective_at(pricing_config.effective_at)
 
         existing_pricing = (
@@ -92,6 +94,8 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
             effective_at=effective_at,
             input_price_per_million=input_price,
             output_price_per_million=output_price,
+            cache_read_price_per_million=cache_read_price,
+            cache_write_price_per_million=cache_write_price,
         )
         db.add(new_pricing)
         logger.info("Added pricing for '%s': input=$%s/M, output=$%s/M", model_key, input_price, output_price)

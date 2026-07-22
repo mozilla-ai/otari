@@ -269,6 +269,30 @@ Config pricing sets initial values. Pricing set via the `/v1/pricing` API takes 
 
 A pricing entry whose provider is not listed in the `providers` section is skipped at startup with a warning, not treated as a fatal error: the provider may still be reachable through environment credentials (any-llm reads keys like `OPENAI_API_KEY`), so a pricing/provider mismatch should not abort the gateway. To have such an entry take effect, add the provider to the `providers` section.
 
+#### Cache token pricing
+
+Providers that support prompt caching (OpenAI, Gemini, Anthropic) report cached-token counts that are captured in `cache_read_tokens` and `cache_write_tokens` on the usage log. By default these are not priced — the cost is computed from `prompt_tokens` and `completion_tokens` only. To bill cache tokens, add the optional `cache_read_price_per_million` and `cache_write_price_per_million` rates (USD per million tokens):
+
+```yaml
+pricing:
+  openai:gpt-4o:
+    input_price_per_million: 2.50
+    output_price_per_million: 10.00
+    cache_read_price_per_million: 1.25  # discounted rate for cached input
+  anthropic:claude-sonnet-4-6:
+    input_price_per_million: 3.00
+    output_price_per_million: 15.00
+    cache_read_price_per_million: 0.30  # cache-read rate
+    cache_write_price_per_million: 3.75  # cache-creation (write) rate
+```
+
+Cache pricing follows the provider inclusion convention:
+
+- **OpenAI / Gemini**: `cache_read_tokens` is a subset of `prompt_tokens`, so the cached portion is discounted (re-priced at `cache_read_price_per_million` instead of the full `input_price_per_million`) rather than double-counted. `cache_write_tokens` is always 0 for these providers.
+- **Anthropic**: `cache_read_tokens` and `cache_write_tokens` are separate from `prompt_tokens`, so they are billed as additive charges at `cache_read_price_per_million` and `cache_write_price_per_million` respectively.
+
+When a cache rate is not configured (null), cache tokens are not billed. The same fields are available on the `/v1/pricing` API (`SetPricingRequest` and `PricingResponse`).
+
 ### Default pricing
 
 Default pricing is **off by default**. When you enable it (`default_pricing: true` in `config.yml`, or

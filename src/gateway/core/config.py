@@ -80,6 +80,16 @@ class PricingConfig(BaseModel):
 
     input_price_per_million: float = Field(ge=0)
     output_price_per_million: float = Field(ge=0)
+    cache_read_price_per_million: float | None = Field(
+        default=None,
+        ge=0,
+        description="Price per 1M cached-input tokens (OpenAI/Gemini discount rate or Anthropic cache-read rate).",
+    )
+    cache_write_price_per_million: float | None = Field(
+        default=None,
+        ge=0,
+        description="Price per 1M cache-write (creation) tokens. Anthropic only.",
+    )
     effective_at: datetime | None = Field(
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",

@@ -2596,6 +2596,28 @@
       "PricingResponse": {
         "description": "Response model for model pricing.",
         "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -2626,6 +2648,8 @@
           "effective_at",
           "input_price_per_million",
           "output_price_per_million",
+          "cache_read_price_per_million",
+          "cache_write_price_per_million",
           "created_at",
           "updated_at"
         ],
@@ -3369,6 +3393,32 @@
       "SetPricingRequest": {
         "description": "Request model for setting model pricing.",
         "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price per 1M cached-input tokens",
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price per 1M cache-write (creation) tokens",
+            "title": "Cache Write Price Per Million"
+          },
           "effective_at": {
             "anyOf": [
               {

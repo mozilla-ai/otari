@@ -25,6 +25,12 @@ class SetPricingRequest(BaseModel):
     model_key: str = Field(description="Model identifier in format 'provider:model'")
     input_price_per_million: float = Field(ge=0, description="Price per 1M input tokens")
     output_price_per_million: float = Field(ge=0, description="Price per 1M output tokens")
+    cache_read_price_per_million: float | None = Field(
+        default=None, ge=0, description="Price per 1M cached-input tokens"
+    )
+    cache_write_price_per_million: float | None = Field(
+        default=None, ge=0, description="Price per 1M cache-write (creation) tokens"
+    )
     effective_at: datetime | None = Field(
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
@@ -38,6 +44,8 @@ class PricingResponse(BaseModel):
     effective_at: str
     input_price_per_million: float
     output_price_per_million: float
+    cache_read_price_per_million: float | None
+    cache_write_price_per_million: float | None
     created_at: str
     updated_at: str
 
@@ -49,6 +57,8 @@ class PricingResponse(BaseModel):
             effective_at=pricing.effective_at.isoformat(),
             input_price_per_million=pricing.input_price_per_million,
             output_price_per_million=pricing.output_price_per_million,
+            cache_read_price_per_million=pricing.cache_read_price_per_million,
+            cache_write_price_per_million=pricing.cache_write_price_per_million,
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),
         )
@@ -155,12 +165,16 @@ async def set_pricing(
     if pricing:
         pricing.input_price_per_million = request.input_price_per_million
         pricing.output_price_per_million = request.output_price_per_million
+        pricing.cache_read_price_per_million = request.cache_read_price_per_million
+        pricing.cache_write_price_per_million = request.cache_write_price_per_million
     else:
         pricing = ModelPricing(
             model_key=normalized_key,
             effective_at=effective_at,
             input_price_per_million=request.input_price_per_million,
             output_price_per_million=request.output_price_per_million,
+            cache_read_price_per_million=request.cache_read_price_per_million,
+            cache_write_price_per_million=request.cache_write_price_per_million,
         )
         db.add(pricing)
 
