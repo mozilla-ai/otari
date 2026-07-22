@@ -168,6 +168,33 @@ def test_codex_metadata_is_forwarded_to_openai_provider(
     ]
 
 
+def test_client_cannot_smuggle_codex_extra_body(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Only the route may construct the raw OpenAI request-body handoff."""
+    captured: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return _response()
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        resp = client.post(
+            "/v1/responses",
+            json={
+                "model": _MODEL,
+                "input": "safe input",
+                "_codex_extra_body": {"input": "unvalidated input", "model": "unapproved-model"},
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["input_data"] == "safe input"
+    assert "extra_body" not in captured
+
+
 def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
     client: TestClient,
     api_key_header: dict[str, str],

@@ -404,6 +404,10 @@ async def create_response(
         tools_extracted=tool_ctx.tools_extracted,
         remaining_user_tools=tool_ctx.remaining_user_tools,
     )
+    # This is an internal handoff populated below, never a client request field.
+    # ``ResponsesRequest`` permits extra fields for OpenAI compatibility, so
+    # remove a caller-supplied value before constructing the provider kwargs.
+    request_fields.pop(_CODEX_EXTRA_BODY_FIELD, None)
     client_metadata = request_fields.pop(_CODEX_CLIENT_METADATA_FIELD, None)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_responses_tools(request_fields["tools"])
