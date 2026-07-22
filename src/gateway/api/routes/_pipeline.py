@@ -721,7 +721,9 @@ class ToolContext:
         remaining_user_tools: list[dict[str, Any]] | None,
         max_tool_iterations: int,
         tools_header: str | None,
+        config: GatewayConfig,
     ) -> None:
+        self.config = config
         self.mcp_server_configs = mcp_server_configs
         self.use_sandbox = use_sandbox
         self.sandbox_tool_entry = sandbox_tool_entry
@@ -807,7 +809,7 @@ async def prepare_gateway_tools(
     reservation taken by :func:`resolve_request_context` before propagating.
     """
     try:
-        await apply_input_guardrails(guardrails, guardrail_text, response=response)
+        await apply_input_guardrails(guardrails, guardrail_text, response=response, config=ctx.config)
 
         if mcp_server_ids and not ctx.hybrid_mode:
             raise adapter.error(400, MCP_SERVER_IDS_HYBRID_ONLY_DETAIL, ErrorKind.INVALID_REQUEST)
@@ -824,7 +826,10 @@ async def prepare_gateway_tools(
             await _validate_mcp_server_urls(adapter, mcp_servers)
 
         sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
-        sandbox_url: str | None = otari_env("SANDBOX_URL") or None
+        # Read the effective config value (dashboard override / env / YAML), falling
+        # back to the env var so pure-env deployments are unchanged. A dashboard
+        # override mutates ctx.config, so it hot-applies on the next request.
+        sandbox_url: str | None = ctx.config.sandbox_url or otari_env("SANDBOX_URL") or None
         use_sandbox = False
         if sandbox_tool_entry is not None:
             if sandbox_url is None:
@@ -867,7 +872,7 @@ async def prepare_gateway_tools(
                 sandbox_max_iterations = resolved_iters
 
         web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
-        web_search_url: str | None = otari_env("WEB_SEARCH_URL") or None
+        web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
         # Forwarded to the search backend as `X-Gateway-Token`. Only set in
         # hybrid mode, where the backend may be the platform-hosted web-search
         # endpoint that authenticates the gateway. Standalone backends (SearXNG /
@@ -926,6 +931,7 @@ async def prepare_gateway_tools(
         raise
 
     return ToolContext(
+        config=ctx.config,
         mcp_server_configs=mcp_servers,
         use_sandbox=use_sandbox,
         sandbox_tool_entry=sandbox_tool_entry,
@@ -1117,7 +1123,7 @@ async def dispatch_non_stream(
 
     if tool_ctx.use_sandbox:
         assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry)
+        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry, tool_ctx.config)
         async with SandboxBackend(
             sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint, auth_token=tool_ctx.sandbox_auth_token
         ) as backend:
@@ -1131,6 +1137,7 @@ async def dispatch_non_stream(
         base_url=tool_ctx.web_search_url,
         tool_entry=tool_ctx.web_search_tool_entry,
         auth_token=tool_ctx.web_search_auth_token,
+        config=tool_ctx.config,
     ) as web_backend:
         kwargs = adapter.inject_hints(call_kwargs, web_backend.purpose_hints(), header=tool_ctx.tools_header)
         return await adapter.run_tool_loop(kwargs, web_backend, tool_ctx.max_tool_iterations, on_first_response)
@@ -1191,7 +1198,7 @@ async def open_stream(
 
     if tool_ctx.use_sandbox:
         assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry)
+        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry, tool_ctx.config)
         sandbox_backend = SandboxBackend(
             sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint, auth_token=tool_ctx.sandbox_auth_token
         )
@@ -1205,6 +1212,7 @@ async def open_stream(
         base_url=tool_ctx.web_search_url,
         tool_entry=tool_ctx.web_search_tool_entry,
         auth_token=tool_ctx.web_search_auth_token,
+        config=tool_ctx.config,
     )
     await web_search_backend.__aenter__()  # may raise WebSearchNotReachableError
     return _eager_backend_stream(adapter, kwargs, web_search_backend, tool_ctx)
@@ -1610,7 +1618,7 @@ async def run_streaming_with_fallback(
             pool_for_loop = await backend_stack.enter_async_context(MCPClientPool(tool_ctx.mcp_server_configs))
         elif tool_ctx.use_sandbox:
             assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-            sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry)
+            sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry, tool_ctx.config)
             pool_for_loop = await backend_stack.enter_async_context(
                 SandboxBackend(
                     sandbox_url=tool_ctx.sandbox_url, purpose_hint=sandbox_hint, auth_token=tool_ctx.sandbox_auth_token
@@ -1624,6 +1632,7 @@ async def run_streaming_with_fallback(
                     base_url=tool_ctx.web_search_url,
                     tool_entry=tool_ctx.web_search_tool_entry,
                     auth_token=tool_ctx.web_search_auth_token,
+                    config=tool_ctx.config,
                 ),
             )
     except BaseException:

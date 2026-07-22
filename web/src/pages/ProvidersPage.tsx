@@ -182,19 +182,22 @@ function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProvider
       >
         {test.isPending ? "Testing…" : "Test connection"}
       </Button>
-      {test.isPending ? null : test.error ? (
-        <span className="text-xs text-red-700">{errorMessage(test.error)}</span>
-      ) : test.data ? (
-        test.data.ok ? (
-          <span className="text-xs font-medium text-green-700">
-            Connected. {test.data.model_count} model{test.data.model_count === 1 ? "" : "s"} available.
-          </span>
-        ) : (
-          <span className="block max-w-md break-words text-xs text-red-700">
-            {test.data.error ?? "Connection failed."}
-          </span>
-        )
-      ) : null}
+      {/* aria-live so the connection outcome is announced to assistive tech. */}
+      <span role="status" aria-live="polite">
+        {test.isPending ? null : test.error ? (
+          <span className="text-xs text-red-700">{errorMessage(test.error)}</span>
+        ) : test.data ? (
+          test.data.ok ? (
+            <span className="text-xs font-medium text-green-700">
+              Connected. {test.data.model_count} model{test.data.model_count === 1 ? "" : "s"} available.
+            </span>
+          ) : (
+            <span className="block max-w-md break-words text-xs text-red-700">
+              {test.data.error ?? "Connection failed."}
+            </span>
+          )
+        ) : null}
+      </span>
     </div>
   );
 }

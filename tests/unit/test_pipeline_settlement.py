@@ -46,6 +46,7 @@ ADAPTERS = [
 
 def _tool_ctx(**overrides: Any) -> ToolContext:
     defaults: dict[str, Any] = {
+        "config": GatewayConfig(),
         "mcp_server_configs": None,
         "use_sandbox": False,
         "sandbox_tool_entry": None,
