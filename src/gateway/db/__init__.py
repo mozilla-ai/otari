@@ -5,6 +5,7 @@ from gateway.models.entities import (
     Budget,
     BudgetResetLog,
     ModelPricing,
+    PricingSnapshot,
     UsageLog,
     User,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "Budget",
     "BudgetResetLog",
     "ModelPricing",
+    "PricingSnapshot",
     "UsageLog",
     "User",
     "get_active_user",

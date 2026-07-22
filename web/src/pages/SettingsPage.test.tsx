@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -70,6 +70,19 @@ const SETTINGS: GatewaySettings = {
   config: CONFIG,
 };
 
+const PRICE_REFRESH = {
+  fetched_at: "2026-07-22T00:00:00Z",
+  added_count: 1,
+  changed_count: 2,
+  removed_count: 0,
+  protected_model_count: 1,
+  changes: [
+    { model_key: "openai:gpt-4o-mini", change: "changed" },
+    { model_key: "openai:gpt-5", change: "added" },
+  ],
+  changes_truncated: false,
+};
+
 function storedProvider(instance: string, last4: string | null, decryptable = true): StoredProvider {
   return {
     instance,
@@ -109,6 +122,15 @@ function mockApi(
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
+    if (url.includes("/v1/pricing/refresh/confirm") && method === "POST") {
+      return jsonResponse({ applied: true });
+    }
+    if (url.includes("/v1/pricing/refresh/reject") && method === "POST") {
+      return new Response(null, { status: 204 });
+    }
+    if (url.includes("/v1/pricing/refresh") && method === "POST") {
+      return jsonResponse(PRICE_REFRESH);
+    }
     if (url.includes("/v1/provider-credentials/reencrypt") && method === "POST") {
       storedList = storedList.map((provider) => ({ ...provider, decryptable: reencryptResult.unreadable === 0 }));
       return jsonResponse(reencryptResult);
@@ -231,6 +253,53 @@ describe("SettingsPage", () => {
     );
     expect(call).toBeDefined();
     expect(await screen.findByText(/Re-encrypted 1 provider key/)).toBeInTheDocument();
+  });
+
+  it("reviews and accepts persisted default price updates", async () => {
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<SettingsPage />);
+    await screen.findByText("Default pricing catalog");
+
+    await user.click(screen.getByRole("button", { name: "Check for price updates" }));
+
+    expect(await screen.findByRole("alertdialog", { name: "Review default price updates" })).toBeInTheDocument();
+    expect(screen.getByText(/1 added, 2 changed, and 0 removed/)).toBeInTheDocument();
+    expect(screen.getAllByText("genai-prices")).toHaveLength(2);
+    expect(screen.getByText("openai:gpt-4o-mini: changed")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Accept price updates" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog", { name: "Review default price updates" })).not.toBeInTheDocument(),
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url).endsWith("/v1/pricing/refresh/confirm") && init?.method === "POST",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a reviewed default price update", async () => {
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<SettingsPage />);
+    await screen.findByText("Default pricing catalog");
+    await user.click(screen.getByRole("button", { name: "Check for price updates" }));
+    await screen.findByRole("alertdialog", { name: "Review default price updates" });
+
+    await user.click(screen.getByRole("button", { name: "Reject changes" }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("alertdialog", { name: "Review default price updates" })).not.toBeInTheDocument(),
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url).endsWith("/v1/pricing/refresh/reject") && init?.method === "POST",
+      ),
+    ).toBe(true);
   });
 
   it("shows unreadable provider key recovery guidance in the Credential security category", async () => {

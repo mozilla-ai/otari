@@ -5,7 +5,7 @@ from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,12 @@ from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, v
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
 from gateway.services.alias_service import resolve_effective_alias
+from gateway.services.pricing_refresh_service import (
+    PricingRefreshError,
+    confirm_price_refresh,
+    prepare_price_refresh,
+    reject_price_refresh,
+)
 from gateway.services.pricing_service import normalize_effective_at
 from gateway.services.provider_kwargs import normalize_pricing_key, split_selector
 
@@ -64,6 +70,31 @@ class PricingResponse(BaseModel):
         )
 
 
+class PricingRefreshChangeResponse(BaseModel):
+    """One default model price changed by a pending refresh."""
+
+    model_key: str
+    change: str
+
+
+class PricingRefreshPreviewResponse(BaseModel):
+    """Reviewable summary of a pending genai-prices refresh."""
+
+    fetched_at: datetime
+    added_count: int
+    changed_count: int
+    removed_count: int
+    protected_model_count: int
+    changes: list[PricingRefreshChangeResponse]
+    changes_truncated: bool
+
+
+class PricingRefreshConfirmationResponse(BaseModel):
+    """Result of activating a reviewed genai-prices refresh."""
+
+    applied: bool = True
+
+
 def _candidate_model_keys(raw_key: str) -> list[str]:
     """Return possible stored keys for a provided selector.
 
@@ -96,6 +127,84 @@ def _candidate_model_keys(raw_key: str) -> list[str]:
         if key not in candidates:
             candidates.append(key)
     return candidates
+
+
+@router.post(
+    "/refresh",
+    response_model=PricingRefreshPreviewResponse,
+    dependencies=[Depends(verify_master_key)],
+)
+async def preview_pricing_refresh(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PricingRefreshPreviewResponse:
+    """Fetch the latest defaults and hold them for operator review."""
+
+    try:
+        preview = await prepare_price_refresh(db)
+    except PricingRefreshError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to fetch the latest genai-prices data",
+        ) from None
+
+    protected_model_count = (
+        await db.execute(select(func.count(distinct(ModelPricing.model_key))))
+    ).scalar_one()
+    return PricingRefreshPreviewResponse(
+        fetched_at=preview.fetched_at,
+        added_count=preview.added_count,
+        changed_count=preview.changed_count,
+        removed_count=preview.removed_count,
+        protected_model_count=protected_model_count,
+        changes=[
+            PricingRefreshChangeResponse(model_key=change.model_key, change=change.change)
+            for change in preview.changes
+        ],
+        changes_truncated=preview.changes_truncated,
+    )
+
+
+@router.post(
+    "/refresh/confirm",
+    response_model=PricingRefreshConfirmationResponse,
+    dependencies=[Depends(verify_master_key)],
+)
+async def confirm_pricing_refresh(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PricingRefreshConfirmationResponse:
+    """Activate the latest reviewed default-price snapshot."""
+
+    try:
+        applied = await confirm_price_refresh(db)
+    except PricingRefreshError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to save the latest genai-prices data",
+        ) from None
+    if not applied:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending genai-prices refresh to apply")
+    return PricingRefreshConfirmationResponse()
+
+
+@router.post(
+    "/refresh/reject",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_master_key)],
+)
+async def reject_pricing_refresh(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Discard a reviewed default-price snapshot without applying it."""
+
+    try:
+        rejected = await reject_price_refresh(db)
+    except PricingRefreshError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to discard the pending genai-prices data",
+        ) from None
+    if not rejected:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending genai-prices refresh to reject")
 
 
 async def _get_effective_pricing(

@@ -2625,6 +2625,85 @@
         "title": "ModerationResult",
         "type": "object"
       },
+      "PricingRefreshChangeResponse": {
+        "description": "One default model price changed by a pending refresh.",
+        "properties": {
+          "change": {
+            "title": "Change",
+            "type": "string"
+          },
+          "model_key": {
+            "title": "Model Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_key",
+          "change"
+        ],
+        "title": "PricingRefreshChangeResponse",
+        "type": "object"
+      },
+      "PricingRefreshConfirmationResponse": {
+        "description": "Result of activating a reviewed genai-prices refresh.",
+        "properties": {
+          "applied": {
+            "default": true,
+            "title": "Applied",
+            "type": "boolean"
+          }
+        },
+        "title": "PricingRefreshConfirmationResponse",
+        "type": "object"
+      },
+      "PricingRefreshPreviewResponse": {
+        "description": "Reviewable summary of a pending genai-prices refresh.",
+        "properties": {
+          "added_count": {
+            "title": "Added Count",
+            "type": "integer"
+          },
+          "changed_count": {
+            "title": "Changed Count",
+            "type": "integer"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/PricingRefreshChangeResponse"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "changes_truncated": {
+            "title": "Changes Truncated",
+            "type": "boolean"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "protected_model_count": {
+            "title": "Protected Model Count",
+            "type": "integer"
+          },
+          "removed_count": {
+            "title": "Removed Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fetched_at",
+          "added_count",
+          "changed_count",
+          "removed_count",
+          "protected_model_count",
+          "changes",
+          "changes_truncated"
+        ],
+        "title": "PricingRefreshPreviewResponse",
+        "type": "object"
+      },
       "PricingResponse": {
         "description": "Response model for model pricing.",
         "properties": {
@@ -7247,6 +7326,89 @@
           }
         ],
         "summary": "Set Pricing",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/v1/pricing/refresh": {
+      "post": {
+        "description": "Fetch the latest defaults and hold them for operator review.",
+        "operationId": "preview_pricing_refresh_v1_pricing_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRefreshPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Preview Pricing Refresh",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/v1/pricing/refresh/confirm": {
+      "post": {
+        "description": "Activate the latest reviewed default-price snapshot.",
+        "operationId": "confirm_pricing_refresh_v1_pricing_refresh_confirm_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRefreshConfirmationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Confirm Pricing Refresh",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/v1/pricing/refresh/reject": {
+      "post": {
+        "description": "Discard a reviewed default-price snapshot without applying it.",
+        "operationId": "reject_pricing_refresh_v1_pricing_refresh_reject_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reject Pricing Refresh",
         "tags": [
           "pricing"
         ]
