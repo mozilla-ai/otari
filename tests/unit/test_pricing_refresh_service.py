@@ -89,6 +89,30 @@ async def test_startup_loads_the_persisted_genai_prices_snapshot() -> None:
 
 
 @pytest.mark.asyncio
+async def test_refresher_applies_a_snapshot_accepted_on_another_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A confirm served by a sibling worker propagates here on the next tick, once."""
+
+    _, model_key, raw_snapshot = _snapshot_with_changed_price()
+    row = PricingSnapshot(source=pricing_refresh_service.GENAI_PRICES_SOURCE, snapshot=raw_snapshot)
+    session = AsyncMock(spec=AsyncSession)
+    session.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: row)
+
+    await pricing_refresh_service.refresh_price_snapshot(cast(AsyncSession, session))
+
+    provider = get_snapshot().find_provider("model", "test", None)
+    assert provider.id == "test"
+    assert pricing_refresh_service._applied_snapshot_raw == raw_snapshot
+
+    # An unchanged stored snapshot must be skipped so the price cache is left alone.
+    monkeypatch.setattr(
+        pricing_refresh_service,
+        "_apply_active_snapshot",
+        lambda _: pytest.fail("an unchanged snapshot must not be re-applied"),
+    )
+    await pricing_refresh_service.refresh_price_snapshot(cast(AsyncSession, session))
+
+
+@pytest.mark.asyncio
 async def test_failed_snapshot_persistence_keeps_the_active_prices(monkeypatch: pytest.MonkeyPatch) -> None:
     """A database failure cannot activate a snapshot that was not saved."""
 

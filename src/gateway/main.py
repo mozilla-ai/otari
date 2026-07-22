@@ -26,7 +26,10 @@ from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
     warn_if_require_pricing_without_pricing,
 )
-from gateway.services.pricing_refresh_service import load_persisted_price_snapshot
+from gateway.services.pricing_refresh_service import (
+    load_persisted_price_snapshot,
+    run_price_snapshot_refresher,
+)
 from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.provider_store_service import (
     load_providers_at_startup,
@@ -97,6 +100,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         log_writer: LogWriter
         alias_refresher: asyncio.Task[None] | None = None
         provider_refresher: asyncio.Task[None] | None = None
+        price_refresher: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
@@ -132,6 +136,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # config.providers synchronously, so the overlay is reloaded on a TTL
             # to converge sibling workers and replicas after a dashboard write.
             provider_refresher = asyncio.create_task(run_provider_refresher(config))
+            # An accepted pricing snapshot is applied in-memory by the worker that
+            # served the confirm; reload it on a TTL so sibling workers and replicas
+            # converge, the same way aliases and provider credentials do.
+            price_refresher = asyncio.create_task(run_price_snapshot_refresher())
 
         await log_writer.start()
         app.state.log_writer = log_writer
@@ -149,6 +157,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 with suppress(asyncio.CancelledError):
                     await provider_refresher
                 reset_provider_cache()
+            if price_refresher is not None:
+                price_refresher.cancel()
+                with suppress(asyncio.CancelledError):
+                    await price_refresher
             await log_writer.stop()
 
     return lifespan
