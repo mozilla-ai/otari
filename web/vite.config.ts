@@ -54,6 +54,15 @@ export default defineConfig({
   build: {
     outDir,
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          heroui: ["@heroui/react"],
+          react: ["react", "react-dom", "react-router-dom"],
+          "tanstack-query": ["@tanstack/react-query"],
+        },
+      },
+    },
   },
   test: {
     environment: "jsdom",
