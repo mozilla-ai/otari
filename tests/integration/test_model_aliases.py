@@ -217,7 +217,12 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
     )
     resp = client.get("/v1/models/housemodel", headers=HEADERS)
     assert resp.status_code == 200
-    assert resp.json()["pricing"] == {"input_price_per_million": 1.0, "output_price_per_million": 2.0}
+    assert resp.json()["pricing"] == {
+        "input_price_per_million": 1.0,
+        "output_price_per_million": 2.0,
+        "cache_read_price_per_million": None,
+        "cache_write_price_per_million": None,
+    }
 
 
 def test_alias_listing_reports_where_its_price_came_from(client: TestClient) -> None:

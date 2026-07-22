@@ -181,6 +181,7 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
             total_tokens=input_tokens + output_tokens,
             cache_read_tokens=event.usage.cache_read_input_tokens or 0,
             cache_write_tokens=event.usage.cache_creation_input_tokens or 0,
+            cache_tokens_in_prompt=False,
         )
     if isinstance(event, MessageStartEvent):
         usage = event.message.usage
@@ -194,6 +195,7 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
                 total_tokens=input_tokens,
                 cache_read_tokens=cache_read,
                 cache_write_tokens=cache_write,
+                cache_tokens_in_prompt=False,
             )
     return None
 
@@ -239,6 +241,7 @@ class _MessagesAdapter:
             total_tokens=result.usage.input_tokens + result.usage.output_tokens,
             cache_read_tokens=result.usage.cache_read_input_tokens or 0,
             cache_write_tokens=result.usage.cache_creation_input_tokens or 0,
+            cache_tokens_in_prompt=False,
         )
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:

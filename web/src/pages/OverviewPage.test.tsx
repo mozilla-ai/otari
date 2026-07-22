@@ -112,6 +112,18 @@ describe("OverviewPage", () => {
     expect(screen.getByText("Elevated")).toBeInTheDocument(); // error-rate status word (non-hue)
   });
 
+  it("shows 30-day cache reads as a tile", async () => {
+    mockApi({
+      today: { cost: 5 },
+      period: { cost: 200, cache_read_tokens: 5_100_000 },
+      prev: { cost: 100, cache_read_tokens: 1_000_000 },
+    });
+    renderPage(<OverviewPage />);
+
+    expect(await screen.findByText("5.1M")).toBeInTheDocument();
+    expect(screen.getByText("Cache reads, last 30 days")).toBeInTheDocument();
+  });
+
   it("shows a dash for error rate when there are no requests", async () => {
     mockApi({ period: { request_count: 0, error_count: 0 } });
     renderPage(<OverviewPage />);

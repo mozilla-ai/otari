@@ -194,6 +194,8 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
     # Input-only models (embeddings, rerank) legitimately have no output rate;
     # price output at 0 rather than rejecting the whole model.
     output_rate = _flat_rate(price.output_mtok) if price.output_mtok is not None else 0.0
+    cache_read_rate = _flat_rate(price.cache_read_mtok) if price.cache_read_mtok is not None else None
+    cache_write_rate = _flat_rate(price.cache_write_mtok) if price.cache_write_mtok is not None else None
 
     model_key = f"{provider}:{model}" if provider else model
     logger.debug(
@@ -207,6 +209,8 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
         effective_at=as_of,
         input_price_per_million=_flat_rate(price.input_mtok),
         output_price_per_million=output_rate,
+        cache_read_price_per_million=cache_read_rate,
+        cache_write_price_per_million=cache_write_rate,
     )
 
 

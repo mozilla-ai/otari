@@ -81,11 +81,11 @@ from gateway.api.routes._tools import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
-from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
+from gateway.core.usage import cache_read_tokens_of, cache_tokens_in_prompt_of, cache_write_tokens_of
 from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt, record_cost, record_tokens
 from gateway.model_labeling import relabel_model
-from gateway.models.entities import UsageLog
+from gateway.models.entities import ModelPricing, UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
@@ -957,6 +957,71 @@ async def prepare_gateway_tools(
 # ---------------------------------------------------------------------------
 
 
+def _compute_cost(pricing: ModelPricing, usage_data: CompletionUsage) -> float:
+    """Compute standalone-mode cost from provider usage and model pricing.
+
+    Prices prompt, completion, and (when configured) cache tokens on a single
+    convention borrowed from the genai-prices dataset this project already uses:
+    the input/prompt token count is the grand total that *includes* cache reads
+    and writes, and each physical token is charged once.
+
+    Providers report cache tokens two different ways, so usage is normalized
+    first (see :attr:`GatewayUsage.cache_tokens_in_prompt`):
+
+    * OpenAI / Gemini report cache reads as a subset already inside
+      ``prompt_tokens`` (``cache_tokens_in_prompt`` is ``True``).
+    * Anthropic reports ``input_tokens`` *exclusive* of cache reads/writes and
+      lists them as separate buckets (``cache_tokens_in_prompt`` is ``False``),
+      so they are folded back into the total here.
+
+    Uncached input is then ``total - cache_read - cache_write``, priced at the
+    input rate. Cache reads/writes are charged at their own rate when one is
+    configured; when a cache rate is absent, those tokens stay in the uncached
+    bucket and are billed at the full input rate rather than being dropped or
+    double counted. This mirrors ``ModelPrice.calc_price`` in genai-prices.
+
+    A malformed provider payload (e.g. a cached count larger than
+    ``prompt_tokens`` on the OpenAI shape) is clamped so the uncached remainder
+    can never go negative and produce a negative cost that would credit the
+    user's budget. Cost is therefore always non-negative.
+    """
+    prompt_tokens = usage_data.prompt_tokens or 0
+    completion_tokens = usage_data.completion_tokens or 0
+    cache_read = cache_read_tokens_of(usage_data)
+    cache_write = cache_write_tokens_of(usage_data)
+
+    if cache_tokens_in_prompt_of(usage_data):
+        total_input_tokens = prompt_tokens
+    else:
+        total_input_tokens = prompt_tokens + cache_read + cache_write
+
+    # Defensive clamp: keep the cache buckets inside the input total so the
+    # uncached remainder stays >= 0 even if a provider/adapter reports an
+    # inconsistent payload. For the Anthropic shape the total is built from
+    # these counts, so this is a no-op there; it only bites a broken OpenAI-shape
+    # payload where cached_tokens exceeds prompt_tokens.
+    cache_read = min(cache_read, total_input_tokens)
+    cache_write = min(cache_write, total_input_tokens - cache_read)
+
+    read_rate = pricing.cache_read_price_per_million
+    write_rate = pricing.cache_write_price_per_million
+
+    # Only pull a cache bucket out of the uncached-input total when it has its
+    # own price; otherwise it stays billed at the input rate.
+    priced_cache_read = cache_read if read_rate is not None else 0
+    priced_cache_write = cache_write if write_rate is not None else 0
+    uncached_input_tokens = total_input_tokens - priced_cache_read - priced_cache_write
+
+    cost = (uncached_input_tokens / 1_000_000) * pricing.input_price_per_million
+    cost += (completion_tokens / 1_000_000) * pricing.output_price_per_million
+    if read_rate is not None and cache_read > 0:
+        cost += (cache_read / 1_000_000) * read_rate
+    if write_rate is not None and cache_write > 0:
+        cost += (cache_write / 1_000_000) * write_rate
+
+    return cost
+
+
 def _elapsed_ms(started_at: float | None) -> int | None:
     """Milliseconds elapsed since a monotonic ``started_at`` reading.
 
@@ -1041,9 +1106,7 @@ async def log_usage(
 
         pricing = await find_model_pricing(db, provider, model, as_of=usage_log.timestamp)
         if pricing:
-            cost = (usage_data.prompt_tokens / 1_000_000) * pricing.input_price_per_million + (
-                usage_data.completion_tokens / 1_000_000
-            ) * pricing.output_price_per_million
+            cost = _compute_cost(pricing, usage_data)
             usage_log.cost = cost
             record_cost(str(provider or ""), model, cost)
         else:

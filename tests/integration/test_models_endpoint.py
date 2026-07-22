@@ -89,6 +89,41 @@ def test_list_models_owned_by_from_provider(
     assert gpt4["owned_by"] == "openai"
 
 
+def test_list_models_exposes_cache_pricing(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Cache read/write rates set via /v1/pricing surface on the model catalogue."""
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "anthropic:claude-sonnet-4",
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+            "cache_read_price_per_million": 0.3,
+            "cache_write_price_per_million": 3.75,
+        },
+        headers=master_key_header,
+    )
+
+    resp = client.get("/v1/models", headers=master_key_header)
+    assert resp.status_code == 200
+    model = next(m for m in resp.json()["data"] if m["id"] == "anthropic:claude-sonnet-4")
+    assert model["pricing"]["cache_read_price_per_million"] == 0.3
+    assert model["pricing"]["cache_write_price_per_million"] == 3.75
+
+    # A model priced without cache rates reports them as null, not absent.
+    client.post(
+        "/v1/pricing",
+        json={"model_key": "openai:gpt-4o", "input_price_per_million": 2.5, "output_price_per_million": 10.0},
+        headers=master_key_header,
+    )
+    resp = client.get("/v1/models", headers=master_key_header)
+    gpt4 = next(m for m in resp.json()["data"] if m["id"] == "openai:gpt-4o")
+    assert gpt4["pricing"]["cache_read_price_per_million"] is None
+    assert gpt4["pricing"]["cache_write_price_per_million"] is None
+
+
 def test_get_model_found(
     client: TestClient,
     master_key_header: dict[str, str],

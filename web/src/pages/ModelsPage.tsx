@@ -110,12 +110,28 @@ interface ModelRow {
   releaseDate?: string | null;
   inputPrice: number | null;
   outputPrice: number | null;
+  cacheReadPrice: number | null;
+  cacheWritePrice: number | null;
   source: PriceSource;
 }
 
 function isValidPrice(value: string): boolean {
   const parsed = Number(value);
   return value.trim() !== "" && Number.isFinite(parsed) && parsed >= 0;
+}
+
+// Cache rates are optional: an empty field means "no cache price" (cache tokens
+// then bill at the input rate). Empty is valid; any set value must be >= 0.
+function isValidOptionalPrice(value: string): boolean {
+  if (value.trim() === "") {
+    return true;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0;
+}
+
+function optionalPrice(value: string): number | null {
+  return value.trim() === "" ? null : Number(value);
 }
 
 function MoneyInput({
@@ -166,8 +182,15 @@ function PriceModelForm({ onClose }: { onClose: () => void }) {
   const [modelKey, setModelKey] = useState("");
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
+  const [cacheRead, setCacheRead] = useState("");
+  const [cacheWrite, setCacheWrite] = useState("");
 
-  const canSubmit = modelKey.trim() !== "" && isValidPrice(input) && isValidPrice(output);
+  const canSubmit =
+    modelKey.trim() !== "" &&
+    isValidPrice(input) &&
+    isValidPrice(output) &&
+    isValidOptionalPrice(cacheRead) &&
+    isValidOptionalPrice(cacheWrite);
 
   const submit = () => {
     if (!canSubmit) {
@@ -178,6 +201,8 @@ function PriceModelForm({ onClose }: { onClose: () => void }) {
         model_key: modelKey.trim(),
         input_price_per_million: Number(input),
         output_price_per_million: Number(output),
+        cache_read_price_per_million: optionalPrice(cacheRead),
+        cache_write_price_per_million: optionalPrice(cacheWrite),
       },
       { onSuccess: onClose },
     );
@@ -203,7 +228,19 @@ function PriceModelForm({ onClose }: { onClose: () => void }) {
           <span className="text-sm font-medium text-[var(--otari-ink)]">Output $ / 1M</span>
           <MoneyInput value={output} onChange={setOutput} ariaLabel="Output price per million" />
         </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-[var(--otari-ink)]">Cache read $ / 1M</span>
+          <MoneyInput value={cacheRead} onChange={setCacheRead} ariaLabel="Cache read price per million" />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-[var(--otari-ink)]">Cache write $ / 1M</span>
+          <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel="Cache write price per million" />
+        </div>
       </div>
+      <p className="text-xs text-[var(--otari-muted)]">
+        Cache rates are optional. Leave them blank to bill cached tokens at the input rate. Cache write applies to
+        Anthropic cache creation.
+      </p>
       <div className="flex gap-2">
         <Button variant="primary" isDisabled={!canSubmit || setPricing.isPending} onPress={submit}>
           {setPricing.isPending ? "Saving…" : "Save price"}
@@ -324,15 +361,21 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
   const [editing, setEditing] = useState(false);
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
+  const [cacheRead, setCacheRead] = useState("");
+  const [cacheWrite, setCacheWrite] = useState("");
 
   const startEdit = () => {
     setInput(row.inputPrice == null ? "" : String(row.inputPrice));
     setOutput(row.outputPrice == null ? "" : String(row.outputPrice));
+    setCacheRead(row.cacheReadPrice == null ? "" : String(row.cacheReadPrice));
+    setCacheWrite(row.cacheWritePrice == null ? "" : String(row.cacheWritePrice));
     setEditing(true);
   };
 
+  const canSave = isValidPrice(input) && isValidPrice(output) && isValidOptionalPrice(cacheRead) && isValidOptionalPrice(cacheWrite);
+
   const save = () => {
-    if (!isValidPrice(input) || !isValidPrice(output)) {
+    if (!canSave) {
       return;
     }
     setPricing.mutate(
@@ -340,6 +383,8 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
         model_key: row.key,
         input_price_per_million: Number(input),
         output_price_per_million: Number(output),
+        cache_read_price_per_million: optionalPrice(cacheRead),
+        cache_write_price_per_million: optionalPrice(cacheWrite),
       },
       { onSuccess: () => setEditing(false) },
     );
@@ -356,13 +401,16 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           <span className="text-xs text-[var(--otari-muted)]">Output $ / 1M</span>
           <MoneyInput value={output} onChange={setOutput} ariaLabel={`Output price for ${row.key}`} />
         </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-[var(--otari-muted)]">Cache read $ / 1M</span>
+          <MoneyInput value={cacheRead} onChange={setCacheRead} ariaLabel={`Cache read price for ${row.key}`} />
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-[var(--otari-muted)]">Cache write $ / 1M</span>
+          <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel={`Cache write price for ${row.key}`} />
+        </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="primary"
-            isDisabled={setPricing.isPending || !isValidPrice(input) || !isValidPrice(output)}
-            onPress={save}
-          >
+          <Button size="sm" variant="primary" isDisabled={setPricing.isPending || !canSave} onPress={save}>
             Save
           </Button>
           <Button size="sm" variant="ghost" isDisabled={setPricing.isPending} onPress={() => setEditing(false)}>
@@ -378,6 +426,8 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
     <div className="flex flex-col gap-2">
       <Spec label="Input" value={row.inputPrice == null ? "—" : `${formatCost(row.inputPrice)} / 1M`} />
       <Spec label="Output" value={row.outputPrice == null ? "—" : `${formatCost(row.outputPrice)} / 1M`} />
+      <Spec label="Cache read" value={row.cacheReadPrice == null ? "—" : `${formatCost(row.cacheReadPrice)} / 1M`} />
+      <Spec label="Cache write" value={row.cacheWritePrice == null ? "—" : `${formatCost(row.cacheWritePrice)} / 1M`} />
       <div className="flex items-center gap-2 pt-1">
         <Button size="sm" variant="outline" onPress={startEdit}>
           {row.source === "configured" ? "Edit price" : "Set price"}
@@ -477,25 +527,17 @@ function ModelDetailPanel({
   providerModelCount,
   providerDiscoveryError,
   onMakeAlias,
+  onClose,
 }: {
-  row: ModelRow | null;
+  row: ModelRow;
   metadata: ModelMetadata | undefined;
   metadataAvailable: boolean;
   providerInfo: ProviderInfo | undefined;
   providerModelCount: number;
   providerDiscoveryError: string | null;
   onMakeAlias: (key: string) => void;
+  onClose: () => void;
 }) {
-  if (!row) {
-    return (
-      <Card>
-        <Card.Content className="p-5 text-sm text-[var(--otari-muted)]">
-          Select a model to see its pricing, context window, modalities, and capabilities.
-        </Card.Content>
-      </Card>
-    );
-  }
-
   const inputModalities = metadata?.input_modalities ?? [];
   const outputModalities = metadata?.output_modalities ?? [];
   const activeCaps = MODEL_CAPABILITY_LABELS.filter(({ key }) => metadata?.[key]);
@@ -515,6 +557,14 @@ function ModelDetailPanel({
             </div>
             {metadata?.family ? <p className="text-xs text-[var(--otari-muted)]">{metadata.family}</p> : null}
           </div>
+          <button
+            type="button"
+            aria-label="Close model details"
+            onClick={onClose}
+            className="-mt-1 -mr-1 shrink-0 rounded-md px-1.5 py-0.5 text-lg leading-none text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]"
+          >
+            ✕
+          </button>
         </div>
 
         {metadata?.description ? <p className="text-sm text-[var(--otari-ink)]">{metadata.description}</p> : null}
@@ -702,11 +752,21 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
   const deletePricing = useDeletePricing();
   const [input, setInput] = useState(row.inputPrice == null ? "" : String(row.inputPrice));
   const [output, setOutput] = useState(row.outputPrice == null ? "" : String(row.outputPrice));
+  const [cacheRead, setCacheRead] = useState(row.cacheReadPrice == null ? "" : String(row.cacheReadPrice));
+  const [cacheWrite, setCacheWrite] = useState(row.cacheWritePrice == null ? "" : String(row.cacheWritePrice));
+
+  const canSave = isValidPrice(input) && isValidPrice(output) && isValidOptionalPrice(cacheRead) && isValidOptionalPrice(cacheWrite);
 
   const save = () => {
-    if (!isValidPrice(input) || !isValidPrice(output)) return;
+    if (!canSave) return;
     setPricing.mutate(
-      { model_key: row.key, input_price_per_million: Number(input), output_price_per_million: Number(output) },
+      {
+        model_key: row.key,
+        input_price_per_million: Number(input),
+        output_price_per_million: Number(output),
+        cache_read_price_per_million: optionalPrice(cacheRead),
+        cache_write_price_per_million: optionalPrice(cacheWrite),
+      },
       { onSuccess: onClose },
     );
   };
@@ -722,12 +782,15 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
         Output $ / 1M
         <MoneyInput value={output} onChange={setOutput} ariaLabel={`Output price for ${row.key}`} />
       </label>
-      <Button
-        size="sm"
-        variant="primary"
-        isDisabled={setPricing.isPending || !isValidPrice(input) || !isValidPrice(output)}
-        onPress={save}
-      >
+      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        Cache read $ / 1M
+        <MoneyInput value={cacheRead} onChange={setCacheRead} ariaLabel={`Cache read price for ${row.key}`} />
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        Cache write $ / 1M
+        <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel={`Cache write price for ${row.key}`} />
+      </label>
+      <Button size="sm" variant="primary" isDisabled={setPricing.isPending || !canSave} onPress={save}>
         {setPricing.isPending ? "Saving…" : "Save"}
       </Button>
       <Button size="sm" variant="ghost" isDisabled={setPricing.isPending} onPress={onClose}>
@@ -752,6 +815,47 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
         <span className="text-xs text-red-700">{errorMessage(setPricing.error ?? deletePricing.error)}</span>
       ) : null}
     </div>
+  );
+}
+
+// A price pair (input/output or cache read/write) shown as two clickable
+// numbers in one cell. Clicking either opens the row's inline editor, so the
+// table stays narrow without hiding the edit affordance. Stops propagation so
+// the click edits the price rather than only selecting the row.
+function PriceCell({
+  primary,
+  secondary,
+  rowKey,
+  primaryLabel,
+  secondaryLabel,
+  onEdit,
+}: {
+  primary: number | null;
+  secondary: number | null;
+  rowKey: string;
+  primaryLabel: string;
+  secondaryLabel: string;
+  onEdit: () => void;
+}) {
+  const number = (value: number | null, label: string) => (
+    <button
+      type="button"
+      aria-label={`Edit ${label} price for ${rowKey}`}
+      className="tabular-nums hover:text-[var(--otari-brand-dark)] hover:underline"
+      onClick={(event) => {
+        event.stopPropagation();
+        onEdit();
+      }}
+    >
+      {value == null ? "—" : formatCost(value)}
+    </button>
+  );
+  return (
+    <span className="inline-flex items-center justify-end gap-1">
+      {number(primary, primaryLabel)}
+      <span className="text-[var(--otari-muted)]">/</span>
+      {number(secondary, secondaryLabel)}
+    </span>
   );
 }
 
@@ -784,59 +888,63 @@ function ModelTable({
           <Th>Provider</Th>
           <SortableTh label="Context" col="context" sort={sort} onSort={onSort} align="right" />
           <SortableTh
-            label="Input $ / 1M"
+            label="In / Out $ / 1M"
             col="input"
             sort={sort}
             onSort={onSort}
             align="right"
             info={<PricingInfo />}
           />
-          <SortableTh label="Output $ / 1M" col="output" sort={sort} onSort={onSort} align="right" />
-          <Th className="text-right">Price</Th>
+          <Th className="text-right">Cache r / w $ / 1M</Th>
         </Tr>
       </THead>
       <tbody>
         {isLoading ? (
-          <LoadingRow colSpan={6} />
+          <LoadingRow colSpan={5} />
         ) : rows.length > 0 ? (
-          rows.map((row) => (
-            <Fragment key={row.key}>
-              <Tr onClick={() => onSelect(row.key)} selected={row.key === selectedKey}>
-                <Td className="font-medium break-all">{row.model}</Td>
-                <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
-                <Td className="text-right tabular-nums text-[var(--otari-muted)]">
-                  {formatContext(row.contextWindow)}
-                </Td>
-                <Td className="text-right tabular-nums">
-                  {row.inputPrice == null ? "—" : formatCost(row.inputPrice)}
-                </Td>
-                <Td className="text-right tabular-nums">
-                  {row.outputPrice == null ? "—" : formatCost(row.outputPrice)}
-                </Td>
-                <Td className="text-right">
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-[var(--otari-brand-dark)] hover:underline"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onSetPricingKey(pricingKey === row.key ? null : row.key);
-                    }}
-                  >
-                    {row.source === "configured" ? "Edit" : "Set price"}
-                  </button>
-                </Td>
-              </Tr>
-              {pricingKey === row.key ? (
-                <tr className="border-b border-[var(--otari-line)] bg-[var(--otari-bg)] last:border-b-0">
-                  <td colSpan={6}>
-                    <InlinePriceForm row={row} onClose={() => onSetPricingKey(null)} />
-                  </td>
-                </tr>
-              ) : null}
-            </Fragment>
-          ))
+          rows.map((row) => {
+            const edit = () => onSetPricingKey(pricingKey === row.key ? null : row.key);
+            return (
+              <Fragment key={row.key}>
+                <Tr onClick={() => onSelect(row.key)} selected={row.key === selectedKey}>
+                  <Td className="font-medium break-all">{row.model}</Td>
+                  <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
+                  <Td className="text-right tabular-nums text-[var(--otari-muted)]">
+                    {formatContext(row.contextWindow)}
+                  </Td>
+                  <Td className="text-right">
+                    <PriceCell
+                      primary={row.inputPrice}
+                      secondary={row.outputPrice}
+                      rowKey={row.key}
+                      primaryLabel="input"
+                      secondaryLabel="output"
+                      onEdit={edit}
+                    />
+                  </Td>
+                  <Td className="text-right">
+                    <PriceCell
+                      primary={row.cacheReadPrice}
+                      secondary={row.cacheWritePrice}
+                      rowKey={row.key}
+                      primaryLabel="cache read"
+                      secondaryLabel="cache write"
+                      onEdit={edit}
+                    />
+                  </Td>
+                </Tr>
+                {pricingKey === row.key ? (
+                  <tr className="border-b border-[var(--otari-line)] bg-[var(--otari-bg)] last:border-b-0">
+                    <td colSpan={5}>
+                      <InlinePriceForm row={row} onClose={() => onSetPricingKey(null)} />
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })
         ) : (
-          <TableMessage colSpan={6}>{empty}</TableMessage>
+          <TableMessage colSpan={5}>{empty}</TableMessage>
         )}
       </tbody>
     </Table>
@@ -935,6 +1043,8 @@ export function ModelsPage() {
         contextWindow: catalogRow?.contextWindow ?? null,
         inputPrice: priced ? priced.input_price_per_million : (catalogRow?.inputPrice ?? null),
         outputPrice: priced ? priced.output_price_per_million : (catalogRow?.outputPrice ?? null),
+        cacheReadPrice: priced ? priced.cache_read_price_per_million : (catalogRow?.cacheReadPrice ?? null),
+        cacheWritePrice: priced ? priced.cache_write_price_per_million : (catalogRow?.cacheWritePrice ?? null),
         source: priced ? "configured" : (catalogRow?.source ?? "none"),
       });
     };
@@ -953,6 +1063,8 @@ export function ModelsPage() {
         contextWindow: model.context_window,
         inputPrice: model.pricing?.input_price_per_million ?? null,
         outputPrice: model.pricing?.output_price_per_million ?? null,
+        cacheReadPrice: model.pricing?.cache_read_price_per_million ?? null,
+        cacheWritePrice: model.pricing?.cache_write_price_per_million ?? null,
         source: priceStatus,
       });
     }
@@ -989,6 +1101,8 @@ export function ModelsPage() {
           releaseDate: metadataByKey[model.key]?.release_date ?? null,
           inputPrice: null,
           outputPrice: null,
+          cacheReadPrice: null,
+          cacheWritePrice: null,
           source: "none",
         });
       }
@@ -1164,7 +1278,11 @@ export function ModelsPage() {
         error={models.error ?? pricing.error ?? discoverable.error ?? providers.error ?? metadata.error}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+      <div
+        className={`grid gap-4 lg:items-start ${
+          selectedRow ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "grid-cols-1"
+        }`}
+      >
           <div className="flex min-w-0 flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <SearchInput value={search} onChange={changeSearch} placeholder="Search models…" />
@@ -1260,19 +1378,22 @@ export function ModelsPage() {
             ) : null}
           </div>
 
-          <aside className="lg:sticky lg:top-4">
-            <ModelDetailPanel
-              row={selectedRow}
-              metadata={selectedRow ? metadataByKey[selectedRow.key] : undefined}
-              metadataAvailable={metadataAvailable}
-              providerInfo={selectedProviderInfo}
-              providerModelCount={selectedProviderDiscovery?.models.length ?? 0}
-              providerDiscoveryError={
-                selectedProviderDiscovery && !selectedProviderDiscovery.ok ? selectedProviderDiscovery.error : null
-              }
-              onMakeAlias={(key) => navigate(`/aliases?target=${encodeURIComponent(key)}`)}
-            />
-          </aside>
+          {selectedRow ? (
+            <aside className="lg:sticky lg:top-4">
+              <ModelDetailPanel
+                row={selectedRow}
+                metadata={metadataByKey[selectedRow.key]}
+                metadataAvailable={metadataAvailable}
+                providerInfo={selectedProviderInfo}
+                providerModelCount={selectedProviderDiscovery?.models.length ?? 0}
+                providerDiscoveryError={
+                  selectedProviderDiscovery && !selectedProviderDiscovery.ok ? selectedProviderDiscovery.error : null
+                }
+                onMakeAlias={(key) => navigate(`/aliases?target=${encodeURIComponent(key)}`)}
+                onClose={() => setSelectedKey(null)}
+              />
+            </aside>
+          ) : null}
         </div>
     </div>
   );

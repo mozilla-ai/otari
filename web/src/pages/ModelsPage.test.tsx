@@ -25,6 +25,8 @@ const PRICED: PricingResponse = {
   effective_at: "2026-01-01T00:00:00Z",
   input_price_per_million: 2.5,
   output_price_per_million: 10,
+  cache_read_price_per_million: null,
+  cache_write_price_per_million: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -44,13 +46,21 @@ function catalogModel(
   source: "configured" | "default" | "none",
   price: [number, number] | null,
   context_window: number | null = null,
+  cache: [number | null, number | null] = [null, null],
 ): ModelObject {
   return {
     id,
     object: "model",
     created: 0,
     owned_by,
-    pricing: price ? { input_price_per_million: price[0], output_price_per_million: price[1] } : null,
+    pricing: price
+      ? {
+          input_price_per_million: price[0],
+          output_price_per_million: price[1],
+          cache_read_price_per_million: cache[0],
+          cache_write_price_per_million: cache[1],
+        }
+      : null,
     pricing_source: source,
     context_window,
   };
@@ -335,13 +345,23 @@ describe("ModelsPage", () => {
     expect(tip).toHaveTextContent(/genai-prices/);
   });
 
-  it("starts with an empty detail panel until a model is selected", async () => {
+  it("hides the detail panel until a model is selected, then closes it again", async () => {
     mockApi();
+    const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    expect(within(panel()).getByText(/Select a model/)).toBeInTheDocument();
+    // Hidden initially so the table has the page to itself.
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+
+    // Selecting a row opens it.
+    await user.click(tableRow("openai:gpt-4o"));
+    expect(screen.getByRole("complementary")).toBeInTheDocument();
+
+    // The close button dismisses it back to the table-only layout.
+    await user.click(screen.getByRole("button", { name: "Close model details" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   });
 
   it("fills the detail panel when a model row is selected", async () => {
@@ -493,7 +513,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    await user.click(screen.getByRole("button", { name: /Input \$ \/ 1M/ }));
+    await user.click(screen.getByRole("button", { name: /In \/ Out \$ \/ 1M/ }));
 
     const order = modelOrder();
     const miniIndex = order.findIndex((text) => text.includes("gpt-4o-mini"));
@@ -602,6 +622,81 @@ describe("ModelsPage", () => {
     expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
       model_key: "openai:gpt-4o",
       input_price_per_million: 4,
+    });
+  });
+
+  it("sets cache prices from the detail panel", async () => {
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    const detail = await selectModel(user, "openai:gpt-4o");
+    await user.click(within(detail).getByRole("button", { name: "Edit price" }));
+    await user.type(within(detail).getByLabelText("Cache read price for openai:gpt-4o"), "0.3");
+    await user.type(within(detail).getByLabelText("Cache write price for openai:gpt-4o"), "3.75");
+    await user.click(within(detail).getByRole("button", { name: "Save" }));
+
+    const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "POST");
+    expect(String(call?.[0])).toContain("/v1/pricing");
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+      model_key: "openai:gpt-4o",
+      cache_read_price_per_million: 0.3,
+      cache_write_price_per_million: 3.75,
+    });
+  });
+
+  it("shows configured cache prices in the table and detail panel", async () => {
+    mockApi({
+      catalog: {
+        object: "list",
+        data: [catalogModel("anthropic:claude-sonnet-4", "anthropic", "configured", [3, 15], 200000, [0.3, 3.75])],
+      },
+      pricing: [],
+    });
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("anthropic:claude-sonnet-4");
+
+    expect(screen.getByRole("columnheader", { name: "Cache r / w $ / 1M" })).toBeInTheDocument();
+
+    // The cache cell shows both numbers as clickable edit affordances.
+    const row = tableRow("anthropic:claude-sonnet-4");
+    expect(within(row).getByRole("button", { name: "Edit cache read price for anthropic:claude-sonnet-4" })).toHaveTextContent(
+      "$0.30",
+    );
+    expect(
+      within(row).getByRole("button", { name: "Edit cache write price for anthropic:claude-sonnet-4" }),
+    ).toHaveTextContent("$3.75");
+
+    const detail = await selectModel(user, "anthropic:claude-sonnet-4");
+    expect(within(detail).getByText("Cache read")).toBeInTheDocument();
+    expect(within(detail).getByText("$0.30 / 1M")).toBeInTheDocument();
+    expect(within(detail).getByText("$3.75 / 1M")).toBeInTheDocument();
+  });
+
+  it("opens the inline editor by clicking a price number and saves cache rates", async () => {
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    const row = tableRow("openai:gpt-4o");
+    await user.click(within(row).getByRole("button", { name: "Edit input price for openai:gpt-4o" }));
+
+    // The inline editor row appears with all four fields.
+    const cacheRead = await screen.findByLabelText("Cache read price for openai:gpt-4o");
+    await user.type(cacheRead, "0.3");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "POST");
+    expect(String(call?.[0])).toContain("/v1/pricing");
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({
+      model_key: "openai:gpt-4o",
+      cache_read_price_per_million: 0.3,
     });
   });
 

@@ -269,6 +269,30 @@ Config pricing sets initial values. Pricing set via the `/v1/pricing` API takes 
 
 A pricing entry whose provider is not listed in the `providers` section is skipped at startup with a warning, not treated as a fatal error: the provider may still be reachable through environment credentials (any-llm reads keys like `OPENAI_API_KEY`), so a pricing/provider mismatch should not abort the gateway. To have such an entry take effect, add the provider to the `providers` section.
 
+#### Cache token pricing
+
+Providers that support prompt caching (OpenAI, Gemini, Anthropic) report cached-token counts that are captured in `cache_read_tokens` and `cache_write_tokens` on the usage log. Without a configured cache rate these tokens are still billed, at `input_price_per_million` (they are ordinary input tokens), just not at a discounted cache rate. To bill them at the provider's cache price instead, add the optional `cache_read_price_per_million` and `cache_write_price_per_million` rates (USD per million tokens):
+
+```yaml
+pricing:
+  openai:gpt-4o:
+    input_price_per_million: 2.50
+    output_price_per_million: 10.00
+    cache_read_price_per_million: 1.25  # discounted rate for cached input
+  anthropic:claude-sonnet-4-6:
+    input_price_per_million: 3.00
+    output_price_per_million: 15.00
+    cache_read_price_per_million: 0.30  # cache-read rate
+    cache_write_price_per_million: 3.75  # cache-creation (write) rate
+```
+
+Every physical input token is charged once. The input/prompt count is treated as the grand total that *includes* cache reads and writes; the uncached remainder is billed at `input_price_per_million`, and cache tokens are re-priced at their own rate when one is configured. Providers report cache counts two ways, and the gateway normalizes both onto that single model:
+
+- **OpenAI / Gemini**: `cache_read_tokens` is already a subset of `prompt_tokens`, so setting `cache_read_price_per_million` discounts the cached portion (re-priced at the cache rate instead of the full `input_price_per_million`) rather than double-counting it. `cache_write_tokens` is always 0 for these providers.
+- **Anthropic**: `cache_read_tokens` and `cache_write_tokens` are reported separately from `prompt_tokens`, so they are added on top and billed at `cache_read_price_per_million` / `cache_write_price_per_million`. This holds on every turn, including warm-cache reads that create no new cache (`cache_write_tokens` is 0).
+
+When a cache rate is left unset (null), those cache tokens are not dropped or billed at $0: they remain part of the input total and are billed at `input_price_per_million`, since they are still real input tokens. Set the cache rate to bill them at the provider's discounted cache price. The same fields are available on the `/v1/pricing` API (`SetPricingRequest` and `PricingResponse`).
+
 ### Default pricing
 
 Default pricing is **off by default**. When you enable it (`default_pricing: true` in `config.yml`, or

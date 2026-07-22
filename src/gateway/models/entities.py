@@ -255,6 +255,13 @@ class ModelPricing(Base):
     )
     input_price_per_million: Mapped[float] = mapped_column()
     output_price_per_million: Mapped[float] = mapped_column()
+    # Nullable: providers without prompt caching (or models without a
+    # discounted cache rate) leave these unset. When set, the cost
+    # calculation prices cache_read_tokens / cache_write_tokens at these
+    # per-million-token rates, following the provider inclusion convention
+    # (see log_usage in _pipeline.py).
+    cache_read_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
+    cache_write_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -269,6 +276,8 @@ class ModelPricing(Base):
             "effective_at": self.effective_at.isoformat() if self.effective_at else None,
             "input_price_per_million": self.input_price_per_million,
             "output_price_per_million": self.output_price_per_million,
+            "cache_read_price_per_million": self.cache_read_price_per_million,
+            "cache_write_price_per_million": self.cache_write_price_per_million,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

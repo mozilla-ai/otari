@@ -9,7 +9,12 @@ from typing import Any, TypeVar
 
 from any_llm.types.completion import CompletionUsage
 
-from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_tokens_of
+from gateway.core.usage import (
+    GatewayUsage,
+    cache_read_tokens_of,
+    cache_tokens_in_prompt_of,
+    cache_write_tokens_of,
+)
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
 
@@ -77,6 +82,10 @@ def _merge_usage(current: CompletionUsage, update: CompletionUsage) -> Completio
         total_tokens=update.total_tokens or current.total_tokens,
         cache_read_tokens=cache_read_tokens_of(update) or cache_read_tokens_of(current),
         cache_write_tokens=cache_write_tokens_of(update) or cache_write_tokens_of(current),
+        # All chunks in one stream share a provider convention. Keep it separate
+        # (Anthropic) if any chunk reported it that way, so the seed's default of
+        # "in prompt" never masks the Anthropic shape.
+        cache_tokens_in_prompt=cache_tokens_in_prompt_of(update) and cache_tokens_in_prompt_of(current),
     )
 
 
