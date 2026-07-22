@@ -527,25 +527,17 @@ function ModelDetailPanel({
   providerModelCount,
   providerDiscoveryError,
   onMakeAlias,
+  onClose,
 }: {
-  row: ModelRow | null;
+  row: ModelRow;
   metadata: ModelMetadata | undefined;
   metadataAvailable: boolean;
   providerInfo: ProviderInfo | undefined;
   providerModelCount: number;
   providerDiscoveryError: string | null;
   onMakeAlias: (key: string) => void;
+  onClose: () => void;
 }) {
-  if (!row) {
-    return (
-      <Card>
-        <Card.Content className="p-5 text-sm text-[var(--otari-muted)]">
-          Select a model to see its pricing, context window, modalities, and capabilities.
-        </Card.Content>
-      </Card>
-    );
-  }
-
   const inputModalities = metadata?.input_modalities ?? [];
   const outputModalities = metadata?.output_modalities ?? [];
   const activeCaps = MODEL_CAPABILITY_LABELS.filter(({ key }) => metadata?.[key]);
@@ -565,6 +557,14 @@ function ModelDetailPanel({
             </div>
             {metadata?.family ? <p className="text-xs text-[var(--otari-muted)]">{metadata.family}</p> : null}
           </div>
+          <button
+            type="button"
+            aria-label="Close model details"
+            onClick={onClose}
+            className="-mt-1 -mr-1 shrink-0 rounded-md px-1.5 py-0.5 text-lg leading-none text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]"
+          >
+            ✕
+          </button>
         </div>
 
         {metadata?.description ? <p className="text-sm text-[var(--otari-ink)]">{metadata.description}</p> : null}
@@ -1278,7 +1278,11 @@ export function ModelsPage() {
         error={models.error ?? pricing.error ?? discoverable.error ?? providers.error ?? metadata.error}
       />
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+      <div
+        className={`grid gap-4 lg:items-start ${
+          selectedRow ? "lg:grid-cols-[minmax(0,1fr)_360px]" : "grid-cols-1"
+        }`}
+      >
           <div className="flex min-w-0 flex-col gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <SearchInput value={search} onChange={changeSearch} placeholder="Search models…" />
@@ -1374,19 +1378,22 @@ export function ModelsPage() {
             ) : null}
           </div>
 
-          <aside className="lg:sticky lg:top-4">
-            <ModelDetailPanel
-              row={selectedRow}
-              metadata={selectedRow ? metadataByKey[selectedRow.key] : undefined}
-              metadataAvailable={metadataAvailable}
-              providerInfo={selectedProviderInfo}
-              providerModelCount={selectedProviderDiscovery?.models.length ?? 0}
-              providerDiscoveryError={
-                selectedProviderDiscovery && !selectedProviderDiscovery.ok ? selectedProviderDiscovery.error : null
-              }
-              onMakeAlias={(key) => navigate(`/aliases?target=${encodeURIComponent(key)}`)}
-            />
-          </aside>
+          {selectedRow ? (
+            <aside className="lg:sticky lg:top-4">
+              <ModelDetailPanel
+                row={selectedRow}
+                metadata={metadataByKey[selectedRow.key]}
+                metadataAvailable={metadataAvailable}
+                providerInfo={selectedProviderInfo}
+                providerModelCount={selectedProviderDiscovery?.models.length ?? 0}
+                providerDiscoveryError={
+                  selectedProviderDiscovery && !selectedProviderDiscovery.ok ? selectedProviderDiscovery.error : null
+                }
+                onMakeAlias={(key) => navigate(`/aliases?target=${encodeURIComponent(key)}`)}
+                onClose={() => setSelectedKey(null)}
+              />
+            </aside>
+          ) : null}
         </div>
     </div>
   );

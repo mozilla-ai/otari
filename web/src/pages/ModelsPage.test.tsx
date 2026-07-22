@@ -345,13 +345,23 @@ describe("ModelsPage", () => {
     expect(tip).toHaveTextContent(/genai-prices/);
   });
 
-  it("starts with an empty detail panel until a model is selected", async () => {
+  it("hides the detail panel until a model is selected, then closes it again", async () => {
     mockApi();
+    const user = userEvent.setup();
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    expect(within(panel()).getByText(/Select a model/)).toBeInTheDocument();
+    // Hidden initially so the table has the page to itself.
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+
+    // Selecting a row opens it.
+    await user.click(tableRow("openai:gpt-4o"));
+    expect(screen.getByRole("complementary")).toBeInTheDocument();
+
+    // The close button dismisses it back to the table-only layout.
+    await user.click(screen.getByRole("button", { name: "Close model details" }));
+    expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
   });
 
   it("fills the detail panel when a model row is selected", async () => {
