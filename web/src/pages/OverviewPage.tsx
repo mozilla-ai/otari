@@ -23,9 +23,9 @@ const PERIOD_DAYS = 30;
 // The operator's current local date, as a stable key. Used to hold the window
 // bounds steady within a day (so query keys don't churn every render) while still
 // letting them advance across midnight.
-function localDayKey(): string {
+export function localDayKey(): string {
   const d = new Date();
-  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 // Window bounds for the summary queries. Held stable within a local day so the

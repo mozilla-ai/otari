@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -44,7 +44,15 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-function mockApi(opts: { budgets?: Budget[]; resetLogs?: BudgetResetLog[]; users?: User[] } = {}) {
+function mockApi(
+  opts: {
+    budgets?: Budget[];
+    resetLogs?: BudgetResetLog[];
+    users?: User[];
+    failedUserUpdates?: string[];
+    updateUser?: (userId: string) => Response | Promise<Response>;
+  } = {},
+) {
   let list = [...(opts.budgets ?? [])];
   const resetLogs = opts.resetLogs ?? [];
   const users = opts.users ?? [];
@@ -55,7 +63,14 @@ function mockApi(opts: { budgets?: Budget[]; resetLogs?: BudgetResetLog[]; users
 
     if (url.includes("/v1/users")) {
       if (method === "PATCH") {
-        return jsonResponse(testUser(decodeURIComponent(url.split("/").pop() ?? "")));
+        const userId = decodeURIComponent(url.split("/").pop() ?? "");
+        if (opts.failedUserUpdates?.includes(userId)) {
+          return jsonResponse({ detail: "User update failed" }, 500);
+        }
+        if (opts.updateUser) {
+          return opts.updateUser(userId);
+        }
+        return jsonResponse(testUser(userId));
       }
       return jsonResponse(users);
     }
@@ -192,6 +207,92 @@ describe("BudgetsPage", () => {
       return call;
     });
     expect(JSON.parse(String(patch[1]?.body))).toEqual({ budget_id: "new-budget-id-0000-0000-000000000000" });
+  });
+
+  it("keeps failed initial assignments retryable without creating another budget", async () => {
+    const fetchMock = mockApi({ budgets: [], users: [testUser("alice")], failedUserUpdates: ["alice"] });
+    const user = userEvent.setup();
+    renderPage(<BudgetsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Create your first budget" }));
+    await user.type(screen.getByLabelText("Add a user"), "alice");
+    await user.click(await screen.findByRole("option", { name: /alice/ }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Create budget" }));
+
+    expect(await screen.findByText(/could not assign it to: alice/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry assignments" }));
+    await vi.waitFor(() => {
+      const patches = fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).includes("/v1/users/alice") && (init?.method ?? "") === "PATCH",
+      );
+      expect(patches).toHaveLength(2);
+    });
+
+    const budgetPosts = fetchMock.mock.calls.filter(
+      ([url, init]) => String(url).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+    );
+    expect(budgetPosts).toHaveLength(1);
+  });
+
+  it("prevents closing the form while initial user assignments are pending", async () => {
+    let resolveUserUpdate: ((response: Response) => void) | undefined;
+    const userUpdate = new Promise<Response>((resolve) => {
+      resolveUserUpdate = resolve;
+    });
+    mockApi({ budgets: [], users: [testUser("alice")], updateUser: () => userUpdate });
+    const user = userEvent.setup();
+    renderPage(<BudgetsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Create your first budget" }));
+    await user.type(screen.getByLabelText("Add a user"), "alice");
+    await user.click(await screen.findByRole("option", { name: /alice/ }));
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Create budget" }));
+
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled());
+    await act(async () => {
+      resolveUserUpdate?.(jsonResponse(testUser("alice")));
+      await userUpdate;
+    });
+    await vi.waitFor(() => expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument());
+  });
+
+  it("does not submit a non-finite budget limit", async () => {
+    const fetchMock = mockApi({ budgets: [] });
+    const user = userEvent.setup();
+    renderPage(<BudgetsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Create your first budget" }));
+    await user.type(screen.getByLabelText("Spending limit (USD)"), "1e309");
+
+    expect(screen.getByRole("button", { name: "Create budget" })).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not submit a custom period that rounds down to zero days", async () => {
+    const fetchMock = mockApi({ budgets: [] });
+    const user = userEvent.setup();
+    renderPage(<BudgetsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Create your first budget" }));
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+    await user.click(screen.getByLabelText("Every N days"));
+    await user.paste("0.1");
+    await user.click(screen.getByRole("button", { name: "Create budget" }));
+
+    const post = await vi.waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([url, init]) => String(url).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+      );
+      if (!call) throw new Error("no budget POST");
+      return call;
+    });
+    expect(JSON.parse(String(post[1]?.body))).toMatchObject({ budget_duration_sec: null });
   });
 
   it("creates an unlimited budget when the limit is left blank", async () => {

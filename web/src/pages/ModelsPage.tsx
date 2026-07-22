@@ -32,13 +32,13 @@ type PriceSource = "configured" | "default" | "alias" | "none";
 // coarser provider-level capabilities. Picking "Vision" narrows to models whose
 // metadata actually reports image input, matching what the chips display.
 const MODEL_FILTER_CAPABILITIES: { value: string; label: string; test: (metadata: ModelMetadata) => boolean }[] = [
-  { value: "vision", label: "Vision", test: (m) => m.input_modalities.includes("image") },
+  { value: "vision", label: "Vision", test: (m) => Array.isArray(m.input_modalities) && m.input_modalities.includes("image") },
   { value: "tool_call", label: "Tool calling", test: (m) => Boolean(m.tool_call) },
   { value: "reasoning", label: "Reasoning", test: (m) => Boolean(m.reasoning) },
   { value: "structured_output", label: "Structured output", test: (m) => Boolean(m.structured_output) },
   { value: "attachment", label: "Attachments", test: (m) => Boolean(m.attachment) },
-  { value: "audio", label: "Audio", test: (m) => m.input_modalities.includes("audio") },
-  { value: "pdf", label: "PDF", test: (m) => m.input_modalities.includes("pdf") },
+  { value: "audio", label: "Audio", test: (m) => Array.isArray(m.input_modalities) && m.input_modalities.includes("audio") },
+  { value: "pdf", label: "PDF", test: (m) => Array.isArray(m.input_modalities) && m.input_modalities.includes("pdf") },
 ];
 
 // Per-model capability flags from models.dev, labelled for the detail panel.

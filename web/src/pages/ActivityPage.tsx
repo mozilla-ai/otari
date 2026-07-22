@@ -104,16 +104,30 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
+export async function copyToClipboard(
+  text: string,
+  clipboard: Pick<Clipboard, "writeText"> | undefined = navigator.clipboard,
+): Promise<boolean> {
+  if (!clipboard) return false;
+  try {
+    await clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <Button
       size="sm"
       variant="ghost"
-      onPress={() => {
-        void navigator.clipboard?.writeText(text);
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
+      onPress={async () => {
+        if (await copyToClipboard(text)) {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        }
       }}
     >
       {copied ? "Copied" : "Copy"}
