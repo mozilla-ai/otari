@@ -154,6 +154,35 @@ async def set_pricing(
 
     normalized_key = normalize_pricing_key(config, request.model_key)
     effective_at = normalize_effective_at(request.effective_at)
+
+    # Resolve the cache rates to persist. A field the client omits inherits the
+    # model's most recent stored value, so a partial input/output update never
+    # silently wipes cache pricing (each POST without an explicit effective_at
+    # creates a new version, so the inherited value must carry forward). An
+    # explicit null still clears the rate.
+    cache_read_set = "cache_read_price_per_million" in request.model_fields_set
+    cache_write_set = "cache_write_price_per_million" in request.model_fields_set
+    latest: ModelPricing | None = None
+    if not (cache_read_set and cache_write_set):
+        latest = (
+            await db.execute(
+                select(ModelPricing)
+                .where(ModelPricing.model_key == normalized_key)
+                .order_by(ModelPricing.effective_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    cache_read = (
+        request.cache_read_price_per_million
+        if cache_read_set
+        else (latest.cache_read_price_per_million if latest else None)
+    )
+    cache_write = (
+        request.cache_write_price_per_million
+        if cache_write_set
+        else (latest.cache_write_price_per_million if latest else None)
+    )
+
     result = await db.execute(
         select(ModelPricing).where(
             ModelPricing.model_key == normalized_key,
@@ -165,16 +194,16 @@ async def set_pricing(
     if pricing:
         pricing.input_price_per_million = request.input_price_per_million
         pricing.output_price_per_million = request.output_price_per_million
-        pricing.cache_read_price_per_million = request.cache_read_price_per_million
-        pricing.cache_write_price_per_million = request.cache_write_price_per_million
+        pricing.cache_read_price_per_million = cache_read
+        pricing.cache_write_price_per_million = cache_write
     else:
         pricing = ModelPricing(
             model_key=normalized_key,
             effective_at=effective_at,
             input_price_per_million=request.input_price_per_million,
             output_price_per_million=request.output_price_per_million,
-            cache_read_price_per_million=request.cache_read_price_per_million,
-            cache_write_price_per_million=request.cache_write_price_per_million,
+            cache_read_price_per_million=cache_read,
+            cache_write_price_per_million=cache_write,
         )
         db.add(pricing)
 

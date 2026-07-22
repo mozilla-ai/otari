@@ -963,7 +963,7 @@ def _compute_cost(pricing: ModelPricing, usage_data: CompletionUsage) -> float:
     Prices prompt, completion, and (when configured) cache tokens on a single
     convention borrowed from the genai-prices dataset this project already uses:
     the input/prompt token count is the grand total that *includes* cache reads
-    and writes, and each physical token is charged exactly once.
+    and writes, and each physical token is charged once.
 
     Providers report cache tokens two different ways, so usage is normalized
     first (see :attr:`GatewayUsage.cache_tokens_in_prompt`):

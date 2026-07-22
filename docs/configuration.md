@@ -271,7 +271,7 @@ A pricing entry whose provider is not listed in the `providers` section is skipp
 
 #### Cache token pricing
 
-Providers that support prompt caching (OpenAI, Gemini, Anthropic) report cached-token counts that are captured in `cache_read_tokens` and `cache_write_tokens` on the usage log. By default these are not priced — the cost is computed from `prompt_tokens` and `completion_tokens` only. To bill cache tokens, add the optional `cache_read_price_per_million` and `cache_write_price_per_million` rates (USD per million tokens):
+Providers that support prompt caching (OpenAI, Gemini, Anthropic) report cached-token counts that are captured in `cache_read_tokens` and `cache_write_tokens` on the usage log. Without a configured cache rate these tokens are still billed, at `input_price_per_million` (they are ordinary input tokens), just not at a discounted cache rate. To bill them at the provider's cache price instead, add the optional `cache_read_price_per_million` and `cache_write_price_per_million` rates (USD per million tokens):
 
 ```yaml
 pricing:
@@ -286,7 +286,7 @@ pricing:
     cache_write_price_per_million: 3.75  # cache-creation (write) rate
 ```
 
-Every physical input token is charged exactly once. The input/prompt count is treated as the grand total that *includes* cache reads and writes; the uncached remainder is billed at `input_price_per_million`, and cache tokens are re-priced at their own rate when one is configured. Providers report cache counts two ways, and the gateway normalizes both onto that single model:
+Every physical input token is charged once. The input/prompt count is treated as the grand total that *includes* cache reads and writes; the uncached remainder is billed at `input_price_per_million`, and cache tokens are re-priced at their own rate when one is configured. Providers report cache counts two ways, and the gateway normalizes both onto that single model:
 
 - **OpenAI / Gemini**: `cache_read_tokens` is already a subset of `prompt_tokens`, so setting `cache_read_price_per_million` discounts the cached portion (re-priced at the cache rate instead of the full `input_price_per_million`) rather than double-counting it. `cache_write_tokens` is always 0 for these providers.
 - **Anthropic**: `cache_read_tokens` and `cache_write_tokens` are reported separately from `prompt_tokens`, so they are added on top and billed at `cache_read_price_per_million` / `cache_write_price_per_million`. This holds on every turn, including warm-cache reads that create no new cache (`cache_write_tokens` is 0).

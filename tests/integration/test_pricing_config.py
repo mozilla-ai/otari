@@ -246,6 +246,74 @@ def test_set_pricing_api_normalizes_legacy_slash_format(
     assert data["model_key"] == "gemini:gemini-2.5-flash", "API should normalize slash to colon format"
 
 
+def test_set_pricing_persists_cache_rates(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Cache rates round-trip through /v1/pricing and are stored on the row."""
+    resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "anthropic:claude-sonnet-4",
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+            "cache_read_price_per_million": 0.3,
+            "cache_write_price_per_million": 3.75,
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cache_read_price_per_million"] == 0.3
+    assert data["cache_write_price_per_million"] == 3.75
+
+
+def test_set_pricing_omitted_cache_rates_preserve_stored_values(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A later update that omits cache fields must not wipe stored cache rates
+    (only an explicit null clears them). Guards the partial-update footgun."""
+    key = "anthropic:claude-sonnet-4"
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": key,
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+            "cache_read_price_per_million": 0.3,
+            "cache_write_price_per_million": 3.75,
+        },
+        headers=master_key_header,
+    )
+
+    # Update only input/output, omitting cache fields entirely.
+    resp = client.post(
+        "/v1/pricing",
+        json={"model_key": key, "input_price_per_million": 4.0, "output_price_per_million": 16.0},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["input_price_per_million"] == 4.0
+    assert data["cache_read_price_per_million"] == 0.3, "omitted cache_read must be preserved"
+    assert data["cache_write_price_per_million"] == 3.75, "omitted cache_write must be preserved"
+
+    # An explicit null still clears a rate.
+    resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": key,
+            "input_price_per_million": 4.0,
+            "output_price_per_million": 16.0,
+            "cache_read_price_per_million": None,
+        },
+        headers=master_key_header,
+    )
+    assert resp.json()["cache_read_price_per_million"] is None
+    assert resp.json()["cache_write_price_per_million"] == 3.75, "unmentioned cache_write still preserved"
+
+
 def test_pricing_history_endpoint_returns_entries(
     client: TestClient,
     master_key_header: dict[str, str],

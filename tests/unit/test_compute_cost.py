@@ -1,9 +1,8 @@
-"""Unit tests for ``_compute_cost`` — the standalone-mode cost calculation.
+"""Unit tests for ``_compute_cost``, the standalone-mode cost calculation.
 
 These pin the cache-token pricing model, which follows the genai-prices dataset
 this project already uses: the input/prompt token count is the grand total that
-*includes* cache reads and writes, and each physical token is charged exactly
-once.
+*includes* cache reads and writes, and each physical token is charged once.
 
 Providers report cache tokens two ways, distinguished by
 ``GatewayUsage.cache_tokens_in_prompt``:
@@ -44,7 +43,7 @@ def _pricing(**overrides: float | None) -> ModelPricing:
 
 
 # ---------------------------------------------------------------------------
-# No cache pricing configured — behaves exactly as before
+# No cache pricing configured: behaves as before
 # ---------------------------------------------------------------------------
 
 
@@ -132,7 +131,7 @@ def test_openai_cache_read_with_cache_write_price_ignored() -> None:
         cache_write_tokens=0,
     )
     cost = _compute_cost(pricing, usage)
-    # Same as test_openai_cache_read_discounted_not_double_counted — cache_write_price unused
+    # Same as test_openai_cache_read_discounted_not_double_counted; cache_write_price unused
     expected = (600 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0 + (400 / 1_000_000) * 5.0
     assert cost == expected
 
@@ -166,7 +165,7 @@ def test_anthropic_cache_read_and_write_additive() -> None:
 def test_anthropic_cache_read_only_is_positive_and_additive() -> None:
     """Regression: a warm-cache Anthropic turn (cache read hit, no new write) is
     the common multi-turn case. cache_write is 0, but the charge must still be
-    additive and strictly positive — never the negative cost the old
+    additive and strictly positive, never the negative cost the old
     ``cache_write > 0`` heuristic produced by discounting cache reads against a
     prompt that never included them."""
     pricing = _pricing(cache_read_price_per_million=0.30)
