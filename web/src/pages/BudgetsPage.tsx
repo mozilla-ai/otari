@@ -59,7 +59,7 @@ function parseLimit(raw: string): { value: number | null; valid: boolean } {
   const trimmed = raw.trim();
   if (trimmed === "") return { value: null, valid: true };
   const n = Number(trimmed);
-  if (Number.isNaN(n) || n < 0) return { value: null, valid: false };
+  if (!Number.isFinite(n) || n < 0) return { value: null, valid: false };
   return { value: n, valid: true };
 }
 
@@ -98,7 +98,12 @@ function PeriodPicker({ value, onChange }: { value: number | null; onChange: (se
             value={customDays}
             onChange={(raw) => {
               const n = Number(raw.trim());
-              onChange(raw.trim() === "" || Number.isNaN(n) || n <= 0 ? null : Math.round(n) * DAY);
+              const seconds = Math.round(n) * DAY;
+              onChange(
+                raw.trim() === "" || !Number.isFinite(n) || n <= 0 || !Number.isFinite(seconds) || seconds <= 0
+                  ? null
+                  : seconds,
+              );
             }}
             placeholder="14"
             description="Whole days between resets."
@@ -189,7 +194,7 @@ function BudgetForm({
           <Button variant="primary" isDisabled={isPending || !parsed.valid} onPress={submit}>
             {isPending ? "Saving…" : submitLabel}
           </Button>
-          <Button variant="ghost" onPress={onClose}>
+          <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
             Cancel
           </Button>
         </div>
@@ -367,23 +372,51 @@ export function BudgetsPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState<string | null>(null);
+  const [assignmentError, setAssignmentError] = useState<Error | null>(null);
+  const [pendingAssignments, setPendingAssignments] = useState<{ budgetId: string; userIds: string[] } | null>(null);
+  const [assigningUsers, setAssigningUsers] = useState(false);
 
   const rows = budgets.data ?? [];
   const loading = budgets.isLoading;
   const editingBudget = rows.find((b) => b.budget_id === editing) ?? null;
   const showOnboarding = !loading && rows.length === 0 && !addOpen;
 
+  const assignUsers = async (budgetId: string, userIds: string[]) => {
+    setAssigningUsers(true);
+    setAssignmentError(null);
+    const results = await Promise.allSettled(
+      userIds.map((id) => updateUser.mutateAsync({ id, body: { budget_id: budgetId } })),
+    );
+    setAssigningUsers(false);
+
+    const failedUserIds = results.flatMap((result, index) => (result.status === "rejected" ? [userIds[index]] : []));
+    if (failedUserIds.length > 0) {
+      setPendingAssignments({ budgetId, userIds: failedUserIds });
+      setAssignmentError(
+        new Error(`Budget created, but could not assign it to: ${failedUserIds.join(", ")}. Retry to try again.`),
+      );
+      return;
+    }
+
+    setPendingAssignments(null);
+    setAddOpen(false);
+  };
+
   // Create the budget, then (optionally) attach it to the chosen users. The
-  // per-user PATCH is what sets each user's reset clock, so it is reused rather
-  // than duplicated here; allSettled so one failed assignment does not abort the
-  // rest (any failure surfaces via updateUser.error).
+  // per-user PATCH sets each user's reset clock. Failed assignments stay in the
+  // form so a retry never creates a duplicate budget.
   const createAndAssign = (body: CreateBudgetRequest, userIds: string[]) => {
+    if (pendingAssignments) {
+      void assignUsers(pendingAssignments.budgetId, pendingAssignments.userIds);
+      return;
+    }
+
+    setAssignmentError(null);
     createBudget.mutate(body, {
       onSuccess: async (budget: Budget) => {
         if (userIds.length > 0) {
-          await Promise.allSettled(
-            userIds.map((id) => updateUser.mutateAsync({ id, body: { budget_id: budget.budget_id } })),
-          );
+          await assignUsers(budget.budget_id, userIds);
+          return;
         }
         setAddOpen(false);
       },
@@ -401,6 +434,8 @@ export function BudgetsPage() {
               variant="primary"
               onPress={() => {
                 setEditing(null);
+                setAssignmentError(null);
+                setPendingAssignments(null);
                 setAddOpen(true);
               }}
             >
@@ -421,6 +456,8 @@ export function BudgetsPage() {
         <OnboardingPanel
           onCreate={() => {
             setEditing(null);
+            setAssignmentError(null);
+            setPendingAssignments(null);
             setAddOpen(true);
           }}
         />
@@ -429,13 +466,17 @@ export function BudgetsPage() {
       {addOpen ? (
         <BudgetForm
           title="Create budget"
-          submitLabel="Create budget"
+          submitLabel={pendingAssignments ? "Retry assignments" : "Create budget"}
           initial={{ name: null, max_budget: null, budget_duration_sec: null }}
-          error={createBudget.error}
-          isPending={createBudget.isPending}
+          error={createBudget.error ?? assignmentError}
+          isPending={createBudget.isPending || assigningUsers}
           assignUsers={users.data ?? []}
           onSubmit={createAndAssign}
-          onClose={() => setAddOpen(false)}
+          onClose={() => {
+            setAssignmentError(null);
+            setPendingAssignments(null);
+            setAddOpen(false);
+          }}
         />
       ) : null}
       {/* Key on the row id so switching which budget is edited remounts the form,

@@ -481,6 +481,24 @@ describe("ModelsPage", () => {
     expect(within(table()).queryByText("openai:gpt-4o-mini")).not.toBeInTheDocument();
   });
 
+  it("treats missing input modalities as not matching a modality filter", async () => {
+    const withoutModalities = {
+      ...METADATA,
+      models: {
+        ...METADATA.models,
+        "openai:gpt-4o": { ...METADATA.models["openai:gpt-4o"], input_modalities: undefined },
+      },
+    } as unknown as ModelMetadataResponse;
+    mockApi({ metadata: withoutModalities });
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+    await user.selectOptions(screen.getByLabelText("Filter by capability"), "Vision");
+
+    expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
+  });
+
   it("explains an empty list is due to filters, not missing credentials", async () => {
     mockApi();
     const user = userEvent.setup();
