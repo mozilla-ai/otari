@@ -346,3 +346,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 ## License
 
 Apache 2.0. See [`LICENSE`](LICENSE).
+
+## Setup
+
+Copy the example environment file and adjust values:
+
+```bash
+cp .env.example .env
+```
