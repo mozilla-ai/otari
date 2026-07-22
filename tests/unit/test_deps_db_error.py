@@ -17,8 +17,10 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import OperationalError
 
 from gateway.api import deps
-from gateway.api.deps import _verify_and_update_api_key
+from gateway.api.deps import _is_valid_master_key, _verify_and_update_api_key
 from gateway.auth.models import generate_api_key, hash_key
+from gateway.core.config import GatewayConfig
+from gateway.services.master_key_service import generate_master_key
 
 
 @pytest.mark.asyncio
@@ -33,6 +35,18 @@ async def test_lookup_db_error_raises_503_not_500() -> None:
     assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert isinstance(exc_info.value.detail, str)
     assert exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_generated_master_key_lookup_db_error_raises_503_not_500() -> None:
+    db: Any = AsyncMock()
+    db.get.side_effect = OperationalError("SELECT", {}, Exception("database is locked"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _is_valid_master_key(generate_master_key(), GatewayConfig(), db)
+
+    assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert exc_info.value.detail == "Authentication temporarily unavailable, please retry"
 
 
 @pytest.mark.asyncio

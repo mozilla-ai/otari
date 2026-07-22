@@ -185,11 +185,24 @@ async def _is_valid_master_key(token: str, config: GatewayConfig, db: AsyncSessi
         return True
     if config.master_key is not None or not is_generated_master_key(token):
         return False
-    stored_hash = await load_master_key_hash(db)
+    stored_hash = await _load_generated_master_key_hash(config, db)
+    if stored_hash is None:
+        return False
+    return secrets.compare_digest(hash_master_key(token), stored_hash)
+
+
+async def _load_generated_master_key_hash(config: GatewayConfig, db: AsyncSession) -> str | None:
+    """Load the shared generated-key hash, treating DB failures as retryable auth outages."""
+    try:
+        stored_hash = await load_master_key_hash(db)
+    except SQLAlchemyError as exc:
+        record_auth_failure("db_error")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication temporarily unavailable, please retry",
+        ) from exc
     config._master_key_hash = stored_hash
-    if stored_hash is not None:
-        return secrets.compare_digest(hash_master_key(token), stored_hash)
-    return False
+    return stored_hash
 
 
 async def verify_api_key(
@@ -230,20 +243,24 @@ async def verify_master_key(
         HTTPException: If master key is not configured or invalid
 
     """
-    if config.master_key is None and await load_master_key_hash(db) is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Master key not configured. Set OTARI_MASTER_KEY environment variable.",
-        )
-
     token = _extract_bearer_token(request, config)
 
-    if not await _is_valid_master_key(token, config, db):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid master key",
-        )
-    return token
+    if config.master_key is None:
+        stored_hash = await _load_generated_master_key_hash(config, db)
+        if stored_hash is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Master key not configured. Set OTARI_MASTER_KEY environment variable.",
+            )
+        if is_generated_master_key(token) and secrets.compare_digest(hash_master_key(token), stored_hash):
+            return token
+    elif secrets.compare_digest(token, config.master_key):
+        return token
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid master key",
+    )
 
 
 async def verify_api_key_or_master_key(

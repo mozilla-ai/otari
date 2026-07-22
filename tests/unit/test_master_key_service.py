@@ -128,11 +128,11 @@ def test_generated_key_authenticates_management_api(tmp_path: Path, monkeypatch:
 @pytest.mark.asyncio
 async def test_is_valid_master_key_accepts_hash_and_plaintext() -> None:
     token = generate_master_key()
-    hashed = GatewayConfig()
+    generated_config = GatewayConfig()
     session = AsyncMock()
     session.get.return_value = RuntimeSetting(key=MASTER_KEY_HASH_KEY, value=hash_master_key(token))
-    assert await deps._is_valid_master_key(token, hashed, session) is True
-    assert await deps._is_valid_master_key("otari-mk-wrong", hashed, session) is False
+    assert await deps._is_valid_master_key(token, generated_config, session) is True
+    assert await deps._is_valid_master_key("otari-mk-wrong", generated_config, session) is False
 
     plain = GatewayConfig(master_key="literal-key")
     assert await deps._is_valid_master_key("literal-key", plain, session) is True

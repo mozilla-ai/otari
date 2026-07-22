@@ -186,13 +186,19 @@ describe("SettingsPage", () => {
     await screen.findByText(/Version 1.2.3/);
 
     await user.click(screen.getByRole("button", { name: "Regenerate" }));
-    expect(screen.getByRole("dialog", { name: "Regenerate master key?" })).toBeInTheDocument();
+    expect(screen.getByRole("alertdialog", { name: "Regenerate master key?" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Regenerate key" }));
 
-    expect(await screen.findByDisplayValue("otari-mk-new")).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Master key regenerated" })).toBeInTheDocument();
+    const revealedKey = await screen.findByDisplayValue("otari-mk-new");
+    expect(revealedKey).toHaveAttribute("autocomplete", "off");
+    expect(revealedKey).toHaveAttribute("data-1p-ignore");
+    expect(revealedKey).toHaveAttribute("data-lpignore", "true");
+    expect(screen.getByRole("alertdialog", { name: "Master key regenerated" })).toBeInTheDocument();
     expect(screen.getByText("Credential security")).toBeInTheDocument();
     expect(window.sessionStorage.getItem("otari.dashboard.masterKey")).toBe("otari-mk-new");
+
+    await user.keyboard("{Escape}");
+    expect(screen.getByDisplayValue("otari-mk-new")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "I’ve saved this key" }));
     expect(screen.queryByDisplayValue("otari-mk-new")).not.toBeInTheDocument();

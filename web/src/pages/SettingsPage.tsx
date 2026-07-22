@@ -1,5 +1,5 @@
-import { Button, Card } from "@heroui/react";
-import { type KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
+import { AlertDialog, Button, Card, Input, buttonVariants } from "@heroui/react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   useReencryptProviderCredentials,
@@ -107,7 +107,7 @@ function NumberSetting({
 
   return (
     <div className="flex items-center gap-2">
-      <input
+      <Input
         type="number"
         min="0"
         step={isFloat ? "any" : "1"}
@@ -301,9 +301,14 @@ function CopyField({ value, fieldRef }: { value: string; fieldRef?: React.RefObj
         readOnly
         value={value}
         onFocus={(event) => event.currentTarget.select()}
-        className="w-full rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 font-mono text-xs text-[var(--otari-ink)]"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        data-1p-ignore
+        data-lpignore="true"
       />
-      <span aria-live="polite" className="text-xs text-green-700">
+      <span aria-live="polite" className="text-xs text-[var(--otari-brand-dark)]">
         {copied ? "Copied to clipboard." : ""}
       </span>
       {selectHint ? (
@@ -313,7 +318,7 @@ function CopyField({ value, fieldRef }: { value: string; fieldRef?: React.RefObj
   );
 }
 
-function MasterKeyRotationModal({
+function MasterKeyRotationDialog({
   masterKey,
   error,
   isPending,
@@ -326,88 +331,64 @@ function MasterKeyRotationModal({
   onRegenerate: () => void;
   onClose: () => void;
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null);
   const keyRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (masterKey !== undefined) {
-      keyRef.current?.focus();
-      keyRef.current?.select();
-    } else {
-      dialogRef.current?.focus();
-    }
+    if (masterKey === undefined) return;
+    keyRef.current?.focus();
+    keyRef.current?.select();
   }, [masterKey]);
 
-  const trapFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    // Esc is intentionally ignored. Closing the one-time reveal requires an
-    // explicit acknowledgement so an operator does not lose it by accident.
-    if (event.key !== "Tab") return;
-    const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
-      'button, input, textarea, a[href], [tabindex]:not([tabindex="-1"])',
-    );
-    if (!focusables || focusables.length === 0) return;
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" role="presentation">
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="master-key-dialog-title"
-        tabIndex={-1}
-        onKeyDown={trapFocus}
-        className="flex max-h-[90vh] w-full max-w-lg flex-col gap-4 overflow-y-auto rounded-xl bg-[var(--otari-surface)] p-6 shadow-xl"
-      >
-        <h2 id="master-key-dialog-title" className="text-lg font-semibold text-[var(--otari-ink)]">
-          {masterKey !== undefined ? "Master key regenerated" : "Regenerate master key?"}
-        </h2>
-        {masterKey !== undefined ? (
-          <>
-            <InfoBanner tone="warning">
-              Copy this key now. It is shown once and cannot be retrieved again after you close this dialog.
-            </InfoBanner>
-            <p className="text-sm text-[var(--otari-muted)]">
-              The previous master key has stopped working. This browser tab now uses the new key.
-            </p>
-            <CopyField value={masterKey} fieldRef={keyRef} />
-            <div className="flex justify-end">
+    <AlertDialog.Backdrop>
+      <AlertDialog.Container placement="center" size="lg">
+        <AlertDialog.Dialog>
+          <AlertDialog.Header>
+            <AlertDialog.Heading>{masterKey !== undefined ? "Master key regenerated" : "Regenerate master key?"}</AlertDialog.Heading>
+          </AlertDialog.Header>
+          <AlertDialog.Body className="flex flex-col gap-4">
+            {masterKey !== undefined ? (
+              <>
+                <InfoBanner tone="warning">
+                  Copy this key now. It is shown once and cannot be retrieved again after you close this dialog.
+                </InfoBanner>
+                <p className="text-sm text-[var(--otari-muted)]">
+                  The previous master key has stopped working. This browser tab now uses the new key.
+                </p>
+                <CopyField value={masterKey} fieldRef={keyRef} />
+              </>
+            ) : (
+              <>
+                <InfoBanner tone="warning">
+                  This immediately invalidates the current dashboard master key. Other signed-in dashboard sessions
+                  will need the new key to continue.
+                </InfoBanner>
+                <p className="text-sm text-[var(--otari-muted)]">
+                  The replacement key will be shown once. Save it before closing the next screen.
+                </p>
+                <ErrorBanner error={error} />
+              </>
+            )}
+          </AlertDialog.Body>
+          <AlertDialog.Footer>
+            {masterKey !== undefined ? (
               <Button variant="primary" onPress={onClose}>
                 I&rsquo;ve saved this key
               </Button>
-            </div>
-          </>
-        ) : (
-          <>
-            <InfoBanner tone="warning">
-              This immediately invalidates the current dashboard master key. Other signed-in dashboard sessions will
-              need the new key to continue.
-            </InfoBanner>
-            <p className="text-sm text-[var(--otari-muted)]">
-              The replacement key will be shown once. Save it before closing the next screen.
-            </p>
-            <ErrorBanner error={error} />
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
-                Cancel
-              </Button>
-              <Button variant="danger" isPending={isPending} onPress={onRegenerate}>
-                Regenerate key
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+            ) : (
+              <>
+                <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
+                  Cancel
+                </Button>
+                <Button variant="danger" isPending={isPending} onPress={onRegenerate}>
+                  Regenerate key
+                </Button>
+              </>
+            )}
+          </AlertDialog.Footer>
+        </AlertDialog.Dialog>
+      </AlertDialog.Container>
+    </AlertDialog.Backdrop>
   );
 }
 
@@ -432,6 +413,15 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
     rotateMasterKey.reset();
   };
 
+  const onOpenChange = (isOpen: boolean) => {
+    if (isOpen) {
+      rotateMasterKey.reset();
+      setDialogOpen(true);
+    } else if (newKey === undefined) {
+      closeDialog();
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -443,21 +433,27 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
               : "This gateway uses a key managed through OTARI_MASTER_KEY or config.yml. Rotate it in configuration, then restart the gateway."}
           </p>
         </div>
-        <div className="shrink-0">
-          <Button size="sm" variant="danger-soft" isDisabled={!isGenerated} onPress={() => setDialogOpen(true)}>
-            {isGenerated ? "Regenerate" : "Managed in configuration"}
-          </Button>
-        </div>
+        <AlertDialog isOpen={dialogOpen} onOpenChange={onOpenChange}>
+          {isGenerated ? (
+            <AlertDialog.Trigger className={buttonVariants({ size: "sm", variant: "danger-soft" })}>
+              Regenerate
+            </AlertDialog.Trigger>
+          ) : (
+            <Button size="sm" variant="danger-soft" isDisabled>
+              Managed in configuration
+            </Button>
+          )}
+          {dialogOpen ? (
+            <MasterKeyRotationDialog
+              masterKey={newKey}
+              error={rotateMasterKey.error}
+              isPending={rotateMasterKey.isPending}
+              onRegenerate={rotate}
+              onClose={closeDialog}
+            />
+          ) : null}
+        </AlertDialog>
       </div>
-      {dialogOpen ? (
-        <MasterKeyRotationModal
-          masterKey={newKey}
-          error={rotateMasterKey.error}
-          isPending={rotateMasterKey.isPending}
-          onRegenerate={rotate}
-          onClose={closeDialog}
-        />
-      ) : null}
     </div>
   );
 }
