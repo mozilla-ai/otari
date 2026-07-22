@@ -143,6 +143,12 @@ export interface TestProviderResult {
   error: string | null;
 }
 
+// Result of re-encrypting stored provider keys with the primary OTARI_SECRET_KEY.
+export interface ReencryptProviderCredentialsResult {
+  reencrypted: number;
+  unreadable: number;
+}
+
 // One provider instance's reachability, from the same model-discovery path the
 // per-provider "test connection" uses. `ok` false means unreachable; `error`
 // carries the sanitized provider error. `checked_at` is the wall-clock time the
@@ -484,7 +490,13 @@ export interface GatewaySettings {
   model_discovery: boolean;
   default_pricing: boolean;
   require_pricing: boolean;
+  master_key_source: "configured" | "generated";
   config: ConfigField[];
+}
+
+// Returned by master-key regeneration. The plaintext key is shown once.
+export interface RotateMasterKeyResponse {
+  master_key: string;
 }
 
 export type StreamMissingUsagePolicy = "estimate" | "fail" | "allow_free";

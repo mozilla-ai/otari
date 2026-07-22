@@ -24,6 +24,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
+from gateway.services.master_key_service import (
+    MasterKeyRotationConflictError,
+    hash_master_key,
+    stage_generated_master_key_rotation,
+)
 from gateway.services.runtime_settings_service import (
     SETTABLE_KEYS,
     SettingValue,
@@ -144,6 +149,9 @@ class GatewaySettings(BaseModel):
     model_discovery: bool
     default_pricing: bool
     require_pricing: bool
+    master_key_source: Literal["configured", "generated"] = Field(
+        description="Whether the dashboard master key is configured at startup or generated and stored by Otari."
+    )
     config: list[ConfigField]
 
 
@@ -172,6 +180,12 @@ class UpdateSettingsRequest(BaseModel):
     # detected via ``model_fields_set``, so an omitted field is left unchanged
     # while an explicit null unsets it.
     vision_describe_model: str | None = None
+
+
+class RotateMasterKeyResponse(BaseModel):
+    """A newly generated dashboard master key, returned once."""
+
+    master_key: str = Field(description="The new plaintext master key. Store it now; it is never returned again.")
 
 
 def _scalar_type_name(annotation: Any) -> Literal["bool", "int", "float", "str", "list"]:
@@ -280,6 +294,7 @@ def _current_settings(config: GatewayConfig) -> GatewaySettings:
         model_discovery=config.model_discovery,
         default_pricing=config.default_pricing,
         require_pricing=config.require_pricing,
+        master_key_source="configured" if config.master_key is not None else "generated",
         config=_config_fields(config),
     )
 
@@ -331,3 +346,33 @@ async def update_settings(
             apply_override(config, key, value)
 
     return _current_settings(config)
+
+
+@router.post("/master-key/rotate", dependencies=[Depends(verify_master_key)])
+async def rotate_master_key(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    authenticated_key: Annotated[str, Depends(verify_master_key)],
+) -> RotateMasterKeyResponse:
+    """Regenerate the database-backed master key and invalidate the old one.
+
+    Only the first-run generated master key can be rotated here. When a master
+    key is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot
+    invalidate it; the operator must change that value and restart instead.
+    """
+    if config.master_key is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This gateway uses a configured master key; change OTARI_MASTER_KEY or config.yml and restart.",
+        )
+    try:
+        token, hashed = await stage_generated_master_key_rotation(db, hash_master_key(authenticated_key))
+        await db.commit()
+    except MasterKeyRotationConflictError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from None
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+    config._master_key_hash = hashed
+    return RotateMasterKeyResponse(master_key=token)

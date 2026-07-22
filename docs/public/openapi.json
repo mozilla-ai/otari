@@ -1517,6 +1517,15 @@
             "title": "Default Pricing",
             "type": "boolean"
           },
+          "master_key_source": {
+            "description": "Whether the dashboard master key is configured at startup or generated and stored by Otari.",
+            "enum": [
+              "configured",
+              "generated"
+            ],
+            "title": "Master Key Source",
+            "type": "string"
+          },
           "mode": {
             "title": "Mode",
             "type": "string"
@@ -1540,6 +1549,7 @@
           "model_discovery",
           "default_pricing",
           "require_pricing",
+          "master_key_source",
           "config"
         ],
         "title": "GatewaySettings",
@@ -2922,6 +2932,27 @@
         "title": "ProvidersResponse",
         "type": "object"
       },
+      "ReencryptProviderCredentialsResponse": {
+        "description": "Result of re-encrypting stored provider keys with the primary secret key.",
+        "properties": {
+          "reencrypted": {
+            "description": "Number of stored provider keys re-encrypted.",
+            "title": "Reencrypted",
+            "type": "integer"
+          },
+          "unreadable": {
+            "description": "Number of encrypted keys left untouched because they could not be decrypted.",
+            "title": "Unreadable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reencrypted",
+          "unreadable"
+        ],
+        "title": "ReencryptProviderCredentialsResponse",
+        "type": "object"
+      },
       "RerankRequest": {
         "description": "Rerank request.",
         "properties": {
@@ -3410,6 +3441,21 @@
           "input"
         ],
         "title": "ResponsesRequest",
+        "type": "object"
+      },
+      "RotateMasterKeyResponse": {
+        "description": "A newly generated dashboard master key, returned once.",
+        "properties": {
+          "master_key": {
+            "description": "The new plaintext master key. Store it now; it is never returned again.",
+            "title": "Master Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "master_key"
+        ],
+        "title": "RotateMasterKeyResponse",
         "type": "object"
       },
       "SetPricingRequest": {
@@ -7474,6 +7520,36 @@
         ]
       }
     },
+    "/v1/provider-credentials/reencrypt": {
+      "post": {
+        "description": "Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.\n\nOperators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,\nrestarting, running this endpoint, then removing the old key and restarting\nagain. Rows that cannot be decrypted are left untouched and must be recovered\nby replacing the affected provider keys.",
+        "operationId": "reencrypt_stored_provider_keys_v1_provider_credentials_reencrypt_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReencryptProviderCredentialsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reencrypt Stored Provider Keys",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
     "/v1/provider-credentials/test": {
       "post": {
         "description": "Test provider credentials without storing them (for the add/edit form).\n\nResolves the implementation from ``provider_type`` (honoring the\n``*-compatible`` aliases) or the ``instance`` name, then lists the provider's\nmodels with the supplied credentials. Nothing is persisted and the key is\nnever echoed.",
@@ -7963,6 +8039,36 @@
           }
         ],
         "summary": "Update Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/v1/settings/master-key/rotate": {
+      "post": {
+        "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.",
+        "operationId": "rotate_master_key_v1_settings_master_key_rotate_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RotateMasterKeyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Rotate Master Key",
         "tags": [
           "settings"
         ]

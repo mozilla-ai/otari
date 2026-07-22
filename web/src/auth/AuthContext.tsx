@@ -10,6 +10,7 @@ interface AuthContextValue {
   masterKey: string | null;
   isAuthenticated: boolean;
   login: (key: string) => void;
+  replaceMasterKey: (key: string) => void;
   logout: () => void;
 }
 
@@ -67,6 +68,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [queryClient],
   );
 
+  const replaceMasterKey = useCallback((key: string) => {
+    const trimmed = key.trim();
+    // A freshly rotated generated master key grants the same dashboard access
+    // as the key it replaces. Keep the current view stable while subsequent
+    // requests begin using the new credential.
+    setMasterKey(trimmed);
+    setKey(trimmed);
+    try {
+      window.sessionStorage.setItem(STORAGE_KEY, trimmed);
+    } catch {
+      // Ignore storage errors; the key still lives in memory for this session.
+    }
+  }, []);
+
   // A 401 from any request means the key is wrong or was revoked: drop it.
   useEffect(() => {
     setUnauthorizedHandler(logout);
@@ -74,8 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [logout]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ masterKey, isAuthenticated: masterKey != null, login, logout }),
-    [masterKey, login, logout],
+    () => ({ masterKey, isAuthenticated: masterKey != null, login, replaceMasterKey, logout }),
+    [masterKey, login, replaceMasterKey, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

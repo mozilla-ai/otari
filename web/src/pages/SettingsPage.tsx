@@ -1,9 +1,16 @@
-import { Button, Card } from "@heroui/react";
+import { AlertDialog, Button, Card, Input, buttonVariants } from "@heroui/react";
 import { useEffect, useRef, useState } from "react";
 
-import { useSettings, useUpdateSettings } from "@/api/hooks";
+import {
+  useReencryptProviderCredentials,
+  useRotateMasterKey,
+  useSettings,
+  useStoredProviders,
+  useUpdateSettings,
+} from "@/api/hooks";
 import type { ConfigField, UpdateSettingsRequest } from "@/api/types";
-import { ErrorBanner, FilterSelect, PageHeader } from "@/components/ui";
+import { useAuth } from "@/auth/AuthContext";
+import { ErrorBanner, FilterSelect, InfoBanner, PageHeader } from "@/components/ui";
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -100,7 +107,7 @@ function NumberSetting({
 
   return (
     <div className="flex items-center gap-2">
-      <input
+      <Input
         type="number"
         min="0"
         step={isFloat ? "any" : "1"}
@@ -258,6 +265,267 @@ function ConfigRow({
   );
 }
 
+function CopyField({ value, fieldRef }: { value: string; fieldRef?: React.RefObject<HTMLInputElement | null> }) {
+  const internalRef = useRef<HTMLInputElement>(null);
+  const ref = fieldRef ?? internalRef;
+  const [copied, setCopied] = useState(false);
+  const [selectHint, setSelectHint] = useState(false);
+
+  const copy = async () => {
+    ref.current?.focus();
+    ref.current?.select();
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        setCopied(true);
+        setSelectHint(false);
+        window.setTimeout(() => setCopied(false), 2_000);
+        return;
+      }
+    } catch {
+      // Fall through to the manual-copy hint.
+    }
+    setSelectHint(true);
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-[var(--otari-muted)]">New master key</span>
+        <Button size="sm" variant="outline" onPress={copy}>
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <input
+        ref={ref}
+        readOnly
+        value={value}
+        onFocus={(event) => event.currentTarget.select()}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+        data-1p-ignore
+        data-lpignore="true"
+      />
+      <span aria-live="polite" className="text-xs text-[var(--otari-brand-dark)]">
+        {copied ? "Copied to clipboard." : ""}
+      </span>
+      {selectHint ? (
+        <span className="text-xs text-[var(--otari-muted)]">Selected. Press Ctrl/Cmd-C to copy.</span>
+      ) : null}
+    </div>
+  );
+}
+
+function MasterKeyRotationDialog({
+  masterKey,
+  error,
+  isPending,
+  onRegenerate,
+  onClose,
+}: {
+  masterKey?: string;
+  error: Error | null;
+  isPending: boolean;
+  onRegenerate: () => void;
+  onClose: () => void;
+}) {
+  const keyRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (masterKey === undefined) return;
+    keyRef.current?.focus();
+    keyRef.current?.select();
+  }, [masterKey]);
+
+  return (
+    <AlertDialog.Backdrop>
+      <AlertDialog.Container placement="center" size="lg">
+        <AlertDialog.Dialog>
+          <AlertDialog.Header>
+            <AlertDialog.Heading>{masterKey !== undefined ? "Master key regenerated" : "Regenerate master key?"}</AlertDialog.Heading>
+          </AlertDialog.Header>
+          <AlertDialog.Body className="flex flex-col gap-4">
+            {masterKey !== undefined ? (
+              <>
+                <InfoBanner tone="warning">
+                  Copy this key now. It is shown once and cannot be retrieved again after you close this dialog.
+                </InfoBanner>
+                <p className="text-sm text-[var(--otari-muted)]">
+                  The previous master key has stopped working. This browser tab now uses the new key.
+                </p>
+                <CopyField value={masterKey} fieldRef={keyRef} />
+              </>
+            ) : (
+              <>
+                <InfoBanner tone="warning">
+                  This immediately invalidates the current dashboard master key. Other signed-in dashboard sessions
+                  will need the new key to continue.
+                </InfoBanner>
+                <p className="text-sm text-[var(--otari-muted)]">
+                  The replacement key will be shown once. Save it before closing the next screen.
+                </p>
+                <ErrorBanner error={error} />
+              </>
+            )}
+          </AlertDialog.Body>
+          <AlertDialog.Footer>
+            {masterKey !== undefined ? (
+              <Button variant="primary" onPress={onClose}>
+                I&rsquo;ve saved this key
+              </Button>
+            ) : (
+              <>
+                <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
+                  Cancel
+                </Button>
+                <Button variant="danger" isPending={isPending} onPress={onRegenerate}>
+                  Regenerate key
+                </Button>
+              </>
+            )}
+          </AlertDialog.Footer>
+        </AlertDialog.Dialog>
+      </AlertDialog.Container>
+    </AlertDialog.Backdrop>
+  );
+}
+
+function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
+  const rotateMasterKey = useRotateMasterKey();
+  const { replaceMasterKey } = useAuth();
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [newKey, setNewKey] = useState<string | undefined>();
+  const isGenerated = source === "generated";
+
+  const rotate = () =>
+    rotateMasterKey.mutate(undefined, {
+      onSuccess: (result) => {
+        setNewKey(result.master_key);
+        replaceMasterKey(result.master_key);
+      },
+    });
+
+  const closeDialog = () => {
+    setDialogOpen(false);
+    setNewKey(undefined);
+    rotateMasterKey.reset();
+  };
+
+  const onOpenChange = (isOpen: boolean) => {
+    if (isOpen) {
+      rotateMasterKey.reset();
+      setDialogOpen(true);
+    } else if (newKey === undefined) {
+      closeDialog();
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <code className="text-sm font-medium text-[var(--otari-ink)]">master_key</code>
+          <p className="mt-1 max-w-3xl text-sm text-[var(--otari-muted)]">
+            {isGenerated
+              ? "This gateway uses its first-run generated dashboard key. Regeneration invalidates the current key immediately."
+              : "This gateway uses a key managed through OTARI_MASTER_KEY or config.yml. Rotate it in configuration, then restart the gateway."}
+          </p>
+        </div>
+        <AlertDialog isOpen={dialogOpen} onOpenChange={onOpenChange}>
+          {isGenerated ? (
+            <AlertDialog.Trigger className={buttonVariants({ size: "sm", variant: "danger-soft" })}>
+              Regenerate
+            </AlertDialog.Trigger>
+          ) : (
+            <Button size="sm" variant="danger-soft" isDisabled>
+              Managed in configuration
+            </Button>
+          )}
+          {dialogOpen ? (
+            <MasterKeyRotationDialog
+              masterKey={newKey}
+              error={rotateMasterKey.error}
+              isPending={rotateMasterKey.isPending}
+              onRegenerate={rotate}
+              onClose={closeDialog}
+            />
+          ) : null}
+        </AlertDialog>
+      </div>
+    </div>
+  );
+}
+
+function SecretKeyRow() {
+  const storedProviders = useStoredProviders();
+  const reencrypt = useReencryptProviderCredentials();
+  const result = reencrypt.data;
+  const storedCount = storedProviders.data?.length ?? 0;
+  const unreadableCount = (storedProviders.data ?? []).filter((provider) => !provider.decryptable).length;
+  const hasStoredKeys = storedCount > 0;
+
+  return (
+    <div className="flex flex-col gap-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <code className="text-sm font-medium text-[var(--otari-ink)]">OTARI_SECRET_KEY</code>
+          <p className="mt-1 max-w-3xl text-sm text-[var(--otari-muted)]">
+            Generate a new key with <code>uv run otari gen-secret-key</code>, then restart with{" "}
+            <code>OTARI_SECRET_KEY=&lt;new-key&gt;,&lt;old-key&gt;</code>. Re-encrypt the stored provider keys, then restart
+            with <code>OTARI_SECRET_KEY=&lt;new-key&gt;</code> once none are unreadable.
+          </p>
+        </div>
+        <div className="shrink-0">
+          <Button
+            size="sm"
+            variant="outline"
+            isDisabled={!hasStoredKeys || reencrypt.isPending}
+            onPress={() => reencrypt.mutate()}
+          >
+            {reencrypt.isPending ? "Re-encrypting…" : "Re-encrypt provider keys"}
+          </Button>
+        </div>
+      </div>
+      <ErrorBanner error={storedProviders.error ?? reencrypt.error} />
+      {unreadableCount > 0 ? (
+        <InfoBanner tone="warning">
+          {unreadableCount} stored provider key{unreadableCount === 1 ? "" : "s"} cannot be decrypted with the current{" "}
+          <code>OTARI_SECRET_KEY</code>. Restore the old secret key and re-encrypt, or edit each affected provider and
+          replace its key.
+        </InfoBanner>
+      ) : null}
+      {result ? (
+        <p className="text-sm text-[var(--otari-muted)]" role="status" aria-live="polite">
+          Re-encrypted {result.reencrypted} provider key{result.reencrypted === 1 ? "" : "s"}.
+          {result.unreadable > 0
+            ? ` ${result.unreadable} still need replacement.`
+            : " All decryptable stored keys now use the primary secret key."}
+        </p>
+      ) : !storedProviders.isLoading && !hasStoredKeys ? (
+        <p className="text-sm text-[var(--otari-muted)]">No stored provider keys need re-encryption.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function SecurityKeysSection({ masterKeySource }: { masterKeySource: "configured" | "generated" }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold text-[var(--otari-ink)]">
+        Credential security <span className="font-normal text-[var(--otari-muted)]">(2)</span>
+      </h2>
+      <Card>
+        <Card.Content className="flex flex-col divide-y divide-[var(--otari-line)] px-5 py-1">
+          <MasterKeyRow source={masterKeySource} />
+          <SecretKeyRow />
+        </Card.Content>
+      </Card>
+    </section>
+  );
+}
+
 // Group fields by their group label, preserving first-seen order. Uses a map (not
 // a consecutive-run merge) so a group name is never emitted twice even if the
 // fields for it are not contiguous, which would otherwise collide React keys.
@@ -365,6 +633,8 @@ export function SettingsPage() {
           </Card>
         </section>
       ))}
+
+      {data ? <SecurityKeysSection masterKeySource={data.master_key_source} /> : null}
 
       {data ? (
         <p className="text-xs text-[var(--otari-muted)]">

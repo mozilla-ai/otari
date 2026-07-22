@@ -37,6 +37,7 @@ from gateway.services.provider_store_service import (
     get_credential,
     get_credential_for_update,
     list_credentials,
+    reencrypt_credentials,
     refresh_provider_cache,
     save_credential,
 )
@@ -293,6 +294,13 @@ class TestProviderResponse(BaseModel):
     error: str | None = None
 
 
+class ReencryptProviderCredentialsResponse(BaseModel):
+    """Result of re-encrypting stored provider keys with the primary secret key."""
+
+    reencrypted: int = Field(description="Number of stored provider keys re-encrypted.")
+    unreadable: int = Field(description="Number of encrypted keys left untouched because they could not be decrypted.")
+
+
 class TestProviderRequest(BaseModel):
     """Credentials to test before saving (from the add-provider form)."""
 
@@ -389,6 +397,35 @@ async def test_provider_connection(
         timeout=config.model_discovery_timeout_seconds,
     )
     return TestProviderResponse(ok=result.error is None, model_count=len(result.models), error=result.error)
+
+
+@router.post("/provider-credentials/reencrypt", dependencies=[Depends(verify_master_key)])
+async def reencrypt_stored_provider_keys(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> ReencryptProviderCredentialsResponse:
+    """Re-encrypt stored provider keys with the primary OTARI_SECRET_KEY.
+
+    Operators rotate ``OTARI_SECRET_KEY`` by setting it to ``new,old`` first,
+    restarting, running this endpoint, then removing the old key and restarting
+    again. Rows that cannot be decrypted are left untouched and must be recovered
+    by replacing the affected provider keys.
+    """
+    try:
+        reencrypted, unreadable = await reencrypt_credentials(db)
+        await db.commit()
+    except SecretBoxUnavailableError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
+    get_model_cache().clear()
+    try:
+        await refresh_provider_cache(db, config)
+    except SQLAlchemyError:
+        logger.warning("Provider overlay refresh failed after re-encrypting credentials; converges within TTL")
+    return ReencryptProviderCredentialsResponse(reencrypted=reencrypted, unreadable=unreadable)
 
 
 @router.get("/provider-credentials", dependencies=[Depends(verify_master_key)])

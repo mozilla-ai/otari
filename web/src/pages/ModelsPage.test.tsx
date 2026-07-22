@@ -37,6 +37,7 @@ const SETTINGS: GatewaySettings = {
   model_discovery: true,
   default_pricing: true,
   require_pricing: false,
+  master_key_source: "configured",
   config: [],
 };
 

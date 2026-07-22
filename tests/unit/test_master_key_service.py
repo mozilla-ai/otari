@@ -18,9 +18,11 @@ from gateway.models.entities import RuntimeSetting
 from gateway.services import master_key_service
 from gateway.services.master_key_service import (
     MASTER_KEY_HASH_KEY,
+    MasterKeyRotationConflictError,
     ensure_master_key,
     generate_master_key,
     hash_master_key,
+    stage_generated_master_key_rotation,
 )
 from gateway.services.pricing_service import no_pricing_error_detail
 
@@ -94,6 +96,15 @@ async def test_first_run_race_adopts_winner_hash() -> None:
     assert config._master_key_hash == winner_hash
 
 
+@pytest.mark.asyncio
+async def test_rotation_rejects_a_stale_master_key_hash() -> None:
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(rowcount=0)
+
+    with pytest.raises(MasterKeyRotationConflictError, match="already rotated"):
+        await stage_generated_master_key_rotation(session, "stale-hash")
+
+
 def test_operator_key_skips_generation(tmp_path: Path) -> None:
     config = GatewayConfig(
         database_url=f"sqlite:///{tmp_path / 'mk.db'}", master_key="operator-set", require_pricing=False
@@ -114,16 +125,18 @@ def test_generated_key_authenticates_management_api(tmp_path: Path, monkeypatch:
         assert bad.status_code == 401
 
 
-def test_is_valid_master_key_accepts_hash_and_plaintext() -> None:
+@pytest.mark.asyncio
+async def test_is_valid_master_key_accepts_hash_and_plaintext() -> None:
     token = generate_master_key()
-    hashed = GatewayConfig()
-    hashed._master_key_hash = hash_master_key(token)
-    assert deps._is_valid_master_key(token, hashed) is True
-    assert deps._is_valid_master_key("otari-mk-wrong", hashed) is False
+    generated_config = GatewayConfig()
+    session = AsyncMock()
+    session.get.return_value = RuntimeSetting(key=MASTER_KEY_HASH_KEY, value=hash_master_key(token))
+    assert await deps._is_valid_master_key(token, generated_config, session) is True
+    assert await deps._is_valid_master_key("otari-mk-wrong", generated_config, session) is False
 
     plain = GatewayConfig(master_key="literal-key")
-    assert deps._is_valid_master_key("literal-key", plain) is True
-    assert deps._is_valid_master_key("nope", plain) is False
+    assert await deps._is_valid_master_key("literal-key", plain, session) is True
+    assert await deps._is_valid_master_key("nope", plain, session) is False
 
 
 def test_402_message_states_cause_and_both_fixes() -> None:

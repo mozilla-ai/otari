@@ -16,7 +16,7 @@ from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
-from gateway.services.master_key_service import hash_master_key
+from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -179,14 +179,30 @@ async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
         logger.warning("Failed to update last_used_at for API key %s", api_key_id, exc_info=True)
 
 
-def _is_valid_master_key(token: str, config: GatewayConfig) -> bool:
-    """Check if token matches the master key (operator-set plaintext or generated hash)."""
+async def _is_valid_master_key(token: str, config: GatewayConfig, db: AsyncSession) -> bool:
+    """Check if token matches the configured key or the current generated key."""
     if config.master_key is not None and secrets.compare_digest(token, config.master_key):
         return True
-    stored_hash = config._master_key_hash
-    if stored_hash is not None:
-        return secrets.compare_digest(hash_master_key(token), stored_hash)
-    return False
+    if config.master_key is not None or not is_generated_master_key(token):
+        return False
+    stored_hash = await _load_generated_master_key_hash(config, db)
+    if stored_hash is None:
+        return False
+    return secrets.compare_digest(hash_master_key(token), stored_hash)
+
+
+async def _load_generated_master_key_hash(config: GatewayConfig, db: AsyncSession) -> str | None:
+    """Load the shared generated-key hash, treating DB failures as retryable auth outages."""
+    try:
+        stored_hash = await load_master_key_hash(db)
+    except SQLAlchemyError as exc:
+        record_auth_failure("db_error")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication temporarily unavailable, please retry",
+        ) from exc
+    config._master_key_hash = stored_hash
+    return stored_hash
 
 
 async def verify_api_key(
@@ -214,8 +230,9 @@ async def verify_api_key(
 
 async def verify_master_key(
     request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-) -> None:
+) -> str:
     """Verify master key from Otari-Key header.
 
     Args:
@@ -226,19 +243,24 @@ async def verify_master_key(
         HTTPException: If master key is not configured or invalid
 
     """
-    if config.master_key is None and config._master_key_hash is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Master key not configured. Set OTARI_MASTER_KEY environment variable.",
-        )
-
     token = _extract_bearer_token(request, config)
 
-    if not _is_valid_master_key(token, config):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid master key",
-        )
+    if config.master_key is None:
+        stored_hash = await _load_generated_master_key_hash(config, db)
+        if stored_hash is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Master key not configured. Set OTARI_MASTER_KEY environment variable.",
+            )
+        if is_generated_master_key(token) and secrets.compare_digest(hash_master_key(token), stored_hash):
+            return token
+    elif secrets.compare_digest(token, config.master_key):
+        return token
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid master key",
+    )
 
 
 async def verify_api_key_or_master_key(
@@ -262,7 +284,7 @@ async def verify_api_key_or_master_key(
     """
     token = _extract_bearer_token(request, config)
 
-    if _is_valid_master_key(token, config):
+    if await _is_valid_master_key(token, config, db):
         return None, True
 
     api_key = await _verify_and_update_api_key(db, token)
