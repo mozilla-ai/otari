@@ -99,6 +99,14 @@ describe("UsagePage", () => {
     expect(screen.getByText(/2\.1% errors/)).toBeInTheDocument();
   });
 
+  it("does not render the CSV export action", async () => {
+    mockApi(summary());
+    renderPage(<UsagePage />);
+
+    await screen.findByText("$1,240.50");
+    expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+  });
+
   it("shows cache read and write totals as tiles", async () => {
     const base = summary();
     mockApi(summary({ totals: { ...base.totals, cache_read_tokens: 5_100_000, cache_write_tokens: 2_700_000 } }));
