@@ -19,11 +19,6 @@ import { budgetHealth, errorRateHealth, providerHealthStatus, toStatStatus } fro
 const DAY_MS = 86_400_000;
 const PERIOD_DAYS = 30;
 
-// How often the health tile re-dials providers in the background. Reachability
-// does not move second to second, so a minute keeps the overview live without
-// hammering every upstream.
-const HEALTH_REFRESH_MS = 60_000;
-
 // The operator's current local date, as a stable key. Used to hold the window
 // bounds steady within a day (so query keys don't churn every render) while still
 // letting them advance across midnight.
@@ -102,7 +97,7 @@ export function OverviewPage() {
   const today = useUsageSummary(todayFilters, "hour");
   const period = useUsageSummary(periodFilters, "day");
   const previous = useUsageSummary(prevFilters, "day");
-  const health = useProviderHealth(HEALTH_REFRESH_MS);
+  const health = useProviderHealth();
   const budgets = useBudgets();
   const keys = useKeys();
   const users = useUsers();

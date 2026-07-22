@@ -65,6 +65,9 @@ const USAGE = "usage";
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
 const BUILD_POLL_MS = 60_000;
+// Checking provider health lists models for every configured provider. Keep the
+// automatic probe infrequent; operators can still force an immediate re-check.
+export const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000;
 
 export function useModels() {
   return useQuery({
@@ -129,20 +132,16 @@ export function useProviderCatalog() {
 
 // Every configured provider's reachability, for the health monitor. Backed by
 // the same model-discovery test path as the per-provider "test connection", so a
-// provider is healthy when its credentials can list models. The gateway caches
-// the underlying dials, so this is cheap enough to poll.
-//
-// `refetchInterval` opts a page into background refresh (pass a millisecond
-// interval); omit it (or pass false) for a purely on-demand load. The response's
-// healthy/total counts are reused by the overview summary tile (issue #302).
-export function useProviderHealth(refetchInterval: number | false = false) {
+// provider is healthy when its credentials can list models. This fans out to
+// every configured provider, so automatic checks run at most hourly. The
+// response's healthy/total counts are reused by the overview summary tile
+// (issue #302).
+export function useProviderHealth() {
   return useQuery({
     queryKey: [PROVIDER_HEALTH],
     queryFn: () => apiFetch<ProviderHealthResponse>("/v1/providers/health"),
-    // A provider's reachability does not move second to second; keep it briefly
-    // fresh so navigating back does not re-dial every provider.
-    staleTime: 30_000,
-    refetchInterval,
+    staleTime: PROVIDER_HEALTH_REFRESH_MS,
+    refetchInterval: PROVIDER_HEALTH_REFRESH_MS,
   });
 }
 

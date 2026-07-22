@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
+import { PROVIDER_HEALTH_REFRESH_MS } from "@/api/hooks";
 import type {
   GatewaySettings,
   KnownProvider,
@@ -148,13 +149,16 @@ function mockApi(opts: MockOpts = {}) {
   });
 }
 
-function renderPage(ui: ReactElement) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(ui: ReactElement, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <MemoryRouter>
       <QueryClientProvider client={client}>{ui}</QueryClientProvider>
     </MemoryRouter>,
   );
+}
+
+function healthRequestCount(fetchMock: ReturnType<typeof mockApi>): number {
+  return fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1/providers/health")).length;
 }
 
 describe("ProvidersPage", () => {
@@ -388,6 +392,24 @@ describe("ProvidersPage", () => {
     renderPage(<ProvidersPage />);
 
     expect(await screen.findByText("1 of 2 providers reachable")).toBeInTheDocument();
+  });
+
+  it("does not automatically re-check all providers within an hour", async () => {
+    const fetchMock = mockApi({ meta: [providerInfo("openai")] });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const first = renderPage(<ProvidersPage />, client);
+
+    await screen.findByText("1 of 1 provider reachable");
+    expect(healthRequestCount(fetchMock)).toBe(1);
+
+    first.unmount();
+    client.setQueryData(["provider-health"], healthResponse([{ instance: "openai", ok: true, model_count: 3, error: null, checked_at: null }]), {
+      updatedAt: Date.now() - (PROVIDER_HEALTH_REFRESH_MS - 5_000),
+    });
+    renderPage(<ProvidersPage />, client);
+
+    await screen.findByText("1 of 1 provider reachable");
+    await waitFor(() => expect(healthRequestCount(fetchMock)).toBe(1));
   });
 
   it("forces a live re-check of every provider on Re-check all", async () => {
