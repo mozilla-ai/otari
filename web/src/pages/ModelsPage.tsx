@@ -8,12 +8,10 @@ import {
   useModelMetadata,
   useModels,
   usePricing,
-  useProviders,
   useSetPricing,
   useSettings,
 } from "@/api/hooks";
-import type { ModelMetadata, ProviderCapabilities, ProviderInfo } from "@/api/types";
-import { ModelComboBox } from "@/components/ModelComboBox";
+import type { ModelMetadata } from "@/api/types";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ConfirmButton, ErrorBanner, errorMessage, FilterSelect, InfoBanner, PageHeader } from "@/components/ui";
 import { formatContext, formatCost, formatNumber, formatReleaseDate } from "@/lib/format";
@@ -28,20 +26,6 @@ const ALIAS_OWNED_BY = "otari";
 // editable here; "default" is the genai-prices fallback; "alias" is inherited
 // from a target; "none" means metered at no cost.
 type PriceSource = "configured" | "default" | "alias" | "none";
-
-const CAPABILITY_LABELS: Record<keyof ProviderCapabilities, string> = {
-  vision: "Vision",
-  reasoning: "Reasoning",
-  embeddings: "Embeddings",
-  streaming: "Streaming",
-  audio: "Audio",
-  image_generation: "Image gen",
-  pdf: "PDF",
-  rerank: "Rerank",
-  responses_api: "Responses API",
-  moderation: "Moderation",
-  list_models: "Lists models",
-};
 
 // Capability filter options. These test the model's own metadata (models.dev),
 // so they line up with the per-model Features chips shown in the table, not the
@@ -175,84 +159,6 @@ function SourceChip({ source }: { source: PriceSource }) {
   return <span className="text-xs text-[var(--otari-muted)]">not priced</span>;
 }
 
-// Prices a model the picker lists, or one it cannot see (an unconfigured
-// provider, a brand-new release), which is why the key stays free text.
-function PriceModelForm({ onClose }: { onClose: () => void }) {
-  const setPricing = useSetPricing();
-  const [modelKey, setModelKey] = useState("");
-  const [input, setInput] = useState("");
-  const [output, setOutput] = useState("");
-  const [cacheRead, setCacheRead] = useState("");
-  const [cacheWrite, setCacheWrite] = useState("");
-
-  const canSubmit =
-    modelKey.trim() !== "" &&
-    isValidPrice(input) &&
-    isValidPrice(output) &&
-    isValidOptionalPrice(cacheRead) &&
-    isValidOptionalPrice(cacheWrite);
-
-  const submit = () => {
-    if (!canSubmit) {
-      return;
-    }
-    setPricing.mutate(
-      {
-        model_key: modelKey.trim(),
-        input_price_per_million: Number(input),
-        output_price_per_million: Number(output),
-        cache_read_price_per_million: optionalPrice(cacheRead),
-        cache_write_price_per_million: optionalPrice(cacheWrite),
-      },
-      { onSuccess: onClose },
-    );
-  };
-
-  return (
-    <div className="flex flex-col gap-4">
-      <ErrorBanner error={setPricing.error} />
-      <div className="grid gap-4 sm:grid-cols-3">
-        <ModelComboBox
-          label="Model"
-          value={modelKey}
-          onChange={setModelKey}
-          isRequired
-          autoFocus
-          description="Pick one your providers report, or type any provider:model key."
-        />
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-[var(--otari-ink)]">Input $ / 1M</span>
-          <MoneyInput value={input} onChange={setInput} ariaLabel="Input price per million" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-[var(--otari-ink)]">Output $ / 1M</span>
-          <MoneyInput value={output} onChange={setOutput} ariaLabel="Output price per million" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-[var(--otari-ink)]">Cache read $ / 1M</span>
-          <MoneyInput value={cacheRead} onChange={setCacheRead} ariaLabel="Cache read price per million" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-[var(--otari-ink)]">Cache write $ / 1M</span>
-          <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel="Cache write price per million" />
-        </div>
-      </div>
-      <p className="text-xs text-[var(--otari-muted)]">
-        Cache rates are optional. Leave them blank to bill cached tokens at the input rate. Cache write applies to
-        Anthropic cache creation.
-      </p>
-      <div className="flex gap-2">
-        <Button variant="primary" isDisabled={!canSubmit || setPricing.isPending} onPress={submit}>
-          {setPricing.isPending ? "Saving…" : "Save price"}
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 // A small info affordance: an "i" bubble that reveals a tooltip on hover or
 // keyboard focus. Hand-rolled to match the dashboard's other bare primitives
 // (HeroUI v3 ships no tooltip we use here).
@@ -315,22 +221,6 @@ function PricingInfo() {
         ? " Requests for any other model are rejected (HTTP 402) because require_pricing is on."
         : " Other models are served without cost tracking."}
     </InfoTooltip>
-  );
-}
-
-function CapabilityBadges({ capabilities }: { capabilities: ProviderCapabilities }) {
-  const active = (Object.keys(CAPABILITY_LABELS) as (keyof ProviderCapabilities)[]).filter((key) => capabilities[key]);
-  if (active.length === 0) {
-    return <span className="text-sm text-[var(--otari-muted)]">No capabilities reported.</span>;
-  }
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {active.map((key) => (
-        <Chip key={key} size="sm" color="default">
-          {CAPABILITY_LABELS[key]}
-        </Chip>
-      ))}
-    </div>
   );
 }
 
@@ -453,88 +343,18 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
   );
 }
 
-function ProviderBlock({
-  provider,
-  info,
-  modelCount,
-  discoveryError,
-}: {
-  provider: string;
-  info: ProviderInfo | undefined;
-  modelCount: number;
-  discoveryError: string | null;
-}) {
-  return (
-    <PanelSection title="Provider">
-      <div className="flex flex-col gap-3 rounded-lg border border-[var(--otari-line)] p-3">
-        <div>
-          <div className="text-sm font-medium text-[var(--otari-ink)]">{info?.name ?? provider}</div>
-          <div className="text-xs text-[var(--otari-muted)]">
-            {info && info.provider_type !== provider ? `${provider} · ${info.provider_type}` : provider}
-          </div>
-        </div>
-        {discoveryError ? (
-          <span className="text-xs text-red-700">Could not list models: {discoveryError}</span>
-        ) : (
-          <span className="text-xs text-[var(--otari-muted)]">
-            {formatNumber(modelCount)} model{modelCount === 1 ? "" : "s"} reported
-          </span>
-        )}
-        {info ? <CapabilityBadges capabilities={info.capabilities} /> : null}
-        {info?.env_key ? (
-          <code className="w-fit rounded bg-[var(--otari-bg)] px-2 py-0.5 text-xs text-[var(--otari-ink)]">
-            {info.env_key}
-          </code>
-        ) : null}
-        {info && (info.doc_url || info.pricing_urls.length > 0) ? (
-          <div className="flex flex-col gap-1">
-            {info.doc_url ? (
-              <a
-                href={info.doc_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-[var(--otari-brand)] underline underline-offset-2"
-              >
-                API documentation
-              </a>
-            ) : null}
-            {info.pricing_urls.slice(0, 2).map((url) => (
-              <a
-                key={url}
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs break-all text-[var(--otari-brand)] underline underline-offset-2"
-              >
-                Pricing page
-              </a>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </PanelSection>
-  );
-}
-
-// The persistent detail panel beside the table. Shows the selected model's
-// pricing, specs, modalities, capabilities, and its provider; lets you page
-// through the current list; and offers to alias the model.
+// The persistent detail panel beside the table shows the selected model's
+// pricing, specs, modalities, and capabilities; it also offers to alias it.
 function ModelDetailPanel({
   row,
   metadata,
   metadataAvailable,
-  providerInfo,
-  providerModelCount,
-  providerDiscoveryError,
   onMakeAlias,
   onClose,
 }: {
   row: ModelRow;
   metadata: ModelMetadata | undefined;
   metadataAvailable: boolean;
-  providerInfo: ProviderInfo | undefined;
-  providerModelCount: number;
-  providerDiscoveryError: string | null;
   onMakeAlias: (key: string) => void;
   onClose: () => void;
 }) {
@@ -631,23 +451,17 @@ function ModelDetailPanel({
           )}
         </PanelSection>
 
-        {/* Skip the provider pane for a custom / self-hosted instance (its name is
-            not a stock provider): the bundled capabilities and doc links describe
-            the underlying implementation, not the operator's endpoint. */}
-        {providerInfo && providerInfo.provider_type === row.provider ? (
-          <ProviderBlock
-            provider={row.provider}
-            info={providerInfo}
-            modelCount={providerModelCount}
-            discoveryError={providerDiscoveryError}
-          />
-        ) : null}
       </Card.Content>
     </Card>
   );
 }
 
-const PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 15;
+const PAGE_SIZE_OPTIONS = [
+  { value: "15", label: "15 per page" },
+  { value: "25", label: "25 per page" },
+  { value: "50", label: "50 per page" },
+];
 
 function SearchInput({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
@@ -662,35 +476,57 @@ function SearchInput({ value, onChange, placeholder }: { value: string; onChange
   );
 }
 
-function Pagination({ page, pageCount, total, onPage }: { page: number; pageCount: number; total: number; onPage: (page: number) => void }) {
-  if (pageCount <= 1) {
-    return null;
-  }
+function Pagination({
+  page,
+  pageCount,
+  total,
+  pageSize,
+  onPage,
+  onPageSize,
+}: {
+  page: number;
+  pageCount: number;
+  total: number;
+  pageSize: number;
+  onPage: (page: number) => void;
+  onPageSize: (pageSize: number) => void;
+}) {
   return (
     <div className="flex items-center justify-between px-1 pt-1 text-sm text-[var(--otari-muted)]">
       <span>
-        Page {page + 1} of {pageCount} · {formatNumber(total)} model{total === 1 ? "" : "s"}
+        {pageCount > 1 ? `Page ${page + 1} of ${pageCount} · ` : ""}
+        {formatNumber(total)} model{total === 1 ? "" : "s"}
       </span>
       <span className="inline-flex gap-2">
-        <Button size="sm" variant="outline" isDisabled={page === 0} onPress={() => onPage(page - 1)}>
-          Prev
-        </Button>
-        <Button size="sm" variant="outline" isDisabled={page >= pageCount - 1} onPress={() => onPage(page + 1)}>
-          Next
-        </Button>
+        <FilterSelect
+          ariaLabel="Rows per page"
+          value={String(pageSize)}
+          onChange={(value) => onPageSize(Number(value))}
+          options={PAGE_SIZE_OPTIONS}
+        />
+        {pageCount > 1 ? (
+          <>
+            <Button size="sm" variant="outline" isDisabled={page === 0} onPress={() => onPage(page - 1)}>
+              Prev
+            </Button>
+            <Button size="sm" variant="outline" isDisabled={page >= pageCount - 1} onPress={() => onPage(page + 1)}>
+              Next
+            </Button>
+          </>
+        ) : null}
       </span>
     </div>
   );
 }
 
-type SortCol = "model" | "context" | "released" | "input" | "output";
+type SortCol = "model" | "released" | "input" | "output";
 type SortDir = "asc" | "desc";
 type Sort = { col: SortCol; dir: SortDir };
 
 // Newest models first by default; the choice is remembered across refreshes.
 const SORT_STORAGE_KEY = "otari.dashboard.modelsSort";
 const DEFAULT_SORT: Sort = { col: "model", dir: "asc" };
-const SORT_COLS: SortCol[] = ["model", "context", "released", "input", "output"];
+const SORT_COLS: SortCol[] = ["model", "released", "input", "output"];
 
 function readStoredSort(): Sort {
   if (typeof window === "undefined") return DEFAULT_SORT;
@@ -886,7 +722,6 @@ function ModelTable({
         <Tr>
           <SortableTh label="Model" col="model" sort={sort} onSort={onSort} />
           <Th>Provider</Th>
-          <SortableTh label="Context" col="context" sort={sort} onSort={onSort} align="right" />
           <SortableTh
             label="In / Out $ / 1M"
             col="input"
@@ -900,7 +735,7 @@ function ModelTable({
       </THead>
       <tbody>
         {isLoading ? (
-          <LoadingRow colSpan={5} />
+          <LoadingRow colSpan={4} />
         ) : rows.length > 0 ? (
           rows.map((row) => {
             const edit = () => onSetPricingKey(pricingKey === row.key ? null : row.key);
@@ -909,9 +744,6 @@ function ModelTable({
                 <Tr onClick={() => onSelect(row.key)} selected={row.key === selectedKey}>
                   <Td className="font-medium break-all">{row.model}</Td>
                   <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
-                  <Td className="text-right tabular-nums text-[var(--otari-muted)]">
-                    {formatContext(row.contextWindow)}
-                  </Td>
                   <Td className="text-right">
                     <PriceCell
                       primary={row.inputPrice}
@@ -935,7 +767,7 @@ function ModelTable({
                 </Tr>
                 {pricingKey === row.key ? (
                   <tr className="border-b border-[var(--otari-line)] bg-[var(--otari-bg)] last:border-b-0">
-                    <td colSpan={5}>
+                    <td colSpan={4}>
                       <InlinePriceForm row={row} onClose={() => onSetPricingKey(null)} />
                     </td>
                   </tr>
@@ -944,7 +776,7 @@ function ModelTable({
             );
           })
         ) : (
-          <TableMessage colSpan={5}>{empty}</TableMessage>
+          <TableMessage colSpan={4}>{empty}</TableMessage>
         )}
       </tbody>
     </Table>
@@ -969,12 +801,11 @@ export function ModelsPage() {
   const models = useModels();
   const pricing = usePricing();
   const discoverable = useDiscoverableModels();
-  const providers = useProviders();
   const metadata = useModelMetadata();
 
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
-  const [showPriceForm, setShowPriceForm] = useState(false);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [pricingKey, setPricingKey] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>(readStoredSort);
@@ -1203,8 +1034,7 @@ export function ModelsPage() {
         }
         return (ad < bd ? -1 : ad > bd ? 1 : 0) * dir || a.model.localeCompare(b.model);
       }
-      const pick = (row: ModelRow) =>
-        sort.col === "context" ? row.contextWindow : sort.col === "input" ? row.inputPrice : row.outputPrice;
+      const pick = (row: ModelRow) => (sort.col === "input" ? row.inputPrice : row.outputPrice);
       const av = pick(a);
       const bv = pick(b);
       if (av == null && bv == null) {
@@ -1235,10 +1065,10 @@ export function ModelsPage() {
   ]);
 
   const total = filteredModels.length;
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const clampedPage = Math.min(page, pageCount - 1);
-  const start = clampedPage * PAGE_SIZE;
-  const pageModels = filteredModels.slice(start, start + PAGE_SIZE);
+  const start = clampedPage * pageSize;
+  const pageModels = filteredModels.slice(start, start + pageSize);
 
   const modelsLoading = models.isLoading || pricing.isLoading || discoverable.isLoading;
   const hasActiveFilters =
@@ -1259,14 +1089,6 @@ export function ModelsPage() {
   const selectedRow = selectedKey
     ? (filteredModels.find((row) => row.key === selectedKey) ?? rowsByKey.get(selectedKey) ?? null)
     : null;
-  const selectedProvider = selectedRow?.provider;
-  const selectedProviderInfo = selectedProvider
-    ? providers.data?.providers.find((info) => info.instance === selectedProvider)
-    : undefined;
-  const selectedProviderDiscovery = selectedProvider
-    ? (discoverable.data?.providers ?? []).find((provider) => provider.provider === selectedProvider)
-    : undefined;
-
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -1275,7 +1097,7 @@ export function ModelsPage() {
       />
 
       <ErrorBanner
-        error={models.error ?? pricing.error ?? discoverable.error ?? providers.error ?? metadata.error}
+        error={models.error ?? pricing.error ?? discoverable.error ?? metadata.error}
       />
 
       <div
@@ -1358,24 +1180,18 @@ export function ModelsPage() {
             />
 
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Pagination page={clampedPage} pageCount={pageCount} total={total} onPage={setPage} />
-              <button
-                type="button"
-                className="text-xs font-medium text-[var(--otari-brand-dark)]"
-                onClick={() => setShowPriceForm((open) => !open)}
-              >
-                {showPriceForm ? "Hide" : "+ Price a model not listed here"}
-              </button>
+              <Pagination
+                page={clampedPage}
+                pageCount={pageCount}
+                total={total}
+                pageSize={pageSize}
+                onPage={setPage}
+                onPageSize={(size) => {
+                  setPageSize(size);
+                  setPage(0);
+                }}
+              />
             </div>
-
-            {showPriceForm ? (
-              <Card>
-                <Card.Content className="flex flex-col gap-4 p-5">
-                  <div className="text-sm font-semibold text-[var(--otari-ink)]">Price a model not listed here</div>
-                  <PriceModelForm onClose={() => setShowPriceForm(false)} />
-                </Card.Content>
-              </Card>
-            ) : null}
           </div>
 
           {selectedRow ? (
@@ -1384,11 +1200,6 @@ export function ModelsPage() {
                 row={selectedRow}
                 metadata={metadataByKey[selectedRow.key]}
                 metadataAvailable={metadataAvailable}
-                providerInfo={selectedProviderInfo}
-                providerModelCount={selectedProviderDiscovery?.models.length ?? 0}
-                providerDiscoveryError={
-                  selectedProviderDiscovery && !selectedProviderDiscovery.ok ? selectedProviderDiscovery.error : null
-                }
                 onMakeAlias={(key) => navigate(`/aliases?target=${encodeURIComponent(key)}`)}
                 onClose={() => setSelectedKey(null)}
               />

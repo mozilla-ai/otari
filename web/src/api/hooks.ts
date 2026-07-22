@@ -17,6 +17,7 @@ import type {
   KnownProvider,
   ModelListResponse,
   ModelMetadataResponse,
+  PricingRefreshPreview,
   PricingResponse,
   ProviderHealthResponse,
   ProvidersResponse,
@@ -392,6 +393,29 @@ export function useDeletePricing() {
       void queryClient.invalidateQueries({ queryKey: [PRICING] });
       void queryClient.invalidateQueries({ queryKey: [MODELS] });
     },
+  });
+}
+
+export function usePreviewPricingRefresh() {
+  return useMutation({
+    mutationFn: () => apiFetch<PricingRefreshPreview>("/v1/pricing/refresh", { method: "POST" }),
+  });
+}
+
+export function useConfirmPricingRefresh() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/pricing/refresh/confirm", { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+      void queryClient.invalidateQueries({ queryKey: [PROVIDERS] });
+    },
+  });
+}
+
+export function useRejectPricingRefresh() {
+  return useMutation({
+    mutationFn: () => apiFetch<void>("/v1/pricing/refresh/reject", { method: "POST" }),
   });
 }
 

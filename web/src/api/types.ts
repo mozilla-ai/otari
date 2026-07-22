@@ -239,6 +239,21 @@ export interface SetPricingRequest {
   effective_at?: string | null;
 }
 
+export interface PricingRefreshChange {
+  model_key: string;
+  change: "added" | "changed" | "removed";
+}
+
+export interface PricingRefreshPreview {
+  fetched_at: string;
+  added_count: number;
+  changed_count: number;
+  removed_count: number;
+  protected_model_count: number;
+  changes: PricingRefreshChange[];
+  changes_truncated: boolean;
+}
+
 // An API key row. The full secret is never returned after creation; `key_prefix`
 // is a display-only fingerprint (leading chars of the key), null for keys minted
 // before the prefix was recorded. Note: providers use `last4` while keys use a

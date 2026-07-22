@@ -15,8 +15,6 @@ import type {
   ModelMetadataResponse,
   ModelObject,
   PricingResponse,
-  ProviderCapabilities,
-  ProvidersResponse,
 } from "@/api/types";
 import { ModelsPage } from "@/pages/ModelsPage";
 
@@ -93,48 +91,6 @@ const DISCOVERABLE: DiscoverableModelsResponse = {
       ok: true,
       error: null,
       models: [{ id: "claude-sonnet-4", key: "anthropic:claude-sonnet-4" }],
-    },
-  ],
-};
-
-function caps(overrides: Partial<ProviderCapabilities>): ProviderCapabilities {
-  return {
-    streaming: false,
-    reasoning: false,
-    vision: false,
-    pdf: false,
-    embeddings: false,
-    image_generation: false,
-    audio: false,
-    rerank: false,
-    responses_api: false,
-    moderation: false,
-    list_models: false,
-    ...overrides,
-  };
-}
-
-const PROVIDERS: ProvidersResponse = {
-  providers: [
-    {
-      instance: "openai",
-      provider_type: "openai",
-      name: "OpenAI",
-      doc_url: "https://platform.openai.com/docs",
-      description: "OpenAI models.",
-      env_key: "OPENAI_API_KEY",
-      pricing_urls: ["https://openai.com/pricing"],
-      capabilities: caps({ vision: true, streaming: true, embeddings: true, list_models: true }),
-    },
-    {
-      instance: "anthropic",
-      provider_type: "anthropic",
-      name: "Anthropic",
-      doc_url: "https://docs.anthropic.com",
-      description: null,
-      env_key: "ANTHROPIC_API_KEY",
-      pricing_urls: [],
-      capabilities: caps({ reasoning: true, streaming: true }),
     },
   ],
 };
@@ -236,7 +192,6 @@ function mockApi(
     pricing?: PricingResponse[];
     aliases?: AliasResponse[];
     discoverable?: DiscoverableModelsResponse;
-    providers?: ProvidersResponse;
     metadata?: ModelMetadataResponse;
   } = {},
 ) {
@@ -251,9 +206,6 @@ function mockApi(
     }
     if (url.includes("/v1/settings")) {
       return jsonResponse(SETTINGS);
-    }
-    if (url.includes("/v1/providers")) {
-      return jsonResponse(opts.providers ?? PROVIDERS);
     }
     // Specific /v1/models/* routes before the /v1/models/ catch-all (which 404s,
     // matching the server's route order).
@@ -277,10 +229,6 @@ function mockApi(
     }
     return jsonResponse([]);
   });
-}
-
-async function openPriceForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: /Price a model not listed here/i }));
 }
 
 // Selects a model row and returns the detail panel scoped for assertions.
@@ -322,14 +270,14 @@ describe("ModelsPage", () => {
 
   // -- model list ----------------------------------------------------------
 
-  it("lists models with their context window", async () => {
+  it("does not show a context column in the model table", async () => {
     mockApi();
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    expect(within(tableRow("openai:gpt-4o")).getByText("128K")).toBeInTheDocument();
-    expect(within(tableRow("anthropic:claude-sonnet-4")).getByText("200K")).toBeInTheDocument();
+    expect(within(table()).queryByRole("columnheader", { name: "Context" })).not.toBeInTheDocument();
+    expect(within(tableRow("openai:gpt-4o")).queryByText("128K")).not.toBeInTheDocument();
   });
 
   it("surfaces the default-pricing note as a tooltip on the pricing column, not a banner", async () => {
@@ -378,10 +326,7 @@ describe("ModelsPage", () => {
     expect(within(detail).getByText("128K")).toBeInTheDocument();
     expect(within(detail).getByText("2023-09")).toBeInTheDocument();
     expect(within(detail).getByText("Tool calling")).toBeInTheDocument();
-    // Provider block: name, a provider capability, and the discovered model count.
-    expect(within(detail).getByText("OpenAI")).toBeInTheDocument();
-    expect(within(detail).getByText("Vision")).toBeInTheDocument();
-    expect(within(detail).getByText(/2 models reported/)).toBeInTheDocument();
+    expect(within(detail).queryByText("Provider")).not.toBeInTheDocument();
   });
 
   it("filters the model list by search", async () => {
@@ -562,7 +507,7 @@ describe("ModelsPage", () => {
     expect(base).toBeLessThan(claude);
   });
 
-  it("paginates a long model list", async () => {
+  it("defaults to 15 models per page and lets operators change the page size", async () => {
     const models = Array.from({ length: 30 }, (_, i) => {
       const id = `m${String(i).padStart(2, "0")}`;
       return { id, key: `openai:${id}` };
@@ -577,6 +522,11 @@ describe("ModelsPage", () => {
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:m00");
+
+    expect(within(table()).getByText("openai:m14")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:m15")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Rows per page"), "25");
 
     expect(within(table()).getByText("openai:m24")).toBeInTheDocument();
     expect(within(table()).queryByText("openai:m25")).not.toBeInTheDocument();
@@ -716,48 +666,4 @@ describe("ModelsPage", () => {
     expect(screen.queryByRole("button", { name: /backfill/i })).not.toBeInTheDocument();
   });
 
-  // -- Price an unlisted model: the picker -----------------------------------
-
-  it("offers discovered models in the picker and puts the full selector in the field", async () => {
-    mockApi();
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("openai:gpt-4o");
-    await openPriceForm(user);
-
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.type(picker, "4o-mini");
-    const option = await screen.findByRole("option", { name: "openai:gpt-4o-mini" });
-    await user.click(option);
-    expect(picker).toHaveValue("openai:gpt-4o-mini");
-  });
-
-  it("keeps a model the picker never offered typeable", async () => {
-    mockApi();
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("openai:gpt-4o");
-    await openPriceForm(user);
-
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.type(picker, "bedrock:claude-3-sonnet");
-    expect(picker).toHaveValue("bedrock:claude-3-sonnet");
-    await user.keyboard("{Escape}");
-
-    await user.type(screen.getByLabelText(/input price per million/i), "1");
-    await user.type(screen.getByLabelText(/output price per million/i), "2");
-    await user.click(screen.getByRole("button", { name: /save price/i }));
-
-    const post = fetchSpy.mock.calls.find(
-      ([url, init]) => String(url).includes("/v1/pricing") && init?.method === "POST",
-    );
-    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
-      model_key: "bedrock:claude-3-sonnet",
-      input_price_per_million: 1,
-      output_price_per_million: 2,
-    });
-  });
 });

@@ -3,12 +3,15 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   useReencryptProviderCredentials,
+  useConfirmPricingRefresh,
+  usePreviewPricingRefresh,
+  useRejectPricingRefresh,
   useRotateMasterKey,
   useSettings,
   useStoredProviders,
   useUpdateSettings,
 } from "@/api/hooks";
-import type { ConfigField, UpdateSettingsRequest } from "@/api/types";
+import type { ConfigField, PricingRefreshPreview, UpdateSettingsRequest } from "@/api/types";
 import { useAuth } from "@/auth/AuthContext";
 import { ErrorBanner, FilterSelect, InfoBanner, PageHeader } from "@/components/ui";
 
@@ -526,6 +529,116 @@ function SecurityKeysSection({ masterKeySource }: { masterKeySource: "configured
   );
 }
 
+function PricingRefreshDialog({
+  preview,
+  error,
+  isPending,
+  onAccept,
+  onReject,
+}: {
+  preview: PricingRefreshPreview;
+  error: Error | null;
+  isPending: boolean;
+  onAccept: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <AlertDialog.Backdrop>
+      <AlertDialog.Container placement="center" size="lg">
+        <AlertDialog.Dialog>
+          <AlertDialog.Header>
+            <AlertDialog.Heading>Review default price updates</AlertDialog.Heading>
+          </AlertDialog.Header>
+          <AlertDialog.Body className="flex flex-col gap-4">
+            <p className="text-sm text-[var(--otari-muted)]">
+              {preview.added_count} added, {preview.changed_count} changed, and {preview.removed_count} removed upstream
+              model prices. The accepted catalog is saved in the database with source <code>genai-prices</code> and
+              reloads after a restart. Your {preview.protected_model_count} custom model price
+              {preview.protected_model_count === 1 ? "" : "s"} remain unchanged.
+            </p>
+            {preview.changes.length > 0 ? (
+              <ul className="max-h-60 list-disc overflow-auto pl-5 text-sm text-[var(--otari-ink)]">
+                {preview.changes.map((change) => (
+                  <li key={change.model_key}>
+                    {change.model_key}: {change.change}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {preview.changes_truncated ? (
+              <p className="text-xs text-[var(--otari-muted)]">Only the first 100 changes are shown.</p>
+            ) : null}
+            <ErrorBanner error={error} />
+          </AlertDialog.Body>
+          <AlertDialog.Footer>
+            <Button variant="ghost" isDisabled={isPending} onPress={onReject}>
+              Reject changes
+            </Button>
+            <Button variant="primary" isPending={isPending} onPress={onAccept}>
+              Accept price updates
+            </Button>
+          </AlertDialog.Footer>
+        </AlertDialog.Dialog>
+      </AlertDialog.Container>
+    </AlertDialog.Backdrop>
+  );
+}
+
+function PricingRefreshSection() {
+  const previewRefresh = usePreviewPricingRefresh();
+  const confirmRefresh = useConfirmPricingRefresh();
+  const rejectRefresh = useRejectPricingRefresh();
+  const [preview, setPreview] = useState<PricingRefreshPreview | null>(null);
+  const isPending = confirmRefresh.isPending || rejectRefresh.isPending;
+
+  const reject = () => {
+    if (preview === null || isPending) {
+      return;
+    }
+    rejectRefresh.mutate(undefined, { onSuccess: () => setPreview(null) });
+  };
+
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold text-[var(--otari-ink)]">Default pricing catalog</h2>
+      <Card>
+        <Card.Content className="flex flex-col gap-4 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-[var(--otari-ink)]">genai-prices defaults</div>
+              <p className="mt-1 max-w-3xl text-sm text-[var(--otari-muted)]">
+                Fetch the latest upstream catalog, inspect every proposed price change, then accept or reject it. Accepted
+                data is stored as <code>genai-prices</code>; custom prices remain separate and always take precedence.
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              isDisabled={previewRefresh.isPending || isPending}
+              onPress={() => previewRefresh.mutate(undefined, { onSuccess: setPreview })}
+            >
+              {previewRefresh.isPending ? "Checking prices…" : "Check for price updates"}
+            </Button>
+          </div>
+          <ErrorBanner error={previewRefresh.error} />
+        </Card.Content>
+      </Card>
+      <AlertDialog isOpen={preview !== null} onOpenChange={(isOpen) => (!isOpen ? reject() : undefined)}>
+        <AlertDialog.Trigger className="hidden">Review price updates</AlertDialog.Trigger>
+        {preview ? (
+          <PricingRefreshDialog
+            preview={preview}
+            error={confirmRefresh.error ?? rejectRefresh.error}
+            isPending={isPending}
+            onAccept={() => confirmRefresh.mutate(undefined, { onSuccess: () => setPreview(null) })}
+            onReject={reject}
+          />
+        ) : null}
+      </AlertDialog>
+    </section>
+  );
+}
+
 // Group fields by their group label, preserving first-seen order. Uses a map (not
 // a consecutive-run merge) so a group name is never emitted twice even if the
 // fields for it are not contiguous, which would otherwise collide React keys.
@@ -633,6 +746,8 @@ export function SettingsPage() {
           </Card>
         </section>
       ))}
+
+      {data ? <PricingRefreshSection /> : null}
 
       {data ? <SecurityKeysSection masterKeySource={data.master_key_source} /> : null}
 

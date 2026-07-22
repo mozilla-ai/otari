@@ -203,6 +203,20 @@ class RuntimeSetting(Base):
     )
 
 
+class PricingSnapshot(Base):
+    """An approved, source-tagged upstream pricing catalog."""
+
+    __tablename__ = "pricing_snapshots"
+
+    source: Mapped[str] = mapped_column(primary_key=True)
+    snapshot: Mapped[str] = mapped_column()
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
 class ProviderCredential(Base):
     """A provider instance configured at runtime through the dashboard.
 

@@ -26,6 +26,7 @@ from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
     warn_if_require_pricing_without_pricing,
 )
+from gateway.services.pricing_refresh_service import load_persisted_price_snapshot
 from gateway.services.pricing_service import configure_default_pricing
 from gateway.services.provider_store_service import (
     load_providers_at_startup,
@@ -104,6 +105,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 # Persisted dashboard overrides win over config/env; apply them
                 # before pricing init so default-pricing behavior is consistent.
                 await apply_overrides_from_db(config, session)
+                await load_persisted_price_snapshot(session)
                 # Persisted tool/guardrail overrides (service URLs + web-search
                 # knobs) win over config/env too; apply them so the running worker
                 # reflects a dashboard change made in a prior run.
