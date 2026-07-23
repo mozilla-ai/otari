@@ -8,12 +8,13 @@ providers or extracts them to text for text-only local models.
 
 import mimetypes
 import uuid
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +24,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, FileObject
-from gateway.services.file_service import fetch_file, read_file_bytes
+from gateway.services.file_service import fetch_file
 from gateway.services.file_store import FileStore
 
 router = APIRouter(prefix="/v1", tags=["files"])
@@ -66,13 +67,14 @@ def _resolve_user(
 _READ_CHUNK_BYTES = 1024 * 1024
 
 
-async def _read_capped(file: UploadFile, max_bytes: int) -> bytes:
-    """Read an upload in chunks, aborting with 413 once it exceeds ``max_bytes``.
+async def _capped_chunks(file: UploadFile, max_bytes: int) -> AsyncIterator[bytes]:
+    """Yield an upload's bytes in chunks, aborting with 413 past ``max_bytes``.
 
-    Avoids buffering an unbounded upload before the size check — reading stops
-    at most one chunk past the limit.
+    This is what keeps the size cap an HTTP concern living in the route: it
+    yields chunks straight through to the storage backend (via
+    ``FileStore.put_stream``) instead of accumulating them, so the cap is
+    enforced as bytes flow rather than after a full buffer is built.
     """
-    chunks: list[bytes] = []
     total = 0
     while chunk := await file.read(_READ_CHUNK_BYTES):
         total += len(chunk)
@@ -81,8 +83,40 @@ async def _read_capped(file: UploadFile, max_bytes: int) -> bytes:
                 status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                 detail=f"File exceeds maximum upload size of {max_bytes // (1024 * 1024)} MB",
             )
-        chunks.append(chunk)
-    return b"".join(chunks)
+        yield chunk
+
+
+async def _prime(chunks: AsyncGenerator[bytes, None]) -> AsyncGenerator[bytes, None]:
+    """Eagerly read ``chunks``' first item so a read failure raises here, not later.
+
+    ``StreamingResponse`` only touches its body iterator after the 200 status
+    and headers are already flushed. Without this, a missing or unreadable blob
+    (DB record present, disk blob gone or corrupted) would truncate an
+    already-started 200 response instead of failing with a clean 500. Awaiting
+    the first chunk before constructing the response surfaces that failure as
+    a normal exception in the route.
+    """
+    try:
+        first: bytes | None = await chunks.__anext__()
+    except StopAsyncIteration:
+        first = None
+
+    async def _rest() -> AsyncGenerator[bytes, None]:
+        # StreamingResponse closes this outer generator on early client
+        # disconnect, but that doesn't automatically propagate to closing
+        # `chunks` (no such thing for a bare `async for`) — without this
+        # try/finally, `get_stream`'s file handle stays open until GC
+        # eventually gets to the abandoned generator, which under real
+        # traffic (cancelled downloads, closed tabs) means fds pile up.
+        try:
+            if first is not None:
+                yield first
+                async for chunk in chunks:
+                    yield chunk
+        finally:
+            await chunks.aclose()
+
+    return _rest()
 
 
 def _content_disposition(filename: str) -> str:
@@ -127,12 +161,14 @@ async def create_file(
 
     user_id = _resolve_user(auth_result, user, config)
 
-    data = await _read_capped(file, config.files_max_bytes)
-    if not data:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
-
     file_id = f"file-{uuid.uuid4().hex}"
-    storage_ref = await file_store.put(file_id, data)
+    storage_ref, size = await file_store.put_stream(file_id, _capped_chunks(file, config.files_max_bytes))
+    if size == 0:
+        # The empty check now happens after the stream drains (we don't know
+        # the size until then), so a zero-byte blob must be cleaned up before
+        # rejecting the upload.
+        await file_store.delete(storage_ref)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
 
     expires_at: datetime | None = None
     if config.files_retention_hours is not None:
@@ -143,7 +179,7 @@ async def create_file(
         user_id=user_id,
         filename=file.filename or file_id,
         mime_type=_guess_mime(file.filename, file.content_type),
-        bytes=len(data),
+        bytes=size,
         purpose=purpose or _DEFAULT_PURPOSE,
         storage_ref=storage_ref,
         created_at=datetime.now(UTC),
@@ -163,7 +199,7 @@ async def create_file(
             detail="Failed to store file",
         ) from exc
 
-    logger.info("Stored file %s (%d bytes) for user %s", file_id, len(data), user_id)
+    logger.info("Stored file %s (%d bytes) for user %s", file_id, size, user_id)
     return record.to_dict()
 
 
@@ -221,7 +257,7 @@ async def get_file_content(
     file_store: Annotated[FileStore, Depends(get_file_store)],
     user: str | None = None,
 ) -> Response:
-    """Download the raw bytes of a file."""
+    """Download the raw bytes of a file, streamed rather than buffered whole."""
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
@@ -230,9 +266,22 @@ async def get_file_content(
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    data = await read_file_bytes(file_store, record)
-    return Response(
-        content=data,
+    # No Content-Length: it would come from record.bytes (DB) while the body
+    # comes from the storage backend (disk). If those ever diverge (partial
+    # write, corruption), a length header derived from the DB value would be
+    # wrong, and clients trust that header over what actually arrives. Chunked
+    # transfer encoding doesn't need to declare a length up front.
+    try:
+        body = await _prime(file_store.get_stream(record.storage_ref))
+    except OSError as exc:
+        logger.error("Failed to read blob for file %s (ref=%s): %s", file_id, record.storage_ref, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to read file",
+        ) from exc
+
+    return StreamingResponse(
+        body,
         media_type=record.mime_type,
         headers={"Content-Disposition": _content_disposition(record.filename)},
     )
