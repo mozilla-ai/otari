@@ -83,7 +83,10 @@ try {
   // the brief initial loading skeleton is trimmed from the final encode
   // (START_TRIM in record.sh).
   await page.goto(BASE + "/", { waitUntil: "networkidle" });
-  await page.getByText(/ago/).first().waitFor({ timeout: 8000 }).catch(() => {});
+  // Require the seeded data to load; if it never does, fail rather than record
+  // an empty dashboard (record.sh runs under `set -e`, so this aborts the run
+  // before the committed GIF is overwritten).
+  await page.getByText(/ago/).first().waitFor({ timeout: 8000 });
   await sleep(700);
   await page.screenshot({ path: resolve(SHOT_DIR, "00-overview.png") });
 
@@ -93,13 +96,10 @@ try {
     i += 1;
     const link = page.getByRole("navigation").getByRole("link", { name: stop.label, exact: true });
     await link.click();
-    // Best-effort wait for the page heading; do not fail the whole run if a
-    // heading text differs slightly.
-    try {
-      await page.getByRole("heading", { name: stop.heading }).first().waitFor({ timeout: 6000 });
-    } catch {
-      /* keep going; the dwell still captures whatever rendered */
-    }
+    // Require the page heading so a broken navigation aborts the run instead of
+    // silently recording an incomplete tour. If a page title changes, update the
+    // matching `heading` in STOPS.
+    await page.getByRole("heading", { name: stop.heading }).first().waitFor({ timeout: 6000 });
     if (stop.settle) await sleep(stop.settle);
     await sleep(stop.dwell);
     const n = String(i).padStart(2, "0");

@@ -1,17 +1,20 @@
 """Seed a realistic-looking standalone gateway for the README dashboard GIF.
 
 Populates providers, budgets, users (assigned to budgets, with spend), named API
-keys, model pricing, aliases, and ~1500 usage_logs spread over ~50 days so the
-Overview / Usage / Activity pages all render with live-looking data. Everything
-is deterministic (seeded RNG, fixed reference time passed in) so re-running
-produces the same GIF.
+keys, model pricing, aliases, and ~4000 usage_logs spread over ~50 days so the
+Overview / Usage / Activity pages all render with live-looking data.
+
+Token and cost values are deterministic (seeded RNG), so the numbers on screen
+are stable across runs. Timestamps are anchored to the current wall clock, not a
+fixed reference, so the demo always looks fresh whenever the GIF is regenerated,
+and row/budget IDs are random UUIDs. Re-running therefore yields a structurally
+identical dataset, not a byte-identical one.
 
 Usage:
     uv run otari migrate --config scripts/demo_gif/otari.yml
     OTARI_SECRET_KEY=<fernet> uv run python scripts/demo_gif/seed.py sqlite:///./scripts/demo_gif/demo.db
 
-The reference "now" is fixed so the seed is reproducible; the usage window is
-anchored to it. See scripts/demo_gif/record.sh for the full pipeline.
+See scripts/demo_gif/record.sh for the full pipeline.
 """
 
 import math

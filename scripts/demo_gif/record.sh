@@ -26,10 +26,16 @@ GIF_OUT="assets/otari-demo.gif"
 # Throwaway Fernet key so provider credentials can be encrypted at rest for the
 # demo. Not a secret: the DB is ephemeral and holds only fake provider keys.
 export OTARI_SECRET_KEY="${OTARI_SECRET_KEY:-wdhWKyd1gwpMjxj9h4EbpW9B6pilzfrNTe0wTnwqPHg=}"
-# arm64 sandbox: use Playwright's Ubuntu 24.04 arm64 Chromium build and skip the
-# host-requirements re-check (see the project's environment recipe).
-export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="${PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:-ubuntu24.04-arm64}"
-export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS="${PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS:-1}"
+# Playwright ships no native arm64 Linux Chromium, so on arm64 force its Ubuntu
+# 24.04 arm64 build and skip the host-requirements re-check. On x86_64 (or any
+# other arch) leave Playwright's native detection and host checks alone, so the
+# pipeline does not select an incompatible Chromium there. Caller-set values win.
+case "$(uname -m)" in
+  aarch64 | arm64)
+    export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="${PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:-ubuntu24.04-arm64}"
+    export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS="${PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS:-1}"
+    ;;
+esac
 
 echo ">> Resetting demo database"
 rm -f "$DB" "$DB-wal" "$DB-shm"

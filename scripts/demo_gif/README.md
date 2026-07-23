@@ -22,7 +22,7 @@ result to `assets/otari-demo.gif`.
   `web/node_modules`).
 - A committed dashboard bundle in `src/gateway/static/dashboard`. Rebuild after
   any `web/src` change: `npm --prefix web run build`.
-- On arm64 Linux, `record.sh` already sets the Playwright platform override.
+- On arm64 Linux, `record.sh` sets the Playwright platform override automatically; on x86_64 it leaves Playwright's native detection and host checks in place.
 
 ## Files
 
