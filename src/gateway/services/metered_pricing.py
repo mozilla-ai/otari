@@ -84,34 +84,39 @@ def estimate_metered_cost(
 ) -> float:
     """Conservatively price a request before provider usage is available.
 
-    A requested Anthropic cache entry is reported as an additional input meter,
-    not as a discounted portion of ordinary prompt input. Until the provider
-    reports its exact meter, reserve for every estimated prompt token becoming
-    a cache write. This also selects threshold rates from the corresponding
-    total billable input.
+    Every estimated prompt token is billed as exactly one of fresh input, a
+    cache read, or a cache write, so the upper bound for the input side is the
+    token count times the dearest rate it could attract. When a cache write is
+    requested that worst case is the cache-write rate; otherwise it is the input
+    rate, since a cache read is never dearer than fresh input. Threshold rates
+    are selected from the estimated input, which approximates the request's
+    billable total. The estimate is reconciled to actual usage on completion.
     """
     input_tokens = max(estimated_input_tokens, 0.0)
     output_tokens = max(estimated_output_tokens, 0)
-    cache_write_tokens = input_tokens if cache_write_ttl is not None else 0.0
-    rates = effective_rates(pricing, input_tokens + cache_write_tokens)
+    rates = effective_rates(pricing, input_tokens)
 
     input_rate = rates["input_price_per_million"]
     output_rate = rates["output_price_per_million"]
     assert input_rate is not None
     assert output_rate is not None
-    cost = (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000
 
     if cache_write_ttl == "1h":
         cache_write_rate = rates["cache_write_1h_price_per_million"]
         if cache_write_rate is None:
             cache_write_rate = rates["cache_write_price_per_million"]
-    else:
+    elif cache_write_ttl == "5m":
         cache_write_rate = rates["cache_write_price_per_million"]
-    if cache_write_rate is not None:
-        cost += cache_write_tokens * cache_write_rate / 1_000_000
     else:
-        cost += cache_write_tokens * input_rate / 1_000_000
-    return cost
+        cache_write_rate = None
+
+    # An unpriced cache write bills at the input rate (it stays in the fresh
+    # bucket), so the input rate is the floor either way.
+    per_input_token_rate = input_rate
+    if cache_write_rate is not None:
+        per_input_token_rate = max(per_input_token_rate, cache_write_rate)
+
+    return (input_tokens * per_input_token_rate + output_tokens * output_rate) / 1_000_000
 
 
 def calculate_metered_cost(

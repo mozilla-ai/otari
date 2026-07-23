@@ -144,9 +144,10 @@ def estimate_cost(
     There is no tokenizer in the gateway, so prompt tokens are approximated as
     ``chars / 4`` (a common rough heuristic). Output tokens default to the
     request's declared max, falling back to ``default_output_tokens`` when the
-    caller leaves the output unbounded. Explicit Anthropic cache creation is
-    conservatively reserved as a possible additional input meter. The estimate
-    is reconciled to actual usage on completion.
+    caller leaves the output unbounded. When Anthropic cache creation is
+    requested, the input is conservatively reserved at the cache-write rate,
+    since any prompt token could become a cache write. The estimate is
+    reconciled to actual usage on completion.
     """
     if pricing is None:
         return 0.0

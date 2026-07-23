@@ -51,18 +51,32 @@ def test_estimate_cost_uses_context_tier_for_all_meters_at_threshold() -> None:
     assert estimate == pytest.approx((200_000 * 6.0 + 100 * 22.5) / 1_000_000)
 
 
-def test_estimate_cost_reserves_explicit_cache_write_as_additional_input() -> None:
+def test_estimate_cost_reserves_explicit_cache_write_at_the_write_rate() -> None:
     estimate = estimate_cost(
         _pricing(),
-        prompt_chars=100_000 * 4,
+        prompt_chars=1_000 * 4,
         max_output_tokens=100,
         default_output_tokens=1_024,
         cache_write_ttl="5m",
     )
 
-    # The potential write doubles billable input, so the long-context tier
-    # applies to ordinary input, output, and cache creation.
-    assert estimate == pytest.approx((100_000 * 6.0 + 100 * 22.5 + 100_000 * 7.5) / 1_000_000)
+    # Any prompt token could become a 5m cache write, so the input side is
+    # reserved at the (dearer) cache-write rate rather than stacked on top of it.
+    assert estimate == pytest.approx((1_000 * 3.75 + 100 * 15.0) / 1_000_000)
+
+
+def test_estimate_cost_reserves_cache_write_using_the_context_tier() -> None:
+    estimate = estimate_cost(
+        _pricing(),
+        prompt_chars=200_000 * 4,
+        max_output_tokens=100,
+        default_output_tokens=1_024,
+        cache_write_ttl="5m",
+    )
+
+    # The estimated input alone crosses the tier, so the tier's write and output
+    # rates apply; the tier is selected from the real billable total, not double.
+    assert estimate == pytest.approx((200_000 * 7.5 + 100 * 22.5) / 1_000_000)
 
 
 def test_estimate_cost_uses_requested_one_hour_cache_write_rate() -> None:
@@ -74,7 +88,7 @@ def test_estimate_cost_uses_requested_one_hour_cache_write_rate() -> None:
         cache_write_ttl="1h",
     )
 
-    assert estimate == pytest.approx((1_000 * 3.0 + 1_000 * 6.0) / 1_000_000)
+    assert estimate == pytest.approx(1_000 * 6.0 / 1_000_000)
 
 
 def test_estimate_cost_falls_back_to_input_when_cache_write_is_unpriced() -> None:
@@ -86,7 +100,7 @@ def test_estimate_cost_falls_back_to_input_when_cache_write_is_unpriced() -> Non
         cache_write_ttl="1h",
     )
 
-    assert estimate == pytest.approx(2_000 * 3.0 / 1_000_000)
+    assert estimate == pytest.approx(1_000 * 3.0 / 1_000_000)
 
 
 def test_estimate_cost_preserves_a_free_cache_write_rate() -> None:
