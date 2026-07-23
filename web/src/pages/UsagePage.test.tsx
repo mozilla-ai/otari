@@ -248,4 +248,38 @@ describe("UsagePage", () => {
     expect(await screen.findByText(/No usage yet/)).toBeInTheDocument();
   });
 
+  it("collapses the filter controls behind a mobile toggle that expands them", async () => {
+    mockApi(summary());
+    const user = userEvent.setup();
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    const toggle = screen.getByRole("button", { name: "Filters" });
+    const region = document.getElementById("usage-filters")!;
+    // Collapsed on mobile by default (display:none there; md: reveals it).
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(region.className).toContain("hidden");
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(region.className).toContain("flex");
+    expect(region.className).not.toContain("hidden");
+  });
+
+  it("labels the mobile filter toggle with the active filter count", async () => {
+    mockApi(summary());
+    const user = userEvent.setup();
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    // No collapsible filters active yet (only the default time range).
+    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+
+    await user.click(screen.getByPlaceholderText("All keys"));
+    await user.click(await screen.findByRole("option", { name: "ci-bot" }));
+
+    expect(await screen.findByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
+  });
+
 });
