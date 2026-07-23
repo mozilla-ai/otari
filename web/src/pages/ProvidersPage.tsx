@@ -27,7 +27,7 @@ import type {
 } from "@/api/types";
 import { Field } from "@/components/Field";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
-import { ConfirmButton, ErrorBanner, errorMessage, PageHeader } from "@/components/ui";
+import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
 
 // A masked, never-prefilled secret input. Native password masking protects
@@ -650,11 +650,13 @@ function OnboardingPanel({
   needsPricing,
   onEnablePricing,
   enabling,
+  secretKeyConfigured,
 }: {
   onAddProvider: () => void;
   needsPricing: boolean;
   onEnablePricing: () => void;
   enabling: boolean;
+  secretKeyConfigured: boolean;
 }) {
   return (
     <Card>
@@ -696,7 +698,7 @@ function OnboardingPanel({
           </p>
         ) : null}
         <div>
-          <Button variant="primary" onPress={onAddProvider}>
+          <Button variant="primary" isDisabled={!secretKeyConfigured} onPress={onAddProvider}>
             Add your first provider
           </Button>
         </div>
@@ -723,6 +725,16 @@ export function ProvidersPage() {
   const loading = meta.isLoading || stored.isLoading;
   const editingProvider = stored.data?.find((p) => p.instance === editing) ?? null;
   const needsPricing = settings.data?.require_pricing === true && settings.data.default_pricing === false;
+  // Gate adding providers on the server having OTARI_SECRET_KEY. Fail closed:
+  // enabled only while settings are still loading (so the button does not
+  // flicker to disabled on first paint) or once a value has actually loaded
+  // that is not `false`. A settings *error* leaves us unable to confirm the
+  // key, so we disable rather than let the operator hit a submit-time failure.
+  // Older gateways omit the field; a present-but-missing value reads as
+  // configured (they never gated on it).
+  const secretKeyConfigured = settings.data
+    ? settings.data.secret_key_configured !== false
+    : !settings.isError;
   const showOnboarding = !loading && rows.length === 0 && !addOpen;
 
   const runTest = (instance: string) => {
@@ -748,6 +760,7 @@ export function ProvidersPage() {
           addOpen || showOnboarding ? null : (
             <Button
               variant="primary"
+              isDisabled={!secretKeyConfigured}
               onPress={() => {
                 setEditing(null);
                 setAddOpen(true);
@@ -765,6 +778,14 @@ export function ProvidersPage() {
         }
       />
 
+      {!secretKeyConfigured ? (
+        <InfoBanner tone="warning">
+          <code>OTARI_SECRET_KEY</code> is not set, so provider keys can't be encrypted at rest and adding providers
+          from the dashboard is disabled. Set it on the server and restart to add providers here. Providers defined in{" "}
+          <code>config.yml</code> keep working without it.
+        </InfoBanner>
+      ) : null}
+
       {showOnboarding ? (
         <OnboardingPanel
           onAddProvider={() => {
@@ -774,13 +795,18 @@ export function ProvidersPage() {
           needsPricing={needsPricing}
           onEnablePricing={() => updateSettings.mutate({ default_pricing: true })}
           enabling={updateSettings.isPending}
+          secretKeyConfigured={secretKeyConfigured}
         />
       ) : null}
       {/* The gateway-wide "requests are rejected until pricing is set" alarm now
           lives in the app shell (PricingWarning), so it shows on every page, not
           only here. The first-run onboarding tip above stays as onboarding guidance. */}
 
-      {addOpen ? <AddProviderForm onClose={() => setAddOpen(false)} /> : null}
+      {/* Also gate the form itself on the flag, not just the buttons that open it:
+          if it was opened while settings were still loading and the key then turns
+          out to be unavailable, retract it so its submit can never reach the create
+          mutation. The banner above explains why. */}
+      {addOpen && secretKeyConfigured ? <AddProviderForm onClose={() => setAddOpen(false)} /> : null}
       {editingProvider ? <EditProviderForm provider={editingProvider} onClose={() => setEditing(null)} /> : null}
 
       {!loading && rows.length > 0 && health.data && health.data.total > 0 ? (

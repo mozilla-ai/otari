@@ -535,6 +535,10 @@ export interface GatewaySettings {
   default_pricing: boolean;
   require_pricing: boolean;
   master_key_source: "configured" | "generated";
+  // Whether OTARI_SECRET_KEY is set on the server. Provider credentials are
+  // encrypted at rest with it, so the dashboard disables adding stored
+  // providers when it is unset.
+  secret_key_configured: boolean;
   config: ConfigField[];
 }
 

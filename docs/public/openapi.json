@@ -1553,6 +1553,11 @@
             "title": "Require Pricing",
             "type": "boolean"
           },
+          "secret_key_configured": {
+            "description": "Whether OTARI_SECRET_KEY is set on the server. Provider credentials are encrypted at rest with it, so the dashboard disables adding stored providers when it is unset.",
+            "title": "Secret Key Configured",
+            "type": "boolean"
+          },
           "version": {
             "title": "Version",
             "type": "string"
@@ -1565,6 +1570,7 @@
           "default_pricing",
           "require_pricing",
           "master_key_source",
+          "secret_key_configured",
           "config"
         ],
         "title": "GatewaySettings",

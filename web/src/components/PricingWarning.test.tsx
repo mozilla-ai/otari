@@ -14,6 +14,7 @@ const BASE: GatewaySettings = {
   default_pricing: false,
   require_pricing: true,
   master_key_source: "configured",
+  secret_key_configured: true,
   config: [],
 };
 

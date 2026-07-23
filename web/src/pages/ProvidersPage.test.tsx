@@ -64,6 +64,7 @@ const SETTINGS: GatewaySettings = {
   default_pricing: true,
   require_pricing: false,
   master_key_source: "configured",
+  secret_key_configured: true,
   config: [],
 };
 
@@ -95,6 +96,12 @@ interface MockOpts {
   // is served for the forced-refresh (refresh=true) request, if given.
   health?: ProviderHealth[];
   healthRefresh?: ProviderHealth[];
+  // When set, GET /v1/settings blocks on this promise before responding, so a
+  // test can resolve it to simulate settings landing after the page has already
+  // painted (and the operator has interacted with it).
+  settingsGate?: Promise<unknown>;
+  // Force GET /v1/settings to fail, so the fail-closed gate can be exercised.
+  settingsError?: boolean;
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -148,6 +155,10 @@ function mockApi(opts: MockOpts = {}) {
     if (url.includes("/v1/settings")) {
       if (method === "PATCH") {
         settings = { ...settings, ...JSON.parse(String(init?.body)) };
+      }
+      if (method === "GET") {
+        if (opts.settingsGate) await opts.settingsGate;
+        if (opts.settingsError) return jsonResponse({ detail: "boom" }, 500);
       }
       return jsonResponse(settings);
     }
@@ -367,6 +378,66 @@ describe("ProvidersPage", () => {
 
     expect(screen.queryByText("Welcome to Otari")).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Search providers…")).toBeInTheDocument();
+  });
+
+  it("disables adding providers when OTARI_SECRET_KEY is not set", async () => {
+    mockApi({
+      stored: [storedProvider("openai", "1234")],
+      settings: { ...SETTINGS, secret_key_configured: false },
+    });
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1234");
+    // The button starts enabled and flips once /v1/settings resolves, so wait
+    // for the settled disabled state rather than asserting on first paint.
+    expect(await screen.findByText(/OTARI_SECRET_KEY/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add provider" })).toBeDisabled());
+  });
+
+  it("disables the first-run add button when OTARI_SECRET_KEY is not set", async () => {
+    mockApi({ meta: [], stored: [], settings: { ...SETTINGS, secret_key_configured: false } });
+    renderPage(<ProvidersPage />);
+
+    expect(await screen.findByText("Welcome to Otari")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Add your first provider" })).toBeDisabled(),
+    );
+  });
+
+  it("fails closed and disables adding providers when settings can't be loaded", async () => {
+    mockApi({ stored: [storedProvider("openai", "1234")], settingsError: true });
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1234");
+    // A settings error leaves the key state unknown; disable rather than let the
+    // operator fill in the form and fail on submit.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add provider" })).toBeDisabled());
+  });
+
+  it("retracts an open add form if settings then report OTARI_SECRET_KEY is unset", async () => {
+    let releaseSettings = () => {};
+    const settingsGate = new Promise<void>((resolve) => {
+      releaseSettings = resolve;
+    });
+    // The onboarding gate ignores settings loading, so the first-run card (and its
+    // enabled add button) is reachable before /v1/settings resolves.
+    mockApi({
+      meta: [],
+      stored: [],
+      settings: { ...SETTINGS, secret_key_configured: false },
+      settingsGate,
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Add your first provider" }));
+    expect(screen.getByPlaceholderText("Search providers…")).toBeInTheDocument();
+
+    // Settings land late and report the key is unavailable: the form must retract
+    // so its submit can never reach the create mutation.
+    releaseSettings();
+    await waitFor(() => expect(screen.queryByPlaceholderText("Search providers…")).not.toBeInTheDocument());
+    expect(screen.getByText(/OTARI_SECRET_KEY/)).toBeInTheDocument();
   });
 
   it("hides the onboarding once a provider exists", async () => {

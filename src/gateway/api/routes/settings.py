@@ -46,6 +46,7 @@ from gateway.services.runtime_settings_service import (
     settable_options,
     stage_override,
 )
+from gateway.services.secret_box import secret_box_configured
 from gateway.version import __version__
 
 router = APIRouter(prefix="/v1/settings", tags=["settings"])
@@ -160,6 +161,12 @@ class GatewaySettings(BaseModel):
     require_pricing: bool
     master_key_source: Literal["configured", "generated"] = Field(
         description="Whether the dashboard master key is configured at startup or generated and stored by Otari."
+    )
+    secret_key_configured: bool = Field(
+        description=(
+            "Whether OTARI_SECRET_KEY is set on the server. Provider credentials are encrypted at rest with it, "
+            "so the dashboard disables adding stored providers when it is unset."
+        )
     )
     config: list[ConfigField]
 
@@ -304,6 +311,7 @@ def _current_settings(config: GatewayConfig) -> GatewaySettings:
         default_pricing=config.default_pricing,
         require_pricing=config.require_pricing,
         master_key_source="configured" if config.master_key is not None else "generated",
+        secret_key_configured=secret_box_configured(),
         config=_config_fields(config),
     )
 

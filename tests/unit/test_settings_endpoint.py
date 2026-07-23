@@ -126,6 +126,26 @@ def test_settings_defaults(tmp_path: Path) -> None:
     assert body["master_key_source"] == "configured"
 
 
+def test_settings_reports_secret_key_unset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+    with _client(tmp_path) as client:
+        response = client.get("/v1/settings", headers=AUTH)
+
+    assert response.status_code == 200
+    assert response.json()["secret_key_configured"] is False
+
+
+def test_settings_reports_secret_key_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from gateway.services.secret_box import generate_secret_key
+
+    monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    with _client(tmp_path) as client:
+        response = client.get("/v1/settings", headers=AUTH)
+
+    assert response.status_code == 200
+    assert response.json()["secret_key_configured"] is True
+
+
 def test_settings_patch_does_not_apply_when_commit_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # A toggle that is persisted but never committed must not mutate this
     # worker's in-memory config or the process-wide pricing flag; otherwise a
