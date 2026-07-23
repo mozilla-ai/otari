@@ -8,7 +8,7 @@ This guide runs the local Docker Compose stack (Otari plus Postgres) from a clon
 
 You can give Otari its provider credentials in one of two ways. Both use the same Docker Compose stack and end at the same first request; pick whichever fits how you like to work.
 
-- **Config-first (Option A):** put your provider key in `config.yml` before starting. Best when you already have keys and want everything in one version-controllable file.
+- **Config-first (Option A):** put your provider key in `config.yml` before starting. Best when you already have keys and want them in one local config file.
 - **Dashboard-first (Option B):** start with almost nothing, then add providers from the admin dashboard in your browser. Best for trying Otari out, or when you would rather manage credentials through a UI.
 
 ## Prerequisites
@@ -16,7 +16,7 @@ You can give Otari its provider credentials in one of two ways. Both use the sam
 - Docker and Docker Compose
 - An API key for at least one LLM provider (this guide uses OpenAI)
 
-Clone the repo first; both options need the Compose file and the example config:
+Clone the repo first. Both options need the Compose file; Option A also copies the example config:
 
 ```bash
 git clone https://github.com/mozilla-ai/otari
@@ -50,6 +50,8 @@ pricing:
     input_price_per_million: 0.15
     output_price_per_million: 0.60
 ```
+
+This `config.yml` holds your master key and provider key, so treat it as a secret: it is gitignored so you will not commit it by default, and for shared deployments keep credentials out of the file entirely by using `${ENV_VAR}` interpolation or environment variables (see [Configuration](configuration.md)).
 
 The `pricing` entry matters because `require_pricing` is on by default: Otari rejects requests for any model it can't resolve a price for, so it can enforce budgets. Add a pricing entry for the model you plan to call, or enable `default_pricing: true` to use the bundled fallback pricing for common models.
 

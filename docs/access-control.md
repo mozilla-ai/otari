@@ -2,7 +2,7 @@
 
 Standalone Otari decides three things about every request: who is calling (the **user**), what credential they presented (the **API key**), and whether they have room to spend (the **budget**). This guide is a task-oriented tour of those three, with the management endpoints that drive them. Everything here is standalone-only and authenticated with the master key; hybrid mode delegates identity and spend to otari.ai.
 
-All management endpoints require the master key. Send it as `Otari-Key: <master-key>` or `Authorization: Bearer <master-key>`. The same actions are available in the dashboard's **Access** section; see the [Admin dashboard guide](dashboard.md).
+The user, key, and budget endpoints in this guide all require the master key (some other management endpoints, such as read-only pricing lookups, also accept a regular API key; see the [API reference](api-reference.md)). Send the master key as `Otari-Key: <master-key>` or `Authorization: Bearer <master-key>`. The same actions are available in the dashboard's **Access** section; see the [Admin dashboard guide](dashboard.md).
 
 ## How the pieces fit
 

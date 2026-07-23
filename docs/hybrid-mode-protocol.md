@@ -316,8 +316,8 @@ resolve response). The platform is responsible for correlating them.
 | `http_<code>` | Provider returned an HTTP status code (e.g. `http_429`, `http_401`) |
 | `unknown` | Any other exception class |
 
-The field is **omitted entirely** when Otari can't classify the failure
-back to an exception; this happens with mid-stream errors surfaced via the
+The field is **omitted entirely** when Otari can't map the failure to an
+exception class; this happens with mid-stream errors surfaced via the
 SSE channel, where only an error string is available. Treat a missing
 `error_class` as "uncategorised error" when aggregating.
 

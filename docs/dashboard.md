@@ -69,7 +69,7 @@ sign-in key and Otari never overrides it.
 If you left it unset, Otari generates one on first startup, stores only its
 hash, and prints the plaintext **once** to the logs. Look for the line:
 
-```
+```text
 Your master key: otari-mk-…
 ```
 
@@ -182,6 +182,11 @@ For how users, keys, and budgets fit together and the management endpoints behin
 - **The master key is an admin credential.** Anyone who has it can read and
   change gateway configuration through the management API. Rotate it if you
   suspect it leaked.
+- **Use HTTPS for anything but local access.** The `http://localhost:8000/`
+  examples here assume you are on the same machine (loopback). The master key
+  authorizes every management request and must never travel over cleartext HTTP,
+  so put the gateway behind HTTPS or a trusted reverse proxy before signing in
+  from another host.
 - **Session storage, not local storage.** The dashboard keeps the master key in
   the browser tab's session storage, so it does not persist across tabs or
   survive closing the tab, and signing out clears it along with any cached admin

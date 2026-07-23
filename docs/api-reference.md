@@ -139,6 +139,7 @@ into something a text-only local model can read.
 | `GET` | `/v1/keys` | List all API keys. | Master key |
 | `GET` | `/v1/keys/{key_id}` | Get a specific key. | Master key |
 | `PATCH` | `/v1/keys/{key_id}` | Update a key (name, active status, expiration, metadata). | Master key |
+| `POST` | `/v1/keys/{key_id}/rotate` | Replace a key's secret in place (id, user, name, expiry, and metadata preserved); returns the new key once. The previous secret stops working immediately. | Master key |
 | `DELETE` | `/v1/keys/{key_id}` | Revoke a key. | Master key |
 
 ### User management

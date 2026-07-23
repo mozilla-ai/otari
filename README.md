@@ -157,6 +157,8 @@ docker run --rm -p 8000:8000 \
 
 With no master key set, Otari generates one and prints it to the logs once on startup (look for `Your master key:`). Open `http://localhost:8000/`, sign in with that key, then open **Providers** and add your OpenAI key. `OTARI_SECRET_KEY` is a Fernet key that encrypts stored provider credentials at rest; back it up, because losing it makes stored keys undecryptable. Full walkthrough, including the two-key model, in the [Admin dashboard guide](docs/dashboard.md).
 
+This `--rm` container is disposable: it uses the in-container SQLite default, so the master key, the providers, keys, and budgets you create here are lost when it stops. For anything you want to keep, use [Run the full stack](#run-the-full-stack) with a Postgres database.
+
 ## Run the full stack
 
 The Quickstart runs the gateway alone on SQLite. To get a durable database plus the built-in tools and guardrails, run the full stack with Docker Compose.
