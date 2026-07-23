@@ -19,13 +19,24 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import IO, Protocol, runtime_checkable
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 
 _STREAM_CHUNK_BYTES = 1024 * 1024
+
+
+@asynccontextmanager
+async def _open_handle(path: Path, mode: str) -> AsyncIterator[IO[bytes]]:
+    """Open ``path`` off the event loop, guaranteeing the handle is closed."""
+    handle = await asyncio.to_thread(path.open, mode)
+    try:
+        yield handle
+    finally:
+        await asyncio.to_thread(handle.close)
 
 
 @runtime_checkable
@@ -121,30 +132,24 @@ class LocalDirFileStore:
 
         await asyncio.to_thread(_mkparent)
         total = 0
-        handle = await asyncio.to_thread(path.open, "wb")
         try:
-            async for chunk in chunks:
-                total += len(chunk)
-                await asyncio.to_thread(handle.write, chunk)
+            async with _open_handle(path, "wb") as handle:
+                async for chunk in chunks:
+                    total += len(chunk)
+                    await asyncio.to_thread(handle.write, chunk)
         except BaseException:
-            await asyncio.to_thread(handle.close)
             # The chunk source (e.g. the route's size-cap check) failed partway
             # through; don't leave a truncated blob with no storage_ref pointing
             # at it, since the caller never gets a ref back to clean it up.
             await asyncio.to_thread(_unlink_partial)
             raise
-        else:
-            await asyncio.to_thread(handle.close)
         return ref, total
 
     async def get_stream(self, storage_ref: str) -> AsyncIterator[bytes]:
         path = self._resolve(storage_ref)
-        handle = await asyncio.to_thread(path.open, "rb")
-        try:
+        async with _open_handle(path, "rb") as handle:
             while chunk := await asyncio.to_thread(handle.read, _STREAM_CHUNK_BYTES):
                 yield chunk
-        finally:
-            await asyncio.to_thread(handle.close)
 
     async def delete(self, storage_ref: str) -> None:
         path = self._resolve(storage_ref)
