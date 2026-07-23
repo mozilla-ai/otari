@@ -1635,6 +1635,7 @@
         "properties": {
           "cache_read_tokens": {
             "default": 0,
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Cache Read Tokens",
             "type": "integer"
@@ -1646,12 +1647,14 @@
           },
           "cache_write_1h_tokens": {
             "default": 0,
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Cache Write 1H Tokens",
             "type": "integer"
           },
           "cache_write_tokens": {
             "default": 0,
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Cache Write Tokens",
             "type": "integer"
@@ -1659,6 +1662,7 @@
           "duration_ms": {
             "anyOf": [
               {
+                "maximum": 2147483647.0,
                 "minimum": 0.0,
                 "type": "integer"
               },
@@ -1670,6 +1674,7 @@
           },
           "input_tokens": {
             "default": 0,
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Input Tokens",
             "type": "integer"
@@ -1683,6 +1688,7 @@
           },
           "output_tokens": {
             "default": 0,
+            "maximum": 2147483647.0,
             "minimum": 0.0,
             "title": "Output Tokens",
             "type": "integer"

@@ -372,3 +372,18 @@ def test_per_event_user_override(
     b = db_session.query(UsageLog).filter(UsageLog.source_event_id == "e_b").one()
     assert a.user_id == "dev-a"
     assert b.user_id == "dev-b"
+
+
+def test_rejects_reserved_gateway_source(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """An import claiming source=gateway would masquerade as native traffic."""
+    _seed_user(client, master_key_header)
+    resp = _post(client, master_key_header, [_event()], source="gateway")
+    assert resp.status_code == 422
+    assert "reserved" in resp.text
+
+
+def test_rejects_token_counts_above_column_width(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """Counts past the 32-bit column cap are a 422, not a DB error that 500s the batch."""
+    _seed_user(client, master_key_header)
+    resp = _post(client, master_key_header, [_event(input_tokens=2_147_483_648)])
+    assert resp.status_code == 422

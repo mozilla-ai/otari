@@ -448,3 +448,15 @@ def test_otlp_rejected_events_reported_via_partial_success(
     assert partial is not None
     assert int(partial["rejectedLogRecords"]) == 1
     assert db_session.query(UsageLog).filter(UsageLog.source_event_id == "req_rejected_1").count() == 0
+
+
+def test_otlp_gateway_client_name_falls_back_to_otel_source(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A client calling itself "gateway" must not masquerade as native traffic."""
+    headers = _exempt_key(client, master_key_header)
+    span = _span_record(**{"otari.client_name": "gateway", "gen_ai.response.id": "resp_reserved_1"})
+    resp = client.post("/v1/traces", json=_otlp_traces(span), headers=headers)
+    assert resp.status_code == 200, resp.text
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "resp_reserved_1").one()
+    assert row.source == "otel"

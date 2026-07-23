@@ -18,7 +18,7 @@ completions, and tool payloads are rejected by the request schema, not stored.
 from datetime import datetime
 
 from fastapi import HTTPException, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +48,12 @@ _SLUG_PATTERN = r"^[a-zA-Z0-9._:-]+$"
 # contract. Allows the punctuation real ids and model names use (`msg_...`,
 # `openai/gpt-4o`, `project:otari`, git branches) but rejects free text.
 _IDENT_PATTERN = r"^[A-Za-z0-9._:/\-]+$"
+# Cap numeric fields at the usage_logs 32-bit integer column width so absurd
+# counts are a 422, not a database error that fails the whole batch.
+_MAX_TOKENS = 2_147_483_647
+# "gateway" tags rows Otari served itself; an import claiming it would masquerade
+# as native traffic in every provenance breakdown.
+RESERVED_SOURCES = {"gateway"}
 
 
 class ExternalUsageEvent(BaseModel):
@@ -65,18 +71,21 @@ class ExternalUsageEvent(BaseModel):
     provider: str = Field(min_length=1, max_length=128, pattern=_IDENT_PATTERN)
     model: str = Field(min_length=1, max_length=256, pattern=_IDENT_PATTERN)
     status: str = Field(default="success", pattern=r"^(success|error)$")
-    input_tokens: int = Field(default=0, ge=0)
-    output_tokens: int = Field(default=0, ge=0)
-    cache_read_tokens: int = Field(default=0, ge=0)
-    cache_write_tokens: int = Field(default=0, ge=0)
-    cache_write_1h_tokens: int = Field(default=0, ge=0)
+    # Token counts are capped at the usage_logs column width (32-bit signed int);
+    # anything larger would fail the INSERT with a 500 instead of a 422, and no
+    # real request has ever been within orders of magnitude of the cap.
+    input_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
+    output_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
+    cache_read_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
+    cache_write_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
+    cache_write_1h_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
     # Whether ``input_tokens`` already includes the cache counts (OpenAI shape,
     # where ``cached_tokens`` is a subset of ``prompt_tokens``) or excludes them
     # (Anthropic / Claude Code shape, where the cache buckets are additive). The
     # cost calculation reads this to avoid double-counting cached tokens. Defaults
     # to the Anthropic shape, matching this endpoint's documented additive counts.
     cache_tokens_in_prompt: bool = Field(default=False)
-    duration_ms: int | None = Field(default=None, ge=0)
+    duration_ms: int | None = Field(default=None, ge=0, le=_MAX_TOKENS)
     session_label: str | None = Field(default=None, max_length=256, pattern=_IDENT_PATTERN)
     # Optional per-event attribution overriding the batch default. A single
     # collector feed carries many users, so per-event user_id lets one pipeline
@@ -99,6 +108,13 @@ class ExternalEventsRequest(BaseModel):
     # may be omitted. The master key must supply it (it can name any user).
     user_id: str | None = Field(default=None, min_length=1, max_length=256)
     events: list[ExternalUsageEvent] = Field(min_length=1, max_length=MAX_EVENTS_PER_BATCH)
+
+    @field_validator("source")
+    @classmethod
+    def _not_reserved(cls, value: str) -> str:
+        if value.lower() in RESERVED_SOURCES:
+            raise ValueError("source 'gateway' is reserved for usage Otari served itself; pick another slug.")
+        return value
 
 
 class ExternalIngestError(BaseModel):
@@ -393,14 +409,15 @@ async def ingest_external_events(
     # fixed handful of queries regardless of batch size (no per-event N+1). Candidate
     # attribution targets are the batch default, any per-event override, and the key's
     # own user; pricing is loaded for every distinct (provider, model) at once.
-    candidate_users = {u for u in ({request.user_id, key_user} | {e.user_id for e in request.events}) if u}
+    candidate_users = sorted(u for u in ({request.user_id, key_user} | {e.user_id for e in request.events}) if u)
     active_users: set[str] = set()
-    if candidate_users:
-        active_users = set(
+    # Chunked like the event-id and pricing lookups: a full batch with per-event
+    # user_ids can carry more candidates than SQLite's bind-variable limit.
+    for start in range(0, len(candidate_users), _IN_CHUNK):
+        chunk = candidate_users[start : start + _IN_CHUNK]
+        active_users.update(
             (
-                await db.execute(
-                    select(User.user_id).where(User.user_id.in_(candidate_users), User.deleted_at.is_(None))
-                )
+                await db.execute(select(User.user_id).where(User.user_id.in_(chunk), User.deleted_at.is_(None)))
             ).scalars().all()
         )
     pricing_index = await _load_pricing_index(db, {(e.provider, e.model) for e in request.events})

@@ -110,7 +110,7 @@ Each event:
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `source_event_id` | yes | Upstream event id. Idempotency key together with `source`. |
+| `source_event_id` | yes | Upstream event id. Idempotency key together with `source`; the scope is global per source (not per user), so one collector and per-user importers can share a feed without double-counting. Use real upstream ids, which are unguessable. |
 | `timestamp` | yes | ISO-8601. Used to resolve the effective price. |
 | `provider`, `model` | yes | Priced as `provider:model` (falls back to `provider/model`). |
 | `status` | no | `success` (default) or `error`. |
