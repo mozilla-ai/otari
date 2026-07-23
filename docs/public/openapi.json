@@ -6661,7 +6661,7 @@
     },
     "/v1/files/{file_id}/content": {
       "get": {
-        "description": "Download the raw bytes of a file.",
+        "description": "Download the raw bytes of a file, streamed rather than buffered whole.",
         "operationId": "get_file_content_v1_files__file_id__content_get",
         "parameters": [
           {
