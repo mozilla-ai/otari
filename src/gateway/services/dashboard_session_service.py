@@ -15,15 +15,26 @@ rotation.
 import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 from fastapi import Response
-from sqlalchemy import delete
+from sqlalchemy import delete, update
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import DashboardSession
+from gateway.core.config import GatewayConfig
+from gateway.log_config import logger
+from gateway.models.entities import DashboardSession, RuntimeSetting
+from gateway.services.master_key_service import hash_master_key
 
 SESSION_COOKIE_NAME = "otari_dashboard_session"
 _SESSION_TOKEN_PREFIX = "otari-sess-"
+# Stored in runtime_settings; ignored by runtime_settings_service (not a
+# SETTABLE_KEY). Hash of the master key that existing sessions were minted
+# under, so a key change across a restart revokes them (see
+# revoke_sessions_on_master_key_change).
+SESSION_KEY_MARKER = "dashboard_session_master_key_hash"
 
 
 def hash_session_token(token: str) -> str:
@@ -67,6 +78,49 @@ async def revoke_dashboard_session(db: AsyncSession, token: str) -> None:
 async def revoke_all_dashboard_sessions(db: AsyncSession) -> None:
     """Stage removal of every session (master-key rotation). The caller commits."""
     await db.execute(delete(DashboardSession))
+
+
+async def record_session_key_marker(db: AsyncSession, key_hash: str) -> None:
+    """Stage the marker naming the master key sessions are minted under.
+
+    Update-then-insert so it works whether or not the row exists yet; the
+    caller commits.
+    """
+    result = cast(
+        CursorResult[Any],
+        await db.execute(update(RuntimeSetting).where(RuntimeSetting.key == SESSION_KEY_MARKER).values(value=key_hash)),
+    )
+    if result.rowcount == 0:
+        db.add(RuntimeSetting(key=SESSION_KEY_MARKER, value=key_hash))
+
+
+async def revoke_sessions_on_master_key_change(config: GatewayConfig, db: AsyncSession) -> None:
+    """At startup, revoke every dashboard session if the master key changed.
+
+    A session only proves possession of the master key at mint time, so it must
+    not outlive the key. The generated key rotates through the dashboard, which
+    revokes sessions inline; a configured key rotates by changing
+    ``OTARI_MASTER_KEY``/config and restarting, which no request handler
+    observes. Comparing a stored hash of the effective key here closes that
+    path (and any configured/generated regime switch).
+
+    Best-effort like ``ensure_master_key``: a failure only skips this check for
+    the boot, and concurrent workers racing the first marker INSERT are benign.
+    """
+    current = hash_master_key(config.master_key) if config.master_key is not None else config._master_key_hash
+    if current is None:
+        return
+    try:
+        row = await db.get(RuntimeSetting, SESSION_KEY_MARKER)
+        if row is not None and row.value == current:
+            return
+        if row is not None:
+            await revoke_all_dashboard_sessions(db)
+        await record_session_key_marker(db, current)
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.warning("Could not check dashboard sessions against the current master key; skipping for this boot.")
 
 
 def apply_session_cookie(response: Response, token: str, expires_at: datetime, *, secure: bool) -> None:

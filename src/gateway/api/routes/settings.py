@@ -28,6 +28,7 @@ from gateway.services.dashboard_session_service import (
     SESSION_COOKIE_NAME,
     apply_session_cookie,
     create_dashboard_session,
+    record_session_key_marker,
     revoke_all_dashboard_sessions,
 )
 from gateway.services.master_key_service import (
@@ -395,6 +396,9 @@ async def rotate_master_key(
     try:
         token, hashed = await stage_generated_master_key_rotation(db, current_hash)
         await revoke_all_dashboard_sessions(db)
+        # Keep the startup key-change check in step, so a restart after this
+        # rotation does not revoke the session re-minted below.
+        await record_session_key_marker(db, hashed)
         if SESSION_COOKIE_NAME in request.cookies:
             session_token, session_expires_at = await create_dashboard_session(
                 db, config.dashboard_session_ttl_hours

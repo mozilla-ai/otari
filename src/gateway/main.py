@@ -19,6 +19,7 @@ from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
+from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
@@ -122,6 +123,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 # so the dashboard is reachable without hand-editing config, and
                 # the management API is never left unauthenticated.
                 await ensure_master_key(config, session)
+                # Dashboard sessions must not outlive the key they were minted
+                # under: revoke them all when the master key changed across a
+                # restart (e.g. OTARI_MASTER_KEY was rotated).
+                await revoke_sessions_on_master_key_change(config, session)
                 # Overlay dashboard-stored providers before pricing init, so a
                 # provider added at runtime is visible to everything that reads
                 # config.providers (pricing seeding, discovery, dispatch).

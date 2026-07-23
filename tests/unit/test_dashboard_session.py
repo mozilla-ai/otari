@@ -119,6 +119,45 @@ def test_expired_sessions_stop_authenticating(tmp_path: Path) -> None:
         assert client.get("/v1/settings").status_code == 401
 
 
+def test_sessions_survive_a_restart_but_not_a_configured_key_change(tmp_path: Path) -> None:
+    db_url = f"sqlite:///{tmp_path / 'restart.db'}"
+
+    def config_with(key: str) -> GatewayConfig:
+        return GatewayConfig(database_url=db_url, master_key=key, require_pricing=False)
+
+    with TestClient(create_app(config_with(MASTER_KEY))) as client:
+        _sign_in(client)
+        cookie = client.cookies[SESSION_COOKIE_NAME]
+
+    # Same key across a restart: the session (the whole point of #338) survives.
+    with TestClient(create_app(config_with(MASTER_KEY))) as client:
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        assert client.get("/v1/settings").status_code == 200
+
+    # Rotating OTARI_MASTER_KEY across a restart revokes every session: a
+    # session only proves possession of the old key and must die with it.
+    with TestClient(create_app(config_with("sk-rotated-master"))) as client:
+        client.cookies.set(SESSION_COOKIE_NAME, cookie)
+        assert client.get("/v1/settings").status_code == 401
+
+
+def test_rotation_then_restart_keeps_the_reminted_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_url = f"sqlite:///{tmp_path / 'rotate-restart.db'}"
+    monkeypatch.setattr(master_key_service, "generate_master_key", lambda: "otari-mk-first")
+
+    with TestClient(create_app(GatewayConfig(database_url=db_url, require_pricing=False))) as client:
+        _sign_in(client, "otari-mk-first")
+        monkeypatch.setattr(master_key_service, "generate_master_key", lambda: "otari-mk-second")
+        assert client.post("/v1/settings/master-key/rotate").status_code == 200
+        reminted = client.cookies[SESSION_COOKIE_NAME]
+
+    # The startup key-change check must recognize the rotated key as current
+    # and keep the session the rotation re-minted.
+    with TestClient(create_app(GatewayConfig(database_url=db_url, require_pricing=False))) as client:
+        client.cookies.set(SESSION_COOKIE_NAME, reminted)
+        assert client.get("/v1/settings").status_code == 200
+
+
 def test_rotation_revokes_other_sessions_and_reminting_keeps_the_caller_signed_in(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
