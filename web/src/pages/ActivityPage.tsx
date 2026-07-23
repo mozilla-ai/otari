@@ -1,4 +1,5 @@
 import { Button, Spinner } from "@heroui/react";
+import { clsx } from "clsx";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -197,6 +198,10 @@ export function ActivityPage() {
   const [apiKeyFilter, setApiKeyFilter] = useState(() => searchParams.get("api_key_id") ?? "");
   const [page, setPage] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // On mobile the status/key/user/model controls collapse behind a "Filters"
+  // toggle so they do not push the request table far down the page; desktop shows
+  // them inline. The time-range presets stay visible either way.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const filters: UsageFilters = useMemo(
     () => ({
@@ -247,6 +252,9 @@ export function ActivityPage() {
   const anyFilter = Boolean(
     statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || rangeSeconds !== null,
   );
+  // Count only the collapsible controls (not the always-visible time range) so
+  // the mobile toggle can advertise how many are active while hidden.
+  const activeFilterCount = [statusFilter, modelFilter.trim(), userFilter, apiKeyFilter].filter(Boolean).length;
 
   const pickRange = (seconds: number | null) => {
     setRangeSeconds(seconds);
@@ -310,7 +318,9 @@ export function ActivityPage() {
       <ErrorBanner error={usage.error ?? count.error} />
 
       {/* Filters. The time-range presets share a row with the filter boxes when the
-          window is wide enough, and wrap onto their own line when it is not. */}
+          window is wide enough, and wrap onto their own line when it is not. On
+          mobile the boxes collapse behind the "Filters" toggle to keep the table
+          near the top. */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-wrap gap-2">
           {TIME_PRESETS.map((preset) => (
@@ -324,7 +334,20 @@ export function ActivityPage() {
             </Button>
           ))}
         </div>
-        <div className="flex flex-wrap items-end gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="md:hidden"
+          onPress={() => setFiltersOpen((open) => !open)}
+          aria-expanded={filtersOpen}
+          aria-controls="activity-filters"
+        >
+          Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
+        </Button>
+        <div
+          id="activity-filters"
+          className={clsx("flex-wrap items-end gap-3 md:flex", filtersOpen ? "flex w-full md:w-auto" : "hidden")}
+        >
           <FilterSelect id="filter-status" label="Status" value={statusFilter} onChange={setStatusFilter}>
             {STATUS_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>

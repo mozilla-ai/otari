@@ -41,10 +41,13 @@ export function StatCard({
 }) {
   const accent = status ? `border-l-4 ${STAT_STATUS[status].accent}` : "";
   const body = (
-    <Card.Content className="flex flex-col gap-1 p-5">
+    // p-0 on the Card zeroes HeroUI's own card padding so it doesn't stack with
+    // Card.Content's, which otherwise doubled the tile's height (most visible at
+    // two-up on mobile). Content owns the padding: tighter on mobile, roomier up.
+    <Card.Content className="flex flex-col gap-1 p-4 sm:p-5">
       <span className="text-xs font-medium uppercase tracking-wide text-[var(--otari-muted)]">{label}</span>
       <span className="flex flex-wrap items-center gap-2">
-        <span className="text-2xl font-semibold text-[var(--otari-ink)]">{value}</span>
+        <span className="text-xl font-semibold text-[var(--otari-ink)] sm:text-2xl">{value}</span>
         {status && statusLabel ? (
           <span
             className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${STAT_STATUS[status].pill}`}
@@ -57,7 +60,10 @@ export function StatCard({
       {chart ? <div className="mt-2">{chart}</div> : null}
     </Card.Content>
   );
-  const cardClass = `flex-1 min-w-[180px] ${accent}`;
+  // min-w-0 (not a fixed min) so the tile fits its grid track: with
+  // grid-cols-2's minmax(0,1fr) columns, a larger min-width would overflow the
+  // track and overlap the neighbouring tile on narrow (mobile) viewports.
+  const cardClass = `flex-1 min-w-0 p-0 ${accent}`;
   if (to) {
     return (
       <Card className={`${cardClass} transition-colors hover:border-[var(--otari-brand)]`}>

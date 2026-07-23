@@ -368,8 +368,10 @@ export function UsagePage() {
         </div>
       ) : (
         <>
-          {/* Tiles */}
-          <div className="flex flex-wrap gap-4">
+          {/* Tiles. A responsive grid rather than flex-wrap so two fit per row on
+              mobile (a fixed-min flex child would wrap one-up), widening to three
+              then four as the viewport grows. */}
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
             <StatCard
               label="Tracked cost"
               value={totals ? formatUsd(totals.cost) : "—"}
