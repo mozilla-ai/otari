@@ -18,31 +18,20 @@ Put one endpoint in front of 40+ providers, then manage API keys, enforce budget
 
 </div>
 <p align="center">
-  <img src="assets/otari-demo.gif" width="720" alt="Start the Otari gateway, make a request, see it metered"/>
+  <img src="assets/otari-demo.gif" width="720" alt="A tour of the Otari admin dashboard: spend and usage analytics, providers, models, users, budgets, and API keys"/>
 </p>
 
 Otari is the proxy server at the heart of [otari.ai](https://otari.ai). Your apps talk to Otari, which routes to your providers. Otari authenticates each request, enforces budgets before the call runs, resolves your provider credential, forwards the request, and logs the usage. Run it yourself and your provider keys and usage data stay in your environment. Or connect it to otari.ai and the platform runs it for you.
 
-```
-                  Your apps / SDKs / OpenAI clients
-                                │
-                       One OpenAI-compatible
-                          endpoint  (:8000)
-                                ▼
-      ┌─────────────────────────────────────────────────┐
-      │                      Otari                       │
-      │    auth · virtual keys · budgets · usage log     │
-      │          guardrails · built-in tools             │
-      └─────────────────────────────────────────────────┘
-                                │
-                    any-llm routing (40+ providers)
-                                ▼
-        OpenAI   Anthropic   Mistral   Gemini   llamafile  …
-```
+<!-- Rendered from assets/architecture.mmd (kept in the repo). Regenerate with:
+     npx -y @mermaid-js/mermaid-cli -i assets/architecture.mmd -o assets/architecture.png -b transparent -s 3 -->
+<p align="center">
+  <img src="assets/architecture.png" width="560" alt="Otari sits between your apps and your providers: OpenAI and Anthropic SDKs call Otari, which handles auth, virtual keys, budgets, usage logging, guardrails, and built-in tools, then routes via any-llm to 40+ providers including OpenAI, Anthropic, and llamafile"/>
+</p>
 
 ## Why Otari
 
-- **One endpoint, many providers.** A single OpenAI-compatible URL in front of 40+ providers via [any-llm](https://github.com/mozilla-ai/any-llm), so client code doesn't need to know which provider serves a request.
+- **One endpoint, many providers.** A single URL that speaks the OpenAI and Anthropic APIs, in front of 40+ providers via [any-llm](https://github.com/mozilla-ai/any-llm), so client code doesn't need to know which provider serves a request.
 - **Your keys stay yours.** Provider credentials live in one place you control. Clients get virtual keys you can scope and revoke.
 - **Cost control before the spend.** Per-user and per-key budgets are enforced before a request runs, not reconciled after the bill.
 - **Everything is tracked.** Usage and spend are logged across every model and app, queryable through `/v1/usage`.

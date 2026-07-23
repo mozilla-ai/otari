@@ -1,0 +1,50 @@
+# Gateway config for recording the README dashboard GIF. SQLite so there is no
+# external dependency; a fixed master key so the login step is deterministic.
+# See scripts/demo_gif/record.sh for the full pipeline.
+database_url: "sqlite:///./scripts/demo_gif/demo.db"
+host: "127.0.0.1"
+port: 8000
+master_key: "otari-demo-key"
+# Show pricing/usage without gating requests behind the pricing requirement.
+require_pricing: false
+# Fail model discovery fast: these providers have no live upstream, so the
+# gateway falls back to each instance's declared `models:` list (below) and
+# reports them healthy for the demo.
+model_discovery_timeout_seconds: 2
+
+# Demo providers. Each declares the models it serves, so the dashboard lists them
+# and reports the provider healthy via the declared-models fallback even though
+# there is no reachable upstream (the api_base points at a closed local port so
+# any live list_models attempt fails instantly). Keys are placeholders.
+providers:
+  openai:
+    provider_type: openai
+    api_key: sk-demo-openai-placeholder
+    api_base: "http://127.0.0.1:9/v1"
+    models:
+      - gpt-5.6
+      - gpt-4o-mini
+  anthropic:
+    provider_type: anthropic
+    api_key: sk-demo-anthropic-placeholder
+    api_base: "http://127.0.0.1:9"
+    models:
+      - claude-sonnet-5
+  google:
+    provider_type: gemini
+    api_key: demo-gemini-placeholder
+    api_base: "http://127.0.0.1:9"
+    models:
+      - gemini-2.5-flash
+  groq:
+    provider_type: groq
+    api_key: gsk-demo-groq-placeholder
+    api_base: "http://127.0.0.1:9/v1"
+    models:
+      - llama-3.3-70b
+  mistral:
+    provider_type: mistral
+    api_key: demo-mistral-placeholder
+    api_base: "http://127.0.0.1:9/v1"
+    models:
+      - mistral-large
