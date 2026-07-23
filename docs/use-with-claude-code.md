@@ -111,6 +111,13 @@ per model call carrying token counts, the model, and a request id, but no prompt
 response content. Otari accepts those directly at `POST /v1/logs`, so no separate
 collector is required.
 
+> **Route or export, not both.** Telemetry import is for sessions that do NOT proxy
+> through Otari. If a session sets `ANTHROPIC_BASE_URL` to Otari and also exports
+> telemetry to it, every call lands twice: once as `source = gateway` (enforced,
+> counts toward budget) and once as `source = claude_code` (exempt observability).
+> The two rows are not correlated, so budgets and `spend` stay correct, but cost
+> analytics count the same traffic twice. Pick one path per session.
+
 ### 1. Get a budget-exempt import key (admin, once)
 
 Imported usage is retrospective, so Otari can never block it, which is why an import

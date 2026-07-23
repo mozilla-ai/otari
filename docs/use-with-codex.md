@@ -12,6 +12,13 @@ gateway does not serve the OTLP endpoints, so the export 404s there). See
 [Importing external usage](external-usage.md) for the shared pricing, idempotency,
 and budget-exempt rules; this page is just the Codex setup.
 
+> **Route or export, not both.** Telemetry import is for sessions that do NOT proxy
+> through Otari. If Codex both routes its API traffic through Otari and exports
+> telemetry to it, every call lands twice: once as `source = gateway` (enforced,
+> counts toward budget) and once as `source = codex` (exempt observability). The two
+> rows are not correlated, so budgets and `spend` stay correct, but cost analytics
+> count the same traffic twice. Pick one path per session.
+
 ## 1. Get a budget-exempt import key (admin, once)
 
 Imported usage is retrospective, so Otari can never block it, which is why an import
