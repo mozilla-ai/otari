@@ -1,8 +1,11 @@
 """Tests for genai-prices-backed default pricing (default_model_pricing)."""
 
 from datetime import UTC, datetime
+from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
+from genai_prices.types import Tier, TieredPrices
 
 from gateway.services import pricing_service
 from gateway.services.pricing_service import (
@@ -135,3 +138,21 @@ def test_default_pricing_is_transient_not_a_session_object() -> None:
     assert pricing.effective_at == as_of
     assert pricing.input_price_per_million > 0
     assert pricing.output_price_per_million > 0
+
+
+def test_genai_tiers_are_preserved_as_whole_request_thresholds() -> None:
+    """Default pricing must retain, rather than flatten, long-context cliffs."""
+    price = SimpleNamespace(
+        input_mtok=TieredPrices(Decimal("2"), [Tier(start=200_000, price=Decimal("4"))]),
+        output_mtok=TieredPrices(Decimal("8"), [Tier(start=200_000, price=Decimal("12"))]),
+        cache_read_mtok=None,
+        cache_write_mtok=None,
+    )
+
+    assert pricing_service._pricing_tiers(price) == [
+        {
+            "min_input_tokens": 200_000,
+            "input_price_per_million": 4.0,
+            "output_price_per_million": 12.0,
+        }
+    ]

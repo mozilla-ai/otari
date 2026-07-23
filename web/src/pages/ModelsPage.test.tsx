@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
+import * as apiClient from "@/api/client";
 import type {
   AliasResponse,
   DiscoverableModelsResponse,
@@ -15,8 +15,6 @@ import type {
   ModelMetadataResponse,
   ModelObject,
   PricingResponse,
-  ProviderCapabilities,
-  ProvidersResponse,
 } from "@/api/types";
 import { ModelsPage } from "@/pages/ModelsPage";
 
@@ -93,48 +91,6 @@ const DISCOVERABLE: DiscoverableModelsResponse = {
       ok: true,
       error: null,
       models: [{ id: "claude-sonnet-4", key: "anthropic:claude-sonnet-4" }],
-    },
-  ],
-};
-
-function caps(overrides: Partial<ProviderCapabilities>): ProviderCapabilities {
-  return {
-    streaming: false,
-    reasoning: false,
-    vision: false,
-    pdf: false,
-    embeddings: false,
-    image_generation: false,
-    audio: false,
-    rerank: false,
-    responses_api: false,
-    moderation: false,
-    list_models: false,
-    ...overrides,
-  };
-}
-
-const PROVIDERS: ProvidersResponse = {
-  providers: [
-    {
-      instance: "openai",
-      provider_type: "openai",
-      name: "OpenAI",
-      doc_url: "https://platform.openai.com/docs",
-      description: "OpenAI models.",
-      env_key: "OPENAI_API_KEY",
-      pricing_urls: ["https://openai.com/pricing"],
-      capabilities: caps({ vision: true, streaming: true, embeddings: true, list_models: true }),
-    },
-    {
-      instance: "anthropic",
-      provider_type: "anthropic",
-      name: "Anthropic",
-      doc_url: "https://docs.anthropic.com",
-      description: null,
-      env_key: "ANTHROPIC_API_KEY",
-      pricing_urls: [],
-      capabilities: caps({ reasoning: true, streaming: true }),
     },
   ],
 };
@@ -218,69 +174,50 @@ function renderWithClient(ui: ReactElement, initialEntries: string[] = ["/"]) {
   );
 }
 
-function notFound(): Response {
-  return new Response(JSON.stringify({ detail: "Model not found" }), {
-    status: 404,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
-}
-
 function mockApi(
   opts: {
-    post?: (url: string) => Response;
+    post?: (url: string) => unknown;
     catalog?: ModelListResponse;
     pricing?: PricingResponse[];
     aliases?: AliasResponse[];
     discoverable?: DiscoverableModelsResponse;
-    providers?: ProvidersResponse;
     metadata?: ModelMetadataResponse;
   } = {},
 ) {
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+  return vi.spyOn(apiClient, "apiFetch").mockImplementation(async (input, init) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
     if (method === "POST") {
-      return opts.post ? opts.post(url) : jsonResponse(PRICED);
+      return (opts.post ? opts.post(url) : PRICED) as never;
     }
     if (method === "DELETE") {
-      return jsonResponse(null);
+      return null as never;
     }
     if (url.includes("/v1/settings")) {
-      return jsonResponse(SETTINGS);
-    }
-    if (url.includes("/v1/providers")) {
-      return jsonResponse(opts.providers ?? PROVIDERS);
+      return SETTINGS as never;
     }
     // Specific /v1/models/* routes before the /v1/models/ catch-all (which 404s,
     // matching the server's route order).
     if (url.includes("/v1/models/discoverable")) {
-      return jsonResponse(opts.discoverable ?? DISCOVERABLE);
+      return (opts.discoverable ?? DISCOVERABLE) as never;
     }
     if (url.includes("/v1/models/metadata")) {
-      return jsonResponse(opts.metadata ?? METADATA);
+      return (opts.metadata ?? METADATA) as never;
     }
     if (url.includes("/v1/aliases")) {
-      return jsonResponse(opts.aliases ?? ALIASES);
+      return (opts.aliases ?? ALIASES) as never;
     }
     if (url.includes("/v1/models/")) {
-      return notFound();
+      throw new Error("Model not found");
     }
     if (url.includes("/v1/models")) {
-      return jsonResponse(opts.catalog ?? CATALOG);
+      return (opts.catalog ?? CATALOG) as never;
     }
     if (url.includes("/v1/pricing")) {
-      return jsonResponse(opts.pricing ?? [PRICED]);
+      return (opts.pricing ?? [PRICED]) as never;
     }
-    return jsonResponse([]);
+    return [] as never;
   });
-}
-
-async function openPriceForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole("button", { name: /Price a model not listed here/i }));
 }
 
 // Selects a model row and returns the detail panel scoped for assertions.
@@ -298,14 +235,14 @@ function modelOrder(): string[] {
 
 describe("ModelsPage", () => {
   beforeEach(() => {
-    setMasterKey("test-master-key");
+    apiClient.setMasterKey("test-master-key");
     // The page persists sort choice in localStorage; start each test clean so
     // one test's sort does not leak into the next.
     window.localStorage.clear();
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    setMasterKey(null);
+    apiClient.setMasterKey(null);
     window.localStorage.clear();
   });
 
@@ -322,14 +259,14 @@ describe("ModelsPage", () => {
 
   // -- model list ----------------------------------------------------------
 
-  it("lists models with their context window", async () => {
+  it("does not show a context column in the model table", async () => {
     mockApi();
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    expect(within(tableRow("openai:gpt-4o")).getByText("128K")).toBeInTheDocument();
-    expect(within(tableRow("anthropic:claude-sonnet-4")).getByText("200K")).toBeInTheDocument();
+    expect(within(table()).queryByRole("columnheader", { name: "Context" })).not.toBeInTheDocument();
+    expect(within(tableRow("openai:gpt-4o")).queryByText("128K")).not.toBeInTheDocument();
   });
 
   it("surfaces the default-pricing note as a tooltip on the pricing column, not a banner", async () => {
@@ -378,10 +315,7 @@ describe("ModelsPage", () => {
     expect(within(detail).getByText("128K")).toBeInTheDocument();
     expect(within(detail).getByText("2023-09")).toBeInTheDocument();
     expect(within(detail).getByText("Tool calling")).toBeInTheDocument();
-    // Provider block: name, a provider capability, and the discovered model count.
-    expect(within(detail).getByText("OpenAI")).toBeInTheDocument();
-    expect(within(detail).getByText("Vision")).toBeInTheDocument();
-    expect(within(detail).getByText(/2 models reported/)).toBeInTheDocument();
+    expect(within(detail).queryByText("Provider")).not.toBeInTheDocument();
   });
 
   it("filters the model list by search", async () => {
@@ -481,6 +415,24 @@ describe("ModelsPage", () => {
     expect(within(table()).queryByText("openai:gpt-4o-mini")).not.toBeInTheDocument();
   });
 
+  it("treats missing input modalities as not matching a modality filter", async () => {
+    const withoutModalities = {
+      ...METADATA,
+      models: {
+        ...METADATA.models,
+        "openai:gpt-4o": { ...METADATA.models["openai:gpt-4o"], input_modalities: undefined },
+      },
+    } as unknown as ModelMetadataResponse;
+    mockApi({ metadata: withoutModalities });
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+    await user.selectOptions(screen.getByLabelText("Filter by capability"), "Vision");
+
+    expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument();
+  });
+
   it("explains an empty list is due to filters, not missing credentials", async () => {
     mockApi();
     const user = userEvent.setup();
@@ -514,7 +466,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    await user.click(screen.getByRole("button", { name: /In \/ Out \$ \/ 1M/ }));
+    await user.click(screen.getByRole("button", { name: /Base in \/ out \$ \/ 1M/ }));
 
     const order = modelOrder();
     const miniIndex = order.findIndex((text) => text.includes("gpt-4o-mini"));
@@ -562,7 +514,7 @@ describe("ModelsPage", () => {
     expect(base).toBeLessThan(claude);
   });
 
-  it("paginates a long model list", async () => {
+  it("defaults to 15 models per page and lets operators change the page size", async () => {
     const models = Array.from({ length: 30 }, (_, i) => {
       const id = `m${String(i).padStart(2, "0")}`;
       return { id, key: `openai:${id}` };
@@ -577,6 +529,11 @@ describe("ModelsPage", () => {
 
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:m00");
+
+    expect(within(table()).getByText("openai:m14")).toBeInTheDocument();
+    expect(within(table()).queryByText("openai:m15")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Rows per page"), "25");
 
     expect(within(table()).getByText("openai:m24")).toBeInTheDocument();
     expect(within(table()).queryByText("openai:m25")).not.toBeInTheDocument();
@@ -626,7 +583,7 @@ describe("ModelsPage", () => {
     });
   });
 
-  it("sets cache prices from the detail panel", async () => {
+  it("sets cache, TTL, and long-context prices from the detail panel", async () => {
     const fetchMock = mockApi();
     const user = userEvent.setup();
 
@@ -637,6 +594,11 @@ describe("ModelsPage", () => {
     await user.click(within(detail).getByRole("button", { name: "Edit price" }));
     await user.type(within(detail).getByLabelText("Cache read price for openai:gpt-4o"), "0.3");
     await user.type(within(detail).getByLabelText("Cache write price for openai:gpt-4o"), "3.75");
+    await user.type(within(detail).getByLabelText("1 hour cache write price for openai:gpt-4o"), "6");
+    await user.click(within(detail).getByRole("button", { name: "Add tier" }));
+    await user.clear(within(detail).getByLabelText("Tier context threshold"));
+    await user.type(within(detail).getByLabelText("Tier context threshold"), "200000");
+    await user.type(within(detail).getByLabelText("Tier input price"), "6");
     await user.click(within(detail).getByRole("button", { name: "Save" }));
 
     const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "POST");
@@ -645,6 +607,8 @@ describe("ModelsPage", () => {
       model_key: "openai:gpt-4o",
       cache_read_price_per_million: 0.3,
       cache_write_price_per_million: 3.75,
+      cache_write_1h_price_per_million: 6,
+      pricing_tiers: [{ min_input_tokens: 200000, input_price_per_million: 6 }],
     });
   });
 
@@ -661,21 +625,95 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("anthropic:claude-sonnet-4");
 
-    expect(screen.getByRole("columnheader", { name: "Cache r / w $ / 1M" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Caching policy" })).toBeInTheDocument();
 
-    // The cache cell shows both numbers as clickable edit affordances.
+    // The compact cache-policy cell keeps the table readable while opening the
+    // full structured editor on click.
     const row = tableRow("anthropic:claude-sonnet-4");
-    expect(within(row).getByRole("button", { name: "Edit cache read price for anthropic:claude-sonnet-4" })).toHaveTextContent(
-      "$0.30",
+    expect(within(row).getByRole("button", { name: "Edit caching price for anthropic:claude-sonnet-4" })).toHaveTextContent(
+      "R $0.30 · W $3.75",
     );
-    expect(
-      within(row).getByRole("button", { name: "Edit cache write price for anthropic:claude-sonnet-4" }),
-    ).toHaveTextContent("$3.75");
 
     const detail = await selectModel(user, "anthropic:claude-sonnet-4");
     expect(within(detail).getByText("Cache read")).toBeInTheDocument();
     expect(within(detail).getByText("$0.30 / 1M")).toBeInTheDocument();
     expect(within(detail).getByText("$3.75 / 1M")).toBeInTheDocument();
+  });
+
+  it("compares effective rates at a selected context threshold", async () => {
+    mockApi({
+      pricing: [
+        {
+          ...PRICED,
+          pricing_tiers: [
+            {
+              min_input_tokens: 200000,
+              input_price_per_million: 5,
+              output_price_per_million: 20,
+              cache_read_price_per_million: 0.5,
+            },
+          ],
+        },
+      ],
+    });
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    await user.selectOptions(screen.getByLabelText("Compare prices at context"), "200000");
+
+    expect(screen.getByRole("columnheader", { name: /at 200K in \/ out \$ \/ 1M/ })).toBeInTheDocument();
+    const row = tableRow("openai:gpt-4o");
+    expect(within(row).getByRole("button", { name: "Edit input price for openai:gpt-4o" })).toHaveTextContent("$5.00");
+    expect(within(row).getByRole("button", { name: "Edit pricing policy for openai:gpt-4o" })).toHaveTextContent(
+      "1 tier · ≥ 200K",
+    );
+  });
+
+  it("orders pricing-policy thresholds by their underlying token count", async () => {
+    mockApi({
+      pricing: [
+        {
+          ...PRICED,
+          pricing_tiers: [
+            { min_input_tokens: 1_000_000, input_price_per_million: 6 },
+            { min_input_tokens: 999_000, input_price_per_million: 5 },
+          ],
+        },
+      ],
+    });
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    expect(within(tableRow("openai:gpt-4o")).getByRole("button", { name: "Edit pricing policy for openai:gpt-4o" })).toHaveTextContent(
+      "2 tiers · ≥ 999K, 1M",
+    );
+  });
+
+  it("removes the repeated provider instance from a model's visible name", async () => {
+    mockApi({
+      catalog: {
+        object: "list",
+        data: [catalogModel("homelab:work-anthropic:claude-sonnet-5", "homelab", "none", null, 200000)],
+      },
+      pricing: [],
+      discoverable: { providers: [] },
+      metadata: { source: "models.dev", available: true, models: {} },
+    });
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("homelab:work-anthropic:claude-sonnet-5");
+
+    const row = tableRow("homelab:work-anthropic:claude-sonnet-5");
+    expect(within(row).getByText("work-anthropic:claude-sonnet-5")).toBeInTheDocument();
+    expect(within(row).getByText("homelab")).toBeInTheDocument();
+
+    const detail = await selectModel(user, "homelab:work-anthropic:claude-sonnet-5");
+    expect(within(detail).getByText(/Selector:/)).toBeInTheDocument();
+    expect(within(detail).getByText("homelab:work-anthropic:claude-sonnet-5")).toBeInTheDocument();
   });
 
   it("opens the inline editor by clicking a price number and saves cache rates", async () => {
@@ -716,48 +754,4 @@ describe("ModelsPage", () => {
     expect(screen.queryByRole("button", { name: /backfill/i })).not.toBeInTheDocument();
   });
 
-  // -- Price an unlisted model: the picker -----------------------------------
-
-  it("offers discovered models in the picker and puts the full selector in the field", async () => {
-    mockApi();
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("openai:gpt-4o");
-    await openPriceForm(user);
-
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.type(picker, "4o-mini");
-    const option = await screen.findByRole("option", { name: "openai:gpt-4o-mini" });
-    await user.click(option);
-    expect(picker).toHaveValue("openai:gpt-4o-mini");
-  });
-
-  it("keeps a model the picker never offered typeable", async () => {
-    mockApi();
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
-    const user = userEvent.setup();
-
-    renderWithClient(<ModelsPage />);
-    await screen.findByText("openai:gpt-4o");
-    await openPriceForm(user);
-
-    const picker = screen.getByRole("combobox", { name: /model/i });
-    await user.type(picker, "bedrock:claude-3-sonnet");
-    expect(picker).toHaveValue("bedrock:claude-3-sonnet");
-    await user.keyboard("{Escape}");
-
-    await user.type(screen.getByLabelText(/input price per million/i), "1");
-    await user.type(screen.getByLabelText(/output price per million/i), "2");
-    await user.click(screen.getByRole("button", { name: /save price/i }));
-
-    const post = fetchSpy.mock.calls.find(
-      ([url, init]) => String(url).includes("/v1/pricing") && init?.method === "POST",
-    );
-    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
-      model_key: "bedrock:claude-3-sonnet",
-      input_price_per_million: 1,
-      output_price_per_million: 2,
-    });
-  });
 });

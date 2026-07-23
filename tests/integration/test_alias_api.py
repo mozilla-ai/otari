@@ -298,6 +298,8 @@ def test_stored_alias_inherits_its_targets_price(client: TestClient) -> None:
         "output_price_per_million": 5.0,
         "cache_read_price_per_million": None,
         "cache_write_price_per_million": None,
+        "cache_write_1h_price_per_million": None,
+        "pricing_tiers": [],
     }
 
 

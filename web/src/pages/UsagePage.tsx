@@ -1,9 +1,8 @@
 import { Button, Spinner } from "@heroui/react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { apiFetchBlob } from "@/api/client";
-import { useUsageSummary, usageSummaryCsvUrl, useUsers } from "@/api/hooks";
+import { useUsageSummary, useUsers } from "@/api/hooks";
 import type { UsageBucket, UsageFilters, UsageGroupRow, UsageSeriesPoint } from "@/api/types";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { DeltaHint, ErrorBanner, FilterComboBox, PageHeader, StatCard } from "@/components/ui";
@@ -249,8 +248,6 @@ export function UsagePage() {
   const [modelFilter, setModelFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [metric, setMetric] = useState<ChartMetric>("cost");
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
 
   const filters: UsageFilters = useMemo(
     () => ({
@@ -302,10 +299,6 @@ export function UsagePage() {
   // these filters": the first is an onboarding state, the second is a filter hint.
   const isEmptyEver = Boolean(data && totals && totals.request_count === 0 && !anyFilter);
 
-  useEffect(() => {
-    setExportError(null);
-  }, [filters]);
-
   const pickPreset = (next: Preset) => {
     setPreset(next);
     setStartDate(next.seconds === null ? undefined : isoAgo(next.seconds));
@@ -335,24 +328,6 @@ export function UsagePage() {
     navigate(`/activity?${search.toString()}`);
   };
 
-  const exportCsv = async () => {
-    setExporting(true);
-    setExportError(null);
-    try {
-      const blob = await apiFetchBlob(usageSummaryCsvUrl(filters));
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = "usage-summary.csv";
-      anchor.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      setExportError(error instanceof Error ? error.message : "Export failed.");
-    } finally {
-      setExporting(false);
-    }
-  };
-
   const errorRate = totals && totals.request_count > 0 ? totals.error_count / totals.request_count : 0;
 
   return (
@@ -361,22 +336,13 @@ export function UsagePage() {
         title="Usage & analytics"
         description="Aggregate spend, tokens, and request volume over time. Click a model or user to drill into the request log."
         action={
-          <>
-            <Button variant="outline" onPress={refresh} isDisabled={summary.isFetching}>
-              Refresh
-            </Button>
-            <Button
-              variant="outline"
-              onPress={() => void exportCsv()}
-              isDisabled={exporting || !totals || totals.request_count === 0}
-            >
-              {exporting ? "Exporting…" : "Export CSV"}
-            </Button>
-          </>
+          <Button variant="outline" onPress={refresh} isDisabled={summary.isFetching}>
+            Refresh
+          </Button>
         }
       />
 
-      <ErrorBanner error={summary.error ?? (exportError ? new Error(exportError) : null)} />
+      <ErrorBanner error={summary.error} />
 
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3">
@@ -465,6 +431,17 @@ export function UsagePage() {
               hint={
                 totals ? (
                   <DeltaHint fraction={deltaFraction(totals.cache_write_tokens, prevTotals?.cache_write_tokens)} />
+                ) : null
+              }
+            />
+            <StatCard
+              label="1h cache write"
+              value={totals ? formatTokens(totals.cache_write_1h_tokens ?? 0) : "—"}
+              hint={
+                totals ? (
+                  <DeltaHint
+                    fraction={deltaFraction(totals.cache_write_1h_tokens ?? 0, prevTotals?.cache_write_1h_tokens ?? 0)}
+                  />
                 ) : null
               }
             />

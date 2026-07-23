@@ -24,10 +24,11 @@ def _reset_default_pricing() -> Generator[None, None, None]:
     Also clear the memoized genai-prices resolutions so a real price cached by one
     test cannot mask another test that patches ``calc_price`` to fail.
     """
-    from gateway.services.pricing_service import configure_default_pricing, reset_price_cache
+    from gateway.services.pricing_refresh_service import reset_price_refresh_state
+    from gateway.services.pricing_service import configure_default_pricing
 
     configure_default_pricing(False)
-    reset_price_cache()
+    reset_price_refresh_state()
     yield
     configure_default_pricing(False)
-    reset_price_cache()
+    reset_price_refresh_state()

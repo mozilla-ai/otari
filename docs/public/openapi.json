@@ -2466,6 +2466,17 @@
             ],
             "title": "Cache Read Price Per Million"
           },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
+          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -2484,6 +2495,23 @@
           "output_price_per_million": {
             "title": "Output Price Per Million",
             "type": "number"
+          },
+          "pricing_tiers": {
+            "items": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "title": "Pricing Tiers",
+            "type": "array"
           }
         },
         "required": [
@@ -2625,6 +2653,85 @@
         "title": "ModerationResult",
         "type": "object"
       },
+      "PricingRefreshChangeResponse": {
+        "description": "One default model price changed by a pending refresh.",
+        "properties": {
+          "change": {
+            "title": "Change",
+            "type": "string"
+          },
+          "model_key": {
+            "title": "Model Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_key",
+          "change"
+        ],
+        "title": "PricingRefreshChangeResponse",
+        "type": "object"
+      },
+      "PricingRefreshConfirmationResponse": {
+        "description": "Result of activating a reviewed genai-prices refresh.",
+        "properties": {
+          "applied": {
+            "default": true,
+            "title": "Applied",
+            "type": "boolean"
+          }
+        },
+        "title": "PricingRefreshConfirmationResponse",
+        "type": "object"
+      },
+      "PricingRefreshPreviewResponse": {
+        "description": "Reviewable summary of a pending genai-prices refresh.",
+        "properties": {
+          "added_count": {
+            "title": "Added Count",
+            "type": "integer"
+          },
+          "changed_count": {
+            "title": "Changed Count",
+            "type": "integer"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/PricingRefreshChangeResponse"
+            },
+            "title": "Changes",
+            "type": "array"
+          },
+          "changes_truncated": {
+            "title": "Changes Truncated",
+            "type": "boolean"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "protected_model_count": {
+            "title": "Protected Model Count",
+            "type": "integer"
+          },
+          "removed_count": {
+            "title": "Removed Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fetched_at",
+          "added_count",
+          "changed_count",
+          "removed_count",
+          "protected_model_count",
+          "changes",
+          "changes_truncated"
+        ],
+        "title": "PricingRefreshPreviewResponse",
+        "type": "object"
+      },
       "PricingResponse": {
         "description": "Response model for model pricing.",
         "properties": {
@@ -2638,6 +2745,17 @@
               }
             ],
             "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -2670,6 +2788,13 @@
             "title": "Output Price Per Million",
             "type": "number"
           },
+          "pricing_tiers": {
+            "items": {
+              "$ref": "#/components/schemas/PricingTier"
+            },
+            "title": "Pricing Tiers",
+            "type": "array"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
@@ -2682,10 +2807,87 @@
           "output_price_per_million",
           "cache_read_price_per_million",
           "cache_write_price_per_million",
+          "cache_write_1h_price_per_million",
+          "pricing_tiers",
           "created_at",
           "updated_at"
         ],
         "title": "PricingResponse",
+        "type": "object"
+      },
+      "PricingTier": {
+        "description": "Whole-request price cliff selected by total billable input tokens.",
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "min_input_tokens": {
+            "exclusiveMinimum": 0.0,
+            "title": "Min Input Tokens",
+            "type": "integer"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          }
+        },
+        "required": [
+          "min_input_tokens"
+        ],
+        "title": "PricingTier",
         "type": "object"
       },
       "ProviderCapabilitiesSchema": {
@@ -3459,7 +3661,7 @@
         "type": "object"
       },
       "SetPricingRequest": {
-        "description": "Request model for setting model pricing.",
+        "description": "Create a versioned per-model price, with optional cache and context tiers.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -3473,6 +3675,19 @@
             ],
             "description": "Price per 1M cached-input tokens",
             "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price per 1M Anthropic 1-hour cache-write tokens",
+            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -3516,6 +3731,21 @@
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
+          },
+          "pricing_tiers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PricingTier"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
+            "title": "Pricing Tiers"
           }
         },
         "required": [
@@ -4368,6 +4598,18 @@
             ],
             "title": "Api Key Id"
           },
+          "billing_meters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Billing Meters"
+          },
           "cache_read_tokens": {
             "anyOf": [
               {
@@ -4378,6 +4620,17 @@
               }
             ],
             "title": "Cache Read Tokens"
+          },
+          "cache_write_1h_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Tokens"
           },
           "cache_write_tokens": {
             "anyOf": [
@@ -4446,6 +4699,33 @@
             "title": "Model",
             "type": "string"
           },
+          "pricing_breakdown": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricing Breakdown"
+          },
           "prompt_tokens": {
             "anyOf": [
               {
@@ -4512,6 +4792,9 @@
           "total_tokens",
           "cache_read_tokens",
           "cache_write_tokens",
+          "cache_write_1h_tokens",
+          "billing_meters",
+          "pricing_breakdown",
           "cost",
           "status",
           "error_message",
@@ -4814,6 +5097,10 @@
             "title": "Cache Read Tokens",
             "type": "integer"
           },
+          "cache_write_1h_tokens": {
+            "title": "Cache Write 1H Tokens",
+            "type": "integer"
+          },
           "cache_write_tokens": {
             "title": "Cache Write Tokens",
             "type": "integer"
@@ -4850,6 +5137,7 @@
           "total_tokens",
           "cache_read_tokens",
           "cache_write_tokens",
+          "cache_write_1h_tokens",
           "request_count",
           "error_count",
           "avg_latency_ms"
@@ -7247,6 +7535,89 @@
           }
         ],
         "summary": "Set Pricing",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/v1/pricing/refresh": {
+      "post": {
+        "description": "Fetch the latest defaults and hold them for operator review.",
+        "operationId": "preview_pricing_refresh_v1_pricing_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRefreshPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Preview Pricing Refresh",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/v1/pricing/refresh/confirm": {
+      "post": {
+        "description": "Activate the latest reviewed default-price snapshot.",
+        "operationId": "confirm_pricing_refresh_v1_pricing_refresh_confirm_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRefreshConfirmationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Confirm Pricing Refresh",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/v1/pricing/refresh/reject": {
+      "post": {
+        "description": "Discard a reviewed default-price snapshot without applying it.",
+        "operationId": "reject_pricing_refresh_v1_pricing_refresh_reject_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reject Pricing Refresh",
         "tags": [
           "pricing"
         ]

@@ -25,7 +25,7 @@ from any_llm.types.completion import CompletionUsage
 from pydantic import ValidationError
 
 from gateway.api.routes._pipeline import _compute_cost
-from gateway.core.config import PricingConfig
+from gateway.core.config import PricingConfig, PricingTierConfig
 from gateway.core.usage import GatewayUsage
 from gateway.models.entities import ModelPricing
 
@@ -260,6 +260,61 @@ def test_convention_flag_drives_discount_vs_additive() -> None:
     assert anthropic_cost > openai_cost
 
 
+def test_context_pricing_tier_is_a_whole_request_cliff() -> None:
+    pricing = _pricing(cache_read_price_per_million=5.0)
+    pricing.pricing_tiers = [
+        {
+            "min_input_tokens": 200_000,
+            "input_price_per_million": 60.0,
+            "output_price_per_million": 120.0,
+            "cache_read_price_per_million": 10.0,
+        }
+    ]
+    usage = GatewayUsage(
+        prompt_tokens=250_000,
+        completion_tokens=1_000,
+        total_tokens=251_000,
+        cache_read_tokens=100_000,
+    )
+
+    cost = _compute_cost(pricing, usage)
+
+    assert cost == (150_000 / 1_000_000) * 60.0 + (1_000 / 1_000_000) * 120.0 + (100_000 / 1_000_000) * 10.0
+
+
+def test_anthropic_1h_cache_write_uses_its_own_rate() -> None:
+    pricing = _pricing(cache_write_price_per_million=3.75)
+    pricing.cache_write_1h_price_per_million = 6.0
+    usage = GatewayUsage(
+        prompt_tokens=1_000,
+        completion_tokens=0,
+        total_tokens=1_100,
+        cache_write_tokens=300,
+        cache_write_1h_tokens=100,
+        cache_tokens_in_prompt=False,
+    )
+
+    cost = _compute_cost(pricing, usage)
+
+    assert cost == (1_000 / 1_000_000) * 30.0 + (200 / 1_000_000) * 3.75 + (100 / 1_000_000) * 6.0
+
+
+def test_anthropic_1h_cache_write_allows_a_free_rate() -> None:
+    """A configured $0 1-hour rate must not fall back to the 5-minute rate."""
+    pricing = _pricing(cache_write_price_per_million=3.75)
+    pricing.cache_write_1h_price_per_million = 0.0
+    usage = GatewayUsage(
+        prompt_tokens=1_000,
+        completion_tokens=0,
+        total_tokens=1_100,
+        cache_write_tokens=100,
+        cache_write_1h_tokens=100,
+        cache_tokens_in_prompt=False,
+    )
+
+    assert _compute_cost(pricing, usage) == (1_000 / 1_000_000) * 30.0
+
+
 # ---------------------------------------------------------------------------
 # Plain CompletionUsage (OpenAI-style fallback via prompt_tokens_details)
 # ---------------------------------------------------------------------------
@@ -310,4 +365,13 @@ def test_pricing_config_rejects_negative_cache_rate() -> None:
             input_price_per_million=30.0,
             output_price_per_million=60.0,
             cache_read_price_per_million=-1.0,
+        )
+
+
+def test_pricing_config_rejects_tier_without_rate_override() -> None:
+    with pytest.raises(ValidationError, match="pricing tier must override at least one price field"):
+        PricingConfig(
+            input_price_per_million=1,
+            output_price_per_million=2,
+            pricing_tiers=[PricingTierConfig(min_input_tokens=200_000)],
         )

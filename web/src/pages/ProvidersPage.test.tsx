@@ -192,11 +192,13 @@ describe("ProvidersPage", () => {
     renderPage(<ProvidersPage />);
 
     await screen.findByText(/No providers yet/);
-    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await user.click(screen.getByRole("button", { name: "Add your first provider" }));
     await user.click(screen.getByRole("button", { name: "Custom endpoint" }));
     await user.type(screen.getByLabelText("Name"), "my-llm");
     await user.type(screen.getByLabelText("API base"), "http://box:8000/v1");
-    await user.type(screen.getByLabelText("API key (optional)"), "sk-live-9999");
+    const apiKey = screen.getByLabelText("API key (optional)");
+    expect(apiKey).toHaveAttribute("type", "password");
+    await user.type(apiKey, "sk-live-9999");
     await user.click(screen.getByRole("button", { name: "Add provider" }));
 
     const post = fetchMock.mock.calls.find(
@@ -314,12 +316,17 @@ describe("ProvidersPage", () => {
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ instance: "openai", api_key: null });
   });
 
-  it("shows the welcome onboarding when no provider is configured", async () => {
+  it("replaces the welcome onboarding with the add form", async () => {
     mockApi({ meta: [], stored: [] });
+    const user = userEvent.setup();
     renderPage(<ProvidersPage />);
 
     expect(await screen.findByText("Welcome to Otari")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add your first provider" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add provider" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add your first provider" }));
+
+    expect(screen.queryByText("Welcome to Otari")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search providers…")).toBeInTheDocument();
   });
 
   it("hides the onboarding once a provider exists", async () => {

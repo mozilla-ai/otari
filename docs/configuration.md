@@ -284,14 +284,32 @@ pricing:
     output_price_per_million: 15.00
     cache_read_price_per_million: 0.30  # cache-read rate
     cache_write_price_per_million: 3.75  # cache-creation (write) rate
+    cache_write_1h_price_per_million: 6.00  # Anthropic 1-hour cache creation
 ```
 
 Every physical input token is charged once. The input/prompt count is treated as the grand total that *includes* cache reads and writes; the uncached remainder is billed at `input_price_per_million`, and cache tokens are re-priced at their own rate when one is configured. Providers report cache counts two ways, and the gateway normalizes both onto that single model:
 
 - **OpenAI / Gemini**: `cache_read_tokens` is already a subset of `prompt_tokens`, so setting `cache_read_price_per_million` discounts the cached portion (re-priced at the cache rate instead of the full `input_price_per_million`) rather than double-counting it. `cache_write_tokens` is always 0 for these providers.
-- **Anthropic**: `cache_read_tokens` and `cache_write_tokens` are reported separately from `prompt_tokens`, so they are added on top and billed at `cache_read_price_per_million` / `cache_write_price_per_million`. This holds on every turn, including warm-cache reads that create no new cache (`cache_write_tokens` is 0).
+- **Anthropic**: `cache_read_tokens` and `cache_write_tokens` are reported separately from `prompt_tokens`, so they are added on top and billed at `cache_read_price_per_million` / `cache_write_price_per_million`. `cache_write_1h_tokens` records the 1-hour subset of cache creation and uses `cache_write_1h_price_per_million` when set, otherwise the standard cache-write rate. This holds on every turn, including warm-cache reads that create no new cache (`cache_write_tokens` is 0).
 
 When a cache rate is left unset (null), those cache tokens are not dropped or billed at $0: they remain part of the input total and are billed at `input_price_per_million`, since they are still real input tokens. Set the cache rate to bill them at the provider's discounted cache price. The same fields are available on the `/v1/pricing` API (`SetPricingRequest` and `PricingResponse`).
+
+#### Long-context pricing tiers
+
+Some models charge a different rate once a request reaches a context threshold. Set `pricing_tiers` when that rate applies to the whole request, as it does for the tiered catalog entries Otari imports from `genai-prices`:
+
+```yaml
+pricing:
+  openai:gpt-5:
+    input_price_per_million: 1.25
+    output_price_per_million: 10.00
+    pricing_tiers:
+      - min_input_tokens: 272000
+        input_price_per_million: 2.50
+        output_price_per_million: 15.00
+```
+
+At `min_input_tokens` and above, an entry replaces only the rates it lists for the entire request. Omitted rates inherit the base price. The dashboard's model detail editor exposes the same controls, and each usage row records the resulting billable meters and rate breakdown for auditability.
 
 ### Default pricing
 
@@ -301,7 +319,11 @@ Otari falls back to community-maintained default pricing from the
 [genai-prices](https://github.com/pydantic/genai-prices) dataset, which bundles per-million rates for
 hundreds of models across the major providers. With it on, common models (for example `openai:gpt-4o`,
 `anthropic:claude-sonnet-4-6`) are priced without any configuration, so `require_pricing` does not reject
-them. The defaults are bundled with the installed package; no network access is used.
+them. The defaults are bundled with the installed package; no network access is used by default. A master-key
+operator can use **Check for price updates** in dashboard **Settings** to fetch the latest upstream snapshot, review
+the added, changed, and removed rates, and explicitly accept or reject it. Pending reviews and accepted snapshots are
+stored in the database, so the decision survives a standalone restart. The accepted snapshot uses source
+`genai-prices`. Stored custom prices always take precedence and are not changed by a refresh.
 
 It is opt-in because a billing gateway should generally charge on rates you control: community estimates can
 lag or differ from real provider rates, and turning this on changes what `require_pricing: true` guarantees
@@ -313,8 +335,7 @@ written to the database.
 
 Limitations when enabled:
 
-- **Tiered pricing** is flattened to the base rate, so a request that crosses a context tier is billed at
-  the base (a small under or over charge for very large requests).
+- **Tiered pricing** is retained from the dataset and applied when a request crosses a configured context threshold.
 - A **provider-agnostic match** is attempted when the exact provider is not in the dataset; an ambiguous
   model *name* could resolve to a different provider's rate. Prefer configuring such models explicitly.
 - **HuggingFace** is modeled per inference backend, so a model is priced only when you pin a backend with

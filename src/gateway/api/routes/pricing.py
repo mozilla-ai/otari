@@ -4,8 +4,8 @@ from typing import Annotated
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
-from sqlalchemy import select
+from pydantic import BaseModel, Field, model_validator
+from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,14 +13,44 @@ from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, v
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
 from gateway.services.alias_service import resolve_effective_alias
+from gateway.services.pricing_refresh_service import (
+    PricingRefreshError,
+    confirm_price_refresh,
+    prepare_price_refresh,
+    reject_price_refresh,
+)
 from gateway.services.pricing_service import normalize_effective_at
 from gateway.services.provider_kwargs import normalize_pricing_key, split_selector
 
 router = APIRouter(prefix="/v1/pricing", tags=["pricing"])
 
 
+class PricingTier(BaseModel):
+    """Whole-request price cliff selected by total billable input tokens."""
+
+    min_input_tokens: int = Field(gt=0)
+    input_price_per_million: float | None = Field(default=None, ge=0)
+    output_price_per_million: float | None = Field(default=None, ge=0)
+    cache_read_price_per_million: float | None = Field(default=None, ge=0)
+    cache_write_price_per_million: float | None = Field(default=None, ge=0)
+    cache_write_1h_price_per_million: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_has_rate_override(self) -> "PricingTier":
+        rates = (
+            self.input_price_per_million,
+            self.output_price_per_million,
+            self.cache_read_price_per_million,
+            self.cache_write_price_per_million,
+            self.cache_write_1h_price_per_million,
+        )
+        if all(rate is None for rate in rates):
+            raise ValueError("pricing tier must override at least one price field")
+        return self
+
+
 class SetPricingRequest(BaseModel):
-    """Request model for setting model pricing."""
+    """Create a versioned per-model price, with optional cache and context tiers."""
 
     model_key: str = Field(description="Model identifier in format 'provider:model'")
     input_price_per_million: float = Field(ge=0, description="Price per 1M input tokens")
@@ -31,10 +61,25 @@ class SetPricingRequest(BaseModel):
     cache_write_price_per_million: float | None = Field(
         default=None, ge=0, description="Price per 1M cache-write (creation) tokens"
     )
+    cache_write_1h_price_per_million: float | None = Field(
+        default=None, ge=0, description="Price per 1M Anthropic 1-hour cache-write tokens"
+    )
+    pricing_tiers: list[PricingTier] | None = Field(
+        default=None,
+        description="Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
+    )
     effective_at: datetime | None = Field(
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
     )
+
+    @model_validator(mode="after")
+    def validate_unique_tier_thresholds(self) -> "SetPricingRequest":
+        if self.pricing_tiers is not None:
+            thresholds = [tier.min_input_tokens for tier in self.pricing_tiers]
+            if len(thresholds) != len(set(thresholds)):
+                raise ValueError("pricing_tiers must not repeat min_input_tokens")
+        return self
 
 
 class PricingResponse(BaseModel):
@@ -46,6 +91,8 @@ class PricingResponse(BaseModel):
     output_price_per_million: float
     cache_read_price_per_million: float | None
     cache_write_price_per_million: float | None
+    cache_write_1h_price_per_million: float | None
+    pricing_tiers: list[PricingTier]
     created_at: str
     updated_at: str
 
@@ -59,9 +106,36 @@ class PricingResponse(BaseModel):
             output_price_per_million=pricing.output_price_per_million,
             cache_read_price_per_million=pricing.cache_read_price_per_million,
             cache_write_price_per_million=pricing.cache_write_price_per_million,
+            cache_write_1h_price_per_million=pricing.cache_write_1h_price_per_million,
+            pricing_tiers=[PricingTier.model_validate(tier) for tier in pricing.pricing_tiers or []],
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),
         )
+
+
+class PricingRefreshChangeResponse(BaseModel):
+    """One default model price changed by a pending refresh."""
+
+    model_key: str
+    change: str
+
+
+class PricingRefreshPreviewResponse(BaseModel):
+    """Reviewable summary of a pending genai-prices refresh."""
+
+    fetched_at: datetime
+    added_count: int
+    changed_count: int
+    removed_count: int
+    protected_model_count: int
+    changes: list[PricingRefreshChangeResponse]
+    changes_truncated: bool
+
+
+class PricingRefreshConfirmationResponse(BaseModel):
+    """Result of activating a reviewed genai-prices refresh."""
+
+    applied: bool = True
 
 
 def _candidate_model_keys(raw_key: str) -> list[str]:
@@ -96,6 +170,84 @@ def _candidate_model_keys(raw_key: str) -> list[str]:
         if key not in candidates:
             candidates.append(key)
     return candidates
+
+
+@router.post(
+    "/refresh",
+    response_model=PricingRefreshPreviewResponse,
+    dependencies=[Depends(verify_master_key)],
+)
+async def preview_pricing_refresh(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PricingRefreshPreviewResponse:
+    """Fetch the latest defaults and hold them for operator review."""
+
+    try:
+        preview = await prepare_price_refresh(db)
+    except PricingRefreshError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Unable to fetch the latest genai-prices data",
+        ) from None
+
+    protected_model_count = (
+        await db.execute(select(func.count(distinct(ModelPricing.model_key))))
+    ).scalar_one()
+    return PricingRefreshPreviewResponse(
+        fetched_at=preview.fetched_at,
+        added_count=preview.added_count,
+        changed_count=preview.changed_count,
+        removed_count=preview.removed_count,
+        protected_model_count=protected_model_count,
+        changes=[
+            PricingRefreshChangeResponse(model_key=change.model_key, change=change.change)
+            for change in preview.changes
+        ],
+        changes_truncated=preview.changes_truncated,
+    )
+
+
+@router.post(
+    "/refresh/confirm",
+    response_model=PricingRefreshConfirmationResponse,
+    dependencies=[Depends(verify_master_key)],
+)
+async def confirm_pricing_refresh(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PricingRefreshConfirmationResponse:
+    """Activate the latest reviewed default-price snapshot."""
+
+    try:
+        applied = await confirm_price_refresh(db)
+    except PricingRefreshError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to save the latest genai-prices data",
+        ) from None
+    if not applied:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending genai-prices refresh to apply")
+    return PricingRefreshConfirmationResponse()
+
+
+@router.post(
+    "/refresh/reject",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(verify_master_key)],
+)
+async def reject_pricing_refresh(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Discard a reviewed default-price snapshot without applying it."""
+
+    try:
+        rejected = await reject_price_refresh(db)
+    except PricingRefreshError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to discard the pending genai-prices data",
+        ) from None
+    if not rejected:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No pending genai-prices refresh to reject")
 
 
 async def _get_effective_pricing(
@@ -162,8 +314,10 @@ async def set_pricing(
     # explicit null still clears the rate.
     cache_read_set = "cache_read_price_per_million" in request.model_fields_set
     cache_write_set = "cache_write_price_per_million" in request.model_fields_set
+    cache_write_1h_set = "cache_write_1h_price_per_million" in request.model_fields_set
+    tiers_set = "pricing_tiers" in request.model_fields_set
     latest: ModelPricing | None = None
-    if not (cache_read_set and cache_write_set):
+    if not (cache_read_set and cache_write_set and cache_write_1h_set and tiers_set):
         latest = (
             await db.execute(
                 select(ModelPricing)
@@ -182,6 +336,16 @@ async def set_pricing(
         if cache_write_set
         else (latest.cache_write_price_per_million if latest else None)
     )
+    cache_write_1h = (
+        request.cache_write_1h_price_per_million
+        if cache_write_1h_set
+        else (latest.cache_write_1h_price_per_million if latest else None)
+    )
+    pricing_tiers = (
+        [tier.model_dump(exclude_none=True) for tier in request.pricing_tiers]
+        if request.pricing_tiers is not None
+        else ([] if tiers_set else (latest.pricing_tiers if latest else []))
+    )
 
     result = await db.execute(
         select(ModelPricing).where(
@@ -196,6 +360,8 @@ async def set_pricing(
         pricing.output_price_per_million = request.output_price_per_million
         pricing.cache_read_price_per_million = cache_read
         pricing.cache_write_price_per_million = cache_write
+        pricing.cache_write_1h_price_per_million = cache_write_1h
+        pricing.pricing_tiers = pricing_tiers
     else:
         pricing = ModelPricing(
             model_key=normalized_key,
@@ -204,6 +370,8 @@ async def set_pricing(
             output_price_per_million=request.output_price_per_million,
             cache_read_price_per_million=cache_read,
             cache_write_price_per_million=cache_write,
+            cache_write_1h_price_per_million=cache_write_1h,
+            pricing_tiers=pricing_tiers,
         )
         db.add(pricing)
 

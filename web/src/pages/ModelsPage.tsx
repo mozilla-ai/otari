@@ -8,12 +8,10 @@ import {
   useModelMetadata,
   useModels,
   usePricing,
-  useProviders,
   useSetPricing,
   useSettings,
 } from "@/api/hooks";
-import type { ModelMetadata, ProviderCapabilities, ProviderInfo } from "@/api/types";
-import { ModelComboBox } from "@/components/ModelComboBox";
+import type { ModelMetadata, PricingTier } from "@/api/types";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ConfirmButton, ErrorBanner, errorMessage, FilterSelect, InfoBanner, PageHeader } from "@/components/ui";
 import { formatContext, formatCost, formatNumber, formatReleaseDate } from "@/lib/format";
@@ -29,32 +27,18 @@ const ALIAS_OWNED_BY = "otari";
 // from a target; "none" means metered at no cost.
 type PriceSource = "configured" | "default" | "alias" | "none";
 
-const CAPABILITY_LABELS: Record<keyof ProviderCapabilities, string> = {
-  vision: "Vision",
-  reasoning: "Reasoning",
-  embeddings: "Embeddings",
-  streaming: "Streaming",
-  audio: "Audio",
-  image_generation: "Image gen",
-  pdf: "PDF",
-  rerank: "Rerank",
-  responses_api: "Responses API",
-  moderation: "Moderation",
-  list_models: "Lists models",
-};
-
 // Capability filter options. These test the model's own metadata (models.dev),
 // so they line up with the per-model Features chips shown in the table, not the
 // coarser provider-level capabilities. Picking "Vision" narrows to models whose
 // metadata actually reports image input, matching what the chips display.
 const MODEL_FILTER_CAPABILITIES: { value: string; label: string; test: (metadata: ModelMetadata) => boolean }[] = [
-  { value: "vision", label: "Vision", test: (m) => m.input_modalities.includes("image") },
+  { value: "vision", label: "Vision", test: (m) => Array.isArray(m.input_modalities) && m.input_modalities.includes("image") },
   { value: "tool_call", label: "Tool calling", test: (m) => Boolean(m.tool_call) },
   { value: "reasoning", label: "Reasoning", test: (m) => Boolean(m.reasoning) },
   { value: "structured_output", label: "Structured output", test: (m) => Boolean(m.structured_output) },
   { value: "attachment", label: "Attachments", test: (m) => Boolean(m.attachment) },
-  { value: "audio", label: "Audio", test: (m) => m.input_modalities.includes("audio") },
-  { value: "pdf", label: "PDF", test: (m) => m.input_modalities.includes("pdf") },
+  { value: "audio", label: "Audio", test: (m) => Array.isArray(m.input_modalities) && m.input_modalities.includes("audio") },
+  { value: "pdf", label: "PDF", test: (m) => Array.isArray(m.input_modalities) && m.input_modalities.includes("pdf") },
 ];
 
 // Per-model capability flags from models.dev, labelled for the detail panel.
@@ -91,6 +75,15 @@ const PRICE_OPTIONS = [
   { value: "30", label: "≤ $30 / 1M in" },
 ];
 
+const PRICE_COMPARISON_OPTIONS = [
+  { value: "", label: "Base prices" },
+  { value: "8000", label: "Compare at 8K" },
+  { value: "128000", label: "Compare at 128K" },
+  { value: "200000", label: "Compare at 200K" },
+  { value: "500000", label: "Compare at 500K" },
+  { value: "1000000", label: "Compare at 1M" },
+];
+
 // Newness windows for the release-date filter, in days back from today. Rows
 // with no known release date are excluded once a window is active.
 const RELEASE_OPTIONS = [
@@ -112,7 +105,45 @@ interface ModelRow {
   outputPrice: number | null;
   cacheReadPrice: number | null;
   cacheWritePrice: number | null;
+  cacheWrite1hPrice: number | null;
+  pricingTiers: PricingTier[];
   source: PriceSource;
+}
+
+type EffectiveRates = Pick<
+  ModelRow,
+  "inputPrice" | "outputPrice" | "cacheReadPrice" | "cacheWritePrice" | "cacheWrite1hPrice"
+>;
+
+function displayModelName(selector: string, provider: string): string {
+  const instancePrefix = `${provider}:`;
+  return selector.startsWith(instancePrefix) ? selector.slice(instancePrefix.length) : selector;
+}
+
+function effectiveRatesAtContext(row: ModelRow, contextTokens: number | null): EffectiveRates {
+  const rates: EffectiveRates = {
+    inputPrice: row.inputPrice,
+    outputPrice: row.outputPrice,
+    cacheReadPrice: row.cacheReadPrice,
+    cacheWritePrice: row.cacheWritePrice,
+    cacheWrite1hPrice: row.cacheWrite1hPrice,
+  };
+  if (contextTokens == null) {
+    return rates;
+  }
+  const tier = row.pricingTiers
+    .filter((candidate) => candidate.min_input_tokens <= contextTokens)
+    .sort((a, b) => b.min_input_tokens - a.min_input_tokens)[0];
+  if (!tier) {
+    return rates;
+  }
+  return {
+    inputPrice: tier.input_price_per_million ?? rates.inputPrice,
+    outputPrice: tier.output_price_per_million ?? rates.outputPrice,
+    cacheReadPrice: tier.cache_read_price_per_million ?? rates.cacheReadPrice,
+    cacheWritePrice: tier.cache_write_price_per_million ?? rates.cacheWritePrice,
+    cacheWrite1hPrice: tier.cache_write_1h_price_per_million ?? rates.cacheWrite1hPrice,
+  };
 }
 
 function isValidPrice(value: string): boolean {
@@ -132,6 +163,54 @@ function isValidOptionalPrice(value: string): boolean {
 
 function optionalPrice(value: string): number | null {
   return value.trim() === "" ? null : Number(value);
+}
+
+type EditablePricingTier = {
+  id: number;
+  minInputTokens: string;
+  input: string;
+  output: string;
+  cacheRead: string;
+  cacheWrite: string;
+  cacheWrite1h: string;
+};
+
+function editableTiers(tiers: PricingTier[]): EditablePricingTier[] {
+  return tiers.map((tier, index) => ({
+    id: index,
+    minInputTokens: String(tier.min_input_tokens),
+    input: tier.input_price_per_million == null ? "" : String(tier.input_price_per_million),
+    output: tier.output_price_per_million == null ? "" : String(tier.output_price_per_million),
+    cacheRead: tier.cache_read_price_per_million == null ? "" : String(tier.cache_read_price_per_million),
+    cacheWrite: tier.cache_write_price_per_million == null ? "" : String(tier.cache_write_price_per_million),
+    cacheWrite1h: tier.cache_write_1h_price_per_million == null ? "" : String(tier.cache_write_1h_price_per_million),
+  }));
+}
+
+function validTiers(tiers: EditablePricingTier[]): boolean {
+  const thresholds = new Set<number>();
+  return tiers.every((tier) => {
+    const threshold = Number(tier.minInputTokens);
+    const hasOverride = [tier.input, tier.output, tier.cacheRead, tier.cacheWrite, tier.cacheWrite1h].some(
+      (value) => value.trim() !== "",
+    );
+    if (!Number.isInteger(threshold) || threshold <= 0 || thresholds.has(threshold) || !hasOverride) {
+      return false;
+    }
+    thresholds.add(threshold);
+    return [tier.input, tier.output, tier.cacheRead, tier.cacheWrite, tier.cacheWrite1h].every(isValidOptionalPrice);
+  });
+}
+
+function pricingTiers(tiers: EditablePricingTier[]): PricingTier[] {
+  return tiers.map((tier) => ({
+    min_input_tokens: Number(tier.minInputTokens),
+    ...(tier.input.trim() === "" ? {} : { input_price_per_million: Number(tier.input) }),
+    ...(tier.output.trim() === "" ? {} : { output_price_per_million: Number(tier.output) }),
+    ...(tier.cacheRead.trim() === "" ? {} : { cache_read_price_per_million: Number(tier.cacheRead) }),
+    ...(tier.cacheWrite.trim() === "" ? {} : { cache_write_price_per_million: Number(tier.cacheWrite) }),
+    ...(tier.cacheWrite1h.trim() === "" ? {} : { cache_write_1h_price_per_million: Number(tier.cacheWrite1h) }),
+  }));
 }
 
 function MoneyInput({
@@ -157,6 +236,79 @@ function MoneyInput({
   );
 }
 
+function PricingTierEditor({
+  tiers,
+  onChange,
+}: {
+  tiers: EditablePricingTier[];
+  onChange: (tiers: EditablePricingTier[]) => void;
+}) {
+  const update = (id: number, field: keyof EditablePricingTier, value: string) => {
+    onChange(tiers.map((tier) => (tier.id === id ? { ...tier, [field]: value } : tier)));
+  };
+  const add = () => {
+    const nextId = tiers.reduce((max, tier) => Math.max(max, tier.id), -1) + 1;
+    onChange([
+      ...tiers,
+      { id: nextId, minInputTokens: "128000", input: "", output: "", cacheRead: "", cacheWrite: "", cacheWrite1h: "" },
+    ]);
+  };
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-[var(--otari-line)] p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-medium text-[var(--otari-ink)]">Long-context price tiers</div>
+          <p className="text-xs text-[var(--otari-muted)]">At a threshold, listed rates replace the base rate for the whole request.</p>
+        </div>
+        <Button size="sm" variant="outline" onPress={add}>
+          Add tier
+        </Button>
+      </div>
+      {tiers.map((tier) => (
+        <div key={tier.id} className="flex flex-wrap items-end gap-2 border-t border-[var(--otari-line)] pt-2">
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            Context ≥ tokens
+            <input
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
+              aria-label="Tier context threshold"
+              value={tier.minInputTokens}
+              onChange={(event) => update(tier.id, "minInputTokens", event.target.value)}
+              className="w-28 rounded-md border border-[var(--otari-line)] bg-white px-2 py-1 text-right text-sm tabular-nums focus:border-[var(--otari-brand)] focus:outline-none"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            Input
+            <MoneyInput value={tier.input} onChange={(value) => update(tier.id, "input", value)} ariaLabel="Tier input price" />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            Output
+            <MoneyInput value={tier.output} onChange={(value) => update(tier.id, "output", value)} ariaLabel="Tier output price" />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            Cache read
+            <MoneyInput value={tier.cacheRead} onChange={(value) => update(tier.id, "cacheRead", value)} ariaLabel="Tier cache read price" />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            Cache write
+            <MoneyInput value={tier.cacheWrite} onChange={(value) => update(tier.id, "cacheWrite", value)} ariaLabel="Tier cache write price" />
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+            1h write
+            <MoneyInput value={tier.cacheWrite1h} onChange={(value) => update(tier.id, "cacheWrite1h", value)} ariaLabel="Tier 1 hour cache write price" />
+          </label>
+          <Button size="sm" variant="ghost" onPress={() => onChange(tiers.filter((item) => item.id !== tier.id))}>
+            Remove
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SourceChip({ source }: { source: PriceSource }) {
   if (source === "configured") {
     return (
@@ -173,84 +325,6 @@ function SourceChip({ source }: { source: PriceSource }) {
     );
   }
   return <span className="text-xs text-[var(--otari-muted)]">not priced</span>;
-}
-
-// Prices a model the picker lists, or one it cannot see (an unconfigured
-// provider, a brand-new release), which is why the key stays free text.
-function PriceModelForm({ onClose }: { onClose: () => void }) {
-  const setPricing = useSetPricing();
-  const [modelKey, setModelKey] = useState("");
-  const [input, setInput] = useState("");
-  const [output, setOutput] = useState("");
-  const [cacheRead, setCacheRead] = useState("");
-  const [cacheWrite, setCacheWrite] = useState("");
-
-  const canSubmit =
-    modelKey.trim() !== "" &&
-    isValidPrice(input) &&
-    isValidPrice(output) &&
-    isValidOptionalPrice(cacheRead) &&
-    isValidOptionalPrice(cacheWrite);
-
-  const submit = () => {
-    if (!canSubmit) {
-      return;
-    }
-    setPricing.mutate(
-      {
-        model_key: modelKey.trim(),
-        input_price_per_million: Number(input),
-        output_price_per_million: Number(output),
-        cache_read_price_per_million: optionalPrice(cacheRead),
-        cache_write_price_per_million: optionalPrice(cacheWrite),
-      },
-      { onSuccess: onClose },
-    );
-  };
-
-  return (
-    <div className="flex flex-col gap-4">
-      <ErrorBanner error={setPricing.error} />
-      <div className="grid gap-4 sm:grid-cols-3">
-        <ModelComboBox
-          label="Model"
-          value={modelKey}
-          onChange={setModelKey}
-          isRequired
-          autoFocus
-          description="Pick one your providers report, or type any provider:model key."
-        />
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-[var(--otari-ink)]">Input $ / 1M</span>
-          <MoneyInput value={input} onChange={setInput} ariaLabel="Input price per million" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-[var(--otari-ink)]">Output $ / 1M</span>
-          <MoneyInput value={output} onChange={setOutput} ariaLabel="Output price per million" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-[var(--otari-ink)]">Cache read $ / 1M</span>
-          <MoneyInput value={cacheRead} onChange={setCacheRead} ariaLabel="Cache read price per million" />
-        </div>
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-[var(--otari-ink)]">Cache write $ / 1M</span>
-          <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel="Cache write price per million" />
-        </div>
-      </div>
-      <p className="text-xs text-[var(--otari-muted)]">
-        Cache rates are optional. Leave them blank to bill cached tokens at the input rate. Cache write applies to
-        Anthropic cache creation.
-      </p>
-      <div className="flex gap-2">
-        <Button variant="primary" isDisabled={!canSubmit || setPricing.isPending} onPress={submit}>
-          {setPricing.isPending ? "Saving…" : "Save price"}
-        </Button>
-        <Button variant="ghost" onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 // A small info affordance: an "i" bubble that reveals a tooltip on hover or
@@ -318,22 +392,6 @@ function PricingInfo() {
   );
 }
 
-function CapabilityBadges({ capabilities }: { capabilities: ProviderCapabilities }) {
-  const active = (Object.keys(CAPABILITY_LABELS) as (keyof ProviderCapabilities)[]).filter((key) => capabilities[key]);
-  if (active.length === 0) {
-    return <span className="text-sm text-[var(--otari-muted)]">No capabilities reported.</span>;
-  }
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {active.map((key) => (
-        <Chip key={key} size="sm" color="default">
-          {CAPABILITY_LABELS[key]}
-        </Chip>
-      ))}
-    </div>
-  );
-}
-
 // Small labelled key/value used throughout the detail panel.
 function Spec({ label, value }: { label: string; value: ReactNode }) {
   return (
@@ -363,16 +421,26 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
   const [output, setOutput] = useState("");
   const [cacheRead, setCacheRead] = useState("");
   const [cacheWrite, setCacheWrite] = useState("");
+  const [cacheWrite1h, setCacheWrite1h] = useState("");
+  const [tiers, setTiers] = useState<EditablePricingTier[]>([]);
 
   const startEdit = () => {
     setInput(row.inputPrice == null ? "" : String(row.inputPrice));
     setOutput(row.outputPrice == null ? "" : String(row.outputPrice));
     setCacheRead(row.cacheReadPrice == null ? "" : String(row.cacheReadPrice));
     setCacheWrite(row.cacheWritePrice == null ? "" : String(row.cacheWritePrice));
+    setCacheWrite1h(row.cacheWrite1hPrice == null ? "" : String(row.cacheWrite1hPrice));
+    setTiers(editableTiers(row.pricingTiers));
     setEditing(true);
   };
 
-  const canSave = isValidPrice(input) && isValidPrice(output) && isValidOptionalPrice(cacheRead) && isValidOptionalPrice(cacheWrite);
+  const canSave =
+    isValidPrice(input) &&
+    isValidPrice(output) &&
+    isValidOptionalPrice(cacheRead) &&
+    isValidOptionalPrice(cacheWrite) &&
+    isValidOptionalPrice(cacheWrite1h) &&
+    validTiers(tiers);
 
   const save = () => {
     if (!canSave) {
@@ -385,6 +453,8 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
         output_price_per_million: Number(output),
         cache_read_price_per_million: optionalPrice(cacheRead),
         cache_write_price_per_million: optionalPrice(cacheWrite),
+        cache_write_1h_price_per_million: optionalPrice(cacheWrite1h),
+        pricing_tiers: pricingTiers(tiers),
       },
       { onSuccess: () => setEditing(false) },
     );
@@ -409,6 +479,11 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           <span className="text-xs text-[var(--otari-muted)]">Cache write $ / 1M</span>
           <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel={`Cache write price for ${row.key}`} />
         </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-[var(--otari-muted)]">1h cache write $ / 1M</span>
+          <MoneyInput value={cacheWrite1h} onChange={setCacheWrite1h} ariaLabel={`1 hour cache write price for ${row.key}`} />
+        </div>
+        <PricingTierEditor tiers={tiers} onChange={setTiers} />
         <div className="flex items-center gap-2">
           <Button size="sm" variant="primary" isDisabled={setPricing.isPending || !canSave} onPress={save}>
             Save
@@ -428,6 +503,8 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
       <Spec label="Output" value={row.outputPrice == null ? "—" : `${formatCost(row.outputPrice)} / 1M`} />
       <Spec label="Cache read" value={row.cacheReadPrice == null ? "—" : `${formatCost(row.cacheReadPrice)} / 1M`} />
       <Spec label="Cache write" value={row.cacheWritePrice == null ? "—" : `${formatCost(row.cacheWritePrice)} / 1M`} />
+      <Spec label="1h cache write" value={row.cacheWrite1hPrice == null ? "—" : `${formatCost(row.cacheWrite1hPrice)} / 1M`} />
+      <Spec label="Context tiers" value={row.pricingTiers.length ? `${row.pricingTiers.length} configured` : "—"} />
       <div className="flex items-center gap-2 pt-1">
         <Button size="sm" variant="outline" onPress={startEdit}>
           {row.source === "configured" ? "Edit price" : "Set price"}
@@ -453,88 +530,18 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
   );
 }
 
-function ProviderBlock({
-  provider,
-  info,
-  modelCount,
-  discoveryError,
-}: {
-  provider: string;
-  info: ProviderInfo | undefined;
-  modelCount: number;
-  discoveryError: string | null;
-}) {
-  return (
-    <PanelSection title="Provider">
-      <div className="flex flex-col gap-3 rounded-lg border border-[var(--otari-line)] p-3">
-        <div>
-          <div className="text-sm font-medium text-[var(--otari-ink)]">{info?.name ?? provider}</div>
-          <div className="text-xs text-[var(--otari-muted)]">
-            {info && info.provider_type !== provider ? `${provider} · ${info.provider_type}` : provider}
-          </div>
-        </div>
-        {discoveryError ? (
-          <span className="text-xs text-red-700">Could not list models: {discoveryError}</span>
-        ) : (
-          <span className="text-xs text-[var(--otari-muted)]">
-            {formatNumber(modelCount)} model{modelCount === 1 ? "" : "s"} reported
-          </span>
-        )}
-        {info ? <CapabilityBadges capabilities={info.capabilities} /> : null}
-        {info?.env_key ? (
-          <code className="w-fit rounded bg-[var(--otari-bg)] px-2 py-0.5 text-xs text-[var(--otari-ink)]">
-            {info.env_key}
-          </code>
-        ) : null}
-        {info && (info.doc_url || info.pricing_urls.length > 0) ? (
-          <div className="flex flex-col gap-1">
-            {info.doc_url ? (
-              <a
-                href={info.doc_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-[var(--otari-brand)] underline underline-offset-2"
-              >
-                API documentation
-              </a>
-            ) : null}
-            {info.pricing_urls.slice(0, 2).map((url) => (
-              <a
-                key={url}
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs break-all text-[var(--otari-brand)] underline underline-offset-2"
-              >
-                Pricing page
-              </a>
-            ))}
-          </div>
-        ) : null}
-      </div>
-    </PanelSection>
-  );
-}
-
-// The persistent detail panel beside the table. Shows the selected model's
-// pricing, specs, modalities, capabilities, and its provider; lets you page
-// through the current list; and offers to alias the model.
+// The persistent detail panel beside the table shows the selected model's
+// pricing, specs, modalities, and capabilities; it also offers to alias it.
 function ModelDetailPanel({
   row,
   metadata,
   metadataAvailable,
-  providerInfo,
-  providerModelCount,
-  providerDiscoveryError,
   onMakeAlias,
   onClose,
 }: {
   row: ModelRow;
   metadata: ModelMetadata | undefined;
   metadataAvailable: boolean;
-  providerInfo: ProviderInfo | undefined;
-  providerModelCount: number;
-  providerDiscoveryError: string | null;
   onMakeAlias: (key: string) => void;
   onClose: () => void;
 }) {
@@ -555,6 +562,9 @@ function ModelDetailPanel({
                 </Chip>
               ) : null}
             </div>
+            <p className="mt-1 text-xs break-all text-[var(--otari-muted)]">
+              Selector: <code>{row.key}</code>
+            </p>
             {metadata?.family ? <p className="text-xs text-[var(--otari-muted)]">{metadata.family}</p> : null}
           </div>
           <button
@@ -631,23 +641,17 @@ function ModelDetailPanel({
           )}
         </PanelSection>
 
-        {/* Skip the provider pane for a custom / self-hosted instance (its name is
-            not a stock provider): the bundled capabilities and doc links describe
-            the underlying implementation, not the operator's endpoint. */}
-        {providerInfo && providerInfo.provider_type === row.provider ? (
-          <ProviderBlock
-            provider={row.provider}
-            info={providerInfo}
-            modelCount={providerModelCount}
-            discoveryError={providerDiscoveryError}
-          />
-        ) : null}
       </Card.Content>
     </Card>
   );
 }
 
-const PAGE_SIZE = 25;
+const DEFAULT_PAGE_SIZE = 15;
+const PAGE_SIZE_OPTIONS = [
+  { value: "15", label: "15 per page" },
+  { value: "25", label: "25 per page" },
+  { value: "50", label: "50 per page" },
+];
 
 function SearchInput({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
@@ -662,35 +666,57 @@ function SearchInput({ value, onChange, placeholder }: { value: string; onChange
   );
 }
 
-function Pagination({ page, pageCount, total, onPage }: { page: number; pageCount: number; total: number; onPage: (page: number) => void }) {
-  if (pageCount <= 1) {
-    return null;
-  }
+function Pagination({
+  page,
+  pageCount,
+  total,
+  pageSize,
+  onPage,
+  onPageSize,
+}: {
+  page: number;
+  pageCount: number;
+  total: number;
+  pageSize: number;
+  onPage: (page: number) => void;
+  onPageSize: (pageSize: number) => void;
+}) {
   return (
     <div className="flex items-center justify-between px-1 pt-1 text-sm text-[var(--otari-muted)]">
       <span>
-        Page {page + 1} of {pageCount} · {formatNumber(total)} model{total === 1 ? "" : "s"}
+        {pageCount > 1 ? `Page ${page + 1} of ${pageCount} · ` : ""}
+        {formatNumber(total)} model{total === 1 ? "" : "s"}
       </span>
       <span className="inline-flex gap-2">
-        <Button size="sm" variant="outline" isDisabled={page === 0} onPress={() => onPage(page - 1)}>
-          Prev
-        </Button>
-        <Button size="sm" variant="outline" isDisabled={page >= pageCount - 1} onPress={() => onPage(page + 1)}>
-          Next
-        </Button>
+        <FilterSelect
+          ariaLabel="Rows per page"
+          value={String(pageSize)}
+          onChange={(value) => onPageSize(Number(value))}
+          options={PAGE_SIZE_OPTIONS}
+        />
+        {pageCount > 1 ? (
+          <>
+            <Button size="sm" variant="outline" isDisabled={page === 0} onPress={() => onPage(page - 1)}>
+              Prev
+            </Button>
+            <Button size="sm" variant="outline" isDisabled={page >= pageCount - 1} onPress={() => onPage(page + 1)}>
+              Next
+            </Button>
+          </>
+        ) : null}
       </span>
     </div>
   );
 }
 
-type SortCol = "model" | "context" | "released" | "input" | "output";
+type SortCol = "model" | "released" | "input" | "output";
 type SortDir = "asc" | "desc";
 type Sort = { col: SortCol; dir: SortDir };
 
 // Newest models first by default; the choice is remembered across refreshes.
 const SORT_STORAGE_KEY = "otari.dashboard.modelsSort";
 const DEFAULT_SORT: Sort = { col: "model", dir: "asc" };
-const SORT_COLS: SortCol[] = ["model", "context", "released", "input", "output"];
+const SORT_COLS: SortCol[] = ["model", "released", "input", "output"];
 
 function readStoredSort(): Sort {
   if (typeof window === "undefined") return DEFAULT_SORT;
@@ -754,8 +780,16 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
   const [output, setOutput] = useState(row.outputPrice == null ? "" : String(row.outputPrice));
   const [cacheRead, setCacheRead] = useState(row.cacheReadPrice == null ? "" : String(row.cacheReadPrice));
   const [cacheWrite, setCacheWrite] = useState(row.cacheWritePrice == null ? "" : String(row.cacheWritePrice));
+  const [cacheWrite1h, setCacheWrite1h] = useState(row.cacheWrite1hPrice == null ? "" : String(row.cacheWrite1hPrice));
+  const [tiers, setTiers] = useState<EditablePricingTier[]>(editableTiers(row.pricingTiers));
 
-  const canSave = isValidPrice(input) && isValidPrice(output) && isValidOptionalPrice(cacheRead) && isValidOptionalPrice(cacheWrite);
+  const canSave =
+    isValidPrice(input) &&
+    isValidPrice(output) &&
+    isValidOptionalPrice(cacheRead) &&
+    isValidOptionalPrice(cacheWrite) &&
+    isValidOptionalPrice(cacheWrite1h) &&
+    validTiers(tiers);
 
   const save = () => {
     if (!canSave) return;
@@ -766,54 +800,63 @@ function InlinePriceForm({ row, onClose }: { row: ModelRow; onClose: () => void 
         output_price_per_million: Number(output),
         cache_read_price_per_million: optionalPrice(cacheRead),
         cache_write_price_per_million: optionalPrice(cacheWrite),
+        cache_write_1h_price_per_million: optionalPrice(cacheWrite1h),
+        pricing_tiers: pricingTiers(tiers),
       },
       { onSuccess: onClose },
     );
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-3 px-4 py-3">
-      <span className="text-xs font-medium break-all text-[var(--otari-muted)]">{row.key}</span>
-      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
-        Input $ / 1M
-        <MoneyInput value={input} onChange={setInput} ariaLabel={`Input price for ${row.key}`} />
-      </label>
-      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
-        Output $ / 1M
-        <MoneyInput value={output} onChange={setOutput} ariaLabel={`Output price for ${row.key}`} />
-      </label>
-      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
-        Cache read $ / 1M
-        <MoneyInput value={cacheRead} onChange={setCacheRead} ariaLabel={`Cache read price for ${row.key}`} />
-      </label>
-      <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
-        Cache write $ / 1M
-        <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel={`Cache write price for ${row.key}`} />
-      </label>
-      <Button size="sm" variant="primary" isDisabled={setPricing.isPending || !canSave} onPress={save}>
-        {setPricing.isPending ? "Saving…" : "Save"}
-      </Button>
-      <Button size="sm" variant="ghost" isDisabled={setPricing.isPending} onPress={onClose}>
-        Cancel
-      </Button>
-      {row.source === "configured" ? (
-        <span className="inline-flex items-center gap-1">
-          <ConfirmButton
-            confirmLabel="Reset"
-            isPending={deletePricing.isPending}
-            onConfirm={() => deletePricing.mutate(row.key, { onSuccess: onClose })}
-          >
-            Reset
-          </ConfirmButton>
-          <InfoTooltip label="What reset does">
-            Removes the custom price. The model reverts to the default rate (genai-prices) when default pricing is on,
-            otherwise it is metered at no cost.
-          </InfoTooltip>
-        </span>
-      ) : null}
-      {setPricing.error || deletePricing.error ? (
-        <span className="text-xs text-red-700">{errorMessage(setPricing.error ?? deletePricing.error)}</span>
-      ) : null}
+    <div className="flex flex-col gap-3 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-xs font-medium break-all text-[var(--otari-muted)]">{row.key}</span>
+        <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+          Input $ / 1M
+          <MoneyInput value={input} onChange={setInput} ariaLabel={`Input price for ${row.key}`} />
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+          Output $ / 1M
+          <MoneyInput value={output} onChange={setOutput} ariaLabel={`Output price for ${row.key}`} />
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+          Cache read $ / 1M
+          <MoneyInput value={cacheRead} onChange={setCacheRead} ariaLabel={`Cache read price for ${row.key}`} />
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+          Cache write $ / 1M
+          <MoneyInput value={cacheWrite} onChange={setCacheWrite} ariaLabel={`Cache write price for ${row.key}`} />
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+          1h cache write $ / 1M
+          <MoneyInput value={cacheWrite1h} onChange={setCacheWrite1h} ariaLabel={`1 hour cache write price for ${row.key}`} />
+        </label>
+        <Button size="sm" variant="primary" isDisabled={setPricing.isPending || !canSave} onPress={save}>
+          {setPricing.isPending ? "Saving…" : "Save"}
+        </Button>
+        <Button size="sm" variant="ghost" isDisabled={setPricing.isPending} onPress={onClose}>
+          Cancel
+        </Button>
+        {row.source === "configured" ? (
+          <span className="inline-flex items-center gap-1">
+            <ConfirmButton
+              confirmLabel="Reset"
+              isPending={deletePricing.isPending}
+              onConfirm={() => deletePricing.mutate(row.key, { onSuccess: onClose })}
+            >
+              Reset
+            </ConfirmButton>
+            <InfoTooltip label="What reset does">
+              Removes the custom price. The model reverts to the default rate (genai-prices) when default pricing is on,
+              otherwise it is metered at no cost.
+            </InfoTooltip>
+          </span>
+        ) : null}
+        {setPricing.error || deletePricing.error ? (
+          <span className="text-xs text-red-700">{errorMessage(setPricing.error ?? deletePricing.error)}</span>
+        ) : null}
+      </div>
+      <PricingTierEditor tiers={tiers} onChange={setTiers} />
     </div>
   );
 }
@@ -859,6 +902,50 @@ function PriceCell({
   );
 }
 
+function CachingCell({ rates, rowKey, onEdit }: { rates: EffectiveRates; rowKey: string; onEdit: () => void }) {
+  const entries = [
+    rates.cacheReadPrice == null ? null : `R ${formatCost(rates.cacheReadPrice)}`,
+    rates.cacheWritePrice == null ? null : `W ${formatCost(rates.cacheWritePrice)}`,
+    rates.cacheWrite1hPrice == null ? null : `1h ${formatCost(rates.cacheWrite1hPrice)}`,
+  ].filter((entry): entry is string => entry !== null);
+  return (
+    <button
+      type="button"
+      aria-label={`Edit caching price for ${rowKey}`}
+      className="max-w-44 text-right text-xs leading-5 text-[var(--otari-muted)] hover:text-[var(--otari-brand-dark)] hover:underline"
+      onClick={(event) => {
+        event.stopPropagation();
+        onEdit();
+      }}
+    >
+      {entries.length > 0 ? entries.join(" · ") : "Input-rate fallback"}
+    </button>
+  );
+}
+
+function PricingPolicyCell({ row, onEdit }: { row: ModelRow; onEdit: () => void }) {
+  const thresholds = [...row.pricingTiers]
+    .sort((a, b) => a.min_input_tokens - b.min_input_tokens)
+    .map((tier) => formatContext(tier.min_input_tokens))
+  const label =
+    thresholds.length === 0
+      ? "Base only"
+      : `${thresholds.length} tier${thresholds.length === 1 ? "" : "s"} · ≥ ${thresholds.join(", ")}`;
+  return (
+    <button
+      type="button"
+      aria-label={`Edit pricing policy for ${row.key}`}
+      className="max-w-40 text-right text-xs leading-5 text-[var(--otari-muted)] hover:text-[var(--otari-brand-dark)] hover:underline"
+      onClick={(event) => {
+        event.stopPropagation();
+        onEdit();
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 function ModelTable({
   rows,
   isLoading,
@@ -869,6 +956,7 @@ function ModelTable({
   onSelect,
   pricingKey,
   onSetPricingKey,
+  comparisonContextTokens,
 }: {
   rows: ModelRow[];
   isLoading: boolean;
@@ -879,23 +967,25 @@ function ModelTable({
   onSelect: (key: string) => void;
   pricingKey: string | null;
   onSetPricingKey: (key: string | null) => void;
+  comparisonContextTokens: number | null;
 }) {
+  const comparisonLabel = comparisonContextTokens == null ? "Base" : `at ${formatContext(comparisonContextTokens)}`;
   return (
     <Table>
       <THead>
         <Tr>
           <SortableTh label="Model" col="model" sort={sort} onSort={onSort} />
           <Th>Provider</Th>
-          <SortableTh label="Context" col="context" sort={sort} onSort={onSort} align="right" />
           <SortableTh
-            label="In / Out $ / 1M"
+            label={`${comparisonLabel} in / out $ / 1M`}
             col="input"
             sort={sort}
             onSort={onSort}
             align="right"
             info={<PricingInfo />}
           />
-          <Th className="text-right">Cache r / w $ / 1M</Th>
+          <Th className="text-right">Caching {comparisonContextTokens == null ? "policy" : comparisonLabel}</Th>
+          <Th className="text-right">Pricing policy</Th>
         </Tr>
       </THead>
       <tbody>
@@ -904,18 +994,19 @@ function ModelTable({
         ) : rows.length > 0 ? (
           rows.map((row) => {
             const edit = () => onSetPricingKey(pricingKey === row.key ? null : row.key);
+            const rates = effectiveRatesAtContext(row, comparisonContextTokens);
             return (
               <Fragment key={row.key}>
                 <Tr onClick={() => onSelect(row.key)} selected={row.key === selectedKey}>
-                  <Td className="font-medium break-all">{row.model}</Td>
-                  <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
-                  <Td className="text-right tabular-nums text-[var(--otari-muted)]">
-                    {formatContext(row.contextWindow)}
+                  <Td className="font-medium break-all">
+                    {row.model}
+                    <span className="sr-only">{row.key}</span>
                   </Td>
+                  <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
                   <Td className="text-right">
                     <PriceCell
-                      primary={row.inputPrice}
-                      secondary={row.outputPrice}
+                      primary={rates.inputPrice}
+                      secondary={rates.outputPrice}
                       rowKey={row.key}
                       primaryLabel="input"
                       secondaryLabel="output"
@@ -923,14 +1014,10 @@ function ModelTable({
                     />
                   </Td>
                   <Td className="text-right">
-                    <PriceCell
-                      primary={row.cacheReadPrice}
-                      secondary={row.cacheWritePrice}
-                      rowKey={row.key}
-                      primaryLabel="cache read"
-                      secondaryLabel="cache write"
-                      onEdit={edit}
-                    />
+                    <CachingCell rates={rates} rowKey={row.key} onEdit={edit} />
+                  </Td>
+                  <Td className="text-right">
+                    <PricingPolicyCell row={row} onEdit={edit} />
                   </Td>
                 </Tr>
                 {pricingKey === row.key ? (
@@ -969,12 +1056,11 @@ export function ModelsPage() {
   const models = useModels();
   const pricing = usePricing();
   const discoverable = useDiscoverableModels();
-  const providers = useProviders();
   const metadata = useModelMetadata();
 
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
-  const [showPriceForm, setShowPriceForm] = useState(false);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [pricingKey, setPricingKey] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>(readStoredSort);
@@ -998,6 +1084,7 @@ export function ModelsPage() {
   const [minContext, setMinContext] = useState("0");
   const [maxInput, setMaxInput] = useState("");
   const [releaseFilter, setReleaseFilter] = useState("all");
+  const [comparisonContext, setComparisonContext] = useState("");
 
   const metadataByKey = metadata.data?.models ?? {};
   const metadataAvailable = metadata.data?.available ?? false;
@@ -1037,7 +1124,7 @@ export function ModelsPage() {
       const priced = configured.get(key);
       result.push({
         key,
-        model,
+        model: displayModelName(model, provider),
         provider,
         isDiscovered: discoverableKeys.has(key),
         contextWindow: catalogRow?.contextWindow ?? null,
@@ -1045,6 +1132,8 @@ export function ModelsPage() {
         outputPrice: priced ? priced.output_price_per_million : (catalogRow?.outputPrice ?? null),
         cacheReadPrice: priced ? priced.cache_read_price_per_million : (catalogRow?.cacheReadPrice ?? null),
         cacheWritePrice: priced ? priced.cache_write_price_per_million : (catalogRow?.cacheWritePrice ?? null),
+        cacheWrite1hPrice: priced ? (priced.cache_write_1h_price_per_million ?? null) : (catalogRow?.cacheWrite1hPrice ?? null),
+        pricingTiers: priced ? (priced.pricing_tiers ?? []) : (catalogRow?.pricingTiers ?? []),
         source: priced ? "configured" : (catalogRow?.source ?? "none"),
       });
     };
@@ -1065,6 +1154,8 @@ export function ModelsPage() {
         outputPrice: model.pricing?.output_price_per_million ?? null,
         cacheReadPrice: model.pricing?.cache_read_price_per_million ?? null,
         cacheWritePrice: model.pricing?.cache_write_price_per_million ?? null,
+        cacheWrite1hPrice: model.pricing?.cache_write_1h_price_per_million ?? null,
+        pricingTiers: model.pricing?.pricing_tiers ?? [],
         source: priceStatus,
       });
     }
@@ -1094,7 +1185,7 @@ export function ModelsPage() {
         seen.add(model.key);
         out.push({
           key: model.key,
-          model: model.key,
+          model: displayModelName(model.key, provider.provider),
           provider: provider.provider,
           isDiscovered: true,
           contextWindow: metadataByKey[model.key]?.context_window ?? null,
@@ -1103,6 +1194,8 @@ export function ModelsPage() {
           outputPrice: null,
           cacheReadPrice: null,
           cacheWritePrice: null,
+          cacheWrite1hPrice: null,
+          pricingTiers: [],
           source: "none",
         });
       }
@@ -1133,6 +1226,7 @@ export function ModelsPage() {
   const query = search.trim().toLowerCase();
   const minContextValue = Number(minContext) || 0;
   const maxInputValue = maxInput === "" ? Number.POSITIVE_INFINITY : Number(maxInput);
+  const comparisonContextTokens = comparisonContext === "" ? null : Number(comparisonContext);
   const releaseCutoff = releaseFilter === "all" ? null : Date.now() - Number(releaseFilter) * RELEASE_WINDOW_MS;
 
   const filteredModels = useMemo(() => {
@@ -1203,8 +1297,7 @@ export function ModelsPage() {
         }
         return (ad < bd ? -1 : ad > bd ? 1 : 0) * dir || a.model.localeCompare(b.model);
       }
-      const pick = (row: ModelRow) =>
-        sort.col === "context" ? row.contextWindow : sort.col === "input" ? row.inputPrice : row.outputPrice;
+      const pick = (row: ModelRow) => (sort.col === "input" ? row.inputPrice : row.outputPrice);
       const av = pick(a);
       const bv = pick(b);
       if (av == null && bv == null) {
@@ -1235,10 +1328,10 @@ export function ModelsPage() {
   ]);
 
   const total = filteredModels.length;
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const clampedPage = Math.min(page, pageCount - 1);
-  const start = clampedPage * PAGE_SIZE;
-  const pageModels = filteredModels.slice(start, start + PAGE_SIZE);
+  const start = clampedPage * pageSize;
+  const pageModels = filteredModels.slice(start, start + pageSize);
 
   const modelsLoading = models.isLoading || pricing.isLoading || discoverable.isLoading;
   const hasActiveFilters =
@@ -1259,14 +1352,6 @@ export function ModelsPage() {
   const selectedRow = selectedKey
     ? (filteredModels.find((row) => row.key === selectedKey) ?? rowsByKey.get(selectedKey) ?? null)
     : null;
-  const selectedProvider = selectedRow?.provider;
-  const selectedProviderInfo = selectedProvider
-    ? providers.data?.providers.find((info) => info.instance === selectedProvider)
-    : undefined;
-  const selectedProviderDiscovery = selectedProvider
-    ? (discoverable.data?.providers ?? []).find((provider) => provider.provider === selectedProvider)
-    : undefined;
-
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -1275,7 +1360,7 @@ export function ModelsPage() {
       />
 
       <ErrorBanner
-        error={models.error ?? pricing.error ?? discoverable.error ?? providers.error ?? metadata.error}
+        error={models.error ?? pricing.error ?? discoverable.error ?? metadata.error}
       />
 
       <div
@@ -1336,6 +1421,12 @@ export function ModelsPage() {
                 options={PRICE_OPTIONS}
               />
               <FilterSelect
+                ariaLabel="Compare prices at context"
+                value={comparisonContext}
+                onChange={setComparisonContext}
+                options={PRICE_COMPARISON_OPTIONS}
+              />
+              <FilterSelect
                 ariaLabel="Filter by release date"
                 value={releaseFilter}
                 onChange={changeFilter(setReleaseFilter)}
@@ -1355,27 +1446,22 @@ export function ModelsPage() {
               onSelect={setSelectedKey}
               pricingKey={pricingKey}
               onSetPricingKey={setPricingKey}
+              comparisonContextTokens={comparisonContextTokens}
             />
 
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <Pagination page={clampedPage} pageCount={pageCount} total={total} onPage={setPage} />
-              <button
-                type="button"
-                className="text-xs font-medium text-[var(--otari-brand-dark)]"
-                onClick={() => setShowPriceForm((open) => !open)}
-              >
-                {showPriceForm ? "Hide" : "+ Price a model not listed here"}
-              </button>
+              <Pagination
+                page={clampedPage}
+                pageCount={pageCount}
+                total={total}
+                pageSize={pageSize}
+                onPage={setPage}
+                onPageSize={(size) => {
+                  setPageSize(size);
+                  setPage(0);
+                }}
+              />
             </div>
-
-            {showPriceForm ? (
-              <Card>
-                <Card.Content className="flex flex-col gap-4 p-5">
-                  <div className="text-sm font-semibold text-[var(--otari-ink)]">Price a model not listed here</div>
-                  <PriceModelForm onClose={() => setShowPriceForm(false)} />
-                </Card.Content>
-              </Card>
-            ) : null}
           </div>
 
           {selectedRow ? (
@@ -1384,11 +1470,6 @@ export function ModelsPage() {
                 row={selectedRow}
                 metadata={metadataByKey[selectedRow.key]}
                 metadataAvailable={metadataAvailable}
-                providerInfo={selectedProviderInfo}
-                providerModelCount={selectedProviderDiscovery?.models.length ?? 0}
-                providerDiscoveryError={
-                  selectedProviderDiscovery && !selectedProviderDiscovery.ok ? selectedProviderDiscovery.error : null
-                }
                 onMakeAlias={(key) => navigate(`/aliases?target=${encodeURIComponent(key)}`)}
                 onClose={() => setSelectedKey(null)}
               />

@@ -78,6 +78,7 @@ def test_summary_empty_range_is_all_zero(client: TestClient, master_key_header: 
         "total_tokens": 0,
         "cache_read_tokens": 0,
         "cache_write_tokens": 0,
+        "cache_write_1h_tokens": 0,
         "request_count": 0,
         "error_count": 0,
         "avg_latency_ms": None,

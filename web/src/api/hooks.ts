@@ -17,6 +17,7 @@ import type {
   KnownProvider,
   ModelListResponse,
   ModelMetadataResponse,
+  PricingRefreshPreview,
   PricingResponse,
   ProviderHealthResponse,
   ProvidersResponse,
@@ -395,6 +396,30 @@ export function useDeletePricing() {
   });
 }
 
+export function usePreviewPricingRefresh() {
+  return useMutation({
+    mutationFn: () => apiFetch<PricingRefreshPreview>("/v1/pricing/refresh", { method: "POST" }),
+  });
+}
+
+export function useConfirmPricingRefresh() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch("/v1/pricing/refresh/confirm", { method: "POST" }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PRICING] });
+      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+      void queryClient.invalidateQueries({ queryKey: [PROVIDERS] });
+    },
+  });
+}
+
+export function useRejectPricingRefresh() {
+  return useMutation({
+    mutationFn: () => apiFetch<void>("/v1/pricing/refresh/reject", { method: "POST" }),
+  });
+}
+
 // The keys endpoint caps `limit` at 1000 server-side; page through it (capped like
 // pricing) so a gateway with many keys can't have rows silently vanish from the
 // table, and a backend that ignores `skip` can't spin an unbounded loop.
@@ -650,10 +675,4 @@ export function useUsageSummary(filters: UsageFilters, bucket: UsageBucket, enab
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
-}
-
-// The authenticated URL for the CSV export of the current filter set. The page
-// downloads it via apiFetchBlob (the master key can't ride on a plain anchor).
-export function usageSummaryCsvUrl(filters: UsageFilters): string {
-  return `/v1/usage/summary.csv?${usageParams(filters).toString()}`;
 }

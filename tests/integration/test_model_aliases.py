@@ -222,6 +222,8 @@ def test_get_model_alias_surfaces_target_pricing(client: TestClient) -> None:
         "output_price_per_million": 2.0,
         "cache_read_price_per_million": None,
         "cache_write_price_per_million": None,
+        "cache_write_1h_price_per_million": None,
+        "pricing_tiers": [],
     }
 
 

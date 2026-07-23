@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setMasterKey } from "@/api/client";
 import type { UsageEntry } from "@/api/types";
-import { ActivityPage } from "@/pages/ActivityPage";
+import { ActivityPage, copyToClipboard } from "@/pages/ActivityPage";
 
 function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
   return {
@@ -98,7 +98,9 @@ function listCalls(fetchMock: ReturnType<typeof mockApi>): string[] {
 }
 
 describe("ActivityPage", () => {
-  beforeEach(() => setMasterKey("test-master-key"));
+  beforeEach(() => {
+    setMasterKey("test-master-key");
+  });
   afterEach(() => {
     vi.restoreAllMocks();
     setMasterKey(null);
@@ -130,7 +132,7 @@ describe("ActivityPage", () => {
     expect(within(batch).getByText("—")).toBeInTheDocument();
   });
 
-  it("expands an error row to show the full error text and a copy affordance", async () => {
+  it("expands an error row without exposing provider diagnostics", async () => {
     const user = userEvent.setup();
     mockApi({ rows: [entry({ status: "error", error_message: "provider exploded: quota exceeded" })] });
     renderPage(<ActivityPage />);
@@ -139,8 +141,25 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("error")).toBeInTheDocument();
 
     await user.click(row);
-    expect(screen.getByText("provider exploded: quota exceeded")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy" })).toBeInTheDocument();
+    expect(screen.getByText("The provider returned an error. Inspect gateway logs for details.")).toBeInTheDocument();
+    expect(screen.queryByText("provider exploded: quota exceeded")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
+  });
+
+  it("reports copying only after the clipboard write succeeds", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const copied = await copyToClipboard("provider exploded", { writeText });
+
+    expect(writeText).toHaveBeenCalledWith("provider exploded");
+    expect(copied).toBe(true);
+  });
+
+  it("does not report success when the clipboard write fails", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("clipboard denied"));
+    const copied = await copyToClipboard("provider exploded", { writeText });
+
+    expect(writeText).toHaveBeenCalledWith("provider exploded");
+    expect(copied).toBe(false);
   });
 
   it("sends the status filter to the API", async () => {

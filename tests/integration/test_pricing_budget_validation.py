@@ -176,6 +176,39 @@ def test_pricing_config_accepts_zero_prices() -> None:
     assert config.output_price_per_million == 0.0
 
 
+def test_pricing_config_validates_context_price_tiers() -> None:
+    """Configuration tiers accept valid rates and reject billing-invalid rules."""
+    config = PricingConfig.model_validate(
+        {
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+            "pricing_tiers": [{"min_input_tokens": 200_000, "input_price_per_million": 3.0}],
+        }
+    )
+    assert config.pricing_tiers[0].min_input_tokens == 200_000
+
+    with pytest.raises(ValueError, match="greater than or equal to 0"):
+        PricingConfig.model_validate(
+            {
+                "input_price_per_million": 1.0,
+                "output_price_per_million": 2.0,
+                "pricing_tiers": [{"min_input_tokens": 200_000, "input_price_per_million": -3.0}],
+            }
+        )
+
+    with pytest.raises(ValueError, match="must not repeat"):
+        PricingConfig.model_validate(
+            {
+                "input_price_per_million": 1.0,
+                "output_price_per_million": 2.0,
+                "pricing_tiers": [
+                    {"min_input_tokens": 200_000, "input_price_per_million": 3.0},
+                    {"min_input_tokens": 200_000, "input_price_per_million": 4.0},
+                ],
+            }
+        )
+
+
 def test_pricing_required_but_missing_true_when_unpriced_and_required() -> None:
     """With require_pricing on, a missing pricing row must reject (F3 budget-bypass fix)."""
     assert pricing_required_but_missing(None, require_pricing=True) is True

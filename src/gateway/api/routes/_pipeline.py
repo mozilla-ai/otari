@@ -35,7 +35,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from enum import Enum, auto
-from typing import Any, Generic, NamedTuple, NoReturn, Protocol, TypeVar
+from typing import Any, Generic, Literal, NamedTuple, NoReturn, Protocol, TypeVar
 from urllib.parse import ParseResult, urlparse
 
 import httpx
@@ -81,7 +81,7 @@ from gateway.api.routes._tools import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
-from gateway.core.usage import cache_read_tokens_of, cache_tokens_in_prompt_of, cache_write_tokens_of
+from gateway.core.usage import cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
 from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt, record_cost, record_tokens
 from gateway.model_labeling import relabel_model
@@ -105,6 +105,7 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
+from gateway.services.metered_pricing import calculate_metered_cost
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import (
     find_model_pricing,
@@ -510,6 +511,7 @@ async def resolve_request_context(
     estimate_max_output_tokens: int | None,
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
+    estimate_cache_write_ttl: Literal["5m", "1h"] | None = None,
     normalize_messages: Callable[
         [str, LLMProvider | None, str, str | None], Awaitable[tuple[int, CompletionUsage | None]]
     ]
@@ -616,6 +618,7 @@ async def resolve_request_context(
             prompt_chars=estimate_prompt_chars,
             max_output_tokens=estimate_max_output_tokens,
             default_output_tokens=config.budget_estimate_default_output_tokens,
+            cache_write_ttl=estimate_cache_write_ttl,
         )
         # Reserve first so user/blocked/budget rejections (404/403) take
         # precedence over the missing-pricing rejection (402); refund if we
@@ -662,6 +665,7 @@ async def resolve_request_context(
                     prompt_chars=post_chars,
                     max_output_tokens=estimate_max_output_tokens,
                     default_output_tokens=config.budget_estimate_default_output_tokens,
+                    cache_write_ttl=estimate_cache_write_ttl,
                 )
                 await increase_reservation(
                     db,
@@ -958,67 +962,8 @@ async def prepare_gateway_tools(
 
 
 def _compute_cost(pricing: ModelPricing, usage_data: CompletionUsage) -> float:
-    """Compute standalone-mode cost from provider usage and model pricing.
-
-    Prices prompt, completion, and (when configured) cache tokens on a single
-    convention borrowed from the genai-prices dataset this project already uses:
-    the input/prompt token count is the grand total that *includes* cache reads
-    and writes, and each physical token is charged once.
-
-    Providers report cache tokens two different ways, so usage is normalized
-    first (see :attr:`GatewayUsage.cache_tokens_in_prompt`):
-
-    * OpenAI / Gemini report cache reads as a subset already inside
-      ``prompt_tokens`` (``cache_tokens_in_prompt`` is ``True``).
-    * Anthropic reports ``input_tokens`` *exclusive* of cache reads/writes and
-      lists them as separate buckets (``cache_tokens_in_prompt`` is ``False``),
-      so they are folded back into the total here.
-
-    Uncached input is then ``total - cache_read - cache_write``, priced at the
-    input rate. Cache reads/writes are charged at their own rate when one is
-    configured; when a cache rate is absent, those tokens stay in the uncached
-    bucket and are billed at the full input rate rather than being dropped or
-    double counted. This mirrors ``ModelPrice.calc_price`` in genai-prices.
-
-    A malformed provider payload (e.g. a cached count larger than
-    ``prompt_tokens`` on the OpenAI shape) is clamped so the uncached remainder
-    can never go negative and produce a negative cost that would credit the
-    user's budget. Cost is therefore always non-negative.
-    """
-    prompt_tokens = usage_data.prompt_tokens or 0
-    completion_tokens = usage_data.completion_tokens or 0
-    cache_read = cache_read_tokens_of(usage_data)
-    cache_write = cache_write_tokens_of(usage_data)
-
-    if cache_tokens_in_prompt_of(usage_data):
-        total_input_tokens = prompt_tokens
-    else:
-        total_input_tokens = prompt_tokens + cache_read + cache_write
-
-    # Defensive clamp: keep the cache buckets inside the input total so the
-    # uncached remainder stays >= 0 even if a provider/adapter reports an
-    # inconsistent payload. For the Anthropic shape the total is built from
-    # these counts, so this is a no-op there; it only bites a broken OpenAI-shape
-    # payload where cached_tokens exceeds prompt_tokens.
-    cache_read = min(cache_read, total_input_tokens)
-    cache_write = min(cache_write, total_input_tokens - cache_read)
-
-    read_rate = pricing.cache_read_price_per_million
-    write_rate = pricing.cache_write_price_per_million
-
-    # Only pull a cache bucket out of the uncached-input total when it has its
-    # own price; otherwise it stays billed at the input rate.
-    priced_cache_read = cache_read if read_rate is not None else 0
-    priced_cache_write = cache_write if write_rate is not None else 0
-    uncached_input_tokens = total_input_tokens - priced_cache_read - priced_cache_write
-
-    cost = (uncached_input_tokens / 1_000_000) * pricing.input_price_per_million
-    cost += (completion_tokens / 1_000_000) * pricing.output_price_per_million
-    if read_rate is not None and cache_read > 0:
-        cost += (cache_read / 1_000_000) * read_rate
-    if write_rate is not None and cache_write > 0:
-        cost += (cache_write / 1_000_000) * write_rate
-
+    """Compute standalone cost through the threshold-aware meter calculator."""
+    cost, _, _ = calculate_metered_cost(pricing, usage_data)
     return cost
 
 
@@ -1096,6 +1041,7 @@ async def log_usage(
         usage_log.total_tokens = usage_data.total_tokens
         usage_log.cache_read_tokens = cache_read_tokens_of(usage_data)
         usage_log.cache_write_tokens = cache_write_tokens_of(usage_data)
+        usage_log.cache_write_1h_tokens = cache_write_1h_tokens_of(usage_data)
 
         record_tokens(
             str(provider or ""),
@@ -1106,8 +1052,10 @@ async def log_usage(
 
         pricing = await find_model_pricing(db, provider, model, as_of=usage_log.timestamp)
         if pricing:
-            cost = _compute_cost(pricing, usage_data)
+            cost, meters, breakdown = calculate_metered_cost(pricing, usage_data)
             usage_log.cost = cost
+            usage_log.billing_meters = meters
+            usage_log.pricing_breakdown = breakdown
             record_cost(str(provider or ""), model, cost)
         else:
             model_ref = f"{provider}:{model}" if provider else model

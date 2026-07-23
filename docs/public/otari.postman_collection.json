@@ -1328,6 +1328,65 @@
           }
         },
         {
+          "name": "Preview Pricing Refresh",
+          "request": {
+            "description": "Fetch the latest defaults and hold them for operator review.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "pricing",
+                "refresh"
+              ],
+              "raw": "{{baseUrl}}/v1/pricing/refresh"
+            }
+          }
+        },
+        {
+          "name": "Confirm Pricing Refresh",
+          "request": {
+            "description": "Activate the latest reviewed default-price snapshot.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "pricing",
+                "refresh",
+                "confirm"
+              ],
+              "raw": "{{baseUrl}}/v1/pricing/refresh/confirm"
+            }
+          }
+        },
+        {
+          "name": "Reject Pricing Refresh",
+          "request": {
+            "description": "Discard a reviewed default-price snapshot without applying it.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "pricing",
+                "refresh",
+                "reject"
+              ],
+              "raw": "{{baseUrl}}/v1/pricing/refresh/reject"
+            }
+          }
+        },
+        {
           "name": "Get Pricing",
           "request": {
             "description": "Get pricing for a specific model as of a timestamp.",

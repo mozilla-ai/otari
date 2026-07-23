@@ -15,6 +15,8 @@ export interface ModelPricingInfo {
   // OpenAI/Gemini discount rate for reads, Anthropic cache-read / cache-write rates.
   cache_read_price_per_million: number | null;
   cache_write_price_per_million: number | null;
+  cache_write_1h_price_per_million?: number | null;
+  pricing_tiers?: PricingTier[];
 }
 
 export interface ModelObject {
@@ -224,8 +226,19 @@ export interface PricingResponse {
   output_price_per_million: number;
   cache_read_price_per_million: number | null;
   cache_write_price_per_million: number | null;
+  cache_write_1h_price_per_million?: number | null;
+  pricing_tiers?: PricingTier[];
   created_at: string;
   updated_at: string;
+}
+
+export interface PricingTier {
+  min_input_tokens: number;
+  input_price_per_million?: number;
+  output_price_per_million?: number;
+  cache_read_price_per_million?: number;
+  cache_write_price_per_million?: number;
+  cache_write_1h_price_per_million?: number;
 }
 
 export interface SetPricingRequest {
@@ -236,7 +249,24 @@ export interface SetPricingRequest {
   // cache pricing (cache tokens then bill at the input rate).
   cache_read_price_per_million?: number | null;
   cache_write_price_per_million?: number | null;
+  cache_write_1h_price_per_million?: number | null;
+  pricing_tiers?: PricingTier[] | null;
   effective_at?: string | null;
+}
+
+export interface PricingRefreshChange {
+  model_key: string;
+  change: "added" | "changed" | "removed";
+}
+
+export interface PricingRefreshPreview {
+  fetched_at: string;
+  added_count: number;
+  changed_count: number;
+  removed_count: number;
+  protected_model_count: number;
+  changes: PricingRefreshChange[];
+  changes_truncated: boolean;
 }
 
 // An API key row. The full secret is never returned after creation; `key_prefix`
@@ -341,6 +371,9 @@ export interface UsageEntry {
   total_tokens: number | null;
   cache_read_tokens: number | null;
   cache_write_tokens: number | null;
+  cache_write_1h_tokens?: number | null;
+  billing_meters?: Record<string, number> | null;
+  pricing_breakdown?: Array<{ meter: string; units: number; rate_per_million: number; cost: number }> | null;
   cost: number | null;
   status: string;
   error_message: string | null;
@@ -379,6 +412,7 @@ export interface UsageTotals {
   total_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cache_write_1h_tokens?: number;
   request_count: number;
   error_count: number;
   // Mean server-side latency over rows that recorded one; null when none did.
