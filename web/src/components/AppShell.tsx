@@ -29,6 +29,19 @@ function readIsMobile(): boolean {
   return window.matchMedia(MOBILE_QUERY).matches;
 }
 
+const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// Visible, focusable descendants of a container, in DOM order. offsetParent is
+// null for display:none nodes (e.g. the desktop-only collapse chevron on mobile),
+// so filtering on it keeps the focus trap's first/last from landing on a hidden
+// control that can't actually take focus.
+function getFocusable(container: HTMLElement | null): HTMLElement[] {
+  if (!container) return [];
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (el) => el.offsetParent !== null || el === document.activeElement,
+  );
+}
+
 function readStoredSidebarWidth(): number {
   if (typeof window === "undefined") return DEFAULT_SIDEBAR;
   try {
@@ -222,6 +235,7 @@ export function AppShell() {
   const { logout } = useAuth();
 
   const asideRef = useRef<HTMLElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredSidebarWidth);
   const [collapsed, setCollapsed] = useState<boolean>(readStoredCollapsed);
   const [resizing, setResizing] = useState(false);
@@ -252,6 +266,40 @@ export function AppShell() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileNavOpen]);
+
+  // Focus management for the mobile drawer, which is a modal overlay: move focus
+  // into it when it opens and restore focus to the toggle when it closes, so
+  // keyboard and screen-reader users are neither stranded inside a hidden panel
+  // nor dropped back to the top of the document. The isMobile guard means a
+  // breakpoint change to desktop (which also closes the drawer) never yanks focus
+  // to the now-hidden toggle.
+  useEffect(() => {
+    if (!isMobile) return;
+    if (mobileNavOpen) {
+      asideRef.current?.focus();
+    } else if (asideRef.current?.contains(document.activeElement)) {
+      toggleRef.current?.focus();
+    }
+  }, [isMobile, mobileNavOpen]);
+
+  // Keep Tab within the open drawer so focus cannot wander to the page behind the
+  // backdrop. Paired with the aside being inert while closed, this bounds keyboard
+  // focus to whichever surface is actually interactive.
+  const trapFocus = useCallback((event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab") return;
+    const focusables = getFocusable(asideRef.current);
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || active === asideRef.current)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }, []);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -312,9 +360,11 @@ export function AppShell() {
         <div className="flex items-center gap-2.5">
           <button
             type="button"
+            ref={toggleRef}
             onClick={() => setMobileNavOpen((value) => !value)}
             aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
             aria-expanded={mobileNavOpen}
+            aria-controls="app-sidebar"
             className="-ml-1 flex h-8 w-8 items-center justify-center rounded-lg text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)] md:hidden"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
@@ -333,21 +383,31 @@ export function AppShell() {
       <PricingWarning />
       <div className="flex min-h-0 flex-1">
         {/* On mobile the drawer floats over the page; a backdrop dims the content
-            behind it and dismisses it on tap. */}
+            behind it and dismisses it on tap. A non-interactive div (not a
+            button): dismissal by pointer is a convenience, keyboard users close
+            with Escape, and an aria-hidden interactive element is a contradiction. */}
         {isMobile && mobileNavOpen ? (
-          <button
-            type="button"
-            aria-hidden
-            tabIndex={-1}
+          <div
+            aria-hidden="true"
             onClick={() => setMobileNavOpen(false)}
             className="fixed inset-0 z-30 bg-black/40 md:hidden"
           />
         ) : null}
         <aside
           ref={asideRef}
+          id="app-sidebar"
+          // On mobile the drawer is a modal dialog; give it a name and mark it
+          // modal while open. While closed it is off-canvas, so inert takes its
+          // links out of the tab order and the accessibility tree until opened.
+          role={isMobile ? "dialog" : undefined}
+          aria-modal={isMobile && mobileNavOpen ? true : undefined}
+          aria-label={isMobile ? "Navigation" : undefined}
+          tabIndex={isMobile ? -1 : undefined}
+          inert={isMobile && !mobileNavOpen ? true : undefined}
+          onKeyDown={isMobile && mobileNavOpen ? trapFocus : undefined}
           style={isMobile ? undefined : { width }}
           className={clsx(
-            "flex flex-col border-r border-[var(--otari-line)] bg-[var(--otari-surface)]",
+            "flex flex-col border-r border-[var(--otari-line)] bg-[var(--otari-surface)] focus:outline-none",
             isMobile
               ? clsx(
                   "fixed inset-y-0 left-0 z-40 w-[17rem] shadow-xl transition-transform duration-200",

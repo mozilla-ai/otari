@@ -105,4 +105,43 @@ describe("AppShell responsive layout", () => {
 
     expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
   });
+
+  it("closes the drawer on Escape and restores focus to the toggle", async () => {
+    mockMatchMedia(true);
+    const user = userEvent.setup();
+    renderShell();
+
+    const toggle = screen.getByRole("button", { name: "Open navigation" });
+    await user.click(toggle);
+    expect(screen.getByRole("button", { name: "Close navigation" })).toHaveAttribute("aria-expanded", "true");
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
+    // Focus returns to the trigger so a keyboard user is not dropped to the top.
+    expect(screen.getByRole("button", { name: "Open navigation" })).toHaveFocus();
+  });
+
+  it("closes the drawer when the backdrop is clicked", async () => {
+    mockMatchMedia(true);
+    const user = userEvent.setup();
+    const { container } = renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Open navigation" }));
+    const backdrop = container.querySelector(".fixed.inset-0")!;
+    expect(backdrop).toBeInTheDocument();
+
+    await user.click(backdrop);
+
+    expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("marks the drawer inert while closed so its links leave the tab order", () => {
+    mockMatchMedia(true);
+    const { container } = renderShell();
+
+    // Off-canvas and inert by default: the nav is not reachable until opened.
+    expect(container.querySelector("aside")).toHaveAttribute("inert");
+    expect(container.querySelector("aside")).toHaveAttribute("aria-label", "Navigation");
+  });
 });
