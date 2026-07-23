@@ -244,7 +244,7 @@ def _env_provider_instances(configured_impls: set[str]) -> list[str]:
     A keyless local provider (``ollama``/``llamacpp``/``llamafile``, whose
     ``env_key`` is absent) has no credential signal to detect and so is not
     surfaced here; discovering it would mean dialing a fixed localhost endpoint on
-    spec. That narrow callable-but-undiscoverable case is tracked separately.
+    spec. That narrow callable-but-undiscoverable case is tracked in issue #389.
     """
     detected: list[str] = []
     try:
