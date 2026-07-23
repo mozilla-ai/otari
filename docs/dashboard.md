@@ -167,6 +167,8 @@ gateway.
   expires).
 - **Budgets**: spending limits callers are held to, with per-period resets.
 
+For how users, keys, and budgets fit together and the management endpoints behind these pages, see [Access control](access-control.md).
+
 ### System
 
 - **Tools & Guardrails**: configure the backends for built-in tools (for

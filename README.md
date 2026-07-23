@@ -147,22 +147,7 @@ The returned `gw-` key is shown in full only once.
 
 ### Set it up in the browser instead
 
-Prefer not to pre-set anything on the command line? Launch Otari bare and finish in the dashboard.
-
-```bash
-docker run --rm -p 8000:8000 mzdotai/otari:latest otari serve
-```
-
-With no master key set, Otari generates one and prints it to the logs once on startup:
-
-```text
-Otari first-run: no master key was set, so one was generated.
-Save it now (it is shown only once). Sign in to the dashboard at http://localhost:8000/
-Your master key:
-otari-mk-...
-```
-
-Open `http://localhost:8000/`, sign in with that key, then open **Providers** and add your OpenAI key. Storing a provider key requires `OTARI_SECRET_KEY`, a Fernet key that encrypts credentials at rest; generate one with `otari gen-secret-key` and set it before launch:
+Prefer not to pre-set anything on the command line? Launch Otari bare, then finish in the dashboard.
 
 ```bash
 docker run --rm -p 8000:8000 \
@@ -170,7 +155,7 @@ docker run --rm -p 8000:8000 \
   mzdotai/otari:latest otari serve
 ```
 
-Back it up somewhere safe: losing `OTARI_SECRET_KEY` makes every stored provider key undecryptable. Providers you set in `config.yml` keep working and appear in the dashboard marked `config` (read-only there); keys you add in the UI are marked `stored`, and a stored key of the same name takes precedence.
+With no master key set, Otari generates one and prints it to the logs once on startup (look for `Your master key:`). Open `http://localhost:8000/`, sign in with that key, then open **Providers** and add your OpenAI key. `OTARI_SECRET_KEY` is a Fernet key that encrypts stored provider credentials at rest; back it up, because losing it makes stored keys undecryptable. Full walkthrough, including the two-key model, in the [Admin dashboard guide](docs/dashboard.md).
 
 ## Run the full stack
 
@@ -218,18 +203,16 @@ For hot reload against a local `.env`, use `make dev`.
 ### Admin dashboard
 
 In standalone mode the gateway serves a web admin dashboard at the root URL
-(`http://localhost:8000`). Sign in with your master key (`OTARI_MASTER_KEY`, or
-the one printed to the logs on first run) to add provider API keys, browse the
-model catalogue, set model pricing, manage aliases, and toggle runtime settings
-(model discovery and default pricing). Provider keys added in the **Providers**
-page are encrypted at rest (requires `OTARI_SECRET_KEY`; see
-[Set it up in the browser instead](#set-it-up-in-the-browser-instead)) and merge
-over `config.yml` providers, so you can start with an empty config and add
-credentials after launch. The get-started tutorial page moved to `/welcome`. The
-dashboard is a React +
-HeroUI app that lives in `web/`; its built bundle is committed under
-`src/gateway/static/dashboard`, so the published package and Docker image serve
-it with no extra build step. See [`web/README.md`](web/README.md) to work on it.
+(`http://localhost:8000`). Sign in with your master key to add provider keys,
+browse the model catalogue, set pricing, manage aliases and access (users, keys,
+budgets), and toggle runtime settings. See the
+[Admin dashboard guide](docs/dashboard.md) for the two-key model, a first-run
+walkthrough, and a page-by-page reference.
+
+The dashboard is a React + HeroUI app that lives in `web/`; its built bundle is
+committed under `src/gateway/static/dashboard`, so the published package and
+Docker image serve it with no extra build step. See
+[`web/README.md`](web/README.md) to work on it.
 
 To build and run the container from your local code instead of pulling the published image, layer in the build file:
 
@@ -254,9 +237,7 @@ export OTARI_AI_TOKEN=gw_xxx
 
 ## Built-in tools
 
-Otari can run two tools itself so any model, including open-weight ones, gets parity with what frontier APIs expose as managed tools: `otari_code_execution` (a sandboxed Python REPL) and `otari_web_search`. Both are opt-in per request via the `tools` array and run behind docker-compose profiles, so operators who don't use them don't pull the extra images.
-
-The keyword decides who runs it. An `otari_*` type means Otari runs it in its own sandbox. Any other type, including the provider-native keywords (`code_interpreter`, `code_execution_<date>`, `web_search_<date>`), is passed through to the provider's native sandbox. Either way Otari still handles routing, observability, and billing.
+Otari can run two tools itself so any model, including open-weight ones, gets parity with what frontier APIs expose as managed tools: `otari_code_execution` (a sandboxed Python REPL) and `otari_web_search`. Both are opt-in per request via the `tools` array and run behind docker-compose profiles. An `otari_*` type means Otari runs it in its own sandbox; any other type, including the provider-native keywords, is passed through to the provider. Either way Otari still handles routing, observability, and billing.
 
 ```json
 {
@@ -266,17 +247,7 @@ The keyword decides who runs it. An `otari_*` type means Otari runs it in its ow
 }
 ```
 
-Bring up with `docker compose --profile code-exec up`. Runnable walkthrough in `demo/code-exec/`.
-
-```json
-{
-  "model": "anthropic:claude-sonnet-4-6",
-  "messages": [{"role": "user", "content": "What's the latest stable Python release?"}],
-  "tools": [{"type": "otari_web_search"}]
-}
-```
-
-Bring up with `docker compose --profile web-search up`. Runnable walkthrough in `demo/web-search/`. The bundled backend is SearXNG, fine for trying it out but rate-limited for sustained use. For production, point `OTARI_WEB_SEARCH_URL` at a licensed backend; ready-to-run Brave and Tavily adapters ship in `scripts/`.
+Bring up with `docker compose --profile code-exec up` (or `--profile web-search`). See [Built-in tools](docs/tools.md) for backends, adapters, and the passthrough rules; runnable walkthroughs live under `demo/`.
 
 ## Guardrails
 
@@ -290,7 +261,7 @@ A guardrail is a request-level check Otari runs on the input before the provider
 }
 ```
 
-`mode: monitor` (the default) forwards to the provider and surfaces the verdict on the `X-Otari-Guardrails` response header. `mode: block` returns `403` and never calls the provider when the input is flagged. Bring up the default prompt-injection guardrail with `docker compose --profile guardrails up`. Runnable walkthrough in `demo/guardrails/`.
+`mode: monitor` (the default) forwards to the provider and surfaces the verdict on the `X-Otari-Guardrails` response header; `mode: block` returns `403` and never calls the provider when the input is flagged. Bring up the default prompt-injection guardrail with `docker compose --profile guardrails up`. See [Guardrails](docs/guardrails.md) for profiles and modes; runnable walkthrough in `demo/guardrails/`.
 
 ## API surface
 
@@ -336,10 +307,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## Documentation
 
+Full docs live in [`docs/`](docs/index.md), grouped by task. Highlights:
+
 - [Quickstart](docs/quickstart.md), get running and make your first request.
 - [Deployment](docs/deployment.md), run Otari with Docker.
 - [Configuration](docs/configuration.md), config file and environment variable reference.
 - [Modes](docs/modes.md), standalone vs connected to otari.ai.
+- [Admin dashboard](docs/dashboard.md), the operator UI.
+- [Access control](docs/access-control.md), users, keys, and budgets.
 - [API reference](docs/api-reference.md), every endpoint.
 - [Models](docs/models.md), supported providers and model format.
 
