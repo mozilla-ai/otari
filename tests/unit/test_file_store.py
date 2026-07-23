@@ -92,6 +92,62 @@ async def test_put_stream_cleans_up_partial_file_on_cancellation(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_put_stream_cleans_up_partial_file_on_http_exception(tmp_path: Path) -> None:
+    """The real production trigger, not just a generic RuntimeError/cancellation.
+
+    _capped_chunks (the route's size-cap wrapper) raises HTTPException(413)
+    mid-stream once the upload exceeds the configured limit. Mirrors that
+    shape directly here (without importing the route, to keep this a pure
+    file_store test) to confirm cleanup covers the actual production path,
+    not just the generic failure modes above.
+    """
+    from fastapi import HTTPException
+
+    store = LocalDirFileStore(str(tmp_path))
+
+    async def _oversized_chunks() -> AsyncIterator[bytes]:
+        yield b"x" * 10
+        raise HTTPException(status_code=413, detail="File exceeds maximum upload size of 1 MB")
+
+    with pytest.raises(HTTPException):
+        await store.put_stream("file-httpexcmidstream", _oversized_chunks())
+
+    shard_dir = tmp_path / "ht"
+    leftover = list(shard_dir.glob("*")) if shard_dir.exists() else []
+    assert leftover == []
+
+
+@pytest.mark.asyncio
+async def test_delete_removes_empty_shard_dir(tmp_path: Path) -> None:
+    """Deleting the only file in a shard dir also removes the now-empty dir.
+
+    Otherwise a zero-byte upload that gets rejected (see the create_file route)
+    leaves an empty shard directory behind for every attempt.
+    """
+    store = LocalDirFileStore(str(tmp_path))
+    ref = await store.put("file-lonelyshard1", b"")
+    shard_dir = (tmp_path / ref).parent
+    assert shard_dir.exists()
+
+    await store.delete(ref)
+    assert not shard_dir.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_keeps_shard_dir_with_other_files(tmp_path: Path) -> None:
+    """rmdir must be harmless when the shard still has siblings in it."""
+    store = LocalDirFileStore(str(tmp_path))
+    # Both ids share the "ab" shard prefix.
+    ref1 = await store.put("file-ab111111", b"one")
+    ref2 = await store.put("file-ab222222", b"two")
+    shard_dir = (tmp_path / ref1).parent
+
+    await store.delete(ref1)
+    assert shard_dir.exists()  # ref2 still lives here
+    assert await store.get(ref2) == b"two"
+
+
+@pytest.mark.asyncio
 async def test_put_shards_by_prefix(tmp_path: Path) -> None:
     store = LocalDirFileStore(str(tmp_path))
     ref = await store.put("file-ab12cd34", b"x")

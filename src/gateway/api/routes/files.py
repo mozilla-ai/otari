@@ -86,6 +86,30 @@ async def _capped_chunks(file: UploadFile, max_bytes: int) -> AsyncIterator[byte
         yield chunk
 
 
+async def _prime(chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+    """Eagerly read ``chunks``' first item so a read failure raises here, not later.
+
+    ``StreamingResponse`` only touches its body iterator after the 200 status
+    and headers are already flushed. Without this, a missing or unreadable blob
+    (DB record present, disk blob gone or corrupted) would truncate an
+    already-started 200 response instead of failing with a clean 500. Awaiting
+    the first chunk before constructing the response surfaces that failure as
+    a normal exception in the route.
+    """
+    try:
+        first: bytes | None = await chunks.__anext__()
+    except StopAsyncIteration:
+        first = None
+
+    async def _rest() -> AsyncIterator[bytes]:
+        if first is not None:
+            yield first
+            async for chunk in chunks:
+                yield chunk
+
+    return _rest()
+
+
 def _content_disposition(filename: str) -> str:
     """Build a Content-Disposition header value that is safe from injection.
 
@@ -233,13 +257,24 @@ async def get_file_content(
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
+    # No Content-Length: it would come from record.bytes (DB) while the body
+    # comes from the storage backend (disk). If those ever diverge (partial
+    # write, corruption), a length header derived from the DB value would be
+    # wrong, and clients trust that header over what actually arrives. Chunked
+    # transfer encoding doesn't need to declare a length up front.
+    try:
+        body = await _prime(file_store.get_stream(record.storage_ref))
+    except OSError as exc:
+        logger.error("Failed to read blob for file %s (ref=%s): %s", file_id, record.storage_ref, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to read file",
+        ) from exc
+
     return StreamingResponse(
-        file_store.get_stream(record.storage_ref),
+        body,
         media_type=record.mime_type,
-        headers={
-            "Content-Disposition": _content_disposition(record.filename),
-            "Content-Length": str(record.bytes),
-        },
+        headers={"Content-Disposition": _content_disposition(record.filename)},
     )
 
 

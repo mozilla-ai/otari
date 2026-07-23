@@ -175,6 +175,16 @@ class LocalDirFileStore:
                 path.unlink()
             except FileNotFoundError:
                 logger.debug("file_store delete: %s already absent", storage_ref)
+                return
+            # Best-effort: if this was the last file in its shard dir (e.g. a
+            # zero-byte upload rejected right after being written), don't leave
+            # an empty shard directory behind. rmdir fails harmlessly if the
+            # shard still has other files in it, or on an unlikely concurrent
+            # write race.
+            try:
+                path.parent.rmdir()
+            except OSError:
+                pass
 
         await asyncio.to_thread(_unlink)
 
