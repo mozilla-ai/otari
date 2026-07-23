@@ -221,7 +221,7 @@ def _supports_list_models(provider_name: str) -> bool:
         return False
 
 
-def _env_provider_instances(configured: set[str]) -> list[str]:
+def _env_provider_instances(configured_impls: set[str]) -> list[str]:
     """any-llm provider implementations made callable by their credential env var.
 
     Completion routing works for any any-llm provider once its native credential
@@ -234,14 +234,30 @@ def _env_provider_instances(configured: set[str]) -> list[str]:
     resolves.
 
     Only providers that support live model listing are included; one that cannot
-    list models would just error out and be dropped from the catalog. Providers
-    already in ``configured`` are skipped so a named instance is neither shadowed
-    nor duplicated.
+    list models would just error out and be dropped from the catalog. A provider
+    whose implementation already backs a configured instance is skipped
+    (``configured_impls`` holds those implementation names): otherwise a custom
+    instance such as ``my-anthropic`` (``provider_type: anthropic``) alongside
+    ``ANTHROPIC_API_KEY`` would dial the same credential twice and list the same
+    models under two keys.
+
+    A keyless local provider (``ollama``/``llamacpp``/``llamafile``, whose
+    ``env_key`` is absent) has no credential signal to detect and so is not
+    surfaced here; discovering it would mean dialing a fixed localhost endpoint on
+    spec. That narrow callable-but-undiscoverable case is tracked separately.
     """
     detected: list[str] = []
-    for metadata in AnyLLM.get_all_provider_metadata():
+    try:
+        all_metadata = AnyLLM.get_all_provider_metadata()
+    except Exception:
+        # Match the module's defensive posture (see _supports_list_models and the
+        # return_exceptions fanouts): a registry hiccup must not 500 GET /v1/models
+        # or /v1/models/discoverable. Fall back to configured-only discovery.
+        logger.warning("Could not enumerate provider metadata for env-based discovery", exc_info=True)
+        return detected
+    for metadata in all_metadata:
         name = metadata.name
-        if name in configured or not metadata.list_models:
+        if name in configured_impls or not metadata.list_models:
             continue
         env_key = metadata.env_key
         if not env_key:
@@ -264,10 +280,13 @@ def _discoverable_instances(config: GatewayConfig) -> list[str]:
 
     Configured instances first, then any-llm providers made discoverable by an
     env var alone (see ``_env_provider_instances``), so GET /v1/models matches
-    what completion routing can actually reach.
+    what completion routing can actually reach. Env detection is deduplicated
+    against the *implementations* the configured instances resolve to, so a
+    custom-named instance is never shadowed by a bare env-detected duplicate.
     """
     configured = list(config.providers.keys())
-    return configured + _env_provider_instances(set(configured))
+    configured_impls = {config.provider_instance_type(instance) for instance in configured}
+    return configured + _env_provider_instances(configured_impls)
 
 
 def _declared_models(config: GatewayConfig, instance: str) -> list[Model]:

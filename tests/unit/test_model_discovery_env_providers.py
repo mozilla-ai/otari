@@ -30,27 +30,37 @@ def _make_model(model_id: str, owned_by: str, created: int = 1700000000) -> Mode
 class TestEnvProviderInstances:
     def test_detects_provider_with_credential_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-        assert "anthropic" in _env_provider_instances(configured=set())
+        assert "anthropic" in _env_provider_instances(configured_impls=set())
 
     def test_absent_env_var_is_not_detected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        assert "anthropic" not in _env_provider_instances(configured=set())
+        assert "anthropic" not in _env_provider_instances(configured_impls=set())
 
     def test_blank_env_var_is_treated_as_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # A blank credential (common from container templating) would only fail to
         # authenticate, so it must not add the provider.
         monkeypatch.setenv("ANTHROPIC_API_KEY", "")
-        assert "anthropic" not in _env_provider_instances(configured=set())
+        assert "anthropic" not in _env_provider_instances(configured_impls=set())
 
-    def test_already_configured_provider_is_not_duplicated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_already_configured_implementation_is_not_duplicated(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-        assert "anthropic" not in _env_provider_instances(configured={"anthropic"})
+        assert "anthropic" not in _env_provider_instances(configured_impls={"anthropic"})
 
     def test_accepts_any_of_slash_separated_alternatives(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # gemini's ENV_API_KEY_NAME is "GEMINI_API_KEY/GOOGLE_API_KEY"; either works.
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "goog-test")
-        assert "gemini" in _env_provider_instances(configured=set())
+        assert "gemini" in _env_provider_instances(configured_impls=set())
+
+    def test_registry_failure_falls_back_to_no_env_providers(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A metadata-registry hiccup must not raise (it would 500 GET /v1/models);
+        # env detection degrades to configured-only discovery.
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        with patch(
+            "gateway.services.model_discovery_service.AnyLLM.get_all_provider_metadata",
+            side_effect=RuntimeError("registry down"),
+        ):
+            assert _env_provider_instances(configured_impls=set()) == []
 
 
 class TestDiscoverableInstances:
@@ -63,6 +73,21 @@ class TestDiscoverableInstances:
 
         assert instances[0] == "home_lab"
         assert "anthropic" in instances
+
+    def test_custom_instance_of_same_impl_suppresses_env_duplicate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A custom-named anthropic instance plus ANTHROPIC_API_KEY must not also
+        # yield a bare "anthropic": that would dial the same credential twice and
+        # list the same models under two keys.
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        config = GatewayConfig(providers={"my-anthropic": {"provider_type": "anthropic", "api_key": "x"}})
+
+        instances = _discoverable_instances(config)
+
+        assert instances == ["my-anthropic"]
+        assert "anthropic" not in instances
 
     def test_env_detection_can_be_stubbed_out(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
