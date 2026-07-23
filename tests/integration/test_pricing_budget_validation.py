@@ -201,7 +201,10 @@ def test_pricing_config_validates_context_price_tiers() -> None:
             {
                 "input_price_per_million": 1.0,
                 "output_price_per_million": 2.0,
-                "pricing_tiers": [{"min_input_tokens": 200_000}, {"min_input_tokens": 200_000}],
+                "pricing_tiers": [
+                    {"min_input_tokens": 200_000, "input_price_per_million": 3.0},
+                    {"min_input_tokens": 200_000, "input_price_per_million": 4.0},
+                ],
             }
         )
 

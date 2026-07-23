@@ -319,6 +319,25 @@ def test_set_pricing_persists_context_tiers_and_1h_cache_rate(
     assert cleared.json()["pricing_tiers"] == []
 
 
+def test_set_pricing_rejects_tier_without_rate_override(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    response = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "anthropic:claude-sonnet-4",
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+            "pricing_tiers": [{"min_input_tokens": 200_000}],
+        },
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 422
+    assert "must override at least one price field" in response.text
+
+
 def test_set_pricing_omitted_cache_rates_preserve_stored_values(
     client: TestClient,
     master_key_header: dict[str, str],
