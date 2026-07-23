@@ -81,6 +81,8 @@ pricing:
 | `model_cache_ttl_seconds` | int | `300` | TTL for the in-memory model-discovery cache (`0` disables caching). |
 | `model_discovery_timeout_seconds` | float | `10.0` | Per-provider timeout for a live model-discovery (`list_models`) call. Bounds how long an unreachable or slow provider can stall discovery before it is treated as failed. |
 | `model_discovery_negative_ttl_seconds` | float | `30.0` | How long a failed model-discovery result is remembered before the provider is dialed again, so an unreachable provider is not re-tried on every request (`0` disables negative caching). |
+| `models_dev_metadata` | bool | `true` | Enrich the dashboard's model detail with metadata (modalities, capabilities, knowledge cutoff) fetched from the public models.dev catalog. Set `false` to disable the outbound call; the gateway then falls back to the bundled genai-prices data. |
+| `models_dev_cache_ttl_seconds` | int | `86400` | TTL in seconds for the cached models.dev catalog (`0` disables caching). |
 | `files_enabled` | bool | `true` | Enable the `/v1/files` upload/storage endpoints (standalone mode). |
 | `files_backend` | string | `"local"` | Blob backend for uploaded file bytes (`"local"` filesystem for now). |
 | `files_local_dir` | string | `"./otari-files"` | Directory the `local` files backend writes uploaded bytes to. |
@@ -93,6 +95,7 @@ pricing:
 | `model_capabilities` | dict | `{}` | Per-model multimodal capability overrides (`provider/model` to `{supports_image, supports_pdf}`). Authoritative over any-llm's provider-level flags; needed for text-only local models behind OpenAI-compatible servers. |
 | `sandbox_url` | string | none | Base URL of the code-execution sandbox backend for `otari_code_execution` tools. When unset, such requests are rejected with HTTP 400. Also settable via `OTARI_SANDBOX_URL`. |
 | `guardrails_url` | string | none | Default input-guardrails service URL, used when a request does not pass its own guardrail `url`. Also settable via `OTARI_GUARDRAILS_URL`. |
+| `web_search_url` | string | none | Base URL of the web-search backend (SearXNG instance or a search adapter) for `otari_web_search` tools. When unset, such requests are rejected with HTTP 400. docker-compose sets this to the bundled SearXNG container. Also settable via `OTARI_WEB_SEARCH_URL`. |
 | `tools_header` | string | none | Override for the purpose-hint preamble header injected ahead of gateway-managed tool hints. When unset, a built-in default header is used. Also settable via `OTARI_TOOLS_HEADER`. |
 | `sandbox_purpose_hint` | string | none | Default purpose hint forwarded to the sandbox backend when a tool entry supplies none. Also settable via `OTARI_SANDBOX_PURPOSE_HINT`. |
 | `web_search_purpose_hint` | string | none | Default purpose hint for the web-search backend when a tool entry supplies none. Also settable via `OTARI_WEB_SEARCH_PURPOSE_HINT`. |
@@ -220,7 +223,7 @@ These are only relevant when running connected to [otari.ai](https://otari.ai). 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OTARI_AI_TOKEN` | -- | Otari token from otari.ai (enables platform connection) |
+| `OTARI_AI_TOKEN` | none | Otari token from otari.ai (enables platform connection) |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Timeout for provider resolution calls |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Timeout for usage reporting calls |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage reporting failures |
@@ -344,7 +347,7 @@ Limitations when enabled:
   `require_pricing`.
 
 > **Fail-closed by default.** With `require_pricing: true` (the default), a request for a model
-> that has no pricing entry is rejected with HTTP 402 rather than served free and unmetered — an
+> that has no pricing entry is rejected with HTTP 402 rather than served free and unmetered; an
 > unpriced model would otherwise bypass the budget cap. To run genuinely free or self-hosted
 > models, add an explicit `$0` pricing entry, or set `require_pricing: false`. Audio and moderation
 > endpoints are exempt. A startup warning is logged if `require_pricing` is on with no pricing configured.

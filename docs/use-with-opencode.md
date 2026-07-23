@@ -61,5 +61,5 @@ provider and records usage and cost for it the same way as any other client.
 
 ## See also
 
-- [Use with Claude Code](use-with-claude-code.md) — drive the Claude Code CLI
+- [Use with Claude Code](use-with-claude-code.md): drive the Claude Code CLI
   through the same Otari via the Anthropic Messages API.

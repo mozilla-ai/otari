@@ -45,8 +45,11 @@ claude
 
 Use `ANTHROPIC_AUTH_TOKEN` (not `ANTHROPIC_API_KEY`): it is sent as
 `Authorization: Bearer <token>`, which is the scheme Otari accepts for
-both standalone API keys and connected user tokens. `ANTHROPIC_API_KEY` sends an
-`x-api-key` header instead, which Otari does not read.
+both standalone API keys and connected user tokens. `ANTHROPIC_API_KEY` is sent
+as an `x-api-key` header instead. In standalone mode Otari reads that header too,
+so it also authenticates; connected mode, though, expects `Authorization: Bearer`
+and does not use local API keys, so `ANTHROPIC_AUTH_TOKEN` is the portable choice
+that works in both modes.
 
 ### settings.json
 

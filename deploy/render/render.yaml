@@ -21,7 +21,7 @@ projects:
             plan: free
             region: oregon
             image:
-              url: docker.io/mzdotai/otari:0.2.0
+              url: docker.io/mzdotai/otari:0.3.0
             # Readiness verifies both the process and its Postgres connection.
             healthCheckPath: /health/readiness
             envVars:

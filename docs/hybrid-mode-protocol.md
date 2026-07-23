@@ -65,7 +65,7 @@ Content-Type: application/json
 }
 ```
 
-### Response — multi-attempt shape (preferred)
+### Response: multi-attempt shape (preferred)
 
 ```json
 {
@@ -103,7 +103,7 @@ back via `X-Correlation-ID` and reports through `/gateway/usage`.
 platform can attribute spend, render trace timelines, and emit fallback events.
 Otari also surfaces it as the `X-Otari-Request-ID` response header.
 
-`fallback_enabled` is informational — set by the platform when its routing
+`fallback_enabled` is informational, set by the platform when its routing
 policy actually allows fallback (i.e. the policy has multiple enabled entries
 and `fallback_enabled = true`). Otari uses `len(attempts) > 1` for its
 own behaviour.
@@ -111,7 +111,7 @@ own behaviour.
 `attempts` MUST contain at least one entry. An empty list is treated as a
 platform bug and surfaced as `502 Bad Gateway`.
 
-### Response — single-attempt shape
+### Response: single-attempt shape
 
 Otari also accepts a flat payload:
 
@@ -127,7 +127,7 @@ Otari also accepts a flat payload:
 ```
 
 Otari maps this onto a single-attempt route (`attempts = [{...}]`,
-`fallback_enabled = false`) and behaves as it always has — no retry loop, errors
+`fallback_enabled = false`) and behaves as it always has: no retry loop, errors
 propagate to the client. New platform implementations should prefer the
 multi-attempt shape.
 
@@ -246,7 +246,7 @@ this field.
 
 ## Usage report
 
-After every attempt — successful or failed — Otari sends:
+After every attempt, successful or failed, Otari sends:
 
 ```http
 POST /gateway/usage
@@ -303,8 +303,8 @@ The platform must accept these additive keys with lenient parsing; a handler tha
 rejects unknown fields would 422 the report (a non-retryable status), silently
 dropping it. See companion issue mozilla-ai/otari-ai#1168.
 
-A multi-attempt request that iterates two attempts produces two usage reports —
-one per attempt — sharing the same `request_id` (recoverable via the original
+A multi-attempt request that iterates two attempts produces two usage reports,
+one per attempt, sharing the same `request_id` (recoverable via the original
 resolve response). The platform is responsible for correlating them.
 
 `error_class` is a short tag describing why the attempt was abandoned:
@@ -316,8 +316,8 @@ resolve response). The platform is responsible for correlating them.
 | `http_<code>` | Provider returned an HTTP status code (e.g. `http_429`, `http_401`) |
 | `unknown` | Any other exception class |
 
-The field is **omitted entirely** when Otari can't classify the failure
-back to an exception — this happens with mid-stream errors surfaced via the
+The field is **omitted entirely** when Otari can't map the failure to an
+exception class; this happens with mid-stream errors surfaced via the
 SSE channel, where only an error string is available. Treat a missing
 `error_class` as "uncategorised error" when aggregating.
 
@@ -326,7 +326,7 @@ SSE channel, where only an error string is available. Treat a missing
 The usage endpoint is called as a background task on Otari side. It
 retries on transient failures (timeout, network error, 5xx) up to
 `PLATFORM_USAGE_MAX_RETRIES` times with exponential backoff
-(`0.25s`, `0.5s`, `1s`). It does **not** retry on `401`, `404`, `409`, `422` —
+(`0.25s`, `0.5s`, `1s`). It does **not** retry on `401`, `404`, `409`, `422`;
 those are treated as terminal client errors.
 
 ## Streaming
@@ -340,8 +340,8 @@ propagates to the SSE channel as today.
 The mechanism is a per-attempt **first-chunk gate**. For each attempt:
 
 1. Open the upstream stream (`acompletion(stream=True, ...)`). If this raises
-   — provider returned `401` / `5xx` / network error before the stream even
-   opened — classify the error: retryable failures move to the next attempt;
+   (provider returned `401` / `5xx` / network error before the stream even
+   opened), classify the error: retryable failures move to the next attempt;
    non-retryable failures propagate.
 2. Wait for the first chunk with a bounded timeout. Non-final attempts use the
    per-attempt failover budget (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS`,
@@ -354,7 +354,7 @@ The mechanism is a per-attempt **first-chunk gate**. For each attempt:
 3. Once a first chunk is in hand, commit. Stitch it back onto the iterator
    and start flushing SSE chunks to the client.
 
-**Latency contract:** zero added latency in the success case — the first
+**Latency contract:** zero added latency in the success case: the first
 chunk is held only for the microseconds it takes to call the SSE response
 builder. In the failure case, each abandoned non-final attempt costs at most the
 failover budget; the final attempt costs at most budget + grace.
@@ -377,7 +377,7 @@ flag.
 
 | Env var | Default | Notes |
 |---|---|---|
-| `OTARI_AI_TOKEN` | — | Setting this enables hybrid mode. |
+| `OTARI_AI_TOKEN` | none | Setting this enables hybrid mode. |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Per-resolve timeout. |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |
