@@ -279,9 +279,7 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
         # retrying: function tools combined with a non-'none' reasoning_effort.
         # Everything else stays the generic bad-request detail.
         if _is_reasoning_effort_tools_conflict(exc):
-            return ProviderErrorMapping(
-                status.HTTP_400_BAD_REQUEST, PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL
-            )
+            return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL)
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, PROVIDER_BAD_REQUEST_DETAIL)
     if status_code == 404:
         return ProviderErrorMapping(status.HTTP_404_NOT_FOUND, PROVIDER_MODEL_NOT_FOUND_DETAIL)
