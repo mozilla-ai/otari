@@ -130,8 +130,15 @@ function mockApi(opts: MockOpts = {}) {
       }
       return jsonResponse(storedList);
     }
+    if (url.includes("/v1/providers/catalog/")) {
+      // Detail endpoint: autofill hints for one selected provider.
+      const id = decodeURIComponent(url.split("/v1/providers/catalog/")[1].split("?")[0]);
+      const detail = catalog.find((p) => p.id === id);
+      return detail ? jsonResponse(detail) : jsonResponse({ detail: `Unknown provider: ${id}` }, 404);
+    }
     if (url.includes("/v1/providers/catalog")) {
-      return jsonResponse(catalog);
+      // List endpoint: id + display name only.
+      return jsonResponse(catalog.map((p) => ({ id: p.id, name: p.name })));
     }
     if (url.includes("/v1/providers/health")) {
       return jsonResponse(healthResponse(url.includes("refresh=true") ? healthRefresh : health));
@@ -243,6 +250,41 @@ describe("ProvidersPage", () => {
     expect(screen.queryByLabelText("API base")).not.toBeInTheDocument();
   });
 
+  it("fetches provider autofill hints lazily, only after one is selected", async () => {
+    const fetchMock = mockApi({
+      stored: [storedProvider("anthropic", "0000")],
+      catalog: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          env_key: "OPENAI_API_KEY",
+          default_api_base: "https://api.openai.com/v1",
+          requires_api_key: true,
+          env_key_present: false,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••0000");
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+
+    const detailCalls = () =>
+      fetchMock.mock.calls.filter(([u]) => String(u).includes("/v1/providers/catalog/openai"));
+
+    // Opening the picker lists providers (id + name) but must not import any
+    // provider SDK: no per-provider detail call until one is chosen (issue #365).
+    expect(detailCalls()).toHaveLength(0);
+
+    await user.type(screen.getByPlaceholderText("Search providers…"), "OpenAI");
+    await user.click(await screen.findByRole("option", { name: /OpenAI/ }));
+
+    // Selecting the provider triggers exactly the one detail fetch it needs.
+    await screen.findByText(/OpenAI's endpoint is built in/);
+    expect(detailCalls().length).toBeGreaterThan(0);
+  });
+
   it("keeps Add disabled for a key-requiring provider until a key is entered", async () => {
     mockApi({
       stored: [storedProvider("anthropic", "0000")],
@@ -300,8 +342,9 @@ describe("ProvidersPage", () => {
     // Close the combobox popover, which otherwise aria-hides the submit button.
     await user.keyboard("{Escape}");
 
-    // The field is optional and the copy explains the env fallback.
-    expect(screen.getByText(/OPENAI_API_KEY is set on the server/)).toBeInTheDocument();
+    // The field is optional and the copy explains the env fallback. The hint
+    // arrives once the selected provider's detail loads, so wait for it.
+    await screen.findByText(/OPENAI_API_KEY is set on the server/);
     expect(screen.getByLabelText("API key (optional)")).toBeInTheDocument();
 
     // Submit with no key: the server stores none and any-llm reads OPENAI_API_KEY.

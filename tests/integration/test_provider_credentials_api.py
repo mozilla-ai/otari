@@ -266,18 +266,43 @@ def test_catalog_lists_known_providers(client: TestClient, master_key_header: di
     resp = client.get("/v1/providers/catalog", headers=master_key_header)
     assert resp.status_code == 200
     by_id = {p["id"]: p for p in resp.json()}
-    assert "openai" in by_id
-    assert by_id["openai"]["requires_api_key"] is True
-    assert by_id["openai"]["default_api_base"]  # openai has an explicit built-in base
-    # env_key_present reports whether the provider's env var is populated on the server.
-    assert isinstance(by_id["openai"]["env_key_present"], bool)
-    # Keyless local backends are reported as not requiring a key, and never present.
-    assert by_id["ollama"]["requires_api_key"] is False
-    assert by_id["ollama"]["env_key_present"] is False
+    assert "openai" in by_id and "ollama" in by_id
+    # The list is id + display name only; autofill hints come from the detail route.
+    assert set(by_id["openai"]) == {"id", "name"}
+    assert by_id["openai"]["name"]
 
 
 def test_catalog_requires_master_key(client: TestClient) -> None:
     assert client.get("/v1/providers/catalog").status_code in (401, 403)
+
+
+def test_catalog_detail_returns_autofill_hints(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = client.get("/v1/providers/catalog/openai", headers=master_key_header)
+    assert resp.status_code == 200
+    openai = resp.json()
+    assert openai["id"] == "openai"
+    assert openai["requires_api_key"] is True
+    assert openai["default_api_base"]  # openai has an explicit built-in base
+    # env_key_present reports whether the provider's env var is populated on the server.
+    assert isinstance(openai["env_key_present"], bool)
+
+
+def test_catalog_detail_keyless_backend(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = client.get("/v1/providers/catalog/ollama", headers=master_key_header)
+    assert resp.status_code == 200
+    ollama = resp.json()
+    # Keyless local backends are reported as not requiring a key, and never present.
+    assert ollama["requires_api_key"] is False
+    assert ollama["env_key_present"] is False
+
+
+def test_catalog_detail_unknown_provider_is_404(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = client.get("/v1/providers/catalog/not-a-real-provider", headers=master_key_header)
+    assert resp.status_code == 404
+
+
+def test_catalog_detail_requires_master_key(client: TestClient) -> None:
+    assert client.get("/v1/providers/catalog/openai").status_code in (401, 403)
 
 
 def test_all_routes_require_master_key(client: TestClient) -> None:
