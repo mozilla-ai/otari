@@ -964,7 +964,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"user_id\": \"string\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"user_id\": \"string\"\n}"
             },
             "description": "Create a new API key.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.",
             "header": [
@@ -1022,7 +1022,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {}\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {}\n}"
             },
             "description": "Update an API key.\n\nRequires master key authentication.",
             "header": [
@@ -1107,6 +1107,47 @@
         }
       ],
       "name": "keys"
+    },
+    {
+      "item": [
+        {
+          "name": "Receive Logs",
+          "request": {
+            "description": "Ingest LLM usage from OTLP log events (Claude Code, Codex, or GenAI logs).",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "logs"
+              ],
+              "raw": "{{baseUrl}}/v1/logs"
+            }
+          }
+        },
+        {
+          "name": "Receive Traces",
+          "request": {
+            "description": "Ingest LLM usage from OTLP spans (GenAI semantic conventions).",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "traces"
+              ],
+              "raw": "{{baseUrl}}/v1/traces"
+            }
+          }
+        }
+      ],
+      "name": "otel"
     },
     {
       "item": [
@@ -2131,6 +2172,18 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+                  "disabled": true,
+                  "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single API key id",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
                   "description": "",
                   "disabled": true,
                   "key": "skip",
@@ -2143,7 +2196,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&model=&endpoint=&skip=&limit="
+              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&skip=&limit="
             }
           }
         },
@@ -2198,9 +2251,54 @@
                   "disabled": true,
                   "key": "endpoint",
                   "value": ""
+                },
+                {
+                  "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+                  "disabled": true,
+                  "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single API key id",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&model=&endpoint="
+              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id="
+            }
+          }
+        },
+        {
+          "name": "Ingest External Usage",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"source\": \"string\",\n  \"events\": [\n    {\n      \"source_event_id\": \"string\",\n      \"timestamp\": \"2024-01-01T00:00:00Z\",\n      \"provider\": \"string\",\n      \"model\": \"string\"\n    }\n  ]\n}"
+            },
+            "description": "Ingest a batch of externally-observed usage events (standalone).\n\nAuthenticated with either an API key or the master key. Usage binds to the\nauthenticated principal: an API key attributes to its own user (and stamps its\nid on the rows); the master key may name any user via ``user_id``. Records\nsubscription-backed usage (e.g. Claude Code) as usage-log rows tagged with their\n``source``, priced at the effective API rate for each event's timestamp.\nImported usage is real cost, but never counts toward budgets or mutates\n``users.spend`` (it is retrospective, so it cannot be reserved). Idempotent by\n``(source, source_event_id)``. The payload is content-free; any\nprompt/completion/tool field is rejected (422), not stored.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "usage",
+                "external-events"
+              ],
+              "raw": "{{baseUrl}}/v1/usage/external-events"
             }
           }
         },
@@ -2257,20 +2355,32 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+                  "disabled": true,
+                  "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single API key id",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
                   "description": "Time-series granularity: 'hour' or 'day'",
                   "disabled": true,
                   "key": "bucket",
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&model=&endpoint=&bucket="
+              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&bucket="
             }
           }
         },
         {
           "name": "Usage Summary Csv",
           "request": {
-            "description": "Download the per-model / per-user / per-key breakdown as CSV.\n\nA dedicated route rather than a ``format=csv`` flag on ``/summary`` so that\nendpoint keeps a single JSON response model and a clean OpenAPI schema. The\nexport is **uncapped** (no top-N fold): finance wants every row. Kept separate\nfrom the bare-array ``/v1/usage`` contract, which is untouched.",
+            "description": "Download the per-model / per-user / per-key / per-source breakdown as CSV.\n\nA dedicated route rather than a ``format=csv`` flag on ``/summary`` so that\nendpoint keeps a single JSON response model and a clean OpenAPI schema. The\nexport is **uncapped** (no top-N fold): finance wants every row. Kept separate\nfrom the bare-array ``/v1/usage`` contract, which is untouched.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2318,9 +2428,21 @@
                   "disabled": true,
                   "key": "endpoint",
                   "value": ""
+                },
+                {
+                  "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+                  "disabled": true,
+                  "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single API key id",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&model=&endpoint="
+              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id="
             }
           }
         }
