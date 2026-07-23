@@ -252,6 +252,11 @@ def _is_reasoning_effort_tools_conflict(exc: BaseException) -> bool:
     bad-request detail. Note the gateway's own tool loop can inject function
     tools (MCP / sandbox / web_search) even when the caller sent no ``tools``,
     so this can surface without an explicit ``tools`` array.
+
+    The "function tools" probe is best-effort against OpenAI's current phrasing:
+    if the provider rewords the message this falls back to the generic detail
+    (safe degradation), never a misclassification. ``param`` stays the primary,
+    authoritative signal.
     """
     if _upstream_error_param(exc) != "reasoning_effort":
         return False

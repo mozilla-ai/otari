@@ -128,6 +128,52 @@ def test_chat_surfaces_reasoning_effort_tools_conflict(
     assert "gpt-5.6-sol" not in response.text
 
 
+def test_responses_surfaces_reasoning_effort_tools_conflict(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    responses_request_body: dict[str, Any],
+) -> None:
+    """The shared classifier surfaces the actionable remedy through the responses
+    adapter too, without leaking the raw provider message."""
+    with patch(
+        "gateway.api.routes.responses.aresponses",
+        new_callable=AsyncMock,
+        side_effect=_ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG),
+    ):
+        response = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL
+    assert "SECRET" not in response.text
+    assert "gpt-5.6-sol" not in response.text
+
+
+def test_messages_surfaces_reasoning_effort_tools_conflict(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    messages_request_body: dict[str, Any],
+) -> None:
+    """The messages (Anthropic) envelope carries the actionable remedy as an
+    invalid_request_error, still without leaking the raw provider message."""
+    messages_request_body["metadata"] = {"user_id": "test-user"}
+
+    with patch(
+        "gateway.api.routes.messages.amessages",
+        new_callable=AsyncMock,
+        side_effect=_ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG),
+    ):
+        response = client.post("/v1/messages", json=messages_request_body, headers=master_key_header)
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["type"] == "error"
+    assert detail["error"]["type"] == "invalid_request_error"
+    assert detail["error"]["message"] == PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL
+    assert "SECRET" not in response.text
+    assert "gpt-5.6-sol" not in response.text
+
+
 @pytest.mark.parametrize(("upstream", "expected_status", "expected_detail"), _CASES)
 def test_responses_classifies_provider_error(
     client: TestClient,
