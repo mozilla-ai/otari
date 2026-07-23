@@ -36,6 +36,12 @@ class TestEnvProviderInstances:
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         assert "anthropic" not in _env_provider_instances(configured=set())
 
+    def test_blank_env_var_is_treated_as_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # A blank credential (common from container templating) would only fail to
+        # authenticate, so it must not add the provider.
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+        assert "anthropic" not in _env_provider_instances(configured=set())
+
     def test_already_configured_provider_is_not_duplicated(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
         assert "anthropic" not in _env_provider_instances(configured={"anthropic"})
