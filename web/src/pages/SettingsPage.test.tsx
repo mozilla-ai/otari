@@ -66,6 +66,7 @@ const SETTINGS: GatewaySettings = {
   default_pricing: false,
   require_pricing: false,
   master_key_source: "generated",
+  secret_key_configured: true,
   config: CONFIG,
 };
 
