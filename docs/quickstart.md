@@ -53,6 +53,8 @@ pricing:
 
 The `pricing` entry matters because `require_pricing` is on by default: Otari rejects requests for any model it can't resolve a price for, so it can enforce budgets. Add a pricing entry for the model you plan to call, or enable `default_pricing: true` to use the bundled fallback pricing for common models.
 
+> To add more providers through the dashboard later instead of editing `config.yml`, you also need to set `OTARI_SECRET_KEY`, which encrypts stored provider keys at rest. See [Option B](#option-b-configure-from-the-dashboard) below and the [Admin dashboard guide](dashboard.md).
+
 ### 2. Start Otari
 
 ```bash
