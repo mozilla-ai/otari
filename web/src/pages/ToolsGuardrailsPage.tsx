@@ -74,9 +74,30 @@ function SaveToast({ message }: { message: string | null }) {
 const INPUT_CLASS =
   "rounded-md border border-[var(--otari-line)] bg-[var(--otari-surface)] px-2 py-1 text-sm focus:border-[var(--otari-brand)] focus:outline-none disabled:opacity-50";
 
+// Every field renders as one grid row with three fixed-width tracks:
+// label | input (16rem) | actions (10rem). Because the input and action tracks
+// have the same width on every row, the boxes and the Save buttons line up in
+// columns down a card regardless of which rows also carry a Test button, an
+// extra help line, or a narrower numeric input. Below `sm` the grid collapses
+// to a single column and the pieces stack.
+//
+// The actions track is sized for the Save button so Save stays column-aligned
+// across every row; on URL rows the trailing Test button is intentionally left
+// to overflow the track's right edge (grid tracks don't clip) rather than
+// widening the track, which would push Save inward and break that alignment.
+const ROW_CLASS = "grid gap-x-4 gap-y-1.5 py-4 sm:grid-cols-[minmax(0,1fr)_16rem_10rem] sm:items-start";
+const INPUT_CELL = `w-full sm:col-start-2 ${INPUT_CLASS}`;
+const ACTIONS_CELL = "flex items-center gap-2 sm:col-start-3";
+const MESSAGE_CELL = "flex flex-col gap-1 sm:col-span-2 sm:col-start-2";
+
+function SaveError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <span className="break-words text-xs text-red-700">{message}</span>;
+}
+
 function FieldLabel({ field, help }: { field: ToolSettingField; help?: string }) {
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 sm:col-start-1">
       <code className="text-sm font-medium text-[var(--otari-ink)]">{field.key}</code>
       {field.description ? <p className="mt-1 text-sm text-[var(--otari-muted)]">{field.description}</p> : null}
       {help ? <p className="mt-1 text-xs text-[var(--otari-muted)]">{help}</p> : null}
@@ -109,53 +130,53 @@ function UrlRow({
   const trimmed = draft.trim();
 
   return (
-    <div className="flex flex-col gap-1.5 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+    <div className={ROW_CLASS}>
       <FieldLabel field={field} help="Leave blank and Save to fall back to the configured default." />
-      <div className="flex shrink-0 flex-col items-start gap-1.5 sm:items-end">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            inputMode="url"
-            aria-label={field.key}
-            value={draft}
-            disabled={disabled}
-            placeholder="unset"
-            onChange={(event) => {
-              setDraft(event.target.value);
-              // Drop any prior reachability result so a result for the old URL
-              // never sits beside a newly-typed, untested one.
-              test.reset();
-            }}
-            className={`w-64 ${INPUT_CLASS}`}
-          />
-          <Button
-            size="sm"
-            variant="primary"
-            aria-label={`Save ${field.key}`}
-            isDisabled={disabled || !changed}
-            onPress={() => onSave(trimmed === "" ? null : trimmed)}
-          >
-            Save
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            aria-label={`Test ${field.service}`}
-            isDisabled={trimmed === "" || test.isPending}
-            onPress={() => test.mutate({ service: field.service, url: trimmed })}
-          >
-            {test.isPending ? "Testing…" : "Test"}
-          </Button>
-        </div>
+      <input
+        type="text"
+        inputMode="url"
+        aria-label={field.key}
+        value={draft}
+        disabled={disabled}
+        placeholder="unset"
+        onChange={(event) => {
+          setDraft(event.target.value);
+          // Drop any prior reachability result so a result for the old URL
+          // never sits beside a newly-typed, untested one.
+          test.reset();
+        }}
+        className={INPUT_CELL}
+      />
+      <div className={ACTIONS_CELL}>
+        <Button
+          size="sm"
+          variant="primary"
+          aria-label={`Save ${field.key}`}
+          isDisabled={disabled || !changed}
+          onPress={() => onSave(trimmed === "" ? null : trimmed)}
+        >
+          Save
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-label={`Test ${field.service}`}
+          isDisabled={trimmed === "" || test.isPending}
+          onPress={() => test.mutate({ service: field.service, url: trimmed })}
+        >
+          {test.isPending ? "Testing…" : "Test"}
+        </Button>
+      </div>
+      <div className={MESSAGE_CELL}>
         {/* aria-live so the reachability outcome is announced, not just shown. */}
-        <span role="status" aria-live="polite" className="block max-w-md break-words text-xs">
+        <span role="status" aria-live="polite" className="block break-words text-xs">
           {test.isPending ? null : test.error ? (
             <span className="text-red-700">{errorMessage(test.error)}</span>
           ) : test.data ? (
             <span className={test.data.ok ? "font-medium text-green-700" : "text-red-700"}>{test.data.reason}</span>
           ) : null}
         </span>
-        {saveError ? <span className="max-w-md break-words text-xs text-red-700">{saveError}</span> : null}
+        <SaveError message={saveError} />
       </div>
     </div>
   );
@@ -183,31 +204,33 @@ function TextRow({
   const changed = draft !== committed;
 
   return (
-    <div className="flex flex-col gap-1.5 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+    <div className={ROW_CLASS}>
       <FieldLabel field={field} />
-      <div className="flex shrink-0 flex-col items-start gap-1.5 sm:items-end">
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            aria-label={field.key}
-            value={draft}
-            disabled={disabled}
-            placeholder="default"
-            onChange={(event) => setDraft(event.target.value)}
-            className={`w-64 ${INPUT_CLASS}`}
-          />
-          <Button
-            size="sm"
-            variant="primary"
-            aria-label={`Save ${field.key}`}
-            isDisabled={disabled || !changed}
-            onPress={() => onSave(draft.trim() === "" ? null : draft.trim())}
-          >
-            Save
-          </Button>
-        </div>
-        {saveError ? <span className="max-w-md break-words text-xs text-red-700">{saveError}</span> : null}
+      <input
+        type="text"
+        aria-label={field.key}
+        value={draft}
+        disabled={disabled}
+        placeholder="default"
+        onChange={(event) => setDraft(event.target.value)}
+        className={INPUT_CELL}
+      />
+      <div className={ACTIONS_CELL}>
+        <Button
+          size="sm"
+          variant="primary"
+          aria-label={`Save ${field.key}`}
+          isDisabled={disabled || !changed}
+          onPress={() => onSave(draft.trim() === "" ? null : draft.trim())}
+        >
+          Save
+        </Button>
       </div>
+      {saveError ? (
+        <div className={MESSAGE_CELL}>
+          <SaveError message={saveError} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -237,34 +260,38 @@ function NumberRow({
   const changed = valid && trimmed !== committed;
 
   return (
-    <div className="flex flex-col gap-1.5 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+    <div className={ROW_CLASS}>
       <FieldLabel field={field} help="Leave blank to use the backend default." />
-      <div className="flex shrink-0 flex-col items-start gap-1.5 sm:items-end">
-        <div className="flex items-center gap-2">
-          <input
-            type="number"
-            min="1"
-            step="1"
-            inputMode="numeric"
-            aria-label={field.key}
-            value={draft}
-            disabled={disabled}
-            placeholder="default"
-            onChange={(event) => setDraft(event.target.value)}
-            className={`w-28 text-right tabular-nums ${INPUT_CLASS}`}
-          />
-          <Button
-            size="sm"
-            variant="primary"
-            aria-label={`Save ${field.key}`}
-            isDisabled={disabled || !changed}
-            onPress={() => onSave(trimmed === "" ? null : parsed)}
-          >
-            Save
-          </Button>
-        </div>
-        {saveError ? <span className="max-w-md break-words text-xs text-red-700">{saveError}</span> : null}
+      <input
+        type="number"
+        min="1"
+        step="1"
+        inputMode="numeric"
+        aria-label={field.key}
+        value={draft}
+        disabled={disabled}
+        placeholder="default"
+        onChange={(event) => setDraft(event.target.value)}
+        // Narrower than the text inputs but right-aligned in the same column, so
+        // its right edge (and the Save button beside it) still lines up with them.
+        className={`w-full text-right tabular-nums sm:col-start-2 sm:w-28 sm:justify-self-end ${INPUT_CLASS}`}
+      />
+      <div className={ACTIONS_CELL}>
+        <Button
+          size="sm"
+          variant="primary"
+          aria-label={`Save ${field.key}`}
+          isDisabled={disabled || !changed}
+          onPress={() => onSave(trimmed === "" ? null : parsed)}
+        >
+          Save
+        </Button>
       </div>
+      {saveError ? (
+        <div className={MESSAGE_CELL}>
+          <SaveError message={saveError} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -288,9 +315,9 @@ function BoolRow({
   // explicit Save because they have intermediate, typed-but-unsaved states.
   const current = field.value === true ? "on" : field.value === false ? "off" : "default";
   return (
-    <div className="flex flex-col gap-1.5 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+    <div className={ROW_CLASS}>
       <FieldLabel field={field} />
-      <div className="flex shrink-0 flex-col items-start gap-1.5 sm:items-end">
+      <div className="sm:col-start-2 sm:justify-self-start">
         <FilterSelect
           ariaLabel={field.key}
           value={current}
@@ -302,8 +329,12 @@ function BoolRow({
           ]}
           disabled={disabled}
         />
-        {saveError ? <span className="max-w-md break-words text-xs text-red-700">{saveError}</span> : null}
       </div>
+      {saveError ? (
+        <div className={MESSAGE_CELL}>
+          <SaveError message={saveError} />
+        </div>
+      ) : null}
     </div>
   );
 }
