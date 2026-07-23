@@ -31,12 +31,20 @@ _STREAM_CHUNK_BYTES = 1024 * 1024
 
 @asynccontextmanager
 async def _open_handle(path: Path, mode: str) -> AsyncIterator[IO[bytes]]:
-    """Open ``path`` off the event loop, guaranteeing the handle is closed."""
+    """Open ``path`` off the event loop, guaranteeing the handle is closed.
+
+    The close itself is shielded: this ``finally`` can run while unwinding a
+    cancellation (client disconnect), and an unshielded ``await`` there could
+    be cut off by a repeated cancel() before the handle actually closes.
+    """
     handle = await asyncio.to_thread(path.open, mode)
     try:
         yield handle
     finally:
-        await asyncio.to_thread(handle.close)
+        try:
+            await asyncio.shield(asyncio.to_thread(handle.close))
+        except Exception as close_exc:
+            logger.warning("_open_handle: failed to close %s: %s", path, close_exc)
 
 
 @runtime_checkable
