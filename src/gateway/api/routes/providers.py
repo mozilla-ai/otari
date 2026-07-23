@@ -7,6 +7,7 @@ dashboard, encrypted at rest and merged over config.yml providers. All routes ar
 master-key gated and standalone-mode only (the router is not mounted in hybrid).
 """
 
+import asyncio
 from typing import Annotated, Any
 
 from any_llm import LLMProvider
@@ -27,8 +28,10 @@ from gateway.services.model_discovery_service import (
 from gateway.services.provider_health_service import ProviderHealth, check_all_provider_health
 from gateway.services.provider_metadata_service import (
     KnownProvider,
+    KnownProviderSummary,
     ProviderInfo,
-    list_known_providers,
+    known_provider_detail,
+    list_known_provider_summaries,
     list_provider_info,
 )
 from gateway.services.provider_store_service import (
@@ -125,8 +128,15 @@ async def list_providers(
     return ProvidersResponse(providers=[_to_schema(info) for info in list_provider_info(config)])
 
 
+class KnownProviderSummarySchema(BaseModel):
+    """A provider offered in the add-provider picker: id and display name only."""
+
+    id: str = Field(description="any-llm provider id, used as the default instance name.")
+    name: str = Field(description="Human-friendly display name.")
+
+
 class KnownProviderSchema(BaseModel):
-    """A provider the add-provider picker can offer, with autofill hints."""
+    """A selected provider's autofill hints for the add-provider form."""
 
     id: str = Field(description="any-llm provider id, used as the default instance name.")
     name: str = Field(description="Human-friendly display name.")
@@ -137,6 +147,10 @@ class KnownProviderSchema(BaseModel):
         default=False,
         description="True when env_key is already set on the server, so a pasted key is optional (env fallback).",
     )
+
+
+def _to_summary_schema(summary: KnownProviderSummary) -> KnownProviderSummarySchema:
+    return KnownProviderSummarySchema(id=summary.id, name=summary.name)
 
 
 def _to_known_schema(provider: KnownProvider) -> KnownProviderSchema:
@@ -151,14 +165,35 @@ def _to_known_schema(provider: KnownProvider) -> KnownProviderSchema:
 
 
 @router.get("/providers/catalog", dependencies=[Depends(verify_master_key)])
-async def provider_catalog() -> list[KnownProviderSchema]:
-    """List every known provider for the add-provider picker.
+async def provider_catalog() -> list[KnownProviderSummarySchema]:
+    """List every known provider for the add-provider picker: id and name only.
 
-    Network-free and config-independent: the full any-llm provider set with each
-    one's display name, credential env var, default endpoint, and whether it
-    needs a key. Master-key gated because it is operator-facing dashboard data.
+    Lightweight by design so the picker never lags: provider ids come from the
+    any-llm registry and names from the bundled genai-prices dataset, so no
+    provider SDK is imported. The autofill hints for a chosen provider come from
+    GET /v1/providers/catalog/{provider_id}, which imports only that one SDK.
+    Master-key gated because it is operator-facing dashboard data.
     """
-    return [_to_known_schema(provider) for provider in list_known_providers()]
+    return [_to_summary_schema(summary) for summary in list_known_provider_summaries()]
+
+
+@router.get("/providers/catalog/{provider_id}", dependencies=[Depends(verify_master_key)])
+async def provider_catalog_detail(provider_id: str) -> KnownProviderSchema:
+    """Autofill hints for one provider the add-provider form has selected.
+
+    Imports only the selected provider's any-llm module (not the whole catalog)
+    to report its credential env var, default endpoint, whether a key is required,
+    and whether that env var is already set on the server. Returns 404 for an
+    unknown provider id. Master-key gated because it is operator-facing.
+
+    The SDK import is offloaded to a worker thread: the first fetch for a given
+    provider imports that provider's module, which would otherwise block the event
+    loop (and thus every concurrent request) for the import's duration.
+    """
+    detail = await asyncio.to_thread(known_provider_detail, provider_id)
+    if detail is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown provider: {provider_id}")
+    return _to_known_schema(detail)
 
 
 class ProviderHealthSchema(BaseModel):

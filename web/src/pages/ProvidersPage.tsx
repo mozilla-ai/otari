@@ -1,11 +1,12 @@
 import { Button, Card, Chip, ComboBox, Description, Input, Label, ListBox, ListBoxItem, Spinner, TextField } from "@heroui/react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
   useCreateStoredProvider,
   useDeleteStoredProvider,
   useProviderCatalog,
+  useProviderDetail,
   useProviderHealth,
   useProviders,
   useRecheckProviderHealth,
@@ -195,7 +196,6 @@ function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProvider
 // Add a hosted provider whose endpoint is built into the SDK: pick it, paste a
 // key. Name and api_base are only exposed under Advanced.
 function KnownProviderForm({ onClose }: { onClose: () => void }) {
-  const catalog = useProviderCatalog();
   const create = useCreateStoredProvider();
   const [providerId, setProviderId] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -203,7 +203,16 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
   const [apiBase, setApiBase] = useState("");
   const [name, setName] = useState("");
 
-  const selected = catalog.data?.find((p) => p.id === providerId);
+  // Autofill hints are fetched lazily for just the selected provider, so the
+  // picker itself never imports every provider SDK (issue #365).
+  const detail = useProviderDetail(providerId);
+  const selected = detail.data?.id === providerId ? detail.data : undefined;
+  // Prefill the (editable) API base with the provider's built-in default once its
+  // detail loads, so Advanced shows what will be used. Keyed on the selected
+  // provider so it fires once per selection and does not clobber later edits.
+  useEffect(() => {
+    if (selected) setApiBase(selected.default_api_base ?? "");
+  }, [selected]);
   const envKeyPresent = selected?.env_key_present ?? false;
   // The key is only mandatory when the provider needs one and its env var is not
   // already set on the server; any-llm falls back to that env var otherwise.
@@ -239,9 +248,9 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         onChange={(id) => {
           setProviderId(id);
           setName("");
-          // Prefill the (editable) API base with the provider's built-in default
-          // so Advanced shows what will be used; empty when the SDK has no explicit one.
-          setApiBase(catalog.data?.find((p) => p.id === id)?.default_api_base ?? "");
+          // Clear the API base; the effect above refills it from the provider's
+          // built-in default once this provider's detail loads.
+          setApiBase("");
         }}
         description="Its endpoint is built in."
       />

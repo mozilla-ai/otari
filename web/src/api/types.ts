@@ -173,7 +173,17 @@ export interface ProviderHealthResponse {
   checked_at: string | null;
 }
 
-// A known provider offered in the add-provider picker, with autofill hints.
+// One provider offered in the add-provider picker: id + display name only. The
+// list is built server-side without importing any provider SDK, so the picker
+// opens instantly. Autofill hints for a chosen provider come from KnownProvider.
+export interface KnownProviderSummary {
+  id: string;
+  name: string;
+}
+
+// Autofill hints for the one provider the add-provider form has selected,
+// fetched lazily from /v1/providers/catalog/{id} (imports only that provider's
+// SDK server-side).
 export interface KnownProvider {
   id: string;
   name: string;

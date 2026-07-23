@@ -1812,7 +1812,7 @@
         "type": "object"
       },
       "KnownProviderSchema": {
-        "description": "A provider the add-provider picker can offer, with autofill hints.",
+        "description": "A selected provider's autofill hints for the add-provider form.",
         "properties": {
           "default_api_base": {
             "anyOf": [
@@ -1866,6 +1866,27 @@
           "requires_api_key"
         ],
         "title": "KnownProviderSchema",
+        "type": "object"
+      },
+      "KnownProviderSummarySchema": {
+        "description": "A provider offered in the add-provider picker: id and display name only.",
+        "properties": {
+          "id": {
+            "description": "any-llm provider id, used as the default instance name.",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "description": "Human-friendly display name.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "KnownProviderSummarySchema",
         "type": "object"
       },
       "McpServerConfig": {
@@ -8157,7 +8178,7 @@
     },
     "/v1/providers/catalog": {
       "get": {
-        "description": "List every known provider for the add-provider picker.\n\nNetwork-free and config-independent: the full any-llm provider set with each\none's display name, credential env var, default endpoint, and whether it\nneeds a key. Master-key gated because it is operator-facing dashboard data.",
+        "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the bundled genai-prices dataset, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /v1/providers/catalog/{provider_id}, which imports only that one SDK.\nMaster-key gated because it is operator-facing dashboard data.",
         "operationId": "provider_catalog_v1_providers_catalog_get",
         "responses": {
           "200": {
@@ -8165,7 +8186,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/KnownProviderSchema"
+                    "$ref": "#/components/schemas/KnownProviderSummarySchema"
                   },
                   "title": "Response Provider Catalog V1 Providers Catalog Get",
                   "type": "array"
@@ -8184,6 +8205,57 @@
           }
         ],
         "summary": "Provider Catalog",
+        "tags": [
+          "providers"
+        ]
+      }
+    },
+    "/v1/providers/catalog/{provider_id}": {
+      "get": {
+        "description": "Autofill hints for one provider the add-provider form has selected.\n\nImports only the selected provider's any-llm module (not the whole catalog)\nto report its credential env var, default endpoint, whether a key is required,\nand whether that env var is already set on the server. Returns 404 for an\nunknown provider id. Master-key gated because it is operator-facing.\n\nThe SDK import is offloaded to a worker thread: the first fetch for a given\nprovider imports that provider's module, which would otherwise block the event\nloop (and thus every concurrent request) for the import's duration.",
+        "operationId": "provider_catalog_detail_v1_providers_catalog__provider_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "title": "Provider Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnownProviderSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Provider Catalog Detail",
         "tags": [
           "providers"
         ]

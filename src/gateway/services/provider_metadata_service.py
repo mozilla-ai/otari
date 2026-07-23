@@ -159,36 +159,61 @@ class KnownProvider:
     env_key_present: bool = False
 
 
-def list_known_providers() -> list[KnownProvider]:
-    """Every any-llm provider offered in the add-provider picker, by display name.
+@dataclass
+class KnownProviderSummary:
+    """One provider offered in the add-provider picker: just an id and a name."""
 
-    Network-free: display name, credential env var, and default endpoint come
-    from the bundled any-llm and genai-prices datasets. A provider whose class
-    cannot be imported (a missing optional dependency) is skipped rather than
-    failing the whole listing.
+    id: str
+    name: str
+
+
+def list_known_provider_summaries() -> list[KnownProviderSummary]:
+    """Every any-llm provider the add-provider picker can offer: id + display name.
+
+    Deliberately lightweight, so opening the picker does not lag: provider ids
+    come from the any-llm registry and display names from the bundled
+    genai-prices dataset, so *no provider SDK is imported*. The per-provider
+    autofill hints (credential env var, default endpoint, whether a key is
+    required) live on the provider class and are resolved lazily by
+    :func:`known_provider_detail`, only for the provider an operator actually
+    selects. A provider absent from genai-prices falls back to its id as the name.
     """
-    result: list[KnownProvider] = []
-    for provider in LLMProvider:
-        pid = provider.value
-        try:
-            cls = AnyLLM.get_provider_class(pid)
-            meta = cls.get_provider_metadata()
-        except Exception as exc:
-            logger.debug("skipping provider %r in catalog: %s", pid, exc)
-            continue
-        gp = _genai_provider(pid)
-        name = _clean(getattr(gp, "name", None)) or _clean(getattr(meta, "name", None)) or pid
-        raw_env = _clean(getattr(meta, "env_key", None))
-        # any-llm uses the literal string "None" for keyless backends (Ollama, llama.cpp).
-        env_key = None if raw_env in (None, "None") else raw_env
-        result.append(
-            KnownProvider(
-                id=pid,
-                name=name,
-                env_key=env_key,
-                default_api_base=_clean(getattr(cls, "API_BASE", None)),
-                requires_api_key=env_key is not None,
-                env_key_present=env_key is not None and bool((os.getenv(env_key) or "").strip()),
-            )
-        )
-    return sorted(result, key=lambda provider: provider.name.lower())
+    summaries = [
+        KnownProviderSummary(id=pid, name=_clean(getattr(_genai_provider(pid), "name", None)) or pid)
+        for pid in AnyLLM.get_supported_providers()
+    ]
+    return sorted(summaries, key=lambda summary: summary.name.lower())
+
+
+def known_provider_detail(provider_id: str) -> KnownProvider | None:
+    """Autofill hints for one provider, importing only that provider's SDK.
+
+    Imports a single any-llm provider module (not the whole catalog) to read its
+    display name, credential env var, and default endpoint, then resolves
+    ``env_key_present`` live against the current environment. Returns ``None`` when
+    the id is not a known any-llm provider or its class cannot be imported (a
+    missing optional dependency), which the route maps to a 404.
+    """
+    try:
+        pid = LLMProvider.from_string(provider_id).value
+    except Exception:
+        return None
+    try:
+        cls = AnyLLM.get_provider_class(pid)
+        meta = cls.get_provider_metadata()
+    except Exception as exc:
+        logger.debug("no provider detail for %r: %s", pid, exc)
+        return None
+    gp = _genai_provider(pid)
+    name = _clean(getattr(gp, "name", None)) or _clean(getattr(meta, "name", None)) or pid
+    raw_env = _clean(getattr(meta, "env_key", None))
+    # any-llm uses the literal string "None" for keyless backends (Ollama, llama.cpp).
+    env_key = None if raw_env in (None, "None") else raw_env
+    return KnownProvider(
+        id=pid,
+        name=name,
+        env_key=env_key,
+        default_api_base=_clean(getattr(cls, "API_BASE", None)),
+        requires_api_key=env_key is not None,
+        env_key_present=env_key is not None and bool((os.getenv(env_key) or "").strip()),
+    )

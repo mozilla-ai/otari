@@ -15,6 +15,7 @@ import type {
   DiscoverableModelsResponse,
   GatewaySettings,
   KnownProvider,
+  KnownProviderSummary,
   ModelListResponse,
   ModelMetadataResponse,
   PricingRefreshPreview,
@@ -121,12 +122,28 @@ export function useProviders() {
   });
 }
 
-// Every known provider the add-provider picker can offer, with autofill hints.
-// Bundled/static gateway-side, so it never moves within a session.
+// Every known provider the add-provider picker can offer: id + display name
+// only. Built gateway-side without importing any provider SDK, so it is cheap
+// and never moves within a session (the old full-catalog fetch used to import
+// every provider SDK, which lagged the picker; issue #365).
 export function useProviderCatalog() {
   return useQuery({
     queryKey: ["provider-catalog"],
-    queryFn: () => apiFetch<KnownProvider[]>("/v1/providers/catalog"),
+    queryFn: () => apiFetch<KnownProviderSummary[]>("/v1/providers/catalog"),
+    staleTime: Infinity,
+  });
+}
+
+// Autofill hints (credential env var, default endpoint, whether a key is
+// required) for the one provider the add-provider form has selected. Resolved
+// lazily so only the chosen provider's SDK is imported gateway-side; disabled
+// until a provider is picked. env_key_present is process-static, so cache it for
+// the session like the catalog.
+export function useProviderDetail(providerId: string) {
+  return useQuery({
+    queryKey: ["provider-catalog", providerId],
+    queryFn: () => apiFetch<KnownProvider>(`/v1/providers/catalog/${encodeURIComponent(providerId)}`),
+    enabled: providerId !== "",
     staleTime: Infinity,
   });
 }
