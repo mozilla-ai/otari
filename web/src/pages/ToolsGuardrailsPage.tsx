@@ -80,6 +80,11 @@ const INPUT_CLASS =
 // columns down a card regardless of which rows also carry a Test button, an
 // extra help line, or a narrower numeric input. Below `sm` the grid collapses
 // to a single column and the pieces stack.
+//
+// The actions track is sized for the Save button so Save stays column-aligned
+// across every row; on URL rows the trailing Test button is intentionally left
+// to overflow the track's right edge (grid tracks don't clip) rather than
+// widening the track, which would push Save inward and break that alignment.
 const ROW_CLASS = "grid gap-x-4 gap-y-1.5 py-4 sm:grid-cols-[minmax(0,1fr)_16rem_10rem] sm:items-start";
 const INPUT_CELL = `w-full sm:col-start-2 ${INPUT_CLASS}`;
 const ACTIONS_CELL = "flex items-center gap-2 sm:col-start-3";
