@@ -63,12 +63,14 @@ OUT_DIR="$ART" BASE_URL="http://127.0.0.1:8000" node "$DIR/tour.mjs"
 
 WEBM=$(ls -t "$ART"/video/*.webm | head -1)
 echo ">> Encoding GIF from $WEBM"
-# Two-pass palette for clean colors; 12fps and 720px wide keeps the file small.
+# Two-pass palette for clean colors; 12fps keeps the file reasonable.
 # START_TRIM drops the brief initial Overview loading skeleton so the GIF opens
 # on populated content (the tour waits for data before the sweep begins).
+# Encode at 1080 wide while the README displays it at 720, so it stays crisp on
+# high-DPI screens (the same 1.5x density the previous hero GIF used).
 PALETTE="$ART/palette.png"
 FPS=12
-WIDTH=720
+WIDTH=1080
 START_TRIM=1.4
 ffmpeg -y -ss "$START_TRIM" -i "$WEBM" -vf "fps=$FPS,scale=$WIDTH:-1:flags=lanczos,palettegen=stats_mode=diff" "$PALETTE" 2>/dev/null
 ffmpeg -y -ss "$START_TRIM" -i "$WEBM" -i "$PALETTE" \

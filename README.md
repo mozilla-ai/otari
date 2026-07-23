@@ -23,21 +23,17 @@ Put one endpoint in front of 40+ providers, then manage API keys, enforce budget
 
 Otari is the proxy server at the heart of [otari.ai](https://otari.ai). Your apps talk to Otari, which routes to your providers. Otari authenticates each request, enforces budgets before the call runs, resolves your provider credential, forwards the request, and logs the usage. Run it yourself and your provider keys and usage data stay in your environment. Or connect it to otari.ai and the platform runs it for you.
 
-```
-                  Your apps / SDKs / OpenAI clients
-                                │
-                       One OpenAI-compatible
-                          endpoint  (:8000)
-                                ▼
-      ┌─────────────────────────────────────────────────┐
-      │                      Otari                       │
-      │    auth · virtual keys · budgets · usage log     │
-      │          guardrails · built-in tools             │
-      └─────────────────────────────────────────────────┘
-                                │
-                    any-llm routing (40+ providers)
-                                ▼
-        OpenAI   Anthropic   Mistral   Gemini   llamafile  …
+```mermaid
+flowchart TB
+    clients["Your apps &middot; OpenAI / Anthropic SDKs"]
+    otari["<b>Otari</b><br/>auth &middot; virtual keys &middot; budgets &middot; usage log<br/>guardrails &middot; built-in tools"]
+    anyllm["routed by any-llm &middot; 40+ providers"]
+    clients -->|"one endpoint &middot; OpenAI + Anthropic APIs &middot; :8000"| otari
+    otari --> anyllm
+    anyllm --> openai["OpenAI"]
+    anyllm --> anthropic["Anthropic"]
+    anyllm --> llamafile["llamafile"]
+    anyllm --> more["and more"]
 ```
 
 ## Why Otari
