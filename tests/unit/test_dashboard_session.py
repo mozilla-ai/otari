@@ -12,8 +12,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
+from gateway.api.routes import auth_session as auth_session_route
 from gateway.core.config import GatewayConfig
 from gateway.main import create_app
 from gateway.models.entities import DashboardSession
@@ -101,6 +103,25 @@ def test_sign_out_revokes_the_session_server_side(tmp_path: Path) -> None:
 def test_sign_out_without_a_session_is_a_no_op(tmp_path: Path) -> None:
     with TestClient(create_app(_config(tmp_path))) as client:
         assert client.delete("/v1/auth/session").status_code == 204
+
+
+def test_sign_out_clears_the_cookie_even_when_revocation_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A DB failure during revocation must not leave the browser holding a live
+    # cookie: sign-out stays best-effort (204 + cookie cleared) and the
+    # unrevoked session dies on its TTL.
+    async def _boom(db: object, token: str) -> None:
+        raise SQLAlchemyError("db down")
+
+    monkeypatch.setattr(auth_session_route, "revoke_dashboard_session", _boom)
+    with TestClient(create_app(_config(tmp_path))) as client:
+        _sign_in(client)
+        response = client.delete("/v1/auth/session")
+        assert response.status_code == 204
+        set_cookie = response.headers.get("set-cookie", "")
+        assert SESSION_COOKIE_NAME in set_cookie
+        assert 'expires=' in set_cookie.lower() or "max-age=0" in set_cookie.lower()
 
 
 def test_expired_sessions_stop_authenticating(tmp_path: Path) -> None:

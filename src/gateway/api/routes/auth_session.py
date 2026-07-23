@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, is_valid_master_key
 from gateway.core.config import GatewayConfig
+from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
 from gateway.services.dashboard_session_service import (
     SESSION_COOKIE_NAME,
@@ -85,8 +86,9 @@ async def delete_session(
             await db.commit()
         except SQLAlchemyError:
             await db.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Database error",
-            ) from None
+            # Raising here would skip the cookie clear below (FastAPI discards
+            # the injected response on an exception), leaving the browser with
+            # a live cookie the operator believes is gone. Clear it and return
+            # 204 anyway; the unrevoked row dies on its TTL.
+            logger.warning("Failed to revoke the dashboard session on sign-out", exc_info=True)
     clear_session_cookie(response)
