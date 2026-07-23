@@ -14,6 +14,7 @@ from gateway.core.database import create_session, get_db
 from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, is_valid_dashboard_session
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
@@ -179,7 +180,55 @@ async def _bump_last_used_at(api_key_id: str, now: datetime) -> None:
         logger.warning("Failed to update last_used_at for API key %s", api_key_id, exc_info=True)
 
 
-async def _is_valid_master_key(token: str, config: GatewayConfig, db: AsyncSession) -> bool:
+def _header_credentials_present(request: Request) -> bool:
+    """Whether the request carries any of the header credential forms.
+
+    Header credentials always win over the dashboard session cookie: an API
+    client that sends a key gets exactly today's behavior (including failures),
+    and the cookie is only consulted for requests that present nothing else,
+    i.e. the browser-driven dashboard.
+    """
+    return bool(
+        request.headers.get(API_KEY_HEADER)
+        or request.headers.get("Authorization")
+        or request.headers.get(X_API_KEY_HEADER)
+    )
+
+
+# Sec-Fetch-Site values under which a cookie may authenticate a request:
+# same-origin fetches (the dashboard itself) and non-site-initiated requests
+# ("none", e.g. a direct navigation). "same-site" is deliberately excluded, so a
+# sibling-subdomain page cannot ride the cookie.
+_COOKIE_SAFE_FETCH_SITES = ("same-origin", "none")
+
+
+async def _session_cookie_authenticates(request: Request, config: GatewayConfig, db: AsyncSession) -> bool:
+    """Whether a valid dashboard session cookie grants master-key authority.
+
+    ``SameSite=Strict`` on the cookie is the primary CSRF control; the
+    Sec-Fetch-Site check is belt-and-braces for clients that send the header.
+    Standalone-only: hybrid mode has no dashboard or management API.
+    """
+    if config.is_hybrid_mode:
+        return False
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        return False
+    fetch_site = request.headers.get("Sec-Fetch-Site")
+    if fetch_site is not None and fetch_site not in _COOKIE_SAFE_FETCH_SITES:
+        record_auth_failure("cross_site_cookie")
+        return False
+    try:
+        return await is_valid_dashboard_session(db, token)
+    except SQLAlchemyError as exc:
+        record_auth_failure("db_error")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication temporarily unavailable, please retry",
+        ) from exc
+
+
+async def is_valid_master_key(token: str, config: GatewayConfig, db: AsyncSession) -> bool:
     """Check if token matches the configured key or the current generated key."""
     if config.master_key is not None and secrets.compare_digest(token, config.master_key):
         return True
@@ -232,17 +281,23 @@ async def verify_master_key(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-) -> str:
-    """Verify master key from Otari-Key header.
+) -> str | None:
+    """Verify master key from Otari-Key header or the dashboard session cookie.
 
     Args:
         request: FastAPI request object
         config: Gateway configuration
 
+    Returns:
+        The raw master key when header-authenticated, or None when a dashboard
+        session cookie authenticated the request (the raw key is not available).
+
     Raises:
         HTTPException: If master key is not configured or invalid
 
     """
+    if not _header_credentials_present(request) and await _session_cookie_authenticates(request, config, db):
+        return None
     token = _extract_bearer_token(request, config)
 
     if config.master_key is None:
@@ -270,6 +325,9 @@ async def verify_api_key_or_master_key(
 ) -> tuple[APIKey | None, bool]:
     """Verify either API key or master key from Otari-Key header.
 
+    A valid dashboard session cookie also grants master-key authority, but only
+    when the request carries no header credentials at all.
+
     Args:
         request: FastAPI request object
         db: Database session
@@ -282,9 +340,12 @@ async def verify_api_key_or_master_key(
         HTTPException: If key is invalid, inactive, or expired
 
     """
+    if not _header_credentials_present(request) and await _session_cookie_authenticates(request, config, db):
+        return None, True
+
     token = _extract_bearer_token(request, config)
 
-    if await _is_valid_master_key(token, config, db):
+    if await is_valid_master_key(token, config, db):
         return None, True
 
     api_key = await _verify_and_update_api_key(db, token)
@@ -322,6 +383,7 @@ __all__ = [
     "get_db_if_needed",
     "get_file_store",
     "get_log_writer",
+    "is_valid_master_key",
     "verify_api_key",
     "verify_api_key_or_master_key",
     "verify_master_key",

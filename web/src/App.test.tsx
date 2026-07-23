@@ -18,12 +18,12 @@ vi.mock("@/pages/OverviewPage", async () => {
 describe("App", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    window.sessionStorage.clear();
+    window.localStorage.clear();
     window.location.hash = "";
   });
 
   it("shows a loading state while the current route loads", async () => {
-    window.sessionStorage.setItem("otari.dashboard.masterKey", "test-master-key");
+    window.localStorage.setItem("otari.dashboard.hasSession", "1");
     vi.mocked(apiFetch).mockImplementation(async (path) => {
       if (path === "/dashboard-build.json") {
         return { build: "test-build" } as never;

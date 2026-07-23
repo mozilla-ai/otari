@@ -19,6 +19,7 @@ from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
+from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
@@ -42,6 +43,10 @@ from gateway.services.tool_settings_service import apply_overrides_from_db as ap
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
+# Paths authenticated by the master key in the request body (sign-in) or the
+# session cookie (sign-out) rather than the header schemes; the OpenAPI
+# security stamp below skips them. They still get the no-store cache headers.
+_COOKIE_AUTH_PREFIXES = ("/v1/auth/session",)
 # Public, unauthenticated static assets that shared caches may keep. Paths here
 # set their own Cache-Control at the route (favicon.svg), so the middleware only
 # fills one in when it is missing.
@@ -118,6 +123,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 # so the dashboard is reachable without hand-editing config, and
                 # the management API is never left unauthenticated.
                 await ensure_master_key(config, session)
+                # Dashboard sessions must not outlive the key they were minted
+                # under: revoke them all when the master key changed across a
+                # restart (e.g. OTARI_MASTER_KEY was rotated).
+                await revoke_sessions_on_master_key_change(config, session)
                 # Overlay dashboard-stored providers before pricing init, so a
                 # provider added at runtime is visible to everything that reads
                 # config.providers (pricing seeding, discovery, dispatch).
@@ -223,7 +232,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         }
 
         for path, path_item in openapi_schema.get("paths", {}).items():
-            if path.startswith(_PUBLIC_PREFIXES):
+            if path.startswith(_PUBLIC_PREFIXES) or path.startswith(_COOKIE_AUTH_PREFIXES):
                 continue
             for operation in path_item.values():
                 if isinstance(operation, dict):

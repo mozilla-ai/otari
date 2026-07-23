@@ -1,7 +1,7 @@
 import { Button, Card, Input, Label, Link, TextField } from "@heroui/react";
 import { useState } from "react";
 
-import { validateMasterKey } from "@/api/client";
+import { createSession } from "@/api/client";
 import { useAuth } from "@/auth/AuthContext";
 import { ErrorBanner } from "@/components/ui";
 
@@ -19,9 +19,9 @@ export function Login() {
     setIsSubmitting(true);
     setError(null);
     try {
-      const valid = await validateMasterKey(trimmed);
+      const valid = await createSession(trimmed);
       if (valid) {
-        login(trimmed);
+        login();
       } else {
         setError(new Error("Invalid master key."));
       }
@@ -85,7 +85,7 @@ export function Login() {
           </form>
 
           <p className="text-center text-xs text-[var(--otari-muted)]">
-            The key is held only in this browser tab (session storage) and sent directly to this gateway.
+            The key is sent once to this gateway and exchanged for a session cookie; it is never stored in the browser.
           </p>
 
           <div className="border-t border-[var(--otari-line)] pt-4 text-center">

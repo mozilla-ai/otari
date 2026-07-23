@@ -169,7 +169,7 @@ class GatewayConfig(BaseSettings):
         # Treat an empty OTARI_<FIELD> env var as unset, matching the empty-skip
         # in _apply_otari_env_overrides. Without this, a blank OTARI_MASTER_KEY
         # (common from container templating) would read as "" instead of None,
-        # and an empty bearer token would then satisfy _is_valid_master_key.
+        # and an empty bearer token would then satisfy is_valid_master_key.
         env_ignore_empty=True,
     )
 
@@ -203,6 +203,15 @@ class GatewayConfig(BaseSettings):
     host: str = Field(default="0.0.0.0", description="Host to bind the server to")  # noqa: S104
     port: int = Field(default=8000, description="Port to bind the server to")
     master_key: str | None = Field(default=None, description="Master key for protecting management endpoints")
+    dashboard_session_ttl_hours: int = Field(
+        default=168,
+        ge=1,
+        description=(
+            "How long a dashboard sign-in stays valid, in hours. Signing in to the admin "
+            "dashboard exchanges the master key for an HttpOnly session cookie with this "
+            "lifetime; the master key itself never expires."
+        ),
+    )
     rate_limit_rpm: int | None = Field(
         default=None, ge=1, description="Maximum requests per minute per user (None disables rate limiting)"
     )

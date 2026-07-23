@@ -1233,6 +1233,21 @@
         "title": "CreateKeyResponse",
         "type": "object"
       },
+      "CreateSessionRequest": {
+        "description": "Sign in to the dashboard by proving possession of the master key.",
+        "properties": {
+          "master_key": {
+            "description": "The gateway master key; verified once and never stored by the browser.",
+            "title": "Master Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "master_key"
+        ],
+        "title": "CreateSessionRequest",
+        "type": "object"
+      },
       "CreateStoredProviderRequest": {
         "description": "Create a stored provider. ``api_key`` is write-only and requires OTARI_SECRET_KEY.",
         "properties": {
@@ -3681,6 +3696,22 @@
         "title": "RotateMasterKeyResponse",
         "type": "object"
       },
+      "SessionResponse": {
+        "description": "A freshly minted dashboard session (the token travels only in the cookie).",
+        "properties": {
+          "expires_at": {
+            "description": "When the session cookie stops being accepted.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_at"
+        ],
+        "title": "SessionResponse",
+        "type": "object"
+      },
       "SetPricingRequest": {
         "description": "Create a versioned per-model price, with optional cache and context tiers.",
         "properties": {
@@ -5665,6 +5696,61 @@
         "summary": "Create Transcription",
         "tags": [
           "audio"
+        ]
+      }
+    },
+    "/v1/auth/session": {
+      "delete": {
+        "description": "Sign out: revoke the cookie's session server-side and expire the cookie.\n\nDeliberately unauthenticated and idempotent: it only ever revokes the\nsession named by the caller's own cookie, and the dashboard calls it on the\n401-bounce path where no valid credential exists anymore. Unlike the read\npath in ``deps.py`` it applies no Sec-Fetch-Site check: ``SameSite=Strict``\nalready keeps cross-site requests from carrying the cookie, and the worst a\nforged call could do is sign the operator out.",
+        "operationId": "delete_session_v1_auth_session_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Delete Session",
+        "tags": [
+          "auth"
+        ]
+      },
+      "post": {
+        "description": "Verify the master key and set the HttpOnly session cookie.",
+        "operationId": "create_session_v1_auth_session_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Session",
+        "tags": [
+          "auth"
         ]
       }
     },
@@ -8489,7 +8575,7 @@
     },
     "/v1/settings/master-key/rotate": {
       "post": {
-        "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.",
+        "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.\n\nEvery dashboard session is revoked with the rotation (a session only proves\npossession of the now-dead key); the caller's own session is re-minted under\nthe new key so the tab that performed the rotation stays signed in.",
         "operationId": "rotate_master_key_v1_settings_master_key_rotate_post",
         "responses": {
           "200": {

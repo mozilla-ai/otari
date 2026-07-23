@@ -12,7 +12,6 @@ import {
   useUpdateSettings,
 } from "@/api/hooks";
 import type { ConfigField, PricingRefreshPreview, UpdateSettingsRequest } from "@/api/types";
-import { useAuth } from "@/auth/AuthContext";
 import { ErrorBanner, FilterSelect, InfoBanner, PageHeader } from "@/components/ui";
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
@@ -397,16 +396,17 @@ function MasterKeyRotationDialog({
 
 function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
   const rotateMasterKey = useRotateMasterKey();
-  const { replaceMasterKey } = useAuth();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newKey, setNewKey] = useState<string | undefined>();
   const isGenerated = source === "generated";
 
+  // Rotation revokes every dashboard session server-side and re-mints this
+  // tab's session cookie on the response, so no client-side credential swap
+  // is needed; the dialog only has to reveal the new key once.
   const rotate = () =>
     rotateMasterKey.mutate(undefined, {
       onSuccess: (result) => {
         setNewKey(result.master_key);
-        replaceMasterKey(result.master_key);
       },
     });
 

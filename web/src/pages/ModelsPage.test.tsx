@@ -235,14 +235,12 @@ function modelOrder(): string[] {
 
 describe("ModelsPage", () => {
   beforeEach(() => {
-    apiClient.setMasterKey("test-master-key");
     // The page persists sort choice in localStorage; start each test clean so
     // one test's sort does not leak into the next.
     window.localStorage.clear();
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    apiClient.setMasterKey(null);
     window.localStorage.clear();
   });
 

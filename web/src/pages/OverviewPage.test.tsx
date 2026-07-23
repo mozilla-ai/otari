@@ -3,9 +3,8 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
 import type { UsageSummary } from "@/api/types";
 import { localDayKey, OverviewIndex, OverviewPage } from "@/pages/OverviewPage";
 
@@ -93,11 +92,9 @@ function renderPage(ui: ReactElement, initial = "/overview") {
 }
 
 describe("OverviewPage", () => {
-  beforeEach(() => setMasterKey("test-master-key"));
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
-    setMasterKey(null);
   });
 
   it("uses a zero-padded, one-based local calendar date as its refresh key", () => {
@@ -250,10 +247,8 @@ describe("OverviewPage", () => {
 });
 
 describe("OverviewIndex routing", () => {
-  beforeEach(() => setMasterKey("test-master-key"));
   afterEach(() => {
     vi.restoreAllMocks();
-    setMasterKey(null);
   });
 
   it("renders the overview when a provider is configured", async () => {

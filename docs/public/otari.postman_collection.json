@@ -214,6 +214,63 @@
     {
       "item": [
         {
+          "name": "Create Session",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"master_key\": \"string\"\n}"
+            },
+            "description": "Verify the master key and set the HttpOnly session cookie.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "session"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/session"
+            }
+          }
+        },
+        {
+          "name": "Delete Session",
+          "request": {
+            "description": "Sign out: revoke the cookie's session server-side and expire the cookie.\n\nDeliberately unauthenticated and idempotent: it only ever revokes the\nsession named by the caller's own cookie, and the dashboard calls it on the\n401-bounce path where no valid credential exists anymore. Unlike the read\npath in ``deps.py`` it applies no Sec-Fetch-Site check: ``SameSite=Strict``\nalready keeps cross-site requests from carrying the cookie, and the worst a\nforged call could do is sign the operator out.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "session"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/session"
+            }
+          }
+        }
+      ],
+      "name": "auth"
+    },
+    {
+      "item": [
+        {
           "name": "List Batches",
           "request": {
             "description": "List batches for a provider.\n\nNon-master keys only see batches they own (plus legacy batches without an\nownership marker); the page is filtered after the provider call, so a page\nmay contain fewer than ``limit`` items.",
@@ -1904,7 +1961,7 @@
         {
           "name": "Rotate Master Key",
           "request": {
-            "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.",
+            "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.\n\nEvery dashboard session is revoked with the rotation (a session only proves\npossession of the now-dead key); the caller's own session is re-minted under\nthe new key so the tab that performed the rotation stays signed in.",
             "header": [],
             "method": "POST",
             "url": {

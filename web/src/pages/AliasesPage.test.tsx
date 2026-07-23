@@ -3,9 +3,8 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactElement } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
 import type { AliasResponse } from "@/api/types";
 import { AliasesPage } from "@/pages/AliasesPage";
 
@@ -53,10 +52,8 @@ function renderPage(ui: ReactElement, route = "/aliases") {
 }
 
 describe("AliasesPage", () => {
-  beforeEach(() => setMasterKey("test-master-key"));
   afterEach(() => {
     vi.restoreAllMocks();
-    setMasterKey(null);
   });
 
   it("lists aliases with provenance; config is read-only, stored is deletable", async () => {

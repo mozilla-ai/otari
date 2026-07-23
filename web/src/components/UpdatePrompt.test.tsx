@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
 import { UpdatePrompt } from "@/components/UpdatePrompt";
 
 // The build the fake gateway is currently serving. Tests flip it to stand in
@@ -41,11 +40,9 @@ describe("UpdatePrompt", () => {
 
   beforeEach(() => {
     servedBuild = "build-a";
-    setMasterKey("test-master-key");
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    setMasterKey(null);
     if (originalLocation) {
       Object.defineProperty(window, "location", originalLocation);
       originalLocation = undefined;

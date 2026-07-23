@@ -203,6 +203,23 @@ class RuntimeSetting(Base):
     )
 
 
+class DashboardSession(Base):
+    """A server-side admin-dashboard sign-in session.
+
+    Minted when an operator signs in to the dashboard with the master key: the
+    browser holds only an opaque token in an HttpOnly cookie and this table
+    stores the token's SHA-256 hash, so neither the master key nor a usable
+    session credential is ever persisted in JS-readable storage. Sessions
+    expire on a TTL and are revoked on sign-out and on master-key rotation.
+    """
+
+    __tablename__ = "dashboard_sessions"
+
+    token_hash: Mapped[str] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class PricingSnapshot(Base):
     """An approved, source-tagged upstream pricing catalog."""
 
