@@ -15,12 +15,20 @@ from gateway.api.routes._pipeline import (
     PROVIDER_CREDENTIALS_DETAIL,
     PROVIDER_MODEL_NOT_FOUND_DETAIL,
     PROVIDER_RATE_LIMITED_DETAIL,
+    PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL,
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
 )
 from gateway.api.routes._platform import _provider_failure_http_exc
 
 _RAW = "raw provider detail SECRET token=abc123"
+
+# The exact upstream OpenAI message for the tools + reasoning_effort rejection.
+_REASONING_TOOLS_MSG = (
+    "Function tools with reasoning_effort are not supported for gpt-5.6-sol in "
+    "/v1/chat/completions. To use function tools, use /v1/responses or set "
+    "reasoning_effort to 'none'."
+)
 
 
 class _StatusError(Exception):
@@ -29,6 +37,27 @@ class _StatusError(Exception):
     def __init__(self, status_code: int) -> None:
         super().__init__(_RAW)
         self.status_code = status_code
+
+
+class _ParamError(Exception):
+    """Upstream error carrying an OpenAI-style ``param`` + ``message``, like the
+    raw ``openai.BadRequestError`` any-llm currently passes through."""
+
+    def __init__(self, status_code: int, param: str | None, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.param = param
+        self.message = message
+
+
+class _WrappedError(Exception):
+    """Upstream error whose signal lives only on ``original_exception``, matching
+    any-llm's unified-exception layer once it becomes the default."""
+
+    def __init__(self, status_code: int, original: BaseException) -> None:
+        super().__init__("Invalid request")
+        self.status_code = status_code
+        self.original_exception = original
 
 
 class _ResponseStatusError(Exception):
@@ -90,3 +119,44 @@ def test_platform_terminal_exc_falls_back_to_generic() -> None:
     assert exc.status_code == 502
     assert exc.detail == "LLM provider error"
     assert "SECRET" not in str(exc.detail)
+
+
+@pytest.mark.parametrize("status_code", [400, 422])
+def test_reasoning_effort_tools_conflict_maps_to_actionable_detail(status_code: int) -> None:
+    """A 400/422 flagged param=reasoning_effort whose message names function tools
+    gets the actionable remedy instead of the generic bad-request detail."""
+    exc = _ParamError(status_code, "reasoning_effort", _REASONING_TOOLS_MSG)
+    assert classify_provider_error(exc) == (400, PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL)
+
+
+def test_reasoning_effort_tools_conflict_read_from_original_exception() -> None:
+    """The signal is picked up when it lives only on ``original_exception`` (the
+    any-llm unified-exception shape)."""
+    original = _ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG)
+    exc = _WrappedError(400, original)
+    assert classify_provider_error(exc) == (400, PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL)
+
+
+def test_reasoning_effort_without_function_tools_stays_generic() -> None:
+    """A reasoning_effort rejection that is not the tools conflict (message does
+    not mention function tools) keeps the generic bad-request detail."""
+    exc = _ParamError(400, "reasoning_effort", "Unsupported value 'ultra' for reasoning_effort.")
+    assert classify_provider_error(exc) == (400, PROVIDER_BAD_REQUEST_DETAIL)
+
+
+def test_function_tools_message_on_other_param_stays_generic() -> None:
+    """A different offending param does not get the reasoning-effort remedy even
+    if the message happens to mention function tools."""
+    exc = _ParamError(400, "tools", "Function tools are malformed for this request.")
+    assert classify_provider_error(exc) == (400, PROVIDER_BAD_REQUEST_DETAIL)
+
+
+def test_reasoning_effort_tools_conflict_does_not_leak_raw_message() -> None:
+    """The actionable detail is a fixed string; the model name and endpoint from
+    the raw upstream message are never echoed to the caller."""
+    exc = _ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG + " SECRET token=abc123")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.detail == PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL
+    assert "gpt-5.6-sol" not in mapping.detail
+    assert "SECRET" not in mapping.detail
