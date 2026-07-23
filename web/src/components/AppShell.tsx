@@ -17,7 +17,17 @@ const SIDEBAR_WIDTH_KEY = "otari.dashboard.sidebarWidth";
 const SIDEBAR_COLLAPSED_KEY = "otari.dashboard.sidebarCollapsed";
 const SIDEBAR_STEP = 16;
 
+// Below this width the sidebar's fixed footprint squashes page content, so it
+// switches to an off-canvas drawer toggled from the header. Matches Tailwind's
+// `md` breakpoint (the classes that hide the trigger and drawer chrome use `md:`).
+const MOBILE_QUERY = "(max-width: 767px)";
+
 const clampSidebar = (width: number) => Math.min(MAX_SIDEBAR, Math.max(MIN_SIDEBAR, width));
+
+function readIsMobile(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia(MOBILE_QUERY).matches;
+}
 
 function readStoredSidebarWidth(): number {
   if (typeof window === "undefined") return DEFAULT_SIDEBAR;
@@ -215,6 +225,33 @@ export function AppShell() {
   const [sidebarWidth, setSidebarWidth] = useState<number>(readStoredSidebarWidth);
   const [collapsed, setCollapsed] = useState<boolean>(readStoredCollapsed);
   const [resizing, setResizing] = useState(false);
+  const [isMobile, setIsMobile] = useState<boolean>(readIsMobile);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Track the mobile breakpoint so the sidebar can render as an off-canvas
+  // drawer below it and as the resizable rail above it. Closing the drawer when
+  // the viewport grows past the breakpoint keeps a stale open state from leaving
+  // a fixed overlay stranded over the desktop layout.
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(MOBILE_QUERY);
+    const onChange = (event: MediaQueryListEvent) => {
+      setIsMobile(event.matches);
+      if (!event.matches) setMobileNavOpen(false);
+    };
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+
+  // Escape closes the drawer, matching the dismissible-overlay convention.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -265,11 +302,25 @@ export function AppShell() {
   }, []);
 
   const width = collapsed ? COLLAPSED_SIDEBAR : sidebarWidth;
+  // The collapse rail and resize handle are desktop-only affordances; on mobile
+  // the drawer always shows the full-width, labelled nav.
+  const effectiveCollapsed = isMobile ? false : collapsed;
 
   return (
     <div className={clsx("relative flex h-full flex-col overflow-hidden", resizing && "cursor-col-resize select-none")}>
       <header className="flex shrink-0 items-center justify-between border-b border-[var(--otari-line)] bg-[var(--otari-surface)] px-5 py-3">
         <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen((value) => !value)}
+            aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
+            aria-expanded={mobileNavOpen}
+            className="-ml-1 flex h-8 w-8 items-center justify-center rounded-lg text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)] md:hidden"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+              <path d="M4 6h16M4 12h16M4 18h16" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
           <img src="/favicon.svg" alt="" className="h-7 w-7 shrink-0" />
           <span className="text-base font-semibold text-[var(--otari-ink)]">Otari</span>
         </div>
@@ -281,23 +332,41 @@ export function AppShell() {
       <ConnectionStatus />
       <PricingWarning />
       <div className="flex min-h-0 flex-1">
+        {/* On mobile the drawer floats over the page; a backdrop dims the content
+            behind it and dismisses it on tap. */}
+        {isMobile && mobileNavOpen ? (
+          <button
+            type="button"
+            aria-hidden
+            tabIndex={-1}
+            onClick={() => setMobileNavOpen(false)}
+            className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          />
+        ) : null}
         <aside
           ref={asideRef}
-          style={{ width }}
+          style={isMobile ? undefined : { width }}
           className={clsx(
-            "relative flex shrink-0 flex-col border-r border-[var(--otari-line)] bg-[var(--otari-surface)]",
-            !resizing && "transition-[width] duration-150",
+            "flex flex-col border-r border-[var(--otari-line)] bg-[var(--otari-surface)]",
+            isMobile
+              ? clsx(
+                  "fixed inset-y-0 left-0 z-40 w-[17rem] shadow-xl transition-transform duration-200",
+                  mobileNavOpen ? "translate-x-0" : "-translate-x-full",
+                )
+              : clsx("relative shrink-0", !resizing && "transition-[width] duration-150"),
           )}
         >
           {/* A round chevron on the sidebar's edge toggles collapse — floats over
-              the border for a polished, VS Code / Notion-style affordance. */}
+              the border for a polished, VS Code / Notion-style affordance.
+              Desktop-only: on mobile the drawer is dismissed from the header or
+              backdrop instead. */}
           <button
             type="button"
             onClick={() => setCollapsed((value) => !value)}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-pressed={collapsed}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="absolute -right-3 top-4 z-30 flex h-6 w-6 items-center justify-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-surface)] text-[var(--otari-muted)] shadow-sm transition-colors hover:border-[var(--otari-brand)] hover:text-[var(--otari-brand-dark)]"
+            className="absolute -right-3 top-4 z-30 hidden h-6 w-6 items-center justify-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-surface)] text-[var(--otari-muted)] shadow-sm transition-colors hover:border-[var(--otari-brand)] hover:text-[var(--otari-brand-dark)] md:flex"
           >
             <svg
               viewBox="0 0 24 24"
@@ -309,7 +378,7 @@ export function AppShell() {
               <path d="M15 6l-6 6 6 6" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
-          <nav className={clsx("flex flex-col py-4", collapsed ? "px-2" : "px-3")}>
+          <nav className={clsx("flex flex-col py-4", effectiveCollapsed ? "px-2" : "px-3")}>
             {NAV_SECTIONS.map((section, sectionIndex) => {
               const items = NAV.filter((item) => item.section === section.key);
               if (items.length === 0) {
@@ -321,12 +390,12 @@ export function AppShell() {
                       in for it when the sidebar is collapsed, or when a group has no
                       header of its own (e.g. Settings) to set it off from the group
                       above. */}
-                  {!collapsed && section.label ? (
+                  {!effectiveCollapsed && section.label ? (
                     <div className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-[var(--otari-muted)] uppercase">
                       {section.label}
                     </div>
                   ) : null}
-                  {sectionIndex > 0 && (collapsed || !section.label) ? (
+                  {sectionIndex > 0 && (effectiveCollapsed || !section.label) ? (
                     <div className="mx-1 mb-2 border-t border-[var(--otari-line)]" />
                   ) : null}
                   <div className="flex flex-col gap-1">
@@ -335,12 +404,15 @@ export function AppShell() {
                         key={item.to}
                         to={item.to}
                         end={item.end}
-                        aria-label={collapsed ? item.label : undefined}
-                        title={collapsed ? item.label : undefined}
+                        // Tapping a destination dismisses the mobile drawer so the
+                        // page it navigated to is visible, not hidden behind it.
+                        onClick={() => setMobileNavOpen(false)}
+                        aria-label={effectiveCollapsed ? item.label : undefined}
+                        title={effectiveCollapsed ? item.label : undefined}
                         className={({ isActive }) =>
                           clsx(
                             "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
-                            collapsed ? "justify-center px-0" : "gap-3 px-3",
+                            effectiveCollapsed ? "justify-center px-0" : "gap-3 px-3",
                             isActive
                               ? "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
                               : "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]",
@@ -348,7 +420,7 @@ export function AppShell() {
                         }
                       >
                         {item.icon}
-                        {collapsed ? null : item.label}
+                        {effectiveCollapsed ? null : item.label}
                       </NavLink>
                     ))}
                   </div>
@@ -364,19 +436,19 @@ export function AppShell() {
             title="otari.ai — the hosted Otari gateway"
             className={clsx(
               "mt-auto mb-3 flex items-center rounded-lg py-2 text-xs font-medium text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-brand-dark)]",
-              collapsed ? "mx-2 justify-center px-0" : "mx-3 gap-2 px-3",
+              effectiveCollapsed ? "mx-2 justify-center px-0" : "mx-3 gap-2 px-3",
             )}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
               <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" strokeLinejoin="round" />
             </svg>
-            {collapsed ? null : (
+            {effectiveCollapsed ? null : (
               <span className="flex-1">
                 otari.ai <span aria-hidden>↗</span>
               </span>
             )}
           </a>
-          {collapsed ? null : (
+          {collapsed || isMobile ? null : (
             <div
               role="separator"
               aria-orientation="vertical"
@@ -398,7 +470,7 @@ export function AppShell() {
           )}
         </aside>
         <main className="flex-1 overflow-y-auto">
-          <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-6 py-6">
+          <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
             <Outlet />
           </div>
         </main>
