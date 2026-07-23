@@ -24,6 +24,7 @@ from gateway.services.dashboard_session_service import (
     apply_session_cookie,
     clear_session_cookie,
     create_dashboard_session,
+    request_is_https,
     revoke_dashboard_session,
 )
 
@@ -63,7 +64,7 @@ async def create_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error",
         ) from None
-    apply_session_cookie(response, token, expires_at, secure=request.url.scheme == "https")
+    apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
     return SessionResponse(expires_at=expires_at)
 
 
@@ -77,7 +78,10 @@ async def delete_session(
 
     Deliberately unauthenticated and idempotent: it only ever revokes the
     session named by the caller's own cookie, and the dashboard calls it on the
-    401-bounce path where no valid credential exists anymore.
+    401-bounce path where no valid credential exists anymore. Unlike the read
+    path in ``deps.py`` it applies no Sec-Fetch-Site check: ``SameSite=Strict``
+    already keeps cross-site requests from carrying the cookie, and the worst a
+    forged call could do is sign the operator out.
     """
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if token:

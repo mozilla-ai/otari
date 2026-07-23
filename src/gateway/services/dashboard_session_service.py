@@ -17,7 +17,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-from fastapi import Response
+from fastapi import Request, Response
 from sqlalchemy import delete, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
@@ -123,15 +123,35 @@ async def revoke_sessions_on_master_key_change(config: GatewayConfig, db: AsyncS
         logger.warning("Could not check dashboard sessions against the current master key; skipping for this boot.")
 
 
+def request_is_https(request: Request) -> bool:
+    """Whether the browser leg of this request is HTTPS, for the Secure flag.
+
+    Behind a TLS-terminating proxy, uvicorn only honors ``X-Forwarded-Proto``
+    from trusted IPs (loopback by default), so ``request.url.scheme`` reads
+    "http" on typical PaaS ingress despite an HTTPS browser leg. Honor the
+    header here regardless of source: it only decides the cookie's ``Secure``
+    attribute, and a spoofed "https" over plain HTTP merely denies the spoofer
+    their own session cookie.
+    """
+    if request.url.scheme == "https":
+        return True
+    forwarded = request.headers.get("X-Forwarded-Proto", "")
+    return forwarded.split(",")[0].strip().lower() == "https"
+
+
 def apply_session_cookie(response: Response, token: str, expires_at: datetime, *, secure: bool) -> None:
     """Set the session cookie with its security attributes in one place.
 
-    ``secure`` mirrors the request scheme rather than being hard-coded: a plain
-    HTTP deployment (LAN, localhost without TLS) would otherwise never receive
-    the cookie back. That is no worse than such a deployment already sending the
-    raw master key in cleartext today. ``SameSite=Strict`` keeps cross-site
-    requests from carrying the cookie, which is the primary CSRF control here
-    (the dashboard and API are same-origin).
+    ``secure`` mirrors the effective request scheme (``request_is_https``)
+    rather than being hard-coded: a plain HTTP deployment (LAN, localhost
+    without TLS) would otherwise never receive the cookie back. That is no
+    worse than such a deployment already sending the raw master key in
+    cleartext today. ``SameSite=Strict`` keeps cross-site requests from
+    carrying the cookie, which is the primary CSRF control here (the dashboard
+    and API are same-origin). ``Path=/`` is as narrow as the surface allows:
+    the management routes live directly under ``/v1`` beside inference, so the
+    cookie reaches inference paths too; that grants nothing beyond what master
+    authority already has, and cross-site use is blocked by SameSite.
     """
     max_age = max(0, int((expires_at - datetime.now(UTC)).total_seconds()))
     response.set_cookie(

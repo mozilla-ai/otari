@@ -59,6 +59,28 @@ def test_sign_in_sets_cookie_and_cookie_authenticates_management_reads(tmp_path:
         assert settings.status_code == 200, settings.text
 
 
+def test_https_requests_get_a_secure_cookie(tmp_path: Path) -> None:
+    with TestClient(create_app(_config(tmp_path)), base_url="https://testserver") as client:
+        response = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        assert response.status_code == 200, response.text
+        assert "secure" in response.headers["set-cookie"].lower()
+
+
+def test_forwarded_https_gets_a_secure_cookie(tmp_path: Path) -> None:
+    # Behind a TLS-terminating proxy the ASGI scheme often reads "http"
+    # (uvicorn only trusts X-Forwarded-Proto from loopback); the Secure
+    # decision must honor the forwarded proto so the common PaaS deployment
+    # is not silently downgraded.
+    with TestClient(create_app(_config(tmp_path))) as client:
+        response = client.post(
+            "/v1/auth/session",
+            json={"master_key": MASTER_KEY},
+            headers={"X-Forwarded-Proto": "https"},
+        )
+        assert response.status_code == 200, response.text
+        assert "secure" in response.headers["set-cookie"].lower()
+
+
 def test_sign_in_rejects_a_wrong_key_without_setting_a_cookie(tmp_path: Path) -> None:
     with TestClient(create_app(_config(tmp_path))) as client:
         response = client.post("/v1/auth/session", json={"master_key": "not-the-master-key"})

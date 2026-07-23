@@ -29,6 +29,7 @@ from gateway.services.dashboard_session_service import (
     apply_session_cookie,
     create_dashboard_session,
     record_session_key_marker,
+    request_is_https,
     revoke_all_dashboard_sessions,
 )
 from gateway.services.master_key_service import (
@@ -412,5 +413,5 @@ async def rotate_master_key(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
     config._master_key_hash = hashed
     if session_token is not None and session_expires_at is not None:
-        apply_session_cookie(response, session_token, session_expires_at, secure=request.url.scheme == "https")
+        apply_session_cookie(response, session_token, session_expires_at, secure=request_is_https(request))
     return RotateMasterKeyResponse(master_key=token)
