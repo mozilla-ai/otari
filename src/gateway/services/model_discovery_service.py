@@ -266,11 +266,11 @@ def _env_provider_instances(configured_impls: set[str]) -> list[str]:
         # (e.g. gemini's "GEMINI_API_KEY/GOOGLE_API_KEY"); any one set is enough.
         # Compound descriptions ("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
         # and the literal "None" are not real single variable names and simply
-        # never match os.environ. A blank value (common from container
-        # templating) is treated as unset, so it does not add a provider that
-        # would only fail to authenticate.
+        # never match os.environ. A blank or whitespace-only value (common from
+        # container templating) is treated as unset, so it does not add a provider
+        # that would only fail to authenticate.
         candidates = (part.strip() for part in env_key.split("/"))
-        if any(part and os.environ.get(part) for part in candidates):
+        if any(part and os.environ.get(part, "").strip() for part in candidates):
             detected.append(name)
     return detected
 
