@@ -64,10 +64,6 @@ interface BreakdownProps {
   // Turns a row key into the Activity-page filter to drill into (model vs user).
   onDrill: (key: string) => void;
   loading: boolean;
-  // Header for the dimension column; defaults to the title with "Spend by " stripped.
-  columnLabel?: string;
-  // Prettify a raw group key for display (e.g. "claude_code" -> "Claude Code").
-  formatKey?: (key: string) => string;
 }
 
 // One breakdown (by model / by user). Rows are spend-ranked with an inline
@@ -81,8 +77,6 @@ function BreakdownTable({
   emptyLabel,
   onDrill,
   loading,
-  columnLabel,
-  formatKey,
 }: BreakdownProps) {
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? rows : rows.slice(0, TABLE_TOP_N);
@@ -94,7 +88,7 @@ function BreakdownTable({
       <Table>
         <THead>
           <tr>
-            <Th>{columnLabel ?? title.replace("Spend by ", "")}</Th>
+            <Th>{title.replace("Spend by ", "")}</Th>
             <Th className="text-right">Requests</Th>
             <Th className="text-right">Spend</Th>
           </tr>
@@ -125,7 +119,7 @@ function BreakdownTable({
                           ? `Other (${row.requests.toLocaleString()} req)`
                           : row.key === null
                             ? "(unknown)"
-                            : (formatKey?.(row.key) ?? row.key)}
+                            : row.key}
                       </span>
                       {/* Share-of-total bar. Width is data-driven, so it rides an
                           inline style like the Table's computed column widths. */}

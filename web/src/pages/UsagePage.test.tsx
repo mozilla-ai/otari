@@ -34,10 +34,6 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
       { key: "bob", cost: 340, tokens: 4_400_000, requests: 34_000, is_other: false },
     ],
     by_api_key: [],
-    by_source: [
-      { key: "gateway", cost: 890.5, tokens: 9_000_000, requests: 60_000, is_other: false },
-      { key: "claude_code", cost: 350, tokens: 3_400_000, requests: 24_000, is_other: false },
-    ],
     series: [
       { bucket_start: "2026-07-19T00:00:00Z", cost: 400, tokens: 4_000_000, requests: 28_000 },
       { bucket_start: "2026-07-20T00:00:00Z", cost: 840.5, tokens: 8_400_000, requests: 56_000 },

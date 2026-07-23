@@ -32,7 +32,6 @@ function summary(totals: Partial<UsageSummary["totals"]>): UsageSummary {
     by_model: [],
     by_user: [],
     by_api_key: [],
-    by_source: [],
     series: [],
   };
 }

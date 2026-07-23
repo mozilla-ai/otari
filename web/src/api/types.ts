@@ -417,7 +417,6 @@ export interface UsageFilters {
   model?: string;
   endpoint?: string;
   user_id?: string;
-  source?: string;
   api_key_id?: string;
 }
 
@@ -477,7 +476,6 @@ export interface UsageSummary {
   by_model: UsageGroupRow[];
   by_user: UsageGroupRow[];
   by_api_key: UsageGroupRow[];
-  by_source: UsageGroupRow[];
   series: UsageSeriesPoint[];
 }
 
