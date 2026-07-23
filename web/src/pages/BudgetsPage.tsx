@@ -1,5 +1,5 @@
 import { Button, Card, Spinner } from "@heroui/react";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import {
   useBudgetResetLogs,
@@ -68,7 +68,21 @@ function parseLimit(raw: string): { value: number | null; valid: boolean } {
 function PeriodPicker({ value, onChange }: { value: number | null; onChange: (seconds: number | null) => void }) {
   const isPreset = PERIOD_PRESETS.some((p) => p.seconds === value);
   const [custom, setCustom] = useState(!isPreset);
-  const customDays = value !== null && value % DAY === 0 ? String(value / DAY) : "";
+  const committedDays = value !== null && value % DAY === 0 ? String(value / DAY) : "";
+  // A local draft so an in-progress, not-yet-valid entry (e.g. "1.5") stays on
+  // screen to be flagged, rather than being coerced. Reseed it when the committed
+  // value changes from outside (a preset click, or editing a different budget).
+  const [draft, setDraft] = useState(committedDays);
+  useEffect(() => {
+    setDraft(committedDays);
+  }, [committedDays]);
+
+  const trimmedDays = draft.trim();
+  const daysValue = Number(trimmedDays);
+  // Whole days only: a fractional or non-positive entry is rejected outright
+  // (surfaced below and left unsaved) rather than silently rounded, so 1.5 never
+  // becomes 2.
+  const invalidDays = trimmedDays !== "" && (!Number.isInteger(daysValue) || daysValue <= 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -95,18 +109,22 @@ function PeriodPicker({ value, onChange }: { value: number | null; onChange: (se
         <div className="flex items-end gap-2">
           <Field
             label="Every N days"
-            value={customDays}
+            value={draft}
             onChange={(raw) => {
+              setDraft(raw);
               const n = Number(raw.trim());
-              const seconds = Math.round(n) * DAY;
-              onChange(
-                raw.trim() === "" || !Number.isFinite(n) || n <= 0 || !Number.isFinite(seconds) || seconds <= 0
-                  ? null
-                  : seconds,
-              );
+              // Reject a non-integer or non-positive value instead of rounding it;
+              // it is held as null (unsaved) until the operator types whole days.
+              onChange(raw.trim() === "" || !Number.isInteger(n) || n <= 0 ? null : n * DAY);
             }}
             placeholder="14"
-            description="Whole days between resets."
+            description={
+              invalidDays ? (
+                <span className="text-red-700">Enter a whole number of days.</span>
+              ) : (
+                "Whole days between resets."
+              )
+            }
           />
         </div>
       ) : null}

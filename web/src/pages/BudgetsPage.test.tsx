@@ -292,6 +292,30 @@ describe("BudgetsPage", () => {
     expect(JSON.parse(String(post[1]?.body))).toMatchObject({ budget_duration_sec: null });
   });
 
+  it("rejects a fractional custom period instead of rounding it up", async () => {
+    const fetchMock = mockApi({ budgets: [] });
+    const user = userEvent.setup();
+    renderPage(<BudgetsPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Create your first budget" }));
+    await user.click(screen.getByRole("button", { name: "Custom" }));
+    await user.click(screen.getByLabelText("Every N days"));
+    await user.paste("1.5");
+
+    // 1.5 is flagged and held unsaved, never silently rounded to 2 days.
+    expect(await screen.findByText("Enter a whole number of days.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create budget" }));
+
+    const post = await vi.waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([url, init]) => String(url).includes("/v1/budgets") && (init?.method ?? "") === "POST",
+      );
+      if (!call) throw new Error("no budget POST");
+      return call;
+    });
+    expect(JSON.parse(String(post[1]?.body))).toMatchObject({ budget_duration_sec: null });
+  });
+
   it("creates an unlimited budget when the limit is left blank", async () => {
     const fetchMock = mockApi({ budgets: [] });
     const user = userEvent.setup();

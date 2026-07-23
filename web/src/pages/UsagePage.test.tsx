@@ -153,6 +153,50 @@ describe("UsagePage", () => {
     expect(loc).toContain("model=gpt-5.6");
   });
 
+  it("keeps an active user filter when drilling into a model", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("gpt-5.6");
+
+    // Filter by a user, then drill into a model row. The user constraint must
+    // survive the navigation, not be dropped in favor of only the clicked model.
+    const userInput = screen.getByRole("combobox", { name: "User" });
+    await user.click(userInput);
+    await user.type(userInput, "alice");
+    await user.click(await screen.findByRole("option", { name: /alice/ }));
+
+    const row = (await screen.findByText("gpt-5.6")).closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByTestId("loc").textContent ?? "";
+    expect(loc.startsWith("/activity")).toBe(true);
+    expect(loc).toContain("model=gpt-5.6");
+    expect(loc).toContain("user_id=alice");
+  });
+
+  it("keeps an active model filter when drilling into a user", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("alice");
+
+    // Filter by a model, then drill into a user row. The model constraint must
+    // survive the navigation, not be dropped in favor of only the clicked user.
+    const modelInput = screen.getByRole("combobox", { name: "Model" });
+    await user.click(modelInput);
+    await user.type(modelInput, "gpt");
+    await user.click(await screen.findByRole("option", { name: /gpt-5.6/ }));
+
+    const row = (await screen.findByText("alice")).closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByTestId("loc").textContent ?? "";
+    expect(loc.startsWith("/activity")).toBe(true);
+    expect(loc).toContain("user_id=alice");
+    expect(loc).toContain("model=gpt-5.6");
+  });
+
   it("filters models by typeahead and commits the exact picked model", async () => {
     const fetchMock = mockApi(summary());
     const user = userEvent.setup();

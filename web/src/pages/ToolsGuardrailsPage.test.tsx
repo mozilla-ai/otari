@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -113,6 +113,45 @@ describe("ToolsGuardrailsPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Test web_search" }));
     expect(await screen.findByText("reachable (HTTP 200)")).toBeInTheDocument();
+  });
+
+  it("does not keep a test result against a URL that changed underneath it", async () => {
+    // Editing the field already drops a stale result (the onChange reset). This
+    // covers the path that reset does not: the committed URL changing from a
+    // refetch (e.g. a background refresh, or saving a sibling field) re-seeds the
+    // input with no keystroke, so a result must be gated on the URL it tested.
+    const user = userEvent.setup();
+    let searxngUrl = "http://searxng:8080";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.includes("/tool-settings/") && url.endsWith("/test")) {
+        return jsonResponse({ ok: true, reason: "reachable (HTTP 200)" });
+      }
+      if (url.includes("/v1/tool-settings")) {
+        // Saving the engines field surfaces a server-changed web_search_url, so
+        // the next GET re-seeds the URL field without an operator keystroke.
+        if (method === "PATCH") searxngUrl = "http://searxng:9999";
+        return jsonResponse({
+          fields: FIELDS.map((f) => (f.key === "web_search_url" ? { ...f, value: searxngUrl } : f)),
+        });
+      }
+      return jsonResponse([]);
+    });
+    renderWithClient(<ToolsGuardrailsPage />);
+    await screen.findByText("Web search");
+
+    // Test the URL; its result shows while the field still holds the tested URL.
+    await user.click(screen.getByRole("button", { name: "Test web_search" }));
+    expect(await screen.findByText("reachable (HTTP 200)")).toBeInTheDocument();
+
+    // Save a sibling field; the refetch re-seeds web_search_url to a new value.
+    await user.type(screen.getByLabelText("web_search_engines"), "google");
+    await user.click(screen.getByRole("button", { name: "Save web_search_engines" }));
+
+    await waitFor(() => expect(screen.getByLabelText("web_search_url")).toHaveValue("http://searxng:9999"));
+    // The result belonged to the old URL, so it must no longer be shown.
+    expect(screen.queryByText("reachable (HTTP 200)")).not.toBeInTheDocument();
   });
 
   it("shows an inline error under the field when a save is rejected", async () => {
