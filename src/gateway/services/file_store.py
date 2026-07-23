@@ -138,10 +138,18 @@ class LocalDirFileStore:
                     total += len(chunk)
                     await asyncio.to_thread(handle.write, chunk)
         except BaseException:
-            # The chunk source (e.g. the route's size-cap check) failed partway
-            # through; don't leave a truncated blob with no storage_ref pointing
-            # at it, since the caller never gets a ref back to clean it up.
-            await asyncio.to_thread(_unlink_partial)
+            # The chunk source (e.g. the route's size-cap check, or a client
+            # disconnect) failed partway through; don't leave a truncated blob
+            # with no storage_ref pointing at it, since the caller never gets a
+            # ref back to clean it up. BaseException includes CancelledError,
+            # so this cleanup itself runs inside an already-cancelling task;
+            # shield it so a repeated cancel() can't cut it off before the
+            # unlink completes, and don't let a cleanup failure mask the
+            # original error.
+            try:
+                await asyncio.shield(asyncio.to_thread(_unlink_partial))
+            except Exception as cleanup_exc:
+                logger.warning("put_stream: failed to remove partial blob %s: %s", ref, cleanup_exc)
             raise
         return ref, total
 

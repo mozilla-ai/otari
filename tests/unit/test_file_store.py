@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -65,6 +66,27 @@ async def test_put_stream_cleans_up_partial_file_on_failure(tmp_path: Path) -> N
     # No orphaned blob: the ref was never returned, so nothing else could
     # clean this up, which is why put_stream must do it itself.
     shard_dir = tmp_path / "fa"
+    leftover = list(shard_dir.glob("*")) if shard_dir.exists() else []
+    assert leftover == []
+
+
+@pytest.mark.asyncio
+async def test_put_stream_cleans_up_partial_file_on_cancellation(tmp_path: Path) -> None:
+    """A client disconnect mid-upload raises CancelledError, not a plain Exception.
+
+    put_stream's cleanup must run under asyncio.shield so a second cancel()
+    can't cut off the unlink before it completes (see PR #380 review).
+    """
+    store = LocalDirFileStore(str(tmp_path))
+
+    async def _cancelled_chunks() -> AsyncIterator[bytes]:
+        yield b"partial data that should not survive cancellation"
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await store.put_stream("file-cancelmidstream", _cancelled_chunks())
+
+    shard_dir = tmp_path / "ca"
     leftover = list(shard_dir.glob("*")) if shard_dir.exists() else []
     assert leftover == []
 
