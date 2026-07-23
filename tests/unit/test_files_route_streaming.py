@@ -7,19 +7,19 @@ the full HTTP stack (see tests/integration/test_files_endpoint.py for that).
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 
 import pytest
 
 from gateway.api.routes.files import _prime
 
 
-async def _iter(chunks: list[bytes]) -> AsyncIterator[bytes]:
+async def _iter(chunks: list[bytes]) -> AsyncGenerator[bytes, None]:
     for chunk in chunks:
         yield chunk
 
 
-async def _collect(chunks: AsyncIterator[bytes]) -> bytes:
+async def _collect(chunks: AsyncGenerator[bytes, None]) -> bytes:
     collected = bytearray()
     async for chunk in chunks:
         collected.extend(chunk)
@@ -45,7 +45,7 @@ async def test_prime_raises_before_returning_on_immediate_failure() -> None:
     can still become a clean error response instead of a truncated 200.
     """
 
-    async def _broken() -> AsyncIterator[bytes]:
+    async def _broken() -> AsyncGenerator[bytes, None]:
         msg = "blob missing or unreadable"
         raise OSError(msg)
         yield b""  # pragma: no cover - unreachable, keeps this an async generator
@@ -61,7 +61,7 @@ async def test_prime_does_not_hide_failures_after_the_first_chunk() -> None:
     iterates the rest, same as before this helper existed.
     """
 
-    async def _fails_on_second_chunk() -> AsyncIterator[bytes]:
+    async def _fails_on_second_chunk() -> AsyncGenerator[bytes, None]:
         yield b"ok first chunk"
         msg = "disk error on second read"
         raise OSError(msg)
@@ -69,3 +69,31 @@ async def test_prime_does_not_hide_failures_after_the_first_chunk() -> None:
     primed = await _prime(_fails_on_second_chunk())
     with pytest.raises(OSError, match="disk error on second read"):
         await _collect(primed)
+
+
+@pytest.mark.asyncio
+async def test_prime_closes_inner_source_on_early_close() -> None:
+    """Simulates a client disconnect mid-download.
+
+    StreamingResponse closes the outer (primed) generator when the client
+    goes away before the body finishes. That must propagate to closing the
+    inner source too, or LocalDirFileStore's open file handle (held inside
+    get_stream's _open_handle context manager) would stay open until GC
+    eventually gets around to the abandoned generator.
+    """
+    closed = {"value": False}
+
+    async def _source() -> AsyncGenerator[bytes, None]:
+        try:
+            yield b"first"
+            yield b"second"
+        finally:
+            closed["value"] = True
+
+    primed = await _prime(_source())
+    first = await primed.__anext__()
+    assert first == b"first"
+    assert closed["value"] is False  # not yet, only the first chunk was read
+
+    await primed.aclose()
+    assert closed["value"] is True

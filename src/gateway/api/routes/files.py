@@ -8,7 +8,7 @@ providers or extracts them to text for text-only local models.
 
 import mimetypes
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -86,7 +86,7 @@ async def _capped_chunks(file: UploadFile, max_bytes: int) -> AsyncIterator[byte
         yield chunk
 
 
-async def _prime(chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+async def _prime(chunks: AsyncGenerator[bytes, None]) -> AsyncGenerator[bytes, None]:
     """Eagerly read ``chunks``' first item so a read failure raises here, not later.
 
     ``StreamingResponse`` only touches its body iterator after the 200 status
@@ -101,11 +101,20 @@ async def _prime(chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
     except StopAsyncIteration:
         first = None
 
-    async def _rest() -> AsyncIterator[bytes]:
-        if first is not None:
-            yield first
-            async for chunk in chunks:
-                yield chunk
+    async def _rest() -> AsyncGenerator[bytes, None]:
+        # StreamingResponse closes this outer generator on early client
+        # disconnect, but that doesn't automatically propagate to closing
+        # `chunks` (no such thing for a bare `async for`) — without this
+        # try/finally, `get_stream`'s file handle stays open until GC
+        # eventually gets to the abandoned generator, which under real
+        # traffic (cancelled downloads, closed tabs) means fds pile up.
+        try:
+            if first is not None:
+                yield first
+                async for chunk in chunks:
+                    yield chunk
+        finally:
+            await chunks.aclose()
 
     return _rest()
 

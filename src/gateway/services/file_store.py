@@ -18,7 +18,7 @@ can implement the same :class:`FileStore` protocol without touching callers.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import IO, Protocol, runtime_checkable
@@ -69,11 +69,14 @@ class FileStore(Protocol):
         """
         ...
 
-    def get_stream(self, storage_ref: str) -> AsyncIterator[bytes]:
+    def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
         """Yield the bytes stored under ``storage_ref`` chunk-by-chunk.
 
         Not ``async def``: implementations are async generators, called
         synchronously and consumed with ``async for``, not awaited first.
+        Typed as ``AsyncGenerator``, not the narrower ``AsyncIterator``,
+        because callers rely on ``aclose()`` (e.g. the download route closes
+        it early on client disconnect so the file handle doesn't linger).
         """
         ...
 
@@ -161,7 +164,7 @@ class LocalDirFileStore:
             raise
         return ref, total
 
-    async def get_stream(self, storage_ref: str) -> AsyncIterator[bytes]:
+    async def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
         path = self._resolve(storage_ref)
         async with _open_handle(path, "rb") as handle:
             while chunk := await asyncio.to_thread(handle.read, _STREAM_CHUNK_BYTES):
