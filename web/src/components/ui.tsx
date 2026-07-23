@@ -23,6 +23,7 @@ export function StatCard({
   hint,
   status,
   statusLabel,
+  chart,
   to,
 }: {
   label: string;
@@ -32,6 +33,9 @@ export function StatCard({
   // A short word (and/or icon) shown as a pill beside the value. Required to be a
   // non-color signal so status is legible without hue (colorblind operators).
   statusLabel?: ReactNode;
+  // An optional trend visual (e.g. a <Sparkline>) rendered under the value/hint,
+  // for KPI tiles that have a bucketed series on the wire.
+  chart?: ReactNode;
   // When set, the whole tile is a keyboard-focusable link to this route.
   to?: string;
 }) {
@@ -50,6 +54,7 @@ export function StatCard({
         ) : null}
       </span>
       {hint ? <span className="text-xs text-[var(--otari-muted)]">{hint}</span> : null}
+      {chart ? <div className="mt-2">{chart}</div> : null}
     </Card.Content>
   );
   const cardClass = `flex-1 min-w-[180px] ${accent}`;

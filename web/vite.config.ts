@@ -60,6 +60,9 @@ export default defineConfig({
           heroui: ["@heroui/react"],
           react: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react-router-dom"],
           "tanstack-query": ["@tanstack/react-query"],
+          // recharts (and its d3 deps) is a large, self-contained vendor lib. Split
+          // it out so it loads with the chart-bearing route bundles, not the shell.
+          recharts: ["recharts"],
         },
       },
     },
