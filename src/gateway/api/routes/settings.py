@@ -17,16 +17,23 @@ import typing
 from typing import Annotated, Any, Literal
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
+from gateway.services.dashboard_session_service import (
+    SESSION_COOKIE_NAME,
+    apply_session_cookie,
+    create_dashboard_session,
+    revoke_all_dashboard_sessions,
+)
 from gateway.services.master_key_service import (
     MasterKeyRotationConflictError,
     hash_master_key,
+    load_master_key_hash,
     stage_generated_master_key_rotation,
 )
 from gateway.services.runtime_settings_service import (
@@ -350,23 +357,48 @@ async def update_settings(
 
 @router.post("/master-key/rotate", dependencies=[Depends(verify_master_key)])
 async def rotate_master_key(
+    request: Request,
+    response: Response,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    authenticated_key: Annotated[str, Depends(verify_master_key)],
+    authenticated_key: Annotated[str | None, Depends(verify_master_key)],
 ) -> RotateMasterKeyResponse:
     """Regenerate the database-backed master key and invalidate the old one.
 
     Only the first-run generated master key can be rotated here. When a master
     key is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot
     invalidate it; the operator must change that value and restart instead.
+
+    Every dashboard session is revoked with the rotation (a session only proves
+    possession of the now-dead key); the caller's own session is re-minted under
+    the new key so the tab that performed the rotation stays signed in.
     """
     if config.master_key is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="This gateway uses a configured master key; change OTARI_MASTER_KEY or config.yml and restart.",
         )
+    # A cookie-authenticated caller has no raw key to hash; the stored hash is
+    # the same value, so the rotation CAS still rejects a concurrent rotation.
+    if authenticated_key is not None:
+        current_hash = hash_master_key(authenticated_key)
+    else:
+        stored_hash = await load_master_key_hash(db)
+        if stored_hash is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The master key was already rotated. Reload and try again.",
+            )
+        current_hash = stored_hash
+    session_token: str | None = None
+    session_expires_at = None
     try:
-        token, hashed = await stage_generated_master_key_rotation(db, hash_master_key(authenticated_key))
+        token, hashed = await stage_generated_master_key_rotation(db, current_hash)
+        await revoke_all_dashboard_sessions(db)
+        if SESSION_COOKIE_NAME in request.cookies:
+            session_token, session_expires_at = await create_dashboard_session(
+                db, config.dashboard_session_ttl_hours
+            )
         await db.commit()
     except MasterKeyRotationConflictError as exc:
         await db.rollback()
@@ -375,4 +407,6 @@ async def rotate_master_key(
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error") from None
     config._master_key_hash = hashed
+    if session_token is not None and session_expires_at is not None:
+        apply_session_cookie(response, session_token, session_expires_at, secure=request.url.scheme == "https")
     return RotateMasterKeyResponse(master_key=token)

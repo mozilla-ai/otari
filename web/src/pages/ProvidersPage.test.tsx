@@ -3,9 +3,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
 import { PROVIDER_HEALTH_REFRESH_MS } from "@/api/hooks";
 import type {
   GatewaySettings,
@@ -169,10 +168,8 @@ function healthRequestCount(fetchMock: ReturnType<typeof mockApi>): number {
 }
 
 describe("ProvidersPage", () => {
-  beforeEach(() => setMasterKey("test-master-key"));
   afterEach(() => {
     vi.restoreAllMocks();
-    setMasterKey(null);
   });
 
   it("lists config and stored providers with provenance and redacted keys", async () => {

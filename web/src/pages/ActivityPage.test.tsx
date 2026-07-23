@@ -3,9 +3,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
 import type { UsageEntry } from "@/api/types";
 import { ActivityPage, copyToClipboard } from "@/pages/ActivityPage";
 
@@ -98,12 +97,8 @@ function listCalls(fetchMock: ReturnType<typeof mockApi>): string[] {
 }
 
 describe("ActivityPage", () => {
-  beforeEach(() => {
-    setMasterKey("test-master-key");
-  });
   afterEach(() => {
     vi.restoreAllMocks();
-    setMasterKey(null);
   });
 
   it("renders a request row with humanized latency, tokens, and status", async () => {

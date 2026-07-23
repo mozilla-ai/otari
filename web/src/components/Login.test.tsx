@@ -21,11 +21,11 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("Login", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    window.sessionStorage.clear();
+    window.localStorage.clear();
   });
 
-  it("signs in when the master key is accepted and sends it as a Bearer token", async () => {
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse([]));
+  it("signs in by exchanging the master key for a session, never storing the key", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse({ expires_at: "2026-07-30T00:00:00Z" }));
     const user = userEvent.setup();
 
     render(
@@ -39,8 +39,14 @@ describe("Login", () => {
 
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument();
 
-    const [, init] = fetchMock.mock.calls[0];
-    expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer sk-correct");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("/v1/auth/session");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ master_key: "sk-correct" }));
+    // The raw key must not land in any JS-readable storage.
+    expect(window.localStorage.getItem("otari.dashboard.hasSession")).toBe("1");
+    expect(Object.values({ ...window.localStorage })).not.toContain("sk-correct");
+    expect(Object.values({ ...window.sessionStorage })).not.toContain("sk-correct");
   });
 
   it("links to the auth-free welcome page", () => {

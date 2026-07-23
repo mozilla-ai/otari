@@ -2,9 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
 import type { Budget, User } from "@/api/types";
 import { UsersPage } from "@/pages/UsersPage";
 
@@ -102,10 +101,8 @@ function renderPage(ui: ReactElement) {
 }
 
 describe("UsersPage", () => {
-  beforeEach(() => setMasterKey("test-master-key"));
   afterEach(() => {
     vi.restoreAllMocks();
-    setMasterKey(null);
   });
 
   it("shows onboarding when there are no users", async () => {

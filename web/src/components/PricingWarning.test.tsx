@@ -2,9 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
 import type { GatewaySettings } from "@/api/types";
 import { PricingWarning } from "@/components/PricingWarning";
 
@@ -41,10 +40,8 @@ function renderPage(ui: ReactElement) {
 }
 
 describe("PricingWarning", () => {
-  beforeEach(() => setMasterKey("test-master-key"));
   afterEach(() => {
     vi.restoreAllMocks();
-    setMasterKey(null);
   });
 
   it("alarms and enables default pricing when require_pricing rejects requests", async () => {

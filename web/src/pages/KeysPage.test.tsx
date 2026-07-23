@@ -2,9 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
 import type { ApiKey, User } from "@/api/types";
 import { KeysPage } from "@/pages/KeysPage";
 
@@ -120,10 +119,8 @@ function renderPage(ui: ReactElement) {
 }
 
 describe("KeysPage", () => {
-  beforeEach(() => setMasterKey("test-master-key"));
   afterEach(() => {
     vi.restoreAllMocks();
-    setMasterKey(null);
   });
 
   it("lists keys with status and prefix, never the full secret", async () => {

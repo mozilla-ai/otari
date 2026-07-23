@@ -2,95 +2,72 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { setMasterKey, setUnauthorizedHandler } from "@/api/client";
+import { deleteSession, setUnauthorizedHandler } from "@/api/client";
 
-const STORAGE_KEY = "otari.dashboard.masterKey";
+// Non-secret marker that a session cookie was minted for this browser. The
+// credential itself is an HttpOnly cookie the page cannot read, so this flag is
+// what lets the app render signed-in synchronously on load instead of probing
+// the server first. If it is ever stale (cookie expired or revoked), the first
+// 401 drops it and bounces to sign-in, exactly like any mid-session revocation.
+const STORAGE_KEY = "otari.dashboard.hasSession";
 
 interface AuthContextValue {
-  masterKey: string | null;
   isAuthenticated: boolean;
-  login: (key: string) => void;
-  replaceMasterKey: (key: string) => void;
+  login: () => void;
   logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function readStoredKey(): string | null {
+function readStoredMarker(): boolean {
   try {
-    return window.sessionStorage.getItem(STORAGE_KEY);
+    return window.localStorage.getItem(STORAGE_KEY) === "1";
   } catch {
-    return null;
+    return false;
   }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
 
-  // Seed the api client synchronously during the first render so a restored
-  // session key is in place before any child query fires. Doing this in an
-  // effect would let the first request go out unauthenticated (effects run
-  // child-first, so React Query's fetch would race ahead of the sync).
-  const [masterKey, setKey] = useState<string | null>(() => {
-    const stored = readStoredKey();
-    setMasterKey(stored);
-    return stored;
-  });
+  const [isAuthenticated, setAuthenticated] = useState<boolean>(readStoredMarker);
 
   const logout = useCallback(() => {
-    setMasterKey(null);
-    setKey(null);
-    // Drop any admin data cached under the old key so it can't render to a
+    // Best-effort server-side revocation; local sign-out proceeds regardless.
+    void deleteSession();
+    setAuthenticated(false);
+    // Drop any admin data cached under the old session so it can't render to a
     // later, possibly different, session in the same tab.
     queryClient.clear();
     try {
-      window.sessionStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(STORAGE_KEY);
     } catch {
       // Ignore storage errors (e.g. private mode); in-memory state still clears.
     }
   }, [queryClient]);
 
-  const login = useCallback(
-    (key: string) => {
-      const trimmed = key.trim();
-      // Set the client key synchronously (before the re-render that mounts the
-      // dashboard) so the first authenticated request carries the header.
-      setMasterKey(trimmed);
-      // Clear any cache from a prior session before the new key's queries run.
-      queryClient.clear();
-      setKey(trimmed);
-      try {
-        window.sessionStorage.setItem(STORAGE_KEY, trimmed);
-      } catch {
-        // Ignore storage errors; the key still lives in memory for this session.
-      }
-    },
-    [queryClient],
-  );
-
-  const replaceMasterKey = useCallback((key: string) => {
-    const trimmed = key.trim();
-    // A freshly rotated generated master key grants the same dashboard access
-    // as the key it replaces. Keep the current view stable while subsequent
-    // requests begin using the new credential.
-    setMasterKey(trimmed);
-    setKey(trimmed);
+  // Called after POST /v1/auth/session succeeded, i.e. the browser already
+  // holds the session cookie; this only flips the rendered state.
+  const login = useCallback(() => {
+    // Clear any cache from a prior session before the new session's queries run.
+    queryClient.clear();
+    setAuthenticated(true);
     try {
-      window.sessionStorage.setItem(STORAGE_KEY, trimmed);
+      window.localStorage.setItem(STORAGE_KEY, "1");
     } catch {
-      // Ignore storage errors; the key still lives in memory for this session.
+      // Ignore storage errors; the sign-in still works for this tab.
     }
-  }, []);
+  }, [queryClient]);
 
-  // A 401 from any request means the key is wrong or was revoked: drop it.
+  // A 401 from any request means the session expired or was revoked: drop it.
   useEffect(() => {
     setUnauthorizedHandler(logout);
     return () => setUnauthorizedHandler(null);
   }, [logout]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ masterKey, isAuthenticated: masterKey != null, login, replaceMasterKey, logout }),
-    [masterKey, login, replaceMasterKey, logout],
+    () => ({ isAuthenticated, login, logout }),
+    [isAuthenticated, login, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

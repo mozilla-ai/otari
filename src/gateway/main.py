@@ -42,6 +42,10 @@ from gateway.services.tool_settings_service import apply_overrides_from_db as ap
 from gateway.version import __version__
 
 _PUBLIC_PREFIXES = ("/health",)
+# Paths authenticated by the master key in the request body (sign-in) or the
+# session cookie (sign-out) rather than the header schemes; the OpenAPI
+# security stamp below skips them. They still get the no-store cache headers.
+_COOKIE_AUTH_PREFIXES = ("/v1/auth/session",)
 # Public, unauthenticated static assets that shared caches may keep. Paths here
 # set their own Cache-Control at the route (favicon.svg), so the middleware only
 # fills one in when it is missing.
@@ -223,7 +227,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         }
 
         for path, path_item in openapi_schema.get("paths", {}).items():
-            if path.startswith(_PUBLIC_PREFIXES):
+            if path.startswith(_PUBLIC_PREFIXES) or path.startswith(_COOKIE_AUTH_PREFIXES):
                 continue
             for operation in path_item.values():
                 if isinstance(operation, dict):

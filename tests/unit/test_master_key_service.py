@@ -131,12 +131,12 @@ async def test_is_valid_master_key_accepts_hash_and_plaintext() -> None:
     generated_config = GatewayConfig()
     session = AsyncMock()
     session.get.return_value = RuntimeSetting(key=MASTER_KEY_HASH_KEY, value=hash_master_key(token))
-    assert await deps._is_valid_master_key(token, generated_config, session) is True
-    assert await deps._is_valid_master_key("otari-mk-wrong", generated_config, session) is False
+    assert await deps.is_valid_master_key(token, generated_config, session) is True
+    assert await deps.is_valid_master_key("otari-mk-wrong", generated_config, session) is False
 
     plain = GatewayConfig(master_key="literal-key")
-    assert await deps._is_valid_master_key("literal-key", plain, session) is True
-    assert await deps._is_valid_master_key("nope", plain, session) is False
+    assert await deps.is_valid_master_key("literal-key", plain, session) is True
+    assert await deps.is_valid_master_key("nope", plain, session) is False
 
 
 def test_402_message_states_cause_and_both_fixes() -> None:

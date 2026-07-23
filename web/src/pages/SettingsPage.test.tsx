@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setMasterKey } from "@/api/client";
 import type { ConfigField, GatewaySettings, ReencryptProviderCredentialsResult, StoredProvider } from "@/api/types";
 import { AuthProvider } from "@/auth/AuthContext";
 import { SettingsPage, fieldMatches } from "@/pages/SettingsPage";
@@ -158,13 +157,11 @@ function mockApi(
 
 describe("SettingsPage", () => {
   beforeEach(() => {
-    window.sessionStorage.setItem("otari.dashboard.masterKey", "test-master-key");
-    setMasterKey("test-master-key");
+    window.localStorage.setItem("otari.dashboard.hasSession", "1");
   });
   afterEach(() => {
     vi.restoreAllMocks();
-    window.sessionStorage.clear();
-    setMasterKey(null);
+    window.localStorage.clear();
   });
 
   it("reflects the current settings on its switches", async () => {
@@ -217,7 +214,6 @@ describe("SettingsPage", () => {
     expect(revealedKey).toHaveAttribute("data-lpignore", "true");
     expect(screen.getByRole("alertdialog", { name: "Master key regenerated" })).toBeInTheDocument();
     expect(screen.getByText("Credential security")).toBeInTheDocument();
-    expect(window.sessionStorage.getItem("otari.dashboard.masterKey")).toBe("otari-mk-new");
 
     await user.keyboard("{Escape}");
     expect(screen.getByDisplayValue("otari-mk-new")).toBeInTheDocument();
@@ -225,9 +221,11 @@ describe("SettingsPage", () => {
     await user.click(screen.getByRole("button", { name: "I’ve saved this key" }));
     expect(screen.queryByDisplayValue("otari-mk-new")).not.toBeInTheDocument();
 
+    // Auth rides the HttpOnly session cookie (re-minted server-side by the
+    // rotation response), so requests carry no Authorization header at all.
     await user.click(screen.getByRole("switch", { name: "default_pricing" }));
     const patch = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "PATCH");
-    expect(new Headers(patch?.[1]?.headers).get("Authorization")).toBe("Bearer otari-mk-new");
+    expect(new Headers(patch?.[1]?.headers).get("Authorization")).toBeNull();
   });
 
   it("explains when a master key is managed in configuration", async () => {

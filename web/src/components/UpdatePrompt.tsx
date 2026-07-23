@@ -44,7 +44,8 @@ export function UpdatePrompt() {
         </span>
         {/* A plain reload is enough: the gateway serves index.html with
             no-store, so this fetches the new bundle rather than the cached one,
-            and the master key lives in sessionStorage, which survives it. */}
+            and the sign-in lives in an HttpOnly session cookie, which
+            survives it. */}
         <Button size="sm" variant="primary" onPress={() => window.location.reload()}>
           Update now
         </Button>
