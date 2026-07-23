@@ -96,6 +96,25 @@ def test_priced_model_passes_the_gate(strict_pricing_client: TestClient) -> None
     assert _chat(strict_pricing_client, model="openai:gpt-4o", user="priced-user") != 402
 
 
+def test_budget_exempt_key_skips_pricing_gate(strict_pricing_client: TestClient) -> None:
+    """A key exempt from budget clears the require_pricing gate: unpriced usage is
+    allowed through (logged with cost=null), not 402, since there is no budget to
+    protect. The call then fails as a provider error, never a 402."""
+    c = strict_pricing_client
+    c.post("/v1/users", json={"user_id": "exempt-user"}, headers=_MASTER_HEADER)
+    key = c.post(
+        "/v1/keys",
+        json={"key_name": "exempt", "user_id": "exempt-user", "exclude_from_budget": True},
+        headers=_MASTER_HEADER,
+    ).json()["key"]
+    resp = c.post(
+        "/v1/chat/completions",
+        json={"model": "openai:gpt-4o", "messages": _MESSAGES},
+        headers={API_KEY_HEADER: f"Bearer {key}"},
+    )
+    assert resp.status_code != 402
+
+
 def test_blocked_user_takes_precedence_over_missing_pricing(strict_pricing_client: TestClient) -> None:
     """A blocked user gets 403, not 402 — budget/state is checked before pricing."""
     strict_pricing_client.post(

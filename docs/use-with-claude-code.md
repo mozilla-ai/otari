@@ -96,7 +96,86 @@ Claude. Expect weaker tool use on some models, and expect Anthropic-specific
 features such as extended thinking or prompt caching to be dropped when the
 target provider does not support them.
 
+## Import subscription usage (without routing through Otari)
+
+If you keep Claude Code on a subscription rather than routing it through Otari, you
+do not pay API rates, but Otari also can't see that usage. You can still get it into
+your usage analytics, priced at API-equivalent rates, by pointing Claude Code's
+OpenTelemetry export at Otari. Nothing about how you run Claude Code changes; it
+reports each request's usage as it goes. This is standalone-only and never affects
+budgets. Point the exporter at a standalone gateway: a hybrid (otari.ai-connected)
+gateway does not serve `/v1/logs`, so the export 404s and the telemetry is dropped.
+
+Claude Code has native OpenTelemetry support: it emits an `api_request` log event
+per model call carrying token counts, the model, and a request id, but no prompt or
+response content. Otari accepts those directly at `POST /v1/logs`, so no separate
+collector is required.
+
+### 1. Get a budget-exempt import key (admin, once)
+
+Imported usage is retrospective, so Otari can never block it, which is why an import
+key must be **budget-exempt** (a budgeted key is refused). In the dashboard: Keys ->
+create a key for the user, open **Advanced**, check **Exempt from budget**. Or over
+the API with the master key:
+
+```bash
+curl -sS "$OTARI_URL/v1/keys" \
+  -H "Otari-Key: Bearer $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"key_name":"claude-code-importer","user_id":"alice","exclude_from_budget":true}'
+```
+
+Treat that key as a secret: `exclude_from_budget` also exempts this key's **live**
+gateway traffic from reservations, spend, and budget enforcement, so a key that leaks
+or is reused for routing grants unmetered access. Use a key (and ideally a dedicated
+user) reserved solely for imports, and rotate it if it is exposed.
+
+### 2. Point Claude Code's telemetry at Otari
+
+Enable telemetry and send the **logs** signal (which carries `api_request`) to
+Otari's base URL, authenticating with the exempt key. Claude Code appends `/v1/logs`
+itself, so the endpoint is the Otari root, not `/v1`.
+
+```bash
+export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf      # http/json also works
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer gw-your-exempt-key"
+claude
+```
+
+`OTEL_LOGS_EXPORTER` is the load-bearing one; a metrics-only exporter carries no
+per-request usage. Set an **http** protocol (`http/protobuf` or `http/json`); the
+default is gRPC, which Otari's HTTP receiver does not accept. The same settings work
+in the `env` block of `~/.claude/settings.json` so every session reports
+automatically:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+    "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otari.example.com",
+    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer gw-your-exempt-key"
+  }
+}
+```
+
+Otari re-prices each event at its own configured rate for the event's timestamp
+(Claude Code's own cost estimate is ignored), records it as `source = claude_code`,
+and dedups by request id, so replays never double-count. A model with no configured
+price still lands with `cost: null`; add pricing to see the cost.
+
+### 3. See it
+
+In the dashboard, the Activity page shows each imported request with its **API key**
+column, and (expanded) its Source and session; the Usage page's **Tracked cost**
+total separates priced from unpriced usage, with an "unpriced" hint when a model has
+no price. Filter the Activity log by API key to scope it to your importer key.
+
 ## See also
 
+- [Importing external usage](external-usage.md) for tracking subscription-backed usage
 - [Modes](modes.md) for standalone vs connected behavior
 - [API reference](api-reference.md) for the Messages endpoints and auth rules

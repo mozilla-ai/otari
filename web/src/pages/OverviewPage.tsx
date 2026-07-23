@@ -116,6 +116,15 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
   const activeKeys = (keys.data ?? []).filter((k) => k.is_active).length;
   const activeUsers = (users.data ?? []).filter((u) => !u.blocked).length;
 
+  // The getting-started banner is an onboarding empty state: show it only when the
+  // gateway has no providers AND no recorded usage. Imported OTLP usage lands in
+  // the usage tables (with counts_toward_budget=false) through a budget-exempt key
+  // and no provider config, so "no providers" alone no longer means "nothing has
+  // happened". `recent` is the unfiltered, all-time log query already loaded below;
+  // gate on it having resolved so the banner never flashes in then hides.
+  const hasAnyUsage = (recent.data?.length ?? 0) > 0;
+  const showGettingStarted = needsSetup && recent.isSuccess && !hasAnyUsage;
+
   // Surface the first load error across the tile queries so a broken master key
   // or backend does not just leave a wall of "—". Recent activity is excluded: it
   // renders its own inline banner, so including it here would double-report.
@@ -125,7 +134,7 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
     <div className="flex flex-col gap-6">
       <PageHeader title="Overview" description="At-a-glance spend, traffic, and health across the gateway." />
 
-      {needsSetup ? <GettingStartedPanel /> : null}
+      {showGettingStarted ? <GettingStartedPanel /> : null}
 
       <ErrorBanner error={loadError} />
 

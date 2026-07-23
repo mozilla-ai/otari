@@ -521,6 +521,7 @@ async def _bill_vision_side_call(
     user_id: str,
     endpoint: str,
     usage: CompletionUsage,
+    counts_toward_budget: bool = True,
 ) -> None:
     """Meter and bill a vision describe side-call made during normalization.
 
@@ -553,12 +554,21 @@ async def _bill_vision_side_call(
         endpoint=endpoint,
         user_id=user_id,
         usage_override=usage,
+        counts_toward_budget=counts_toward_budget,
     )
     # Commit the spend directly via an unreserved handle (no held estimate to
-    # release): this just adds the actual cost to users.spend.
+    # release): this just adds the actual cost to users.spend. When the request is
+    # budget-exempt the handle carries counts_toward_budget=False, so the cost is
+    # logged on its own row but never folded into users.spend.
     await reconcile_reservation(
         db,
-        ReservationHandle(user_id=user_id, estimate=0.0, reserved=False, strategy=config.budget_strategy),
+        ReservationHandle(
+            user_id=user_id,
+            estimate=0.0,
+            reserved=False,
+            strategy=config.budget_strategy,
+            counts_toward_budget=counts_toward_budget,
+        ),
         cost or 0.0,
     )
 
@@ -686,11 +696,28 @@ async def resolve_request_context(
             default_output_tokens=config.budget_estimate_default_output_tokens,
             cache_write_ttl=estimate_cache_write_ttl,
         )
+        # A key flagged exclude_from_budget still logs its cost but is never
+        # reserved, reconciled into users.spend, or gated. Master-key callers have
+        # api_key None and stay on the enforced path. The decision is threaded
+        # through the reservation handle so every downstream reconcile/refund/top-up
+        # site inherits it (see budget_service.reconcile_reservation).
+        budget_exempt = api_key is not None and api_key.exclude_from_budget
         # Reserve first so user/blocked/budget rejections (404/403) take
         # precedence over the missing-pricing rejection (402); refund if we
         # then reject for missing pricing.
-        reservation = await reserve_budget(db, user_id, estimate, model=model, strategy=config.budget_strategy)
-        if pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
+        reservation = await reserve_budget(
+            db,
+            user_id,
+            estimate,
+            model=model,
+            strategy=config.budget_strategy,
+            counts_toward_budget=not budget_exempt,
+        )
+        # require_pricing is a budget-enforcement safety gate: it refuses a request
+        # we cannot price because we then cannot debit it. A budget-exempt key is
+        # never debited, so the gate does not apply: the call proceeds and logs
+        # cost=null when unpriced.
+        if not budget_exempt and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
             await refund_reservation(db, reservation)
             raise adapter.error(
                 402,
@@ -725,6 +752,7 @@ async def resolve_request_context(
                         user_id=user_id,
                         endpoint=adapter.endpoint,
                         usage=vision_usage,
+                        counts_toward_budget=not budget_exempt,
                     )
                 post_estimate = estimate_cost(
                     gate_pricing,
@@ -1058,6 +1086,7 @@ async def log_usage(
     error: str | None = None,
     cost_override: float | None = None,
     latency_ms: int | None = None,
+    counts_toward_budget: bool = True,
 ) -> float | None:
     """Log API usage to the database and return the computed cost.
 
@@ -1095,6 +1124,7 @@ async def log_usage(
         status="success" if error is None else "error",
         error_message=error,
         latency_ms=latency_ms,
+        counts_toward_budget=counts_toward_budget,
     )
 
     usage_data = usage_override
@@ -1137,6 +1167,15 @@ async def log_usage(
     return usage_log.cost
 
 
+def _handle_counts_toward_budget(reservation: ReservationHandle | None) -> bool:
+    """Row-level budget flag for a settled request, derived from its reservation.
+
+    A missing reservation (hybrid, or a path that reserved nothing) is treated as
+    counting: only an explicit budget-exempt handle marks the row false.
+    """
+    return reservation.counts_toward_budget if reservation is not None else True
+
+
 async def release_reservation(ctx: RequestContext) -> None:
     """Refund the request's budget reservation, if one was taken.
 
@@ -1169,6 +1208,7 @@ async def _log_failure_and_refund(
         user_id=ctx.user_id,
         error=error,
         latency_ms=_elapsed_ms(ctx.started_at),
+        counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
     )
     if ctx.reservation is not None:
         await refund_reservation(ctx.db, ctx.reservation)
@@ -1391,6 +1431,7 @@ def build_streaming_response(
             user_id=user_id,
             usage_override=usage_data,
             latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=_handle_counts_toward_budget(reservation),
         )
         if reservation is not None:
             await reconcile_reservation(db, reservation, actual_cost or 0.0)
@@ -1411,6 +1452,7 @@ def build_streaming_response(
                 endpoint=adapter.endpoint,
                 user_id=user_id,
                 latency_ms=_elapsed_ms(started_at),
+                counts_toward_budget=reservation.counts_toward_budget,
             )
             await refund_reservation(db, reservation)
             return
@@ -1427,6 +1469,7 @@ def build_streaming_response(
             error="stream completed without usage data" if policy == "fail" else None,
             cost_override=reservation.estimate,
             latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=reservation.counts_toward_budget,
         )
         await reconcile_reservation(db, reservation, reservation.estimate)
 
@@ -1456,6 +1499,7 @@ def build_streaming_response(
             user_id=user_id,
             error=error,
             latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=_handle_counts_toward_budget(reservation),
         )
         if reservation is not None:
             await refund_reservation(db, reservation)
@@ -2003,6 +2047,7 @@ async def run_standalone_non_stream(
                     user_id=ctx.user_id,
                     usage_override=usage_data,
                     latency_ms=_elapsed_ms(ctx.started_at),
+                    counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
                 )
             if ctx.reservation is not None:
                 await reconcile_reservation(ctx.db, ctx.reservation, actual_cost or 0.0)

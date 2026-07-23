@@ -129,6 +129,11 @@ class ReservationHandle:
     estimate: float
     reserved: bool
     strategy: str
+    # When false, reconciliation records the usage row's cost but does NOT write it
+    # to ``users.spend`` and never gates enforcement. Set for requests on keys flagged
+    # ``exclude_from_budget`` (and reused for imported usage). Defaults to true so every
+    # existing construction site keeps the normal enforced behavior.
+    counts_toward_budget: bool = True
 
 
 def estimate_cost(
@@ -172,6 +177,7 @@ async def reserve_budget(
     *,
     model: str | None = None,
     strategy: str = "for_update",
+    counts_toward_budget: bool = True,
 ) -> ReservationHandle:
     """Atomically pre-debit an estimated cost against the user's budget.
 
@@ -202,6 +208,19 @@ async def reserve_budget(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"User '{user_id}' is blocked",
+        )
+
+    # Budget-exempt request (e.g. a key flagged exclude_from_budget): the user is
+    # still validated and a block still rejects, but no estimate is reserved and
+    # reconciliation will not write spend. The handle carries the decision so every
+    # downstream reconcile/refund site inherits it.
+    if not counts_toward_budget:
+        return ReservationHandle(
+            user_id=user_id,
+            estimate=0.0,
+            reserved=False,
+            strategy=normalized,
+            counts_toward_budget=False,
         )
 
     no_reservation = ReservationHandle(user_id=user_id, estimate=0.0, reserved=False, strategy=normalized)
@@ -294,7 +313,11 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     # Never let a negative cost reduce recorded spend.
     actual_cost = max(actual_cost, 0.0)
     values: dict[str, object] = {}
-    if actual_cost:
+    # Budget-exempt rows are recorded (their cost still lands on the usage row) but
+    # never fold into users.spend, so they cannot gate a later request. Gating the
+    # spend write here (not merely skipping the reserve) is what makes an empty
+    # handle safe at every reconcile site.
+    if actual_cost and handle.counts_toward_budget:
         values["spend"] = User.spend + actual_cost
     if handle.reserved:
         values["reserved"] = _release_reserved(handle.estimate)
@@ -359,6 +382,11 @@ async def increase_reservation(
     refund-on-error block). No-op when ``additional_estimate`` is not positive.
     """
     if additional_estimate <= 0:
+        return
+    # A budget-exempt request never grows a reservation: there is nothing to hold and
+    # nothing to gate. Without this, the top-up path would silently re-enter the
+    # enforced flow and reserve against the user's budget.
+    if not handle.counts_toward_budget:
         return
     delta = await reserve_budget(db, handle.user_id, additional_estimate, model=model, strategy=strategy)
     if delta.reserved:

@@ -34,6 +34,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "trafilatura>=2.0.0",
     "uvicorn[standard]>=0.30.0",
+    "opentelemetry-proto>=1.39.1",
 ]
 
 [project.optional-dependencies]
@@ -125,4 +126,9 @@ ignore_missing_imports = true
 # `from markitdown import ...`). Bare root names are required — a `foo.*` pattern
 # alone does not match the top-level `foo` module these are imported as.
 module = ["markitdown", "pypdfium2", "rapidocr_onnxruntime", "numpy", "PIL"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# The OTLP proto messages and google.protobuf runtime helpers ship without stubs.
+module = ["google.protobuf.*", "opentelemetry.proto.*"]
 ignore_missing_imports = true

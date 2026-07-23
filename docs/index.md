@@ -45,7 +45,9 @@ Calling the gateway from your own code.
 - [Files](files.md): file uploads and document understanding for local models.
 - [Guardrails](guardrails.md): request-level checks like prompt-injection detection.
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
+- [Use with Codex](use-with-codex.md): point the Codex CLI at Otari.
 - [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
+- [Importing external usage](external-usage.md): bring subscription-backed usage (Claude Code, Codex, any OTLP app) into your analytics.
 - [SDK compatibility](sdk-compatibility.md): how the language SDKs are released and which SDK version works with which Otari version.
 
 ### For platform builders

@@ -58,6 +58,22 @@ def _make_log(
     return log
 
 
+def test_list_usage_filters_by_api_key(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    k1 = client.post("/v1/keys", json={"key_name": "k1"}, headers=master_key_header).json()["id"]
+    k2 = client.post("/v1/keys", json={"key_name": "k2"}, headers=master_key_header).json()["id"]
+    ts = datetime(2026, 7, 1, 9, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="u", timestamp=ts, api_key_id=k1, log_id="log-k1")
+    _make_log(db_session, user_id="u", timestamp=ts, api_key_id=k2, log_id="log-k2")
+    db_session.commit()
+
+    listed = client.get(USAGE_PATH, params={"api_key_id": k1}, headers=master_key_header)
+    assert [r["id"] for r in listed.json()] == ["log-k1"]
+    count = client.get("/v1/usage/count", params={"api_key_id": k1}, headers=master_key_header)
+    assert count.json()["total"] == 1
+
+
 def test_list_usage_requires_master_key(client: TestClient) -> None:
     response = client.get(USAGE_PATH)
     assert response.status_code == 401
@@ -256,6 +272,9 @@ def test_list_usage_response_shape(
         "status": "error",
         "error_message": "capacity",
         "latency_ms": 842,
+        "source": "gateway",
+        "source_label": None,
+        "counts_toward_budget": True,
     }
 
 

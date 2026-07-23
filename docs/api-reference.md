@@ -138,7 +138,7 @@ into something a text-only local model can read.
 | `POST` | `/v1/keys` | Create an API key. | Master key |
 | `GET` | `/v1/keys` | List all API keys. | Master key |
 | `GET` | `/v1/keys/{key_id}` | Get a specific key. | Master key |
-| `PATCH` | `/v1/keys/{key_id}` | Update a key (name, active status, expiration, metadata). | Master key |
+| `PATCH` | `/v1/keys/{key_id}` | Update a key (name, active status, expiration, allowed models, `exclude_from_budget`, metadata). | Master key |
 | `POST` | `/v1/keys/{key_id}/rotate` | Replace a key's secret in place (id, user, name, expiry, and metadata preserved); returns the new key once. The previous secret stops working immediately. | Master key |
 | `DELETE` | `/v1/keys/{key_id}` | Revoke a key. | Master key |
 
@@ -177,4 +177,10 @@ into something a text-only local model can read.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`. | Master key |
+| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `model`, `endpoint`, `source`, `api_key_id`. | Master key |
+| `GET` | `/v1/usage/count` | Total rows matching the filters (paginator total). | Master key |
+| `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source, and a time series. | Master key |
+| `GET` | `/v1/usage/summary.csv` | The breakdowns as a CSV download. | Master key |
+| `POST` | `/v1/usage/external-events` | Import externally-observed usage (e.g. Claude Code) as source-tagged rows, priced at API rates, never counted toward budget. An API key (must be budget-exempt) attributes to its own user; the master key may name any user. Idempotent by `(source, source_event_id)`. See [Importing external usage](external-usage.md). | API key (budget-exempt) or master key |
+| `POST` | `/v1/traces` | OTLP receiver for GenAI usage **spans** (protobuf or JSON). Maps the OpenTelemetry GenAI conventions (`gen_ai.*`, `otari.*`) onto external usage ingestion. Any instrumented app can ship here. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |
+| `POST` | `/v1/logs` | OTLP receiver for GenAI usage **log events** (protobuf or JSON), including Claude Code's `api_request` and Codex's `codex.sse_event` / `codex.api_request`. Same mapping as `/v1/traces`. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |

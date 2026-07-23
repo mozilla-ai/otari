@@ -1088,6 +1088,12 @@
             "description": "Model allow-list: null = any model, [] = deny all, or canonical instance:model entries (with instance:* / instance:prefix* wildcards).",
             "title": "Allowed Models"
           },
+          "exclude_from_budget": {
+            "default": false,
+            "description": "When true, requests on this key are logged with cost but never reserved, reconciled into the user's spend, or gated by budget.",
+            "title": "Exclude From Budget",
+            "type": "boolean"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -1155,6 +1161,10 @@
           "created_at": {
             "title": "Created At",
             "type": "string"
+          },
+          "exclude_from_budget": {
+            "title": "Exclude From Budget",
+            "type": "boolean"
           },
           "expires_at": {
             "anyOf": [
@@ -1228,6 +1238,7 @@
           "expires_at",
           "is_active",
           "allowed_models",
+          "exclude_from_budget",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -1518,6 +1529,224 @@
         "title": "EmbeddingRequest",
         "type": "object"
       },
+      "ExternalEventsRequest": {
+        "additionalProperties": false,
+        "description": "A batch of imported usage events sharing a source and default user.\n\n``extra=\"forbid\"`` here mirrors the per-event schema: a stray content field at\nthe batch level (e.g. a top-level ``prompt``) is a 422, not silently ignored.",
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalUsageEvent"
+            },
+            "maxItems": 1000,
+            "minItems": 1,
+            "title": "Events",
+            "type": "array"
+          },
+          "source": {
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9._:-]+$",
+            "title": "Source",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "source",
+          "events"
+        ],
+        "title": "ExternalEventsRequest",
+        "type": "object"
+      },
+      "ExternalIngestError": {
+        "description": "A single rejected event, with enough context to fix it and retry.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "index": {
+            "title": "Index",
+            "type": "integer"
+          },
+          "source_event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Event Id"
+          }
+        },
+        "required": [
+          "index",
+          "source_event_id",
+          "detail"
+        ],
+        "title": "ExternalIngestError",
+        "type": "object"
+      },
+      "ExternalIngestResult": {
+        "description": "Per-batch outcome. Re-submitting is safe: prior events count as duplicates.",
+        "properties": {
+          "accepted": {
+            "default": 0,
+            "title": "Accepted",
+            "type": "integer"
+          },
+          "duplicate": {
+            "default": 0,
+            "title": "Duplicate",
+            "type": "integer"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalIngestError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "rejected": {
+            "default": 0,
+            "title": "Rejected",
+            "type": "integer"
+          }
+        },
+        "title": "ExternalIngestResult",
+        "type": "object"
+      },
+      "ExternalUsageEvent": {
+        "additionalProperties": false,
+        "description": "One imported usage event. Content-free: token counts and metadata only.\n\n``extra=\"forbid\"`` rejects any unexpected field (e.g. a stray ``prompt`` or\n``completion``) with a 422 rather than silently dropping it, so no prompt or\ncompletion text can ever be accepted here.",
+        "properties": {
+          "cache_read_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_tokens_in_prompt": {
+            "default": false,
+            "title": "Cache Tokens In Prompt",
+            "type": "boolean"
+          },
+          "cache_write_1h_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Write 1H Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "input_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "model": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:/\\-]+$",
+            "title": "Model",
+            "type": "string"
+          },
+          "output_tokens": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "provider": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:/\\-]+$",
+            "title": "Provider",
+            "type": "string"
+          },
+          "session_label": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "pattern": "^[A-Za-z0-9._:/\\-]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Label"
+          },
+          "source_event_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:/\\-]+$",
+            "title": "Source Event Id",
+            "type": "string"
+          },
+          "status": {
+            "default": "success",
+            "pattern": "^(success|error)$",
+            "title": "Status",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "source_event_id",
+          "timestamp",
+          "provider",
+          "model"
+        ],
+        "title": "ExternalUsageEvent",
+        "type": "object"
+      },
       "GatewaySettings": {
         "description": "Operator-facing runtime settings surfaced to the dashboard.\n\nThe top-level flags are kept for the callers that read them directly\n(pricing warnings, the models/providers pages); ``config`` is the full\nread-only view with the settable/startup-only marking.",
         "properties": {
@@ -1748,6 +1977,10 @@
             "title": "Created At",
             "type": "string"
           },
+          "exclude_from_budget": {
+            "title": "Exclude From Budget",
+            "type": "boolean"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -1827,6 +2060,7 @@
           "expires_at",
           "is_active",
           "allowed_models",
+          "exclude_from_budget",
           "metadata"
         ],
         "title": "KeyInfo",
@@ -4159,6 +4393,17 @@
             ],
             "title": "Allowed Models"
           },
+          "exclude_from_budget": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclude From Budget"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -4723,6 +4968,10 @@
             ],
             "title": "Cost"
           },
+          "counts_toward_budget": {
+            "title": "Counts Toward Budget",
+            "type": "boolean"
+          },
           "endpoint": {
             "title": "Endpoint",
             "type": "string"
@@ -4806,6 +5055,21 @@
             ],
             "title": "Provider"
           },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Label"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -4856,7 +5120,10 @@
           "cost",
           "status",
           "error_message",
-          "latency_ms"
+          "latency_ms",
+          "source",
+          "source_label",
+          "counts_toward_budget"
         ],
         "title": "UsageEntry",
         "type": "object"
@@ -5098,6 +5365,13 @@
             "title": "By Model",
             "type": "array"
           },
+          "by_source": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By Source",
+            "type": "array"
+          },
           "by_user": {
             "items": {
               "$ref": "#/components/schemas/UsageGroupRow"
@@ -5132,6 +5406,7 @@
           "by_model",
           "by_user",
           "by_api_key",
+          "by_source",
           "series"
         ],
         "title": "UsageSummary",
@@ -5185,6 +5460,11 @@
           },
           "total_tokens": {
             "title": "Total Tokens",
+            "type": "integer"
+          },
+          "unpriced_requests": {
+            "default": 0,
+            "title": "Unpriced Requests",
             "type": "integer"
           }
         },
@@ -7205,6 +7485,34 @@
         ]
       }
     },
+    "/v1/logs": {
+      "post": {
+        "description": "Ingest LLM usage from OTLP log events (Claude Code, Codex, or GenAI logs).",
+        "operationId": "receive_logs_v1_logs_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Receive Logs",
+        "tags": [
+          "otel"
+        ]
+      }
+    },
     "/v1/messages": {
       "post": {
         "description": "Anthropic Messages API-compatible endpoint.\n\nSupports MCP tool-use loops, sandboxed code execution, and SearXNG\nweb_search in both standalone mode and hybrid mode. Hybrid-mode requests\nresolve credentials via the platform service and get multi-attempt\nfallback across the resolved route, tool-loop requests included (fallback\napplies up to the pre-lock-in point, same as chat).",
@@ -8748,6 +9056,34 @@
         ]
       }
     },
+    "/v1/traces": {
+      "post": {
+        "description": "Ingest LLM usage from OTLP spans (GenAI semantic conventions).",
+        "operationId": "receive_traces_v1_traces_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Receive Traces",
+        "tags": [
+          "otel"
+        ]
+      }
+    },
     "/v1/usage": {
       "get": {
         "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, and endpoint.\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
@@ -8861,6 +9197,42 @@
               ],
               "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
               "title": "Endpoint"
+            }
+          },
+          {
+            "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+              "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single API key id",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single API key id",
+              "title": "Api Key Id"
             }
           },
           {
@@ -9041,6 +9413,42 @@
               "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
               "title": "Endpoint"
             }
+          },
+          {
+            "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+              "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single API key id",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single API key id",
+              "title": "Api Key Id"
+            }
           }
         ],
         "responses": {
@@ -9074,6 +9482,56 @@
           }
         ],
         "summary": "Count Usage",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/usage/external-events": {
+      "post": {
+        "description": "Ingest a batch of externally-observed usage events (standalone).\n\nAuthenticated with either an API key or the master key. Usage binds to the\nauthenticated principal: an API key attributes to its own user (and stamps its\nid on the rows); the master key may name any user via ``user_id``. Records\nsubscription-backed usage (e.g. Claude Code) as usage-log rows tagged with their\n``source``, priced at the effective API rate for each event's timestamp.\nImported usage is real cost, but never counts toward budgets or mutates\n``users.spend`` (it is retrospective, so it cannot be reserved). Idempotent by\n``(source, source_event_id)``. The payload is content-free; any\nprompt/completion/tool field is rejected (422), not stored.",
+        "operationId": "ingest_external_usage_v1_usage_external_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalEventsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalIngestResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Ingest External Usage",
         "tags": [
           "usage"
         ]
@@ -9195,6 +9653,42 @@
             }
           },
           {
+            "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+              "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single API key id",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single API key id",
+              "title": "Api Key Id"
+            }
+          },
+          {
             "description": "Time-series granularity: 'hour' or 'day'",
             "in": "query",
             "name": "bucket",
@@ -9249,7 +9743,7 @@
     },
     "/v1/usage/summary.csv": {
       "get": {
-        "description": "Download the per-model / per-user / per-key breakdown as CSV.\n\nA dedicated route rather than a ``format=csv`` flag on ``/summary`` so that\nendpoint keeps a single JSON response model and a clean OpenAPI schema. The\nexport is **uncapped** (no top-N fold): finance wants every row. Kept separate\nfrom the bare-array ``/v1/usage`` contract, which is untouched.",
+        "description": "Download the per-model / per-user / per-key / per-source breakdown as CSV.\n\nA dedicated route rather than a ``format=csv`` flag on ``/summary`` so that\nendpoint keeps a single JSON response model and a clean OpenAPI schema. The\nexport is **uncapped** (no top-N fold): finance wants every row. Kept separate\nfrom the bare-array ``/v1/usage`` contract, which is untouched.",
         "operationId": "usage_summary_csv_v1_usage_summary_csv_get",
         "parameters": [
           {
@@ -9360,6 +9854,42 @@
               ],
               "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
               "title": "Endpoint"
+            }
+          },
+          {
+            "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+              "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single API key id",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single API key id",
+              "title": "Api Key Id"
             }
           }
         ],

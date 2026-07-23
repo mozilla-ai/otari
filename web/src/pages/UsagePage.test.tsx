@@ -34,6 +34,10 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
       { key: "bob", cost: 340, tokens: 4_400_000, requests: 34_000, is_other: false },
     ],
     by_api_key: [],
+    by_source: [
+      { key: "gateway", cost: 890.5, tokens: 9_000_000, requests: 60_000, is_other: false },
+      { key: "claude_code", cost: 350, tokens: 3_400_000, requests: 24_000, is_other: false },
+    ],
     series: [
       { bucket_start: "2026-07-19T00:00:00Z", cost: 400, tokens: 4_000_000, requests: 28_000 },
       { bucket_start: "2026-07-20T00:00:00Z", cost: 840.5, tokens: 8_400_000, requests: 56_000 },
@@ -54,6 +58,9 @@ function mockApi(body: UsageSummary | null) {
     }
     if (url.includes("/v1/users")) {
       return jsonResponse([{ user_id: "alice", alias: "Alice" }]);
+    }
+    if (url.includes("/v1/keys")) {
+      return jsonResponse([{ id: "key-1", key_name: "ci-bot", user_id: "alice", allowed_models: null }]);
     }
     return jsonResponse([]);
   });
@@ -94,6 +101,21 @@ describe("UsagePage", () => {
     expect(screen.getByText("12.4M")).toBeInTheDocument();
     // 1764 / 84000 = 2.1% errors.
     expect(screen.getByText(/2\.1% errors/)).toBeInTheDocument();
+  });
+
+  it("filters usage by API key", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.click(screen.getByPlaceholderText("All keys"));
+    await user.click(await screen.findByRole("option", { name: "ci-bot" }));
+
+    const summaryCalls = fetchMock.mock.calls
+      .map(([u]) => String(u))
+      .filter((u) => u.includes("/v1/usage/summary"));
+    expect(summaryCalls.some((u) => u.includes("api_key_id=key-1"))).toBe(true);
   });
 
   it("does not render the CSV export action", async () => {

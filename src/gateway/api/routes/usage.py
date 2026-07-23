@@ -15,8 +15,14 @@ from pydantic import BaseModel
 from sqlalchemy import ColumnElement, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_db, verify_master_key
-from gateway.models.entities import UsageLog
+from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
+from gateway.core.config import GatewayConfig
+from gateway.models.entities import APIKey, UsageLog
+from gateway.services.external_usage_service import (
+    ExternalEventsRequest,
+    ExternalIngestResult,
+    ingest_external_events,
+)
 
 router = APIRouter(prefix="/v1/usage", tags=["usage"])
 
@@ -31,6 +37,19 @@ _MAX_SUMMARY_SPAN = timedelta(days=366)
 _BREAKDOWN_TOP_N = 100
 
 Bucket = Literal["hour", "day"]
+
+
+def _utc_iso(value: datetime) -> str:
+    """Serialize a stored timestamp as unambiguous UTC ISO-8601.
+
+    ``usage_logs.timestamp`` is timezone-aware, but SQLite returns it naive (it does
+    not persist the offset). A naive ``isoformat()`` has no ``+00:00``, so a browser
+    reads it in its own local zone and a recent UTC event can land in the future,
+    showing as "0s ago". Treat a naive value as the UTC it was stored as.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.isoformat()
 
 
 class UsageEntry(BaseModel):
@@ -55,6 +74,9 @@ class UsageEntry(BaseModel):
     status: str
     error_message: str | None
     latency_ms: int | None
+    source: str
+    source_label: str | None
+    counts_toward_budget: bool
 
     @classmethod
     def from_model(cls, log: UsageLog) -> "UsageEntry":
@@ -62,10 +84,13 @@ class UsageEntry(BaseModel):
             id=log.id,
             user_id=log.user_id,
             api_key_id=log.api_key_id,
-            timestamp=log.timestamp.isoformat(),
+            timestamp=_utc_iso(log.timestamp),
             model=log.model,
             provider=log.provider,
             endpoint=log.endpoint,
+            source=log.source,
+            source_label=log.source_label,
+            counts_toward_budget=log.counts_toward_budget,
             prompt_tokens=log.prompt_tokens,
             completion_tokens=log.completion_tokens,
             total_tokens=log.total_tokens,
@@ -94,6 +119,8 @@ _USER_DESC = "Filter to a single user"
 _STATUS_DESC = "Filter to a single status (e.g. 'success' or 'error')"
 _MODEL_DESC = "Filter to a single model"
 _ENDPOINT_DESC = "Filter to a single endpoint (e.g. '/v1/chat/completions')"
+_SOURCE_DESC = "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')"
+_API_KEY_DESC = "Filter to a single API key id"
 
 
 def _usage_filters(
@@ -104,6 +131,8 @@ def _usage_filters(
     status: str | None,
     model: str | None,
     endpoint: str | None,
+    source: str | None = None,
+    api_key_id: str | None = None,
 ) -> list[ColumnElement[bool]]:
     """Build the shared WHERE conditions for the list and count endpoints.
 
@@ -123,6 +152,10 @@ def _usage_filters(
         conditions.append(UsageLog.model == model)
     if endpoint is not None:
         conditions.append(UsageLog.endpoint == endpoint)
+    if source is not None:
+        conditions.append(UsageLog.source == source)
+    if api_key_id is not None:
+        conditions.append(UsageLog.api_key_id == api_key_id)
     return conditions
 
 
@@ -135,6 +168,8 @@ async def list_usage(
     status: str | None = Query(default=None, description=_STATUS_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
+    source: str | None = Query(default=None, description=_SOURCE_DESC),
+    api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[UsageEntry]:
@@ -154,6 +189,8 @@ async def list_usage(
         status=status,
         model=model,
         endpoint=endpoint,
+        source=source,
+        api_key_id=api_key_id,
     )
     stmt = (
         select(UsageLog)
@@ -167,6 +204,35 @@ async def list_usage(
     return [UsageEntry.from_model(log) for log in logs]
 
 
+@router.post("/external-events")
+async def ingest_external_usage(
+    request: ExternalEventsRequest,
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> ExternalIngestResult:
+    """Ingest a batch of externally-observed usage events (standalone).
+
+    Authenticated with either an API key or the master key. Usage binds to the
+    authenticated principal: an API key attributes to its own user (and stamps its
+    id on the rows); the master key may name any user via ``user_id``. Records
+    subscription-backed usage (e.g. Claude Code) as usage-log rows tagged with their
+    ``source``, priced at the effective API rate for each event's timestamp.
+    Imported usage is real cost, but never counts toward budgets or mutates
+    ``users.spend`` (it is retrospective, so it cannot be reserved). Idempotent by
+    ``(source, source_event_id)``. The payload is content-free; any
+    prompt/completion/tool field is rejected (422), not stored.
+    """
+    api_key, is_master_key = auth_result
+    return await ingest_external_events(
+        db,
+        request,
+        api_key=api_key,
+        is_master_key=is_master_key,
+        reject_user_mismatch=config.reject_user_mismatch,
+    )
+
+
 @router.get("/count", dependencies=[Depends(verify_master_key)])
 async def count_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -176,6 +242,8 @@ async def count_usage(
     status: str | None = Query(default=None, description=_STATUS_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
+    source: str | None = Query(default=None, description=_SOURCE_DESC),
+    api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
 ) -> UsageCount:
     """Total number of usage logs matching the given filters.
 
@@ -190,6 +258,8 @@ async def count_usage(
         status=status,
         model=model,
         endpoint=endpoint,
+        source=source,
+        api_key_id=api_key_id,
     )
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
     total = (await db.execute(stmt)).scalar_one()
@@ -215,6 +285,9 @@ class UsageTotals(BaseModel):
     request_count: int
     error_count: int
     avg_latency_ms: float | None
+    # Rows with no configured price (cost is NULL), e.g. imported usage for an
+    # unpriced model. Surfaced so a $0 cost is not mistaken for free usage.
+    unpriced_requests: int = 0
 
 
 class UsageGroupRow(BaseModel):
@@ -253,6 +326,7 @@ class UsageSummary(BaseModel):
     by_model: list[UsageGroupRow]
     by_user: list[UsageGroupRow]
     by_api_key: list[UsageGroupRow]
+    by_source: list[UsageGroupRow]
     series: list[UsageSeriesPoint]
 
 
@@ -327,6 +401,7 @@ async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> Us
                 func.count(),
                 func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
                 func.avg(UsageLog.latency_ms),
+                func.coalesce(func.sum(case((UsageLog.cost.is_(None), 1), else_=0)), 0),
             ).where(*conditions)
         )
     ).one()
@@ -341,6 +416,7 @@ async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> Us
         request_count=int(row[7]),
         error_count=int(row[8]),
         avg_latency_ms=float(row[9]) if row[9] is not None else None,
+        unpriced_requests=int(row[10]),
     )
 
 
@@ -404,6 +480,8 @@ async def _summary_context(
     status: str | None,
     model: str | None,
     endpoint: str | None,
+    source: str | None = None,
+    api_key_id: str | None = None,
 ) -> tuple[datetime, datetime, list[ColumnElement[bool]], UsageTotals]:
     """Resolve the bounded window, the shared WHERE conditions, and the grand
     totals: the common preamble both summary endpoints run, kept in one place so a
@@ -417,6 +495,8 @@ async def _summary_context(
         status=status,
         model=model,
         endpoint=endpoint,
+        source=source,
+        api_key_id=api_key_id,
     )
     totals = await _totals(db, conditions)
     return start, end, conditions, totals
@@ -473,6 +553,8 @@ async def usage_summary(
     status: str | None = Query(default=None, description=_STATUS_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
+    source: str | None = Query(default=None, description=_SOURCE_DESC),
+    api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
 ) -> UsageSummary:
     """Aggregate spend, tokens, and request volume for the dashboard Usage page.
@@ -490,10 +572,13 @@ async def usage_summary(
         status=status,
         model=model,
         endpoint=endpoint,
+        source=source,
+        api_key_id=api_key_id,
     )
     by_model = await _breakdown(db, UsageLog.model, conditions, totals, limit=_BREAKDOWN_TOP_N)
     by_user = await _breakdown(db, UsageLog.user_id, conditions, totals, limit=_BREAKDOWN_TOP_N)
     by_api_key = await _breakdown(db, UsageLog.api_key_id, conditions, totals, limit=_BREAKDOWN_TOP_N)
+    by_source = await _breakdown(db, UsageLog.source, conditions, totals, limit=_BREAKDOWN_TOP_N)
 
     expr = _bucket_expr(_dialect_name(db), bucket)
     series_rows = (
@@ -520,6 +605,7 @@ async def usage_summary(
         by_model=by_model,
         by_user=by_user,
         by_api_key=by_api_key,
+        by_source=by_source,
         series=series,
     )
 
@@ -545,8 +631,10 @@ async def usage_summary_csv(
     status: str | None = Query(default=None, description=_STATUS_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
+    source: str | None = Query(default=None, description=_SOURCE_DESC),
+    api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
 ) -> Response:
-    """Download the per-model / per-user / per-key breakdown as CSV.
+    """Download the per-model / per-user / per-key / per-source breakdown as CSV.
 
     A dedicated route rather than a ``format=csv`` flag on ``/summary`` so that
     endpoint keeps a single JSON response model and a clean OpenAPI schema. The
@@ -561,11 +649,14 @@ async def usage_summary_csv(
         status=status,
         model=model,
         endpoint=endpoint,
+        source=source,
+        api_key_id=api_key_id,
     )
     dimensions = (
         ("model", await _breakdown(db, UsageLog.model, conditions, totals, limit=None)),
         ("user", await _breakdown(db, UsageLog.user_id, conditions, totals, limit=None)),
         ("api_key", await _breakdown(db, UsageLog.api_key_id, conditions, totals, limit=None)),
+        ("source", await _breakdown(db, UsageLog.source, conditions, totals, limit=None)),
     )
 
     buffer = io.StringIO()
