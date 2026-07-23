@@ -6,8 +6,8 @@ Your applications talk to Otari instead of directly to providers. Otari authenti
 
 ## Two ways to run it
 
-- **Standalone** — Otari manages everything locally: its own database, your provider credentials, keys, budgets, and usage. Nothing leaves your environment. This is the default and the place to start.
-- **Connected to otari.ai** — Otari delegates provider routing, authentication, and usage tracking to the platform, adding multi-provider fallback. Enabled by setting one environment variable.
+- **Standalone**: Otari manages everything locally: its own database, your provider credentials, keys, budgets, and usage. Nothing leaves your environment. This is the default and the place to start.
+- **Connected to otari.ai**: Otari delegates provider routing, authentication, and usage tracking to the platform, adding multi-provider fallback. Enabled by setting one environment variable.
 
 See [Modes](modes.md) for the full comparison.
 
@@ -17,18 +17,19 @@ Start with the [Quickstart](quickstart.md). It gets Otari running locally and wa
 
 ## Browse the docs
 
-- [Quickstart](quickstart.md) — get running and make your first request.
-- [Deployment](deployment.md) — hybrid mode, optional services, and deployment-specific configuration.
-- [Modes](modes.md) — standalone vs hybrid, and what changes between them.
-- [Built-in tools](tools.md) — sandboxed code execution and web search Otari runs itself.
-- [MCP](mcp.md) — connect MCP servers to chat, messages, and responses requests.
-- [Files](files.md) — file uploads and document understanding for local models.
-- [Guardrails](guardrails.md) — request-level checks like prompt-injection detection.
-- [Configuration](configuration.md) — the full config file and environment variable reference.
-- [API reference](api-reference.md) — every endpoint, with auth and availability per mode.
-- [Use with Claude Code](use-with-claude-code.md) — point the Claude Code CLI at Otari.
-- [Use with opencode](use-with-opencode.md) — point the opencode CLI at Otari.
-- [Supported models](models.md) — providers, model format, and capabilities.
-- [OpenAI provider guide](providers/openai.md). Configure OpenAI and route your first request through Otari.
-- [Hybrid-mode protocol](hybrid-mode-protocol.md) — Otari/platform wire contract, for platform builders.
-- [SDK compatibility](sdk-compatibility.md) — how the language SDKs are released and which SDK version works with which Otari version.
+- [Quickstart](quickstart.md): get running and make your first request.
+- [Deployment](deployment.md): hybrid mode, optional services, and deployment-specific configuration.
+- [Modes](modes.md): standalone vs hybrid, and what changes between them.
+- [Built-in tools](tools.md): sandboxed code execution and web search Otari runs itself.
+- [MCP](mcp.md): connect MCP servers to chat, messages, and responses requests.
+- [Files](files.md): file uploads and document understanding for local models.
+- [Guardrails](guardrails.md): request-level checks like prompt-injection detection.
+- [Admin dashboard](dashboard.md): the operator dashboard, covering the two-key model, a first-run walkthrough, and a page-by-page reference.
+- [Configuration](configuration.md): the full config file and environment variable reference.
+- [API reference](api-reference.md): every endpoint, with auth and availability per mode.
+- [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
+- [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
+- [Supported models](models.md): providers, model format, and capabilities.
+- [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
+- [Hybrid-mode protocol](hybrid-mode-protocol.md): Otari/platform wire contract, for platform builders.
+- [SDK compatibility](sdk-compatibility.md): how the language SDKs are released and which SDK version works with which Otari version.

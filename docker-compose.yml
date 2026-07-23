@@ -54,6 +54,11 @@ services:
       # doesn't override.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Fernet key that encrypts provider credentials added through the admin
+      # dashboard. Needed only for the dashboard-first flow (add providers in
+      # the browser); unset is fine when providers live in config.yml. Generate
+      # one with `docker run --rm mzdotai/otari:latest otari gen-secret-key`.
+      - OTARI_SECRET_KEY=${OTARI_SECRET_KEY:-}
       # Local llamafile (open-weight model) endpoint. host.docker.internal
       # routes from Otari container back to a llamafile running on
       # the macOS/Windows host. Override if you run the model elsewhere.

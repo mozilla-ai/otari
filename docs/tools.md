@@ -2,8 +2,8 @@
 
 Otari can run two tools itself so any model, including open-weight ones, gets parity with what frontier APIs expose as managed tools:
 
-- **`otari_code_execution`** — a sandboxed Python REPL
-- **`otari_web_search`** — a web search backend
+- **`otari_code_execution`**: a sandboxed Python REPL
+- **`otari_web_search`**: a web search backend
 
 Both are opt-in per request via the `tools` array and require bringing up additional services via Docker Compose profiles. Operators who don't use them don't pull the extra images.
 

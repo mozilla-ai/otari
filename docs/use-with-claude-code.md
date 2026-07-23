@@ -45,8 +45,10 @@ claude
 
 Use `ANTHROPIC_AUTH_TOKEN` (not `ANTHROPIC_API_KEY`): it is sent as
 `Authorization: Bearer <token>`, which is the scheme Otari accepts for
-both standalone API keys and connected user tokens. `ANTHROPIC_API_KEY` sends an
-`x-api-key` header instead, which Otari does not read.
+both standalone API keys and connected user tokens. `ANTHROPIC_API_KEY` is sent
+as an `x-api-key` header instead. Otari does read that header, so it also
+authenticates, but `ANTHROPIC_AUTH_TOKEN` is the variable Claude Code intends for
+a third-party endpoint and works uniformly across both modes.
 
 ### settings.json
 
