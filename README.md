@@ -18,7 +18,7 @@ Put one endpoint in front of 40+ providers, then manage API keys, enforce budget
 
 </div>
 <p align="center">
-  <img src="assets/otari-demo.gif" width="720" alt="Start the Otari gateway, make a request, see it metered"/>
+  <img src="assets/otari-demo.gif" width="720" alt="A tour of the Otari admin dashboard: spend and usage analytics, providers, models, users, budgets, and API keys"/>
 </p>
 
 Otari is the proxy server at the heart of [otari.ai](https://otari.ai). Your apps talk to Otari, which routes to your providers. Otari authenticates each request, enforces budgets before the call runs, resolves your provider credential, forwards the request, and logs the usage. Run it yourself and your provider keys and usage data stay in your environment. Or connect it to otari.ai and the platform runs it for you.
