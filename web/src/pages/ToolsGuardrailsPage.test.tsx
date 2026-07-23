@@ -169,6 +169,36 @@ describe("ToolsGuardrailsPage", () => {
     expect(await screen.findByText(/must be a boolean/)).toBeInTheDocument();
   });
 
+  it("aligns fields on one grid: every row shares the same fixed input/action columns", async () => {
+    // The alignment fix (issue #355) lays each field out as a grid row with
+    // fixed-width input and action tracks, so the boxes and Save buttons line up
+    // in columns regardless of a row's type or whether it also has a Test button.
+    // Before the fix, rows were flex with per-type input widths (w-64 vs w-28)
+    // and a Test button that shoved Save off the shared right edge.
+    mockApi();
+    renderWithClient(<ToolsGuardrailsPage />);
+    await screen.findByText("Web search");
+
+    const rowOf = (labelledBy: string) =>
+      screen.getByLabelText(labelledBy).closest("div.grid") as HTMLElement | null;
+
+    const urlRow = rowOf("web_search_url"); // has Save + Test
+    const textRow = rowOf("web_search_engines"); // has Save only
+    const numberRow = rowOf("web_search_max_results"); // narrower numeric input
+
+    for (const row of [urlRow, textRow, numberRow]) {
+      expect(row).not.toBeNull();
+      // Same three-track template on every row keeps the columns aligned.
+      expect(row?.className).toContain("sm:grid-cols-[minmax(0,1fr)_16rem_10rem]");
+    }
+
+    // The URL and text inputs fill the shared input column (no more w-64 vs w-28
+    // mismatch); the numeric input is pinned to that column's right edge.
+    expect(screen.getByLabelText("web_search_url").className).toContain("w-full");
+    expect(screen.getByLabelText("web_search_engines").className).toContain("w-full");
+    expect(screen.getByLabelText("web_search_max_results").className).toContain("sm:justify-self-end");
+  });
+
   it("trims surrounding whitespace when saving a text field", async () => {
     const fetchMock = mockApi();
     const user = userEvent.setup();
