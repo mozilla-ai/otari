@@ -31,7 +31,7 @@ Otari is the proxy server at the heart of [otari.ai](https://otari.ai). Your app
 
 ## Why Otari
 
-- **One endpoint, many providers.** A single OpenAI-compatible URL in front of 40+ providers via [any-llm](https://github.com/mozilla-ai/any-llm), so client code doesn't need to know which provider serves a request.
+- **One endpoint, many providers.** A single URL that speaks the OpenAI and Anthropic APIs, in front of 40+ providers via [any-llm](https://github.com/mozilla-ai/any-llm), so client code doesn't need to know which provider serves a request.
 - **Your keys stay yours.** Provider credentials live in one place you control. Clients get virtual keys you can scope and revoke.
 - **Cost control before the spend.** Per-user and per-key budgets are enforced before a request runs, not reconciled after the bill.
 - **Everything is tracked.** Usage and spend are logged across every model and app, queryable through `/v1/usage`.
