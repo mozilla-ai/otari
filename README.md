@@ -29,7 +29,7 @@ flowchart TB
     clients("Your apps &middot; OpenAI / Anthropic SDKs")
     otari("<b>Otari</b><br/>auth &middot; virtual keys &middot; budgets &middot; usage log<br/>guardrails &middot; built-in tools")
     anyllm("routed by any-llm &middot; 40+ providers")
-    clients -->|"one endpoint &middot; OpenAI + Anthropic APIs &middot; :8000"| otari
+    clients -->|"OpenAI + Anthropic APIs"| otari
     otari --> anyllm
     anyllm --> openai("OpenAI")
     anyllm --> anthropic("Anthropic")
