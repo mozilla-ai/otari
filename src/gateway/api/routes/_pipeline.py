@@ -141,6 +141,10 @@ PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
 # embeds the raw upstream message, so classifying an error cannot leak provider
 # internals (see classify_provider_error and test_error_detail_leakage).
 PROVIDER_BAD_REQUEST_DETAIL = "The provider rejected the request as invalid (check the model name and parameters)"
+PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL = (
+    "The provider does not support function tools together with a non-'none' reasoning_effort for this model. "
+    "Retry with reasoning_effort set to 'none', or use the responses endpoint."
+)
 PROVIDER_MODEL_NOT_FOUND_DETAIL = "The requested model was not found on the provider"
 PROVIDER_CREDENTIALS_DETAIL = "The provider rejected the gateway's credentials"
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
@@ -202,6 +206,63 @@ def _upstream_status_code(exc: BaseException) -> int | None:
     return status_code if isinstance(status_code, int) else None
 
 
+def _upstream_error_param(exc: BaseException) -> str | None:
+    """Pull the offending request field off an upstream exception, if it names one.
+
+    OpenAI-style provider errors carry the rejected field on ``exc.param`` (from
+    the error body). any-llm currently surfaces the raw SDK error, so the
+    attribute is read directly; it also survives on ``original_exception`` once
+    any-llm's unified-exception layer becomes the default, so unwrap that too.
+    """
+    for candidate in (exc, getattr(exc, "original_exception", None)):
+        param = getattr(candidate, "param", None)
+        if isinstance(param, str):
+            return param
+    return None
+
+
+def _upstream_error_message(exc: BaseException) -> str:
+    """Best-effort human-readable text from an upstream exception (and its wrapper).
+
+    Concatenates the exception's ``message`` attribute and ``str()`` for both the
+    exception and any ``original_exception``, so a substring probe still matches
+    whether otari receives the raw SDK error today or the wrapped
+    ``AnyLLMError`` after any-llm flips to unified exceptions. Used only for
+    fixed-string classification, never echoed back to the caller.
+    """
+    parts: list[str] = []
+    for candidate in (exc, getattr(exc, "original_exception", None)):
+        if candidate is None:
+            continue
+        message = getattr(candidate, "message", None)
+        if isinstance(message, str):
+            parts.append(message)
+        parts.append(str(candidate))
+    return " ".join(parts)
+
+
+def _is_reasoning_effort_tools_conflict(exc: BaseException) -> bool:
+    """True when a 400/422 is the 'function tools + reasoning_effort' rejection.
+
+    Some OpenAI reasoning models reject a request that combines function tools
+    with a non-'none' ``reasoning_effort`` on the chat-completions endpoint. The
+    provider flags the offending field as ``param == "reasoning_effort"`` and
+    names "function tools" in the message. Match narrowly on both so an
+    unrelated ``reasoning_effort`` rejection still falls through to the generic
+    bad-request detail. Note the gateway's own tool loop can inject function
+    tools (MCP / sandbox / web_search) even when the caller sent no ``tools``,
+    so this can surface without an explicit ``tools`` array.
+
+    The "function tools" probe is best-effort against OpenAI's current phrasing:
+    if the provider rewords the message this falls back to the generic detail
+    (safe degradation), never a misclassification. ``param`` stays the primary,
+    authoritative signal.
+    """
+    if _upstream_error_param(exc) != "reasoning_effort":
+        return False
+    return "function tools" in _upstream_error_message(exc).lower()
+
+
 def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     """Map an upstream provider exception to a safe, specific (status, detail).
 
@@ -219,6 +280,11 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     if status_code is None:
         return None
     if status_code in (400, 422):
+        # Preserve the actionable remedy for the one 400/422 a caller can fix by
+        # retrying: function tools combined with a non-'none' reasoning_effort.
+        # Everything else stays the generic bad-request detail.
+        if _is_reasoning_effort_tools_conflict(exc):
+            return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL)
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, PROVIDER_BAD_REQUEST_DETAIL)
     if status_code == 404:
         return ProviderErrorMapping(status.HTTP_404_NOT_FOUND, PROVIDER_MODEL_NOT_FOUND_DETAIL)
