@@ -24,16 +24,25 @@ Put one endpoint in front of 40+ providers, then manage API keys, enforce budget
 Otari is the proxy server at the heart of [otari.ai](https://otari.ai). Your apps talk to Otari, which routes to your providers. Otari authenticates each request, enforces budgets before the call runs, resolves your provider credential, forwards the request, and logs the usage. Run it yourself and your provider keys and usage data stay in your environment. Or connect it to otari.ai and the platform runs it for you.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'ui-sans-serif, -apple-system, Segoe UI, Roboto, sans-serif','fontSize':'15px','lineColor':'#5e8496','edgeLabelBackground':'#ffffff'}}}%%
 flowchart TB
-    clients["Your apps &middot; OpenAI / Anthropic SDKs"]
-    otari["<b>Otari</b><br/>auth &middot; virtual keys &middot; budgets &middot; usage log<br/>guardrails &middot; built-in tools"]
-    anyllm["routed by any-llm &middot; 40+ providers"]
+    clients("Your apps &middot; OpenAI / Anthropic SDKs")
+    otari("<b>Otari</b><br/>auth &middot; virtual keys &middot; budgets &middot; usage log<br/>guardrails &middot; built-in tools")
+    anyllm("routed by any-llm &middot; 40+ providers")
     clients -->|"one endpoint &middot; OpenAI + Anthropic APIs &middot; :8000"| otari
     otari --> anyllm
-    anyllm --> openai["OpenAI"]
-    anyllm --> anthropic["Anthropic"]
-    anyllm --> llamafile["llamafile"]
-    anyllm --> more["and more"]
+    anyllm --> openai("OpenAI")
+    anyllm --> anthropic("Anthropic")
+    anyllm --> llamafile("llamafile")
+    anyllm --> more("and more")
+    classDef client fill:#eef4f7,stroke:#b8ccd6,stroke-width:1px,color:#22303a;
+    classDef hero fill:#3c6678,stroke:#2c4d5c,stroke-width:1.5px,color:#ffffff;
+    classDef router fill:#dbe8ee,stroke:#9dbccb,stroke-width:1px,color:#22303a;
+    classDef provider fill:#ffffff,stroke:#c4d4dc,stroke-width:1px,color:#22303a;
+    class clients client;
+    class otari hero;
+    class anyllm router;
+    class openai,anthropic,llamafile,more provider;
 ```
 
 ## Why Otari

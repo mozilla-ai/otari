@@ -5,6 +5,7 @@
 #
 # Prereqs (installed once in the dev/sandbox environment):
 #   - ffmpeg on PATH                     (webm -> gif)
+#   - gifsicle on PATH                   (lossy GIF optimisation)
 #   - web deps installed: (cd web && npm ci)
 #   - a committed dashboard bundle in src/gateway/static/dashboard
 #     (rebuild with: npm --prefix web run build)
@@ -63,19 +64,25 @@ OUT_DIR="$ART" BASE_URL="http://127.0.0.1:8000" node "$DIR/tour.mjs"
 
 WEBM=$(ls -t "$ART"/video/*.webm | head -1)
 echo ">> Encoding GIF from $WEBM"
-# Two-pass palette for clean colors; 12fps keeps the file reasonable.
-# START_TRIM drops the brief initial Overview loading skeleton so the GIF opens
-# on populated content (the tour waits for data before the sweep begins).
 # Encode at 1080 wide while the README displays it at 720, so it stays crisp on
-# high-DPI screens (the same 1.5x density the previous hero GIF used).
+# high-DPI screens (the same 1.5x density the previous hero GIF used). START_TRIM
+# drops the brief initial Overview loading skeleton so the GIF opens on populated
+# content. The flat dashboard UI needs few colors, so a 64-colour palette plus a
+# gifsicle lossy pass roughly halves the file with no visible loss. Note: 12fps
+# is smaller than 10fps here because the diff-based GIF stores smaller
+# frame-to-frame rectangles when there is less motion per frame.
 PALETTE="$ART/palette.png"
 FPS=12
 WIDTH=1080
 START_TRIM=1.4
-ffmpeg -y -ss "$START_TRIM" -i "$WEBM" -vf "fps=$FPS,scale=$WIDTH:-1:flags=lanczos,palettegen=stats_mode=diff" "$PALETTE" 2>/dev/null
+COLORS=64
+LOSSY=80
+ffmpeg -y -ss "$START_TRIM" -i "$WEBM" -vf "fps=$FPS,scale=$WIDTH:-1:flags=lanczos,palettegen=max_colors=$COLORS:stats_mode=diff" "$PALETTE" 2>/dev/null
 ffmpeg -y -ss "$START_TRIM" -i "$WEBM" -i "$PALETTE" \
   -lavfi "fps=$FPS,scale=$WIDTH:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=3:diff_mode=rectangle" \
-  "$ART/otari-demo.gif" 2>/dev/null
+  "$ART/otari-demo-raw.gif" 2>/dev/null
+# gifsicle squeezes the LZW stream further (lossy) and optimises frames.
+gifsicle -O3 --lossy="$LOSSY" "$ART/otari-demo-raw.gif" -o "$ART/otari-demo.gif" 2>/dev/null
 
 cp "$ART/otari-demo.gif" "$GIF_OUT"
 BYTES=$(wc -c <"$GIF_OUT")

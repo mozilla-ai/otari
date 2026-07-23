@@ -17,6 +17,7 @@ result to `assets/otari-demo.gif`.
 ## Prereqs
 
 - `ffmpeg` on `PATH` (webm to gif).
+- `gifsicle` on `PATH` (lossy GIF optimisation).
 - Web deps installed: `(cd web && npm ci)` (Playwright resolves from
   `web/node_modules`).
 - A committed dashboard bundle in `src/gateway/static/dashboard`. Rebuild after
