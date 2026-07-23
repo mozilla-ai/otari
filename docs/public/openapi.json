@@ -2466,6 +2466,17 @@
             ],
             "title": "Cache Read Price Per Million"
           },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
+          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -2484,6 +2495,23 @@
           "output_price_per_million": {
             "title": "Output Price Per Million",
             "type": "number"
+          },
+          "pricing_tiers": {
+            "items": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "integer"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "title": "Pricing Tiers",
+            "type": "array"
           }
         },
         "required": [
@@ -2718,6 +2746,17 @@
             ],
             "title": "Cache Read Price Per Million"
           },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
+          },
           "cache_write_price_per_million": {
             "anyOf": [
               {
@@ -2749,6 +2788,13 @@
             "title": "Output Price Per Million",
             "type": "number"
           },
+          "pricing_tiers": {
+            "items": {
+              "$ref": "#/components/schemas/PricingTier"
+            },
+            "title": "Pricing Tiers",
+            "type": "array"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
@@ -2761,10 +2807,87 @@
           "output_price_per_million",
           "cache_read_price_per_million",
           "cache_write_price_per_million",
+          "cache_write_1h_price_per_million",
+          "pricing_tiers",
           "created_at",
           "updated_at"
         ],
         "title": "PricingResponse",
+        "type": "object"
+      },
+      "PricingTier": {
+        "description": "Whole-request price cliff selected by total billable input tokens.",
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "input_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price Per Million"
+          },
+          "min_input_tokens": {
+            "exclusiveMinimum": 0.0,
+            "title": "Min Input Tokens",
+            "type": "integer"
+          },
+          "output_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price Per Million"
+          }
+        },
+        "required": [
+          "min_input_tokens"
+        ],
+        "title": "PricingTier",
         "type": "object"
       },
       "ProviderCapabilitiesSchema": {
@@ -3538,7 +3661,7 @@
         "type": "object"
       },
       "SetPricingRequest": {
-        "description": "Request model for setting model pricing.",
+        "description": "Create a versioned per-model price, with optional cache and context tiers.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -3552,6 +3675,19 @@
             ],
             "description": "Price per 1M cached-input tokens",
             "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price per 1M Anthropic 1-hour cache-write tokens",
+            "title": "Cache Write 1H Price Per Million"
           },
           "cache_write_price_per_million": {
             "anyOf": [
@@ -3595,6 +3731,21 @@
             "minimum": 0.0,
             "title": "Output Price Per Million",
             "type": "number"
+          },
+          "pricing_tiers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PricingTier"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
+            "title": "Pricing Tiers"
           }
         },
         "required": [
@@ -4447,6 +4598,18 @@
             ],
             "title": "Api Key Id"
           },
+          "billing_meters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Billing Meters"
+          },
           "cache_read_tokens": {
             "anyOf": [
               {
@@ -4457,6 +4620,17 @@
               }
             ],
             "title": "Cache Read Tokens"
+          },
+          "cache_write_1h_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Tokens"
           },
           "cache_write_tokens": {
             "anyOf": [
@@ -4525,6 +4699,33 @@
             "title": "Model",
             "type": "string"
           },
+          "pricing_breakdown": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricing Breakdown"
+          },
           "prompt_tokens": {
             "anyOf": [
               {
@@ -4591,6 +4792,9 @@
           "total_tokens",
           "cache_read_tokens",
           "cache_write_tokens",
+          "cache_write_1h_tokens",
+          "billing_meters",
+          "pricing_breakdown",
           "cost",
           "status",
           "error_message",
@@ -4893,6 +5097,10 @@
             "title": "Cache Read Tokens",
             "type": "integer"
           },
+          "cache_write_1h_tokens": {
+            "title": "Cache Write 1H Tokens",
+            "type": "integer"
+          },
           "cache_write_tokens": {
             "title": "Cache Write Tokens",
             "type": "integer"
@@ -4929,6 +5137,7 @@
           "total_tokens",
           "cache_read_tokens",
           "cache_write_tokens",
+          "cache_write_1h_tokens",
           "request_count",
           "error_count",
           "avg_latency_ms"

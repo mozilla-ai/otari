@@ -1,7 +1,7 @@
 import math
 import uuid
 from collections.abc import AsyncIterator, Callable
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from any_llm import LLMProvider, amessages
 from any_llm.types.completion import CompletionUsage
@@ -181,6 +181,7 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
             total_tokens=input_tokens + output_tokens,
             cache_read_tokens=event.usage.cache_read_input_tokens or 0,
             cache_write_tokens=event.usage.cache_creation_input_tokens or 0,
+            cache_write_1h_tokens=_cache_write_1h_tokens(event.usage),
             cache_tokens_in_prompt=False,
         )
     if isinstance(event, MessageStartEvent):
@@ -195,9 +196,42 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
                 total_tokens=input_tokens,
                 cache_read_tokens=cache_read,
                 cache_write_tokens=cache_write,
+                cache_write_1h_tokens=_cache_write_1h_tokens(usage),
                 cache_tokens_in_prompt=False,
             )
     return None
+
+
+def _cache_write_1h_tokens(usage: Any) -> int:
+    """Read Anthropic's optional 1-hour cache-creation breakdown."""
+    cache_creation = getattr(usage, "cache_creation", None)
+    return getattr(cache_creation, "ephemeral_1h_input_tokens", 0) or 0
+
+
+def _requested_cache_write_ttl(*values: Any) -> Literal["5m", "1h"] | None:
+    """Return the longest explicitly requested Anthropic cache-write TTL."""
+    found_cache_write = False
+
+    def visit(value: Any) -> bool:
+        nonlocal found_cache_write
+        if isinstance(value, dict):
+            cache_control = value.get("cache_control")
+            if value.get("type") == "ephemeral":
+                found_cache_write = True
+                if value.get("ttl") == "1h":
+                    return True
+            if isinstance(cache_control, dict) and cache_control.get("type") == "ephemeral":
+                found_cache_write = True
+                if cache_control.get("ttl") == "1h":
+                    return True
+            return any(visit(child) for child in value.values())
+        if isinstance(value, list):
+            return any(visit(item) for item in value)
+        return False
+
+    if any(visit(value) for value in values):
+        return "1h"
+    return "5m" if found_cache_write else None
 
 
 class _MessagesAdapter:
@@ -241,6 +275,7 @@ class _MessagesAdapter:
             total_tokens=result.usage.input_tokens + result.usage.output_tokens,
             cache_read_tokens=result.usage.cache_read_input_tokens or 0,
             cache_write_tokens=result.usage.cache_creation_input_tokens or 0,
+            cache_write_1h_tokens=_cache_write_1h_tokens(result.usage),
             cache_tokens_in_prompt=False,
         )
 
@@ -359,6 +394,12 @@ async def create_message(
             user_id_from_request=str(user_from_metadata) if user_from_metadata else None,
             estimate_prompt_chars=len(str(request.messages)) + len(str(request.system or "")),
             estimate_max_output_tokens=request.max_tokens,
+            estimate_cache_write_ttl=_requested_cache_write_ttl(
+                request.cache_control,
+                request.system,
+                request.messages,
+                request.tools,
+            ),
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
             normalize_messages=_normalize,

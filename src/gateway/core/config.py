@@ -12,7 +12,7 @@ from typing import Any
 import yaml
 from any_llm import LLMProvider
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, PrivateAttr, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 API_KEY_HEADER = "Otari-Key"
@@ -75,6 +75,30 @@ def _get_platform_token_from_env() -> str | None:
     return token or None
 
 
+class PricingTierConfig(BaseModel):
+    """One whole-request context threshold price rule from configuration."""
+
+    min_input_tokens: int = Field(gt=0)
+    input_price_per_million: float | None = Field(default=None, ge=0)
+    output_price_per_million: float | None = Field(default=None, ge=0)
+    cache_read_price_per_million: float | None = Field(default=None, ge=0)
+    cache_write_price_per_million: float | None = Field(default=None, ge=0)
+    cache_write_1h_price_per_million: float | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_has_rate_override(self) -> "PricingTierConfig":
+        rates = (
+            self.input_price_per_million,
+            self.output_price_per_million,
+            self.cache_read_price_per_million,
+            self.cache_write_price_per_million,
+            self.cache_write_1h_price_per_million,
+        )
+        if all(rate is None for rate in rates):
+            raise ValueError("pricing tier must override at least one price field")
+        return self
+
+
 class PricingConfig(BaseModel):
     """Model pricing configuration."""
 
@@ -90,10 +114,26 @@ class PricingConfig(BaseModel):
         ge=0,
         description="Price per 1M cache-write (creation) tokens. Anthropic only.",
     )
+    cache_write_1h_price_per_million: float | None = Field(
+        default=None,
+        ge=0,
+        description="Price per 1M Anthropic 1-hour cache-write tokens.",
+    )
+    pricing_tiers: list[PricingTierConfig] = Field(
+        default_factory=list,
+        description="Whole-request context threshold pricing rules.",
+    )
     effective_at: datetime | None = Field(
         default=None,
         description="ISO 8601 datetime from which this price applies. Defaults to now if omitted.",
     )
+
+    @model_validator(mode="after")
+    def validate_unique_tier_thresholds(self) -> "PricingConfig":
+        thresholds = [tier.min_input_tokens for tier in self.pricing_tiers]
+        if len(thresholds) != len(set(thresholds)):
+            raise ValueError("pricing_tiers must not repeat min_input_tokens")
+        return self
 
 
 class ModelCapabilityConfig(BaseModel):
