@@ -109,6 +109,8 @@ def estimate_metered_cost(
         cache_write_rate = rates["cache_write_price_per_million"]
     if cache_write_rate is not None:
         cost += cache_write_tokens * cache_write_rate / 1_000_000
+    else:
+        cost += cache_write_tokens * input_rate / 1_000_000
     return cost
 
 

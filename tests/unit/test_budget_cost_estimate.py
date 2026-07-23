@@ -86,7 +86,7 @@ def test_estimate_cost_falls_back_to_input_when_cache_write_is_unpriced() -> Non
         cache_write_ttl="1h",
     )
 
-    assert estimate == pytest.approx(1_000 * 3.0 / 1_000_000)
+    assert estimate == pytest.approx(2_000 * 3.0 / 1_000_000)
 
 
 def test_estimate_cost_preserves_a_free_cache_write_rate() -> None:
