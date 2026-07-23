@@ -168,6 +168,10 @@ async def run_passthrough(
     started_at = time.monotonic()
     api_key, is_master_key = auth_result
     api_key_id = api_key.id if api_key else None
+    # A key flagged exclude_from_budget logs cost but is never reserved or folded
+    # into users.spend. Threaded through the reservation handle (so reconcile skips
+    # the spend write) and stamped on the usage row.
+    budget_exempt = api_key is not None and api_key.exclude_from_budget
 
     user_id = resolve_passthrough_user_id(auth_result, user, reject_mismatch=config.reject_user_mismatch)
 
@@ -176,7 +180,12 @@ async def run_passthrough(
     pricing: ModelPricing | None = None
     if reserve_before_resolve:
         reservation = await reserve_budget(
-            db, user_id, estimate(None) if estimate else 0.0, model=model, strategy=config.budget_strategy
+            db,
+            user_id,
+            estimate(None) if estimate else 0.0,
+            model=model,
+            strategy=config.budget_strategy,
+            counts_toward_budget=not budget_exempt,
         )
         # The reservation is already held, so refund it before mapping an
         # unresolvable selector to 400; otherwise the estimate leaks.
@@ -195,9 +204,20 @@ async def run_passthrough(
         # Reserve first so user/blocked/budget rejections (404/403) precede the
         # missing-pricing rejection (402); refund if we then reject for no pricing.
         reservation = await reserve_budget(
-            db, user_id, estimate(pricing) if estimate else 0.0, model=model, strategy=config.budget_strategy
+            db,
+            user_id,
+            estimate(pricing) if estimate else 0.0,
+            model=model,
+            strategy=config.budget_strategy,
+            counts_toward_budget=not budget_exempt,
         )
-        if enforce_require_pricing and pricing_required_but_missing(pricing, require_pricing=config.require_pricing):
+        # A budget-exempt key is never debited, so the require_pricing safety gate
+        # does not apply: the call proceeds and logs cost=null when unpriced.
+        if (
+            enforce_require_pricing
+            and not budget_exempt
+            and pricing_required_but_missing(pricing, require_pricing=config.require_pricing)
+        ):
             await refund_reservation(db, reservation)
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -234,6 +254,7 @@ async def run_passthrough(
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=not budget_exempt,
         )
 
         cost = compute_cost(result, pricing) if compute_cost else None
@@ -258,6 +279,7 @@ async def run_passthrough(
             status="error",
             error_message=str(e),
             latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=not budget_exempt,
         )
         await log_writer.put(error_log)
         await refund_reservation(db, reservation)

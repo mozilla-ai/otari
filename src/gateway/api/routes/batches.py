@@ -83,6 +83,7 @@ async def log_batch_usage(
     completion_tokens: int | None = None,
     total_tokens: int | None = None,
     cost: float | None = None,
+    counts_toward_budget: bool = True,
 ) -> None:
     """Log batch API usage, including token counts and cost when derivable."""
     # latency_ms is intentionally left NULL: a batch is an asynchronous job that
@@ -102,6 +103,7 @@ async def log_batch_usage(
         cost=cost,
         status="success" if error is None else "error",
         error_message=error,
+        counts_toward_budget=counts_toward_budget,
     )
     await log_writer.put(usage_log)
 
@@ -288,10 +290,21 @@ async def create_batch(
 
     provider_kwargs = resolved.kwargs
 
+    # A key flagged exclude_from_budget logs cost but is never reserved or folded
+    # into users.spend, at create time and again when results are accounted.
+    budget_exempt = api_key is not None and api_key.exclude_from_budget
+
     # Batch cost is unknown until results are retrieved, so the reservation
     # estimate is 0; it still enforces per-user state (user exists, not
     # blocked, not already over budget), matching the audio routes.
-    reservation = await reserve_budget(db, user_id, 0.0, model=request.model, strategy=config.budget_strategy)
+    reservation = await reserve_budget(
+        db,
+        user_id,
+        0.0,
+        model=request.model,
+        strategy=config.budget_strategy,
+        counts_toward_budget=not budget_exempt,
+    )
 
     # Stamp the billed user into the provider-side metadata so ownership can be
     # enforced on retrieve/cancel/results; a client-supplied value never wins.
@@ -330,6 +343,7 @@ async def create_batch(
             endpoint="/v1/batches",
             user_id=user_id,
             error=str(e),
+            counts_toward_budget=not budget_exempt,
         )
         await refund_reservation(db, reservation)
         logger.error("Batch create failed for %s: %s", provider, e)
@@ -353,6 +367,7 @@ async def create_batch(
         prompt_tokens=0,
         completion_tokens=0,
         total_tokens=0,
+        counts_toward_budget=not budget_exempt,
     )
     await reconcile_reservation(db, reservation, 0.0)
 
@@ -522,6 +537,14 @@ async def retrieve_batch_results(
     metadata_owner = (batch.metadata or {}).get(_OWNER_METADATA_KEY)
     user_id = (record.user_id if record else None) or metadata_owner or (api_key.user_id if api_key else None)
 
+    # Budget exemption follows the key that CREATED the batch (billing attributes to
+    # its owner), not the retriever. Resolve it from the stored record; a deleted
+    # originating key (api_key_id NULL) defaults to enforced, the conservative choice.
+    batch_exempt = False
+    if record is not None and record.api_key_id is not None:
+        origin_key = await db.get(APIKey, record.api_key_id)
+        batch_exempt = origin_key is not None and origin_key.exclude_from_budget
+
     try:
         result = await aretrieve_batch_results(
             provider=provider_enum,
@@ -583,7 +606,9 @@ async def retrieve_batch_results(
     # does not claim the slot, so once pricing exists a later retrieval still
     # folds the spend once. Legacy batches with no record keep the prior behavior
     # (log every retrieval, no spend fold), since they cannot be deduplicated.
-    pricing_missing = record is not None and bool(total_tokens) and cost is None
+    # Exempt batches never fold spend, so there is nothing to defer for: they
+    # claim and log immediately with cost null, like every other exempt path.
+    pricing_missing = record is not None and bool(total_tokens) and cost is None and not batch_exempt
     if pricing_missing:
         should_account = False
     elif record is not None:
@@ -603,13 +628,15 @@ async def retrieve_batch_results(
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             cost=cost,
+            counts_toward_budget=not batch_exempt,
         )
         if record is not None:
-            if cost and user_id:
+            if cost and user_id and not batch_exempt:
                 # Folds the spend and commits the claim in one transaction.
                 await record_external_spend(db, user_id, cost)
             else:
-                # Nothing to bill (no cost/owner); still persist the one-time claim.
+                # Nothing to fold (no cost/owner, or the originating key is
+                # budget-exempt); still persist the one-time accounting claim.
                 await db.commit()
 
     return {

@@ -298,6 +298,9 @@ export interface ApiKey {
   expires_at: string | null;
   is_active: boolean;
   allowed_models: string[] | null;
+  // When true, requests on this key are logged with cost but never counted toward
+  // the user's budget or spend, and never gated by it.
+  exclude_from_budget: boolean;
   metadata: Record<string, unknown>;
 }
 
@@ -306,6 +309,7 @@ export interface CreateKeyRequest {
   user_id?: string | null;
   expires_at?: string | null;
   allowed_models?: string[] | null;
+  exclude_from_budget?: boolean;
   metadata?: Record<string, unknown>;
 }
 
@@ -321,6 +325,7 @@ export interface CreateKeyResponse {
   expires_at: string | null;
   is_active: boolean;
   allowed_models: string[] | null;
+  exclude_from_budget: boolean;
   metadata: Record<string, unknown>;
 }
 
@@ -331,6 +336,7 @@ export interface UpdateKeyRequest {
   is_active?: boolean | null;
   expires_at?: string | null;
   allowed_models?: string[] | null;
+  exclude_from_budget?: boolean | null;
   metadata?: Record<string, unknown> | null;
 }
 
@@ -390,6 +396,14 @@ export interface UsageEntry {
   // Total server-side request duration in ms; null for historical rows and for
   // write paths with no synchronous duration (e.g. batch jobs).
   latency_ms: number | null;
+  // Provenance: "gateway" for requests Otari served, or a source slug (e.g.
+  // "claude_code") for imported usage. `source_label` carries optional
+  // session/project attribution. `counts_toward_budget` is false for imported
+  // rows and rows from budget-exempt keys: their cost shows in analytics but is
+  // never folded into a user's spend / budget gauge.
+  source: string;
+  source_label: string | null;
+  counts_toward_budget: boolean;
 }
 
 // Activity-log filters. All optional; an omitted field means "no filter". Sent as
@@ -403,6 +417,7 @@ export interface UsageFilters {
   model?: string;
   endpoint?: string;
   user_id?: string;
+  api_key_id?: string;
 }
 
 // Total matching rows for a set of filters (from /v1/usage/count). Kept separate
@@ -427,6 +442,9 @@ export interface UsageTotals {
   error_count: number;
   // Mean server-side latency over rows that recorded one; null when none did.
   avg_latency_ms: number | null;
+  // Requests with no configured price (cost is null), e.g. imported usage for an
+  // unpriced model, so a $0 total is not read as free.
+  unpriced_requests?: number;
 }
 
 // One breakdown row (a model, a user, or an API key). `key` is null both for the

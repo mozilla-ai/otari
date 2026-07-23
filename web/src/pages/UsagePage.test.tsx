@@ -55,6 +55,9 @@ function mockApi(body: UsageSummary | null) {
     if (url.includes("/v1/users")) {
       return jsonResponse([{ user_id: "alice", alias: "Alice" }]);
     }
+    if (url.includes("/v1/keys")) {
+      return jsonResponse([{ id: "key-1", key_name: "ci-bot", user_id: "alice", allowed_models: null }]);
+    }
     return jsonResponse([]);
   });
 }
@@ -94,6 +97,21 @@ describe("UsagePage", () => {
     expect(screen.getByText("12.4M")).toBeInTheDocument();
     // 1764 / 84000 = 2.1% errors.
     expect(screen.getByText(/2\.1% errors/)).toBeInTheDocument();
+  });
+
+  it("filters usage by API key", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.click(screen.getByPlaceholderText("All keys"));
+    await user.click(await screen.findByRole("option", { name: "ci-bot" }));
+
+    const summaryCalls = fetchMock.mock.calls
+      .map(([u]) => String(u))
+      .filter((u) => u.includes("/v1/usage/summary"));
+    expect(summaryCalls.some((u) => u.includes("api_key_id=key-1"))).toBe(true);
   });
 
   it("does not render the CSV export action", async () => {

@@ -310,6 +310,29 @@ function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
   );
 }
 
+// Money-adjacent control: a labeled checkbox with the consequence spelled out, so
+// flipping it is a deliberate act rather than a bare switch in a table cell.
+function BudgetExemptToggle({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-2 rounded-lg border border-[var(--otari-line)] p-3 text-sm">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 accent-[var(--otari-brand)]"
+        aria-label="Exempt this key from budget"
+      />
+      <span className="flex flex-col gap-0.5">
+        <span className="font-medium text-[var(--otari-ink)]">Exempt from budget</span>
+        <span className="text-xs text-[var(--otari-muted)]">
+          Requests on this key are logged with their cost but never counted toward the owner&apos;s budget or spend,
+          and never blocked by it.
+        </span>
+      </span>
+    </label>
+  );
+}
+
 function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated: (result: CreateKeyResponse) => void }) {
   const create = useCreateKey();
   const users = useUsers();
@@ -318,6 +341,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [userId, setUserId] = useState("");
   const [allowedModels, setAllowedModels] = useState<string[] | null>(null);
+  const [excludeFromBudget, setExcludeFromBudget] = useState(false);
   const [scopeValid, setScopeValid] = useState(true);
 
   const expiresInPast = expiresAt !== "" && new Date(expiresAt).getTime() < Date.now();
@@ -333,6 +357,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
       user_id: userId.trim(),
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels,
+      exclude_from_budget: excludeFromBudget,
     };
     create.mutate(body, {
       onSuccess: (result) => {
@@ -378,7 +403,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
           className="self-start text-xs font-medium text-[var(--otari-brand-dark)]"
           onClick={() => setShowAdvanced((v) => !v)}
         >
-          {showAdvanced ? "Hide advanced" : "Advanced (restrict models)"}
+          {showAdvanced ? "Hide advanced" : "Advanced"}
         </button>
         {showAdvanced ? (
           <div className="flex flex-col gap-4 rounded-lg border border-[var(--otari-line)] p-4">
@@ -393,6 +418,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
                 setScopeValid(valid);
               }}
             />
+            <BudgetExemptToggle checked={excludeFromBudget} onChange={setExcludeFromBudget} />
           </div>
         ) : null}
         <div className="flex gap-2">
@@ -414,6 +440,7 @@ function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void 
   const [keyName, setKeyName] = useState(apiKey.key_name ?? "");
   const [expiresAt, setExpiresAt] = useState(toDatetimeLocal(apiKey.expires_at));
   const [allowedModels, setAllowedModels] = useState<string[] | null>(apiKey.allowed_models);
+  const [excludeFromBudget, setExcludeFromBudget] = useState(apiKey.exclude_from_budget);
   const [scopeValid, setScopeValid] = useState(true);
 
   const submit = () => {
@@ -425,6 +452,7 @@ function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void 
           key_name: keyName.trim() || null,
           expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
           allowed_models: allowedModels,
+          exclude_from_budget: excludeFromBudget,
         },
       },
       { onSuccess: onClose },
@@ -459,6 +487,7 @@ function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void 
             setScopeValid(valid);
           }}
         />
+        <BudgetExemptToggle checked={excludeFromBudget} onChange={setExcludeFromBudget} />
         <div className="flex gap-2">
           <Button variant="primary" isDisabled={update.isPending || !scopeValid} onPress={submit}>
             {update.isPending ? "Saving…" : "Save changes"}
@@ -631,7 +660,17 @@ export function KeysPage() {
                 <Td className="font-medium text-[var(--otari-ink)]">
                   <div className="flex flex-col gap-0.5">
                     <span>{k.key_name ?? <span className="text-[var(--otari-muted)]">(unnamed)</span>}</span>
-                    <AccessChip allowed={k.allowed_models} />
+                    <div className="flex flex-wrap items-center gap-1">
+                      <AccessChip allowed={k.allowed_models} />
+                      {k.exclude_from_budget ? (
+                        <span
+                          className="inline-flex items-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] px-2 py-0.5 text-xs font-medium text-[var(--otari-brand-dark)]"
+                          title="Requests on this key are logged with cost but never counted toward budget"
+                        >
+                          Budget-exempt
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 </Td>
                 <Td>

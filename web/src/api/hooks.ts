@@ -640,6 +640,7 @@ function usageParams(filters: UsageFilters): URLSearchParams {
   if (filters.model) params.set("model", filters.model);
   if (filters.endpoint) params.set("endpoint", filters.endpoint);
   if (filters.user_id) params.set("user_id", filters.user_id);
+  if (filters.api_key_id) params.set("api_key_id", filters.api_key_id);
   return params;
 }
 

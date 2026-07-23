@@ -36,6 +36,11 @@ class CreateKeyRequest(BaseModel):
         description="Model allow-list: null = any model, [] = deny all, or canonical "
         "instance:model entries (with instance:* / instance:prefix* wildcards).",
     )
+    exclude_from_budget: bool = Field(
+        default=False,
+        description="When true, requests on this key are logged with cost but never reserved, "
+        "reconciled into the user's spend, or gated by budget.",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
 
@@ -53,6 +58,7 @@ class CreateKeyResponse(BaseModel):
     expires_at: str | None
     is_active: bool
     allowed_models: list[str] | None
+    exclude_from_budget: bool
     metadata: dict[str, Any]
 
 
@@ -70,6 +76,7 @@ class KeyInfo(BaseModel):
     expires_at: str | None
     is_active: bool
     allowed_models: list[str] | None
+    exclude_from_budget: bool
     metadata: dict[str, Any]
 
     @classmethod
@@ -84,6 +91,7 @@ class KeyInfo(BaseModel):
             expires_at=key.expires_at.isoformat() if key.expires_at else None,
             is_active=bool(key.is_active),
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
+            exclude_from_budget=bool(key.exclude_from_budget),
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
 
@@ -94,6 +102,7 @@ class UpdateKeyRequest(BaseModel):
     key_name: str | None = None
     is_active: bool | None = None
     expires_at: datetime | None = None
+    exclude_from_budget: bool | None = None
     # Tri-state via model_fields_set: absent = unchanged, null = clear to
     # unrestricted, [] = deny all, list = restrict. A plain default cannot tell
     # "absent" from "explicit null", so the handler checks model_fields_set.
@@ -160,6 +169,7 @@ async def create_key(
         user_id=user_id,
         expires_at=request.expires_at,
         allowed_models=allowed_models,
+        exclude_from_budget=request.exclude_from_budget,
         metadata_=request.metadata,
     )
 
@@ -244,6 +254,8 @@ async def update_key(
         key.is_active = request.is_active
     if request.expires_at is not None:
         key.expires_at = request.expires_at
+    if request.exclude_from_budget is not None:
+        key.exclude_from_budget = request.exclude_from_budget
     # Tri-state: only touch the allow-list when the field was supplied. A supplied
     # null clears to unrestricted; [] denies all; a list restricts.
     if "allowed_models" in request.model_fields_set:

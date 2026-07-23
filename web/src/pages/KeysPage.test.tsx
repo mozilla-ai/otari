@@ -38,6 +38,7 @@ function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     expires_at: null,
     is_active: true,
     allowed_models: null,
+    exclude_from_budget: false,
     metadata: {},
     ...overrides,
   };
@@ -275,7 +276,7 @@ describe("KeysPage", () => {
     await user.click(screen.getByRole("button", { name: "Create your first key" }));
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Advanced (restrict models)" }));
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
     await user.click(screen.getByRole("button", { name: "Only selected" }));
     // The scope picker is a catalog combobox, not free text: type to filter, then
     // pick the discovered model.
@@ -291,6 +292,32 @@ describe("KeysPage", () => {
     expect(JSON.parse(String(post?.[1]?.body)).allowed_models).toEqual(["openai:gpt-4o"]);
     // User-first: the key names its owner rather than auto-creating a virtual user.
     expect(JSON.parse(String(post?.[1]?.body)).user_id).toBe("alice");
+  });
+
+  it("creates a budget-exempt key when the toggle is checked", async () => {
+    const fetchMock = mockApi({ keys: [] });
+    const user = userEvent.setup();
+    renderPage(<KeysPage />);
+
+    await screen.findByText("No API keys yet");
+    await user.click(screen.getByRole("button", { name: "Create your first key" }));
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
+    await user.keyboard("{Escape}");
+    // The exempt toggle lives under the Advanced disclosure.
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
+    await user.click(screen.getByLabelText("Exempt this key from budget"));
+    await user.click(screen.getByRole("button", { name: "Create key" }));
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) => String(u).endsWith("/v1/keys") && (init?.method ?? "") === "POST",
+    );
+    expect(JSON.parse(String(post?.[1]?.body)).exclude_from_budget).toBe(true);
+  });
+
+  it("renders a Budget-exempt chip for exempt keys", async () => {
+    mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot", exclude_from_budget: true })] });
+    renderPage(<KeysPage />);
+    expect(await screen.findByText("Budget-exempt")).toBeInTheDocument();
   });
 
   it("posts the picked owner's user_id, not the option's display label", async () => {
@@ -324,7 +351,7 @@ describe("KeysPage", () => {
     await user.click(screen.getByRole("button", { name: "Create your first key" }));
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Advanced (restrict models)" }));
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
     await user.click(screen.getByRole("button", { name: "Block all" }));
     await user.click(screen.getByRole("button", { name: "Create key" }));
 
@@ -344,7 +371,7 @@ describe("KeysPage", () => {
     // Give it an owner so the only reason Create stays disabled is the empty scope.
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Advanced (restrict models)" }));
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
     await user.click(screen.getByRole("button", { name: "Only selected" }));
 
     expect(screen.getByRole("button", { name: "Create key" })).toBeDisabled();
@@ -374,7 +401,7 @@ describe("KeysPage", () => {
     await user.click(screen.getByRole("button", { name: "Create your first key" }));
     await user.type(screen.getByPlaceholderText(/Pick a user/), "team-checkout");
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Advanced (restrict models)" }));
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
 
     // The "any" mode is labelled as inheritance, not unrestricted, and the owner's
     // access is surfaced for context (a new id starts unrestricted).
@@ -391,6 +418,21 @@ describe("KeysPage", () => {
 
     // The inline edit card appears (its Save button is unique to edit mode).
     expect(await screen.findByRole("button", { name: "Save changes" })).toBeInTheDocument();
+  });
+
+  it("toggles exclude_from_budget on an existing key via PATCH", async () => {
+    const fetchMock = mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot", exclude_from_budget: false })] });
+    const user = userEvent.setup();
+    renderPage(<KeysPage />);
+
+    await user.click(await screen.findByText("ci-bot"));
+    await user.click(await screen.findByLabelText("Exempt this key from budget"));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    const patch = fetchMock.mock.calls.find(
+      ([u, init]) => String(u).includes("/v1/keys/key-1") && (init?.method ?? "") === "PATCH",
+    );
+    expect(JSON.parse(String(patch?.[1]?.body)).exclude_from_budget).toBe(true);
   });
 
   it("resets the edit form when switching to a different key row", async () => {

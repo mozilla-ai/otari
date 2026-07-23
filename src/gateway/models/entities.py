@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -41,6 +41,11 @@ class APIKey(Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(default=True)
+    # When true, requests authenticated with this key are logged with their computed
+    # cost but skip budget reservation/reconciliation: their spend is never written to
+    # User.spend and never gates enforcement. Default false keeps every existing key
+    # (and all keys minted before this column) on the normal enforced path.
+    exclude_from_budget: Mapped[bool] = mapped_column(default=False)
     # Per-key model allow-list. NULL = unrestricted (default; every key predating
     # this column stays unrestricted), [] = deny all, a list = canonical
     # instance:model entries (with instance:* / instance:prefix* wildcards).
@@ -62,6 +67,7 @@ class APIKey(Base):
             "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "is_active": self.is_active,
+            "exclude_from_budget": self.exclude_from_budget,
             "allowed_models": self.allowed_models,
             "metadata": self.metadata_,
         }
@@ -330,6 +336,11 @@ class UsageLog(Base):
         # query. status is low-cardinality; model is high-cardinality and left
         # unindexed on purpose.
         Index("ix_usage_logs_status_timestamp", "status", "timestamp"),
+        # Idempotency for imported usage: re-submitting the same (source,
+        # source_event_id) must not create a second row. Gateway-originated rows
+        # keep source_event_id NULL, and SQL treats NULLs as distinct on both
+        # SQLite and Postgres, so many (gateway, NULL) rows coexist freely.
+        UniqueConstraint("source", "source_event_id", name="uq_usage_logs_source_event"),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -340,6 +351,19 @@ class UsageLog(Base):
     model: Mapped[str] = mapped_column()
     provider: Mapped[str | None] = mapped_column()
     endpoint: Mapped[str] = mapped_column()
+
+    # Provenance. "gateway" for requests Otari served itself; a source slug (e.g.
+    # "claude_code") for usage imported through POST /v1/usage/external-events.
+    # source_event_id is the upstream event id used for idempotent import (NULL for
+    # gateway rows); source_label carries optional session/project attribution.
+    source: Mapped[str] = mapped_column(default="gateway", index=True)
+    source_event_id: Mapped[str | None] = mapped_column()
+    source_label: Mapped[str | None] = mapped_column()
+    # Whether this row's cost participates in budget enforcement. True for normal
+    # gateway rows; false for imported usage and for rows from keys flagged
+    # exclude_from_budget. False rows are recorded (and appear in cost analytics)
+    # but their cost is never written to User.spend.
+    counts_toward_budget: Mapped[bool] = mapped_column(default=True)
 
     prompt_tokens: Mapped[int | None] = mapped_column()
     completion_tokens: Mapped[int | None] = mapped_column()
@@ -371,6 +395,9 @@ class UsageLog(Base):
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "model": self.model,
             "endpoint": self.endpoint,
+            "source": self.source,
+            "source_label": self.source_label,
+            "counts_toward_budget": self.counts_toward_budget,
             "prompt_tokens": self.prompt_tokens,
             "completion_tokens": self.completion_tokens,
             "total_tokens": self.total_tokens,
