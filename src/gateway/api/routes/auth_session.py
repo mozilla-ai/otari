@@ -60,6 +60,8 @@ async def create_session(
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
+        # Generic error to the client; the raw failure is only logged here.
+        logger.warning("Failed to persist a dashboard session on sign-in", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error",
