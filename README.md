@@ -49,9 +49,6 @@ A few names you'll run into, and how they fit together:
 | **Otari CLI** | Command-line tool for accessing and managing Otari, a thin wrapper over the Python SDK. | [mozilla-ai/otari-cli](https://github.com/mozilla-ai/otari-cli) (`pip install otari-cli`) |
 
 
-> Browse every Otari repository on GitHub with [this filter](https://github.com/orgs/mozilla-ai/repositories?q=otari).
-
-
 ## Quickstart
 
 Get a metered gateway running and make a request in about a minute. No clone, no config file, no database. This is **standalone mode**: Otari runs on your machine and talks to providers with credentials you supply, and you don't need an otari.ai account.
