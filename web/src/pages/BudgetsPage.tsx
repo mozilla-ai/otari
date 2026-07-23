@@ -79,10 +79,10 @@ function PeriodPicker({ value, onChange }: { value: number | null; onChange: (se
 
   const trimmedDays = draft.trim();
   const daysValue = Number(trimmedDays);
-  // Whole days only: a fractional or non-positive entry is rejected outright
-  // (surfaced below and left unsaved) rather than silently rounded, so 1.5 never
-  // becomes 2.
-  const invalidDays = trimmedDays !== "" && (!Number.isInteger(daysValue) || daysValue <= 0);
+  // Whole days only: a fractional, non-positive, or non-finite entry is rejected
+  // outright (surfaced below and left unsaved) rather than silently rounded, so
+  // 1.5 never becomes 2. isSafeInteger also rules out an overflowing day count.
+  const invalidDays = trimmedDays !== "" && (!Number.isSafeInteger(daysValue) || daysValue <= 0);
 
   return (
     <div className="flex flex-col gap-2">
@@ -115,7 +115,7 @@ function PeriodPicker({ value, onChange }: { value: number | null; onChange: (se
               const n = Number(raw.trim());
               // Reject a non-integer or non-positive value instead of rounding it;
               // it is held as null (unsaved) until the operator types whole days.
-              onChange(raw.trim() === "" || !Number.isInteger(n) || n <= 0 ? null : n * DAY);
+              onChange(raw.trim() === "" || !Number.isSafeInteger(n) || n <= 0 ? null : n * DAY);
             }}
             placeholder="14"
             description={

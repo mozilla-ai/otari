@@ -62,7 +62,11 @@ function mockApi(body: UsageSummary | null) {
 // Surfaces the current location so a drill-down navigation can be asserted.
 function LocationProbe() {
   const loc = useLocation();
-  return <div data-testid="loc">{`${loc.pathname}${loc.search}`}</div>;
+  // A status role with an accessible name so tests query the probe by role
+  // rather than a test id.
+  return (
+    <div role="status" aria-label="Current location">{`${loc.pathname}${loc.search}`}</div>
+  );
 }
 
 function renderPage(ui: ReactElement) {
@@ -148,7 +152,7 @@ describe("UsagePage", () => {
     const row = (await screen.findByText("gpt-5.6")).closest("tr")!;
     await user.click(row);
 
-    const loc = screen.getByTestId("loc").textContent ?? "";
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
     expect(loc.startsWith("/activity")).toBe(true);
     expect(loc).toContain("model=gpt-5.6");
   });
@@ -169,7 +173,7 @@ describe("UsagePage", () => {
     const row = (await screen.findByText("gpt-5.6")).closest("tr")!;
     await user.click(row);
 
-    const loc = screen.getByTestId("loc").textContent ?? "";
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
     expect(loc.startsWith("/activity")).toBe(true);
     expect(loc).toContain("model=gpt-5.6");
     expect(loc).toContain("user_id=alice");
@@ -191,7 +195,7 @@ describe("UsagePage", () => {
     const row = (await screen.findByText("alice")).closest("tr")!;
     await user.click(row);
 
-    const loc = screen.getByTestId("loc").textContent ?? "";
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
     expect(loc.startsWith("/activity")).toBe(true);
     expect(loc).toContain("user_id=alice");
     expect(loc).toContain("model=gpt-5.6");
