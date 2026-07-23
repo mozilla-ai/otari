@@ -9,6 +9,8 @@ import asyncio
 
 import httpx
 import pytest
+from anthropic import APITimeoutError as AnthropicAPITimeoutError
+from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
     PROVIDER_BAD_REQUEST_DETAIL,
@@ -72,6 +74,16 @@ def test_timeout_maps_to_504() -> None:
     for exc in (asyncio.TimeoutError(), TimeoutError(), httpx.TimeoutException("slow")):
         mapping = classify_provider_error(exc)
         assert mapping == (504, PROVIDER_TIMEOUT_DETAIL)
+
+
+def test_sdk_wrapped_timeout_maps_to_504() -> None:
+    """The OpenAI/Anthropic SDKs wrap httpx timeouts into their own
+    ``APITimeoutError`` (no ``status_code``, not an httpx exception instance).
+    any-llm surfaces that wrapped type directly, so it must still classify
+    as a 504, not fall through to the generic 502."""
+    request = httpx.Request("POST", "http://upstream")
+    for exc in (OpenAIAPITimeoutError(request=request), AnthropicAPITimeoutError(request=request)):
+        assert classify_provider_error(exc) == (504, PROVIDER_TIMEOUT_DETAIL)
 
 
 @pytest.mark.parametrize(

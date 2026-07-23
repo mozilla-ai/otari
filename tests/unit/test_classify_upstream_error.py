@@ -6,8 +6,12 @@ import asyncio
 
 import httpx
 import pytest
+from anthropic import APIConnectionError as AnthropicAPIConnectionError
 from anthropic import APIStatusError as AnthropicAPIStatusError
+from anthropic import APITimeoutError as AnthropicAPITimeoutError
+from openai import APIConnectionError as OpenAIAPIConnectionError
 from openai import APIStatusError as OpenAIAPIStatusError
+from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._platform import _classify_upstream_error
 
@@ -59,6 +63,54 @@ def test_error_without_status_is_unknown_and_terminal() -> None:
     retryable, error_class = _classify_upstream_error(ValueError("no status here"))
     assert retryable is False
     assert error_class == "unknown"
+
+
+@pytest.mark.parametrize(
+    "sdk_error, expected_class",
+    [
+        (OpenAIAPITimeoutError, "timeout"),
+        (AnthropicAPITimeoutError, "timeout"),
+        (OpenAIAPIConnectionError, "conn_err"),
+        (AnthropicAPIConnectionError, "conn_err"),
+    ],
+)
+def test_sdk_wrapped_timeout_and_connection_errors_are_retryable(sdk_error: type, expected_class: str) -> None:
+    """any-llm calls the OpenAI/Anthropic SDKs directly, and both SDKs catch
+    ``httpx.TimeoutException``/network errors internally and re-raise as their
+    own ``APITimeoutError``/``APIConnectionError`` (``APITimeoutError``
+    subclasses ``APIConnectionError`` in both SDKs). Neither wrapped type is an
+    instance of any httpx exception or carries ``status_code``/``response``, so
+    a real provider timeout or "provider unreachable" reaches the classifier in
+    this shape in production, not as a raw httpx exception.
+    """
+    request = httpx.Request("POST", "http://upstream")
+    exc = sdk_error(request=request)
+    assert not hasattr(exc, "status_code")
+
+    retryable, error_class = _classify_upstream_error(exc)
+    assert retryable is True
+    assert error_class == expected_class
+
+
+@pytest.mark.parametrize(
+    "class_name, expected_class",
+    [
+        ("SomeProviderAPITimeoutError", "timeout"),
+        ("SomeProviderConnectionError", "conn_err"),
+    ],
+)
+def test_duck_typed_fallback_for_unenumerated_sdks(class_name: str, expected_class: str) -> None:
+    """Provider SDKs any-llm supports beyond OpenAI/Anthropic (cohere, mistral,
+    groq, bedrock, ...) may raise their own timeout/connection exception types
+    that this module doesn't import. A conservative class-name fallback still
+    classifies them as retryable rather than falling into ``unknown``, as long
+    as they carry no status code (so a real HTTP-status classification is
+    never shadowed).
+    """
+    exc_type = type(class_name, (Exception,), {})
+    retryable, error_class = _classify_upstream_error(exc_type("boom"))
+    assert retryable is True
+    assert error_class == expected_class
 
 
 @pytest.mark.parametrize("sdk_error", [AnthropicAPIStatusError, OpenAIAPIStatusError])

@@ -38,7 +38,6 @@ from enum import Enum, auto
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, Protocol, TypeVar
 from urllib.parse import ParseResult, urlparse
 
-import httpx
 from any_llm import LLMProvider
 from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import (
@@ -69,6 +68,7 @@ from gateway.api.routes._platform import (
     _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
     run_platform_attempts,
+    upstream_exception_shape,
 )
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
@@ -192,20 +192,6 @@ class ProviderErrorMapping(NamedTuple):
     detail: str
 
 
-def _upstream_status_code(exc: BaseException) -> int | None:
-    """Pull an HTTP status off an upstream exception, if it carries one.
-
-    any-llm surfaces provider HTTP errors either as ``exc.status_code`` or via an
-    attached ``exc.response.status_code``; everything else has neither.
-    """
-    status_code = getattr(exc, "status_code", None)
-    if status_code is None:
-        response = getattr(exc, "response", None)
-        if response is not None:
-            status_code = getattr(response, "status_code", None)
-    return status_code if isinstance(status_code, int) else None
-
-
 def _upstream_error_param(exc: BaseException) -> str | None:
     """Pull the offending request field off an upstream exception, if it names one.
 
@@ -271,12 +257,17 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     detail returned here is a fixed string: the raw provider message is never
     included, preserving the no-leak guarantee. The mapping is intentionally
     conservative, classifying only the cases a caller can act on and leaving
-    everything else (including provider 5xx) to the generic 502.
-    """
-    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
-        return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
+    everything else (including provider 5xx and connection errors) to the
+    generic 502.
 
-    status_code = _upstream_status_code(exc)
+    Timeout detection (including the OpenAI/Anthropic SDKs' own
+    ``APITimeoutError``, and a duck-typed fallback for other provider SDKs) is
+    shared with the hybrid-mode fallback classifier via
+    :func:`upstream_exception_shape`, so both stay in sync.
+    """
+    kind, status_code = upstream_exception_shape(exc)
+    if kind == "timeout":
+        return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
     if status_code is None:
         return None
     if status_code in (400, 422):
@@ -1899,7 +1890,8 @@ def raise_all_streaming_attempts_failed(
     invalid_request = mapping is not None and mapping.status_code == status.HTTP_400_BAD_REQUEST
     if invalid_request or len(route.attempts) <= 1:
         raise adapter.provider_error(exc) from exc
-    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+    kind, _ = upstream_exception_shape(exc)
+    if kind == "timeout":
         raise adapter.error(504, ALL_PROVIDERS_TIMED_OUT_DETAIL, ErrorKind.API) from exc
     raise adapter.error(502, ALL_PROVIDERS_FAILED_DETAIL, ErrorKind.API) from exc
 

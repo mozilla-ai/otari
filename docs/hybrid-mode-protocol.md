@@ -311,10 +311,21 @@ resolve response). The platform is responsible for correlating them.
 
 | Tag | Cause |
 |---|---|
-| `timeout` | `httpx.TimeoutException`, `asyncio.TimeoutError`, `TimeoutError` |
-| `conn_err` | `httpx.NetworkError` |
+| `timeout` | `httpx.TimeoutException`, `asyncio.TimeoutError`, `TimeoutError`, or the OpenAI/Anthropic SDKs' own `APITimeoutError` |
+| `conn_err` | `httpx.NetworkError`, or the OpenAI/Anthropic SDKs' own `APIConnectionError` |
 | `http_<code>` | Provider returned an HTTP status code (e.g. `http_429`, `http_401`) |
 | `unknown` | Any other exception class |
+
+Otari calls the OpenAI/Anthropic SDKs directly rather than httpx, and both SDKs
+catch `httpx.TimeoutException`/network errors internally and re-raise as their
+own `APITimeoutError`/`APIConnectionError`; neither is an instance of any
+`httpx` exception, and neither carries `status_code`/`response`. Otari
+recognizes these wrapped types explicitly (covering the majority of providers,
+which reuse the OpenAI/Anthropic base provider classes), plus a conservative
+class-name-based fallback (`*TimeoutError` / `*ConnectionError`, only when no
+status code is present) for the other any-llm provider SDKs, so a real
+"provider unreachable" or provider-side timeout still falls through to the
+next attempt instead of being misclassified as `unknown`.
 
 The field is **omitted entirely** when Otari can't map the failure to an
 exception class; this happens with mid-stream errors surfaced via the
