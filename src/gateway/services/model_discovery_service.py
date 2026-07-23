@@ -18,6 +18,7 @@ of upstream calls:
 """
 
 import asyncio
+import os
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -220,6 +221,53 @@ def _supports_list_models(provider_name: str) -> bool:
         return False
 
 
+def _env_provider_instances(configured: set[str]) -> list[str]:
+    """any-llm provider implementations made callable by their credential env var.
+
+    Completion routing works for any any-llm provider once its native credential
+    env var is set: ``get_provider_kwargs`` returns ``{}`` for a provider absent
+    from ``config.providers``, so any-llm reads the env var directly. Discovery
+    would otherwise only see ``config.providers``, so such a provider is callable
+    yet missing from GET /v1/models. This closes that gap by treating a provider
+    whose credential env var is present as discoverable under its implementation
+    name, which is exactly the request selector ``<impl>:<model>`` that routing
+    resolves.
+
+    Only providers that support live model listing are included; one that cannot
+    list models would just error out and be dropped from the catalog. Providers
+    already in ``configured`` are skipped so a named instance is neither shadowed
+    nor duplicated.
+    """
+    detected: list[str] = []
+    for metadata in AnyLLM.get_all_provider_metadata():
+        name = metadata.name
+        if name in configured or not metadata.list_models:
+            continue
+        env_key = metadata.env_key
+        if not env_key:
+            continue
+        # ENV_API_KEY_NAME may name interchangeable alternatives separated by "/"
+        # (e.g. gemini's "GEMINI_API_KEY/GOOGLE_API_KEY"); any one present is
+        # enough. Compound descriptions ("AWS_ACCESS_KEY_ID and
+        # AWS_SECRET_ACCESS_KEY") and the literal "None" are not real single
+        # variable names and simply never match os.environ.
+        candidates = (part.strip() for part in env_key.split("/"))
+        if any(part and part in os.environ for part in candidates):
+            detected.append(name)
+    return detected
+
+
+def _discoverable_instances(config: GatewayConfig) -> list[str]:
+    """Instance names to run discovery for.
+
+    Configured instances first, then any-llm providers made discoverable by an
+    env var alone (see ``_env_provider_instances``), so GET /v1/models matches
+    what completion routing can actually reach.
+    """
+    configured = list(config.providers.keys())
+    return configured + _env_provider_instances(set(configured))
+
+
 def _declared_models(config: GatewayConfig, instance: str) -> list[Model]:
     """Build Model rows from an instance's declared ``models:`` list.
 
@@ -409,8 +457,10 @@ async def discover_models_with_status(config: GatewayConfig) -> list[ProviderDis
     Deliberately not gated on ``config.model_discovery``: that flag governs what
     GET /v1/models publishes to API callers, and an operator who curates that
     listing still has to be able to see what their own credentials can reach.
+    Includes providers made callable by an env var alone, so this operator view
+    agrees with completion routing and with GET /v1/models.
     """
-    instances = list(config.providers)
+    instances = _discoverable_instances(config)
     # return_exceptions so one provider that somehow escapes _discover_uncached
     # cannot 500 the whole operator listing (this route awaits with no guard);
     # surface it as a per-provider error instead. Real cancellation still bubbles.
@@ -434,7 +484,11 @@ async def discover_all_models(
     config: GatewayConfig,
     provider_filter: str | None = None,
 ) -> list[tuple[str, Model]]:
-    """Discover models from configured providers with caching.
+    """Discover models from discoverable providers with caching.
+
+    Discoverable providers are the configured instances plus any-llm providers
+    made callable by an env var alone (see ``_discoverable_instances``), so the
+    catalog matches what completion routing can actually reach.
 
     Args:
         config: Gateway configuration with provider credentials.
@@ -445,10 +499,11 @@ async def discover_all_models(
         from the configured provider key rather than relying on ``owned_by``.
 
     """
+    discoverable = _discoverable_instances(config)
     if provider_filter:
-        instances = [provider_filter] if provider_filter in config.providers else []
+        instances = [provider_filter] if provider_filter in discoverable else []
     else:
-        instances = list(config.providers.keys())
+        instances = discoverable
 
     # Each instance goes through the shared cache + single-flight path, so a
     # failing provider is dialed at most once per negative-TTL window and the

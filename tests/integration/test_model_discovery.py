@@ -138,6 +138,57 @@ def test_list_models_with_discovery(
     assert "openai:gpt-4o-mini" in ids
 
 
+def test_list_models_includes_env_only_provider(
+    postgres_url: str,
+    discovery_master_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider callable via its env var alone appears in GET /v1/models (issue #221).
+
+    Setting only ANTHROPIC_API_KEY makes ``anthropic:<model>`` callable for
+    completions (get_provider_kwargs returns {} and any-llm reads the env var),
+    so discovery must list it too even though ``anthropic`` is not in
+    ``config.providers``.
+    """
+    from any_llm.types.model import Model
+
+    # anthropic is NOT configured; only its credential env var is present.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        auto_migrate=False,
+        model_discovery=True,
+        model_cache_ttl_seconds=300,
+        providers={},
+    )
+
+    async def fake_alist(provider: Any, **kwargs: Any) -> list[Model]:
+        if provider.value == "anthropic":
+            return [Model(**_make_openai_model("claude-3-5-sonnet", owned_by="anthropic"))]
+        return []
+
+    get_model_cache().clear()
+    client_gen = _make_client(config)
+    client = next(client_gen)
+    try:
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", side_effect=fake_alist),
+        ):
+            resp = client.get("/v1/models", headers=discovery_master_header)
+    finally:
+        client_gen.close()
+
+    assert resp.status_code == 200
+    ids = [m["id"] for m in resp.json()["data"]]
+    assert "anthropic:claude-3-5-sonnet" in ids
+
+
 def test_list_models_discovery_disabled(
     no_discovery_client: TestClient,
     discovery_master_header: dict[str, str],

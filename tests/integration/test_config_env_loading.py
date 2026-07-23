@@ -1,5 +1,6 @@
 import base64
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -9,6 +10,21 @@ import gateway.core.config as config_module
 from gateway.core.config import load_config
 from gateway.core.env import otari_env
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url, validate_outbound_fetch_url
+
+
+@pytest.fixture(autouse=True)
+def _restore_environ() -> Iterator[None]:
+    """Restore ``os.environ`` after each test in this module.
+
+    Several tests call ``load_config()``, which loads a ``.env`` via python-dotenv
+    into the process environment. Those writes persist past the test (monkeypatch
+    only reverts a key the test itself touched first), so a provider credential
+    like ``ANTHROPIC_API_KEY`` would otherwise leak into later tests. That now
+    matters because model discovery treats a provider whose credential env var is
+    set as discoverable.
+    """
+    with mock.patch.dict(os.environ, clear=False):
+        yield
 
 
 def test_load_config_loads_provider_env_vars_from_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

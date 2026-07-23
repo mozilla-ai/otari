@@ -77,7 +77,7 @@ pricing:
 | `reject_user_mismatch` | bool | `true` | When `true`, a non-master key whose request names a `user` other than its own is rejected (HTTP 403). When `false`, the client `user` is still forwarded to the provider but spend is always bound to the key's own user. The master key may always bill an arbitrary user. |
 | `stream_missing_usage_policy` | string | `"estimate"` | How to bill a streamed response that completes with no provider usage data: `"estimate"` (charge the up-front estimate), `"fail"` (charge estimate and mark errored), or `"allow_free"` (don't bill). |
 | `budget_estimate_default_output_tokens` | int | `1024` | Output-token count assumed when reserving budget for a request with no declared max output; reconciled to actual usage on completion. |
-| `model_discovery` | bool | `true` | Auto-discover models from configured providers for `GET /v1/models`. |
+| `model_discovery` | bool | `true` | Auto-discover models for `GET /v1/models`, from configured providers and from any provider made callable by its native credential environment variable alone (so the catalog matches what routing can reach). |
 | `model_cache_ttl_seconds` | int | `300` | TTL for the in-memory model-discovery cache (`0` disables caching). |
 | `model_discovery_timeout_seconds` | float | `10.0` | Per-provider timeout for a live model-discovery (`list_models`) call. Bounds how long an unreachable or slow provider can stall discovery before it is treated as failed. |
 | `model_discovery_negative_ttl_seconds` | float | `30.0` | How long a failed model-discovery result is remembered before the provider is dialed again, so an unreachable provider is not re-tried on every request (`0` disables negative caching). |

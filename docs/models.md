@@ -95,7 +95,11 @@ Or via environment variable:
 export OPENAI_API_KEY="sk-..."
 ```
 
-Both approaches work. Config file values take precedence over environment variables.
+Both approaches work, for routing and for discovery alike: a provider whose
+native credential environment variable is set (for example `ANTHROPIC_API_KEY`)
+is callable as `provider:model` and its models also appear in `GET /v1/models`,
+even without a `providers` entry. Config file values take precedence over
+environment variables.
 
 In standalone mode, provider config only tells Otari how to reach the backend.
 Otari also requires pricing for the model you call by default, unless
