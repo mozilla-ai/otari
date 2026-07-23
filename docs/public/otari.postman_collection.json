@@ -790,7 +790,7 @@
         {
           "name": "Get File Content",
           "request": {
-            "description": "Download the raw bytes of a file.",
+            "description": "Download the raw bytes of a file, streamed rather than buffered whole.",
             "header": [],
             "method": "GET",
             "url": {
