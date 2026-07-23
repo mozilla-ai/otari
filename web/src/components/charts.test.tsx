@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { BarTrendChart, Sparkline } from "@/components/charts";
+import { BarTrendChart, ChartTooltip, Sparkline } from "@/components/charts";
 
 describe("charts", () => {
   it("renders a single-series recharts bar chart with one bar per point", () => {
@@ -29,5 +29,29 @@ describe("charts", () => {
 
     expect(screen.getByRole("img", { name: "Spend trend" })).toBeInTheDocument();
     expect(container.querySelector(".recharts-line")).not.toBeNull();
+  });
+});
+
+describe("ChartTooltip", () => {
+  const fmt = (v: number) => `$${v.toFixed(2)}`;
+
+  it("formats the active value with its label", () => {
+    render(<ChartTooltip active label="Jul 20" payload={[{ value: 840.5 }]} formatValue={fmt} />);
+    expect(screen.getByText("Jul 20")).toBeInTheDocument();
+    expect(screen.getByText("$840.50")).toBeInTheDocument();
+  });
+
+  it("renders a zero value rather than treating it as empty", () => {
+    render(<ChartTooltip active label="Jul 20" payload={[{ value: 0 }]} formatValue={fmt} />);
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+  });
+
+  it("renders nothing when inactive, empty, or non-numeric", () => {
+    const { container: inactive } = render(<ChartTooltip payload={[{ value: 5 }]} formatValue={fmt} />);
+    expect(inactive).toBeEmptyDOMElement();
+    const { container: empty } = render(<ChartTooltip active payload={[]} formatValue={fmt} />);
+    expect(empty).toBeEmptyDOMElement();
+    const { container: nonNumeric } = render(<ChartTooltip active payload={[{ value: "n/a" }]} formatValue={fmt} />);
+    expect(nonNumeric).toBeEmptyDOMElement();
   });
 });

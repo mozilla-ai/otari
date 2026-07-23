@@ -169,14 +169,16 @@ function formatBucketLabel(iso: string, bucket: UsageBucket): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-// The selected metric's series shaped for the shared trend chart, plus the peak
-// (floored at 1, matching the chart's y-scale) and count for the caption.
+// The selected metric's series shaped for the shared trend chart, plus the true
+// peak and count for the caption. The peak is the real data max (0 for an
+// all-zero window), so the caption and the chart's auto-scaled bars agree; the
+// chart is only rendered for a non-empty series, so the empty guard is defensive.
 function trendData(series: UsageSeriesPoint[], metric: ChartMetric, bucket: UsageBucket) {
   const points = series.map((point) => ({
     label: formatBucketLabel(point.bucket_start, bucket),
     value: metricValue(point, metric),
   }));
-  const peak = Math.max(1, ...points.map((p) => p.value));
+  const peak = points.length ? Math.max(...points.map((p) => p.value)) : 0;
   return { points, peak, count: series.length };
 }
 

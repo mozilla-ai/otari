@@ -17,7 +17,9 @@ export interface ChartPoint {
 
 // Tooltip body. recharts clones this element and injects `active`, `payload`,
 // and `label` at render time, so only `formatValue` is passed by the caller.
-function ChartTooltip({
+// Exported for direct branch testing (active/inactive, the zero-value case, and
+// the non-number guard) since recharts hover is impractical to drive in jsdom.
+export function ChartTooltip({
   active,
   label,
   payload,
