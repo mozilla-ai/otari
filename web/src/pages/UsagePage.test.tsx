@@ -175,6 +175,23 @@ describe("UsagePage", () => {
     expect(summaryCalls.at(-1)).toContain("model=claude-sonnet-5");
   });
 
+  it("renders the trend with recharts and retires the hand-rolled SVG chart", async () => {
+    mockApi(summary());
+    const { container } = renderPage(<UsagePage />);
+    await screen.findByText("gpt-5.6");
+
+    // The trend is now a recharts chart (labelled "<metric> per <bucket>"), and a
+    // reusable sparkline rides the KPI tiles off the same bucketed series.
+    expect(screen.getByRole("img", { name: "cost per day" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /Spend trend/ })).toBeInTheDocument();
+    expect(container.querySelector(".recharts-surface")).not.toBeNull();
+
+    // The retired hand-rolled chart's fingerprints are gone: its "<metric> over
+    // time" label and its fixed 720x224 viewBox.
+    expect(screen.queryByRole("img", { name: /over time/ })).not.toBeInTheDocument();
+    expect(container.querySelector('svg[viewBox="0 0 720 224"]')).toBeNull();
+  });
+
   it("switches the chart metric via the segmented toggle", async () => {
     const user = userEvent.setup();
     mockApi(summary());

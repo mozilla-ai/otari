@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import { useUsageSummary, useUsers } from "@/api/hooks";
 import type { UsageBucket, UsageFilters, UsageGroupRow, UsageSeriesPoint } from "@/api/types";
+import { BarTrendChart, Sparkline } from "@/components/charts";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { DeltaHint, ErrorBanner, FilterComboBox, PageHeader, StatCard } from "@/components/ui";
 import { deltaFraction, formatPct, formatTokens, formatUsd } from "@/lib/format";
@@ -168,71 +169,15 @@ function formatBucketLabel(iso: string, bucket: UsageBucket): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-// A single-series bar chart of the selected metric. Hand-rolled SVG (the dashboard
-// keeps zero chart dependencies); the breakdown tables above are the accessible
-// data table, and each bar carries a native <title> for hover/screen-reader. One
-// series means one color, so nothing is encoded by hue alone.
-function UsageChart({
-  series,
-  metric,
-  bucket,
-}: {
-  series: UsageSeriesPoint[];
-  metric: ChartMetric;
-  bucket: UsageBucket;
-}) {
-  const width = 720;
-  const height = 200;
-  const pad = 8;
-  const max = Math.max(1, ...series.map((p) => metricValue(p, metric)));
-  const n = series.length;
-  const slot = n > 0 ? (width - pad * 2) / n : 0;
-  const barW = Math.max(1, slot * 0.7);
-
-  // Label a handful of x positions (first / middle / last) so ticks never collide.
-  // Dedupe so a short series (where middle == an endpoint) doesn't repeat a key.
-  const labelIdx = n <= 1 ? [0] : [...new Set([0, Math.floor(n / 2), n - 1])];
-
-  return (
-    <figure className="flex flex-col gap-2">
-      <svg
-        viewBox={`0 0 ${width} ${height + 24}`}
-        preserveAspectRatio="none"
-        role="img"
-        className="w-full"
-        aria-label={`${metric} over time`}
-      >
-        <title>{`${metric} per ${bucket}`}</title>
-        {series.map((point, i) => {
-          const value = metricValue(point, metric);
-          const h = (value / max) * (height - pad);
-          const x = pad + i * slot + (slot - barW) / 2;
-          const y = height - h;
-          return (
-            <rect key={point.bucket_start} x={x} y={y} width={barW} height={h} rx={1.5} className="fill-[var(--otari-brand)]">
-              <title>{`${formatBucketLabel(point.bucket_start, bucket)}: ${formatMetric(value, metric)}`}</title>
-            </rect>
-          );
-        })}
-        {labelIdx.map((i) =>
-          series[i] ? (
-            <text
-              key={`lbl_${i}`}
-              x={pad + i * slot + slot / 2}
-              y={height + 16}
-              textAnchor="middle"
-              className="fill-[var(--otari-muted)] text-[10px]"
-            >
-              {formatBucketLabel(series[i].bucket_start, bucket)}
-            </text>
-          ) : null,
-        )}
-      </svg>
-      <figcaption className="text-xs text-[var(--otari-muted)]">
-        {formatMetric(max, metric)} peak · {n} {bucket === "hour" ? "hours" : "days"} (times in UTC)
-      </figcaption>
-    </figure>
-  );
+// The selected metric's series shaped for the shared trend chart, plus the peak
+// (floored at 1, matching the chart's y-scale) and count for the caption.
+function trendData(series: UsageSeriesPoint[], metric: ChartMetric, bucket: UsageBucket) {
+  const points = series.map((point) => ({
+    label: formatBucketLabel(point.bucket_start, bucket),
+    value: metricValue(point, metric),
+  }));
+  const peak = Math.max(1, ...points.map((p) => p.value));
+  return { points, peak, count: series.length };
 }
 
 // ---------- page ----------
@@ -330,6 +275,12 @@ export function UsagePage() {
 
   const errorRate = totals && totals.request_count > 0 ? totals.error_count / totals.request_count : 0;
 
+  // The bucketed series is already on the wire; reuse it for tile sparklines. A
+  // single point has no trend to draw, so sparklines only appear with 2+ buckets.
+  const series = data?.series ?? [];
+  const hasTrend = series.length > 1;
+  const trend = trendData(series, metric, preset.bucket);
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -393,6 +344,7 @@ export function UsagePage() {
               label="Spend"
               value={totals ? formatUsd(totals.cost) : "—"}
               hint={totals ? <DeltaHint fraction={deltaFraction(totals.cost, prevTotals?.cost)} /> : null}
+              chart={hasTrend ? <Sparkline values={series.map((p) => p.cost)} ariaLabel="Spend trend over the selected window" /> : undefined}
             />
             <StatCard
               label="Requests"
@@ -410,11 +362,17 @@ export function UsagePage() {
                   </span>
                 ) : null
               }
+              chart={
+                hasTrend ? (
+                  <Sparkline values={series.map((p) => p.requests)} ariaLabel="Request volume trend over the selected window" />
+                ) : undefined
+              }
             />
             <StatCard
               label="Tokens"
               value={totals ? formatTokens(totals.total_tokens) : "—"}
               hint={totals ? <DeltaHint fraction={deltaFraction(totals.total_tokens, prevTotals?.total_tokens)} /> : null}
+              chart={hasTrend ? <Sparkline values={series.map((p) => p.tokens)} ariaLabel="Token usage trend over the selected window" /> : undefined}
             />
             <StatCard
               label="Cache read"
@@ -490,12 +448,22 @@ export function UsagePage() {
               <div className="flex h-48 items-center justify-center">
                 <Spinner size="sm" />
               </div>
-            ) : (data?.series.length ?? 0) === 0 ? (
+            ) : series.length === 0 ? (
               <div className="flex h-48 items-center justify-center text-sm text-[var(--otari-muted)]">
                 No data in this range.
               </div>
             ) : (
-              <UsageChart series={data?.series ?? []} metric={metric} bucket={preset.bucket} />
+              <figure className="flex flex-col gap-2">
+                <BarTrendChart
+                  data={trend.points}
+                  formatValue={(value) => formatMetric(value, metric)}
+                  ariaLabel={`${metric} per ${preset.bucket}`}
+                />
+                <figcaption className="text-xs text-[var(--otari-muted)]">
+                  {formatMetric(trend.peak, metric)} peak · {trend.count} {preset.bucket === "hour" ? "hours" : "days"} (times
+                  in UTC)
+                </figcaption>
+              </figure>
             )}
           </div>
         </>

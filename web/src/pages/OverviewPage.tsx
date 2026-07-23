@@ -12,9 +12,10 @@ import {
   useUsers,
 } from "@/api/hooks";
 import type { UsageEntry } from "@/api/types";
+import { Sparkline } from "@/components/charts";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { DeltaHint, ErrorBanner, PageHeader, StatCard } from "@/components/ui";
-import { deltaFraction, formatNumber, formatPct, formatRelative, formatTokens, formatUsd } from "@/lib/format";
+import { deltaFraction, formatNumber, formatPct, formatRelative, formatUsd } from "@/lib/format";
 import { budgetHealth, errorRateHealth, providerHealthStatus, toStatStatus } from "@/lib/overview";
 
 const DAY_MS = 86_400_000;
@@ -66,7 +67,6 @@ function useWindows() {
 // A status tile's short word (paired with the color so status never rides on hue
 // alone), keyed off the derived Health.
 const ERROR_WORDS = { ok: "Healthy", warn: "Elevated", alert: "High" } as const;
-const PROVIDER_WORDS = { ok: "All up", warn: "Degraded", alert: "All down" } as const;
 const BUDGET_WORDS = { ok: "On track", warn: "Near limit", alert: "Over budget" } as const;
 
 // The authenticated index uses the provider list to make the empty gateway a
@@ -100,6 +100,11 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
   const todayTotals = today.data?.totals;
   const periodTotals = period.data?.totals;
   const prevTotals = previous.data?.totals;
+
+  // The 30-day daily series is already on the wire (used for tile sparklines).
+  // A single point has no trend to draw, so sparklines only appear with 2+ days.
+  const periodSeries = period.data?.series ?? [];
+  const hasTrend = periodSeries.length > 1;
 
   const err = errorRateHealth(periodTotals);
   const errPrev = errorRateHealth(prevTotals);
@@ -145,6 +150,11 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
           label="Spend, last 30 days"
           value={periodTotals ? formatUsd(periodTotals.cost) : "—"}
           hint={periodTotals ? <DeltaHint fraction={deltaFraction(periodTotals.cost, prevTotals?.cost)} /> : null}
+          chart={
+            hasTrend ? (
+              <Sparkline values={periodSeries.map((p) => p.cost)} ariaLabel="Spend trend over the last 30 days" />
+            ) : undefined
+          }
         />
         <StatCard
           label="Requests, last 30 days"
@@ -154,16 +164,14 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
               <DeltaHint fraction={deltaFraction(periodTotals.request_count, prevTotals?.request_count)} />
             ) : null
           }
-        />
-        <StatCard
-          label="Cache reads, last 30 days"
-          value={periodTotals ? formatTokens(periodTotals.cache_read_tokens) : "—"}
-          hint={
-            periodTotals ? (
-              <DeltaHint fraction={deltaFraction(periodTotals.cache_read_tokens, prevTotals?.cache_read_tokens)} />
-            ) : null
+          chart={
+            hasTrend ? (
+              <Sparkline
+                values={periodSeries.map((p) => p.requests)}
+                ariaLabel="Request volume trend over the last 30 days"
+              />
+            ) : undefined
           }
-          to="/usage"
         />
         <StatCard
           label="Error rate, last 30 days"
@@ -179,16 +187,6 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
           statusLabel={budgets.data && budget.status !== "neutral" ? BUDGET_WORDS[budget.status] : undefined}
           hint={budgets.data ? (budget.worst ? `${budget.label} · worst: ${budget.worst.name}` : budget.label) : undefined}
           to="/budgets"
-        />
-        <StatCard
-          label="Providers healthy"
-          value={health.data ? `${health.data.healthy}/${health.data.total}` : "—"}
-          status={health.data ? toStatStatus(providerHealth) : undefined}
-          statusLabel={health.data && providerHealth !== "neutral" ? PROVIDER_WORDS[providerHealth] : undefined}
-          hint={
-            health.data ? (health.data.checked_at ? `checked ${formatRelative(health.data.checked_at)}` : "not checked yet") : undefined
-          }
-          to="/providers"
         />
         <StatCard label="Active keys" value={keys.data ? formatNumber(activeKeys) : "—"} to="/keys" />
         <StatCard label="Active users" value={users.data ? formatNumber(activeUsers) : "—"} to="/users" />

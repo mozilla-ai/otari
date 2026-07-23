@@ -122,23 +122,36 @@ describe("OverviewPage", () => {
     expect(screen.getByText("Elevated")).toBeInTheDocument(); // error-rate status word (non-hue)
   });
 
-  it("shows 30-day cache reads as a tile", async () => {
-    mockApi({
-      today: { cost: 5 },
-      period: { cost: 200, cache_read_tokens: 5_100_000 },
-      prev: { cost: 100, cache_read_tokens: 1_000_000 },
+  it("renders spend and request-volume sparklines from the 30-day series", async () => {
+    const series = [
+      { bucket_start: "2026-07-20T00:00:00Z", cost: 10, tokens: 1000, requests: 100 },
+      { bucket_start: "2026-07-21T00:00:00Z", cost: 20, tokens: 2000, requests: 150 },
+      { bucket_start: "2026-07-22T00:00:00Z", cost: 15, tokens: 1500, requests: 120 },
+    ];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/usage/summary")) {
+        if (url.includes("bucket=hour")) return jsonResponse(summary({ cost: 5 }));
+        if (url.includes("end_date=")) return jsonResponse(summary({ cost: 100 }));
+        // The 30-day (day-bucket, unbounded) query carries the series the tiles chart.
+        return jsonResponse({ ...summary({ cost: 200, request_count: 2000 }), series });
+      }
+      if (url.includes("/v1/providers/health")) {
+        return jsonResponse({ providers: [], healthy: 1, total: 1, checked_at: null });
+      }
+      return jsonResponse([]);
     });
     renderPage(<OverviewPage />);
 
-    expect(await screen.findByText("5.1M")).toBeInTheDocument();
-    expect(screen.getByText("Cache reads, last 30 days")).toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Spend trend over the last 30 days" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Request volume trend over the last 30 days" })).toBeInTheDocument();
   });
 
   it("shows a dash for error rate when there are no requests", async () => {
     mockApi({ period: { request_count: 0, error_count: 0 } });
     renderPage(<OverviewPage />);
     // No status word for a neutral error-rate tile.
-    expect(await screen.findByText("0/0")).toBeInTheDocument();
+    expect(await screen.findByText("Error rate, last 30 days")).toBeInTheDocument();
     expect(screen.queryByText("Elevated")).not.toBeInTheDocument();
   });
 
@@ -160,10 +173,9 @@ describe("OverviewPage", () => {
       budgets: [{ budget_id: "team", name: "team", max_budget: 10, user_count: 2, total_spend: 25, total_reserved: 0 }],
     });
     renderPage(<OverviewPage />);
-    expect(await screen.findByText("2/3")).toBeInTheDocument();
-    expect(screen.getByText("Degraded")).toBeInTheDocument();
-    // The strip lists only the problems, each a link.
-    expect(screen.getByText("1 provider unreachable")).toBeInTheDocument();
+    // Provider health has no tile of its own; a degraded state surfaces only via
+    // the attention strip, each problem a link.
+    expect(await screen.findByText("1 provider unreachable")).toBeInTheDocument();
     expect(screen.getByText("1 budget over limit")).toBeInTheDocument();
   });
 
@@ -171,7 +183,9 @@ describe("OverviewPage", () => {
     mockApi({ health: { providers: [], healthy: 3, total: 3, checked_at: "2026-07-22T00:00:00Z" } });
     renderPage(<OverviewPage />);
 
-    await screen.findByText("3/3");
+    // Wait for the tiles to resolve (spend today + last-30d both read $0.00 here),
+    // then confirm no neutral status strip renders when every source is healthy.
+    expect((await screen.findAllByText("$0.00")).length).toBeGreaterThan(0);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
