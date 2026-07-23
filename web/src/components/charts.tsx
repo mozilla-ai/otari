@@ -25,11 +25,12 @@ function ChartTooltip({
 }: {
   active?: boolean;
   label?: ReactNode;
-  payload?: readonly { value?: number }[];
+  // recharts types a datum's value as `number | string`; guard before formatting.
+  payload?: readonly { value?: number | string }[];
   formatValue: (value: number) => string;
 }) {
   const value = payload?.[0]?.value;
-  if (!active || value == null) {
+  if (!active || typeof value !== "number") {
     return null;
   }
   return (

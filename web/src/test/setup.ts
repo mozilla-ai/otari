@@ -14,4 +14,8 @@ class ResizeObserverStub {
   disconnect(): void {}
 }
 
-globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+// Only install the stub when the environment lacks a ResizeObserver, so a future
+// jsdom (or another polyfill) that provides one is not clobbered.
+if (!globalThis.ResizeObserver) {
+  globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}

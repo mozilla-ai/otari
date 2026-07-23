@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -150,9 +150,13 @@ describe("OverviewPage", () => {
   it("shows a dash for error rate when there are no requests", async () => {
     mockApi({ period: { request_count: 0, error_count: 0 } });
     renderPage(<OverviewPage />);
-    // No status word for a neutral error-rate tile.
-    expect(await screen.findByText("Error rate, last 30 days")).toBeInTheDocument();
-    expect(screen.queryByText("Elevated")).not.toBeInTheDocument();
+    // Scope to the error-rate tile: its value is a dash (not a percentage) and it
+    // carries no status word when the rate is neutral.
+    const label = await screen.findByText("Error rate, last 30 days");
+    const tile = label.closest("div")!;
+    expect(within(tile).getByText("—")).toBeInTheDocument();
+    expect(within(tile).queryByText("Elevated")).not.toBeInTheDocument();
+    expect(within(tile).queryByText(/%/)).not.toBeInTheDocument();
   });
 
   it("computes budget health with cap * user_count and links to budgets", async () => {
