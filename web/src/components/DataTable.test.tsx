@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import type { Selection, SortDescriptor } from "react-aria-components";
@@ -180,15 +180,48 @@ describe("DataTable", () => {
     const renderDetail = (r: Row) => <div>{`detail for ${r.name}`}</div>;
     render(<DataTable {...base({ onRowAction, detailKey: "b", renderDetail })} />);
 
-    const rows = screen.getAllByRole("row");
-    const bravoIndex = rows.findIndex((r) => within(r).queryByText("Bravo"));
-    expect(bravoIndex).toBeGreaterThan(0);
-    expect(within(rows[bravoIndex + 1]).getByText("detail for Bravo")).toBeInTheDocument();
+    // The detail row is a portal-managed <tr> outside react-aria's collection
+    // (no grid row role) and is inserted after react-aria commits its rows, so
+    // adjacency is asserted on the DOM sibling once it lands.
+    await waitFor(() => {
+      const bravoRow = screen.getByRole("row", { name: /Bravo/ });
+      expect(bravoRow.nextElementSibling?.textContent).toContain("detail for Bravo");
+    });
 
     // Activating the detail row itself must not fire onRowAction (which would
     // re-toggle the panel in callers).
     await user.click(screen.getByText("detail for Bravo"));
     expect(onRowAction).not.toHaveBeenCalled();
+  });
+
+  it("still fires onRowAction on a row click while a selection is active", async () => {
+    // react-aria's toggle behavior repurposes row clicks into selection
+    // extension once any row is selected; DataTable intercepts those clicks so
+    // the drill-in keeps working (checkboxes own selection).
+    const user = userEvent.setup();
+    const onRowAction = vi.fn();
+
+    function Harness() {
+      const [selected, setSelected] = useState<Selection>(new Set(["a"]));
+      return (
+        <>
+          <span data-testid="count">{selected === "all" ? "all" : selected.size}</span>
+          <DataTable
+            {...base({
+              onRowAction,
+              selectionMode: "multiple",
+              selectedKeys: selected,
+              onSelectionChange: setSelected,
+            })}
+          />
+        </>
+      );
+    }
+
+    render(<Harness />);
+    await user.click(within(screen.getByRole("row", { name: /Bravo/ })).getByText("Bravo"));
+    expect(onRowAction).toHaveBeenCalledWith("b");
+    expect(screen.getByTestId("count")).toHaveTextContent("1");
   });
 
   it("reports sort changes from a sortable column header", async () => {

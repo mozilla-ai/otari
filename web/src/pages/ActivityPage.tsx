@@ -360,7 +360,7 @@ export function ActivityPage() {
   // docstring.
   const renderDetail = useCallback(
     (entry: UsageEntry) => (
-      <div className="border-y border-[var(--otari-line)] bg-[var(--otari-bg)]">
+      <div>
         <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
           <span className="text-sm font-medium text-[var(--otari-ink)]">Request detail</span>
           <Button size="sm" variant="ghost" onPress={() => setExpandedId(null)}>
