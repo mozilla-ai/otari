@@ -55,8 +55,8 @@ describe("TablePagination", () => {
   it("changes rows per page", async () => {
     const user = userEvent.setup();
     const { onPageSizeChange } = setup();
-    await user.selectOptions(screen.getByRole("combobox", { name: "Rows per page" }), "250");
-    expect(onPageSizeChange).toHaveBeenCalledWith(250);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Rows per page" }), "100");
+    expect(onPageSizeChange).toHaveBeenCalledWith(100);
   });
 
   it("with an unknown total, hides last and uses the next fallback", () => {

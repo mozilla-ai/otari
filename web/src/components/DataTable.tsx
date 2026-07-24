@@ -1,4 +1,5 @@
 import { Spinner, Table } from "@heroui/react";
+import { useCallback } from "react";
 import type { ReactNode } from "react";
 import { Checkbox as AriaCheckbox } from "react-aria-components";
 import type { Key, Selection, SortDescriptor } from "react-aria-components";
@@ -91,7 +92,7 @@ const SELECTION_COLUMN_WIDTH = 44;
 // `overflow: hidden` (also in globals.css) clips the header and last row to that
 // one radius, so the header meets the card corner exactly.
 
-export function DataTable<Row>({
+export function DataTable<Row extends object>({
   ariaLabel,
   columns,
   rows,
@@ -110,6 +111,34 @@ export function DataTable<Row>({
 }: DataTableProps<Row>) {
   const showSelection = selectionMode === "multiple";
   const Container = resizable ? Table.ResizableContainer : Table.ScrollContainer;
+
+  // Rows render through react-aria's items-collection path so each row element
+  // is cached per row object: a selection toggle re-renders only the affected
+  // row instead of the whole page of rows (which made checkbox clicks lag by
+  // whole seconds at large page sizes). The cache is invalidated when any input
+  // that changes row rendering does (the `dependencies` on Table.Body below),
+  // so callers must keep `columns` (and `rowClassName`, if used) referentially
+  // stable across unrelated re-renders for the cache to pay off.
+  const renderRow = useCallback(
+    (row: Row) => {
+      const key = getRowKey(row);
+      return (
+        <Table.Row key={key} id={key} className={rowClassName?.(row)}>
+          {showSelection ? (
+            <Table.Cell>
+              <SelectionCheckbox ariaLabel="Select row" />
+            </Table.Cell>
+          ) : null}
+          {columns.map((col) => (
+            <Table.Cell key={col.id} className={col.align === "end" ? "text-right tabular-nums" : undefined}>
+              {col.cell(row)}
+            </Table.Cell>
+          ))}
+        </Table.Row>
+      );
+    },
+    [getRowKey, rowClassName, showSelection, columns],
+  );
 
   return (
     <Table.Root className="otari-table">
@@ -159,6 +188,8 @@ export function DataTable<Row>({
             ))}
           </Table.Header>
           <Table.Body
+            items={isLoading && rows.length === 0 ? [] : rows}
+            dependencies={[renderRow]}
             renderEmptyState={() => (
               <div className="px-4 py-10 text-center text-[var(--otari-muted)]">
                 {isLoading ? (
@@ -171,23 +202,7 @@ export function DataTable<Row>({
               </div>
             )}
           >
-            {(isLoading && rows.length === 0 ? [] : rows).map((row) => {
-              const key = getRowKey(row);
-              return (
-                <Table.Row key={key} id={key} className={rowClassName?.(row)}>
-                  {showSelection ? (
-                    <Table.Cell>
-                      <SelectionCheckbox ariaLabel="Select row" />
-                    </Table.Cell>
-                  ) : null}
-                  {columns.map((col) => (
-                    <Table.Cell key={col.id} className={col.align === "end" ? "text-right tabular-nums" : undefined}>
-                      {col.cell(row)}
-                    </Table.Cell>
-                  ))}
-                </Table.Row>
-              );
-            })}
+            {renderRow}
           </Table.Body>
         </Table.Content>
       </Container>

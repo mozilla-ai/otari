@@ -241,6 +241,29 @@ function RequestStatusPill({ status }: { status: string }) {
   );
 }
 
+// Column definitions and the row-key getter live at module scope so their
+// identity is stable across renders: DataTable caches rendered rows on them,
+// and a new array each render would rebuild every row on each selection click.
+const REQUEST_COLUMNS: DataTableColumn<UsageEntry>[] = [
+  {
+    id: "time",
+    header: "Time",
+    isRowHeader: true,
+    cell: (e) => (
+      <span className="text-[var(--otari-muted)]" title={new Date(e.timestamp).toLocaleString()}>
+        {requestTimeAgo(e.timestamp)}
+      </span>
+    ),
+  },
+  { id: "model", header: "Model", cell: (e) => <span className="text-[var(--otari-ink)]">{e.model}</span> },
+  { id: "user", header: "User", cell: (e) => <span className="text-[var(--otari-muted)]">{e.user_id ?? "—"}</span> },
+  { id: "tokens", header: "Tokens", align: "end", cell: (e) => (e.total_tokens === null ? "—" : e.total_tokens.toLocaleString()) },
+  { id: "cost", header: "Cost", align: "end", cell: (e) => (e.cost === null ? "—" : formatUsd(e.cost)) },
+  { id: "status", header: "Status", cell: (e) => <RequestStatusPill status={e.status} /> },
+];
+
+const getRequestRowKey = (e: UsageEntry): string => e.id;
+
 // The raw usage rows for the current filter window, paginated, with selection
 // and the imported-row bulk actions (Delete, Set price). Only imported rows are
 // selectable; enforced gateway rows are disabled so bulk ops never touch them.
@@ -314,24 +337,6 @@ function UsageRequests({ filters, anyFilter }: { filters: UsageFilters; anyFilte
       },
     );
 
-  const columns: DataTableColumn<UsageEntry>[] = [
-    {
-      id: "time",
-      header: "Time",
-      isRowHeader: true,
-      cell: (e) => (
-        <span className="text-[var(--otari-muted)]" title={new Date(e.timestamp).toLocaleString()}>
-          {requestTimeAgo(e.timestamp)}
-        </span>
-      ),
-    },
-    { id: "model", header: "Model", cell: (e) => <span className="text-[var(--otari-ink)]">{e.model}</span> },
-    { id: "user", header: "User", cell: (e) => <span className="text-[var(--otari-muted)]">{e.user_id ?? "—"}</span> },
-    { id: "tokens", header: "Tokens", align: "end", cell: (e) => (e.total_tokens === null ? "—" : e.total_tokens.toLocaleString()) },
-    { id: "cost", header: "Cost", align: "end", cell: (e) => (e.cost === null ? "—" : formatUsd(e.cost)) },
-    { id: "status", header: "Status", cell: (e) => <RequestStatusPill status={e.status} /> },
-  ];
-
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-sm font-semibold text-[var(--otari-ink)]">Individual requests</h2>
@@ -357,9 +362,9 @@ function UsageRequests({ filters, anyFilter }: { filters: UsageFilters; anyFilte
 
       <DataTable
         ariaLabel="Individual requests"
-        columns={columns}
+        columns={REQUEST_COLUMNS}
         rows={rows}
-        getRowKey={(e) => e.id}
+        getRowKey={getRequestRowKey}
         isLoading={usage.isLoading}
         emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
         selectionMode="multiple"

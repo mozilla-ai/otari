@@ -17,7 +17,7 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
-import { TablePagination } from "@/components/TablePagination";
+import { PAGE_SIZE_OPTIONS, TablePagination } from "@/components/TablePagination";
 import { ErrorBanner, FilterComboBox, FilterSelect, PageHeader } from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 import { useUrlState } from "@/lib/urlState";
@@ -240,7 +240,10 @@ export function ActivityPage() {
   const apiKeyFilter = url.get("api_key_id");
   const pricedFilter = url.get("priced");
   const page = url.getNumber("page");
-  const pageSize = url.getNumber("size");
+  // Cap URL-supplied sizes at the largest offered option: selection latency
+  // grows linearly with rows on the page, so an old bookmark with size=500
+  // must not resurrect second-long checkbox clicks.
+  const pageSize = Math.min(url.getNumber("size"), Math.max(...PAGE_SIZE_OPTIONS));
 
   // Snapshot the window so a rolling preset does not recompute "now" every render
   // (which would churn the query key). Re-anchored when the range changes or on refresh.
