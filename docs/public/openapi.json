@@ -4924,6 +4924,17 @@
             ],
             "title": "End Date"
           },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint"
+          },
           "ids": {
             "anyOf": [
               {
@@ -5529,6 +5540,17 @@
               }
             ],
             "title": "End Date"
+          },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endpoint"
           },
           "ids": {
             "anyOf": [
@@ -10189,6 +10211,24 @@
             }
           },
           {
+            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "in": "query",
+            "name": "counts_toward_budget",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "title": "Counts Toward Budget"
+            }
+          },
+          {
             "description": "Time-series granularity: 'hour' or 'day'",
             "in": "query",
             "name": "bucket",
@@ -10408,6 +10448,24 @@
               ],
               "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
               "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "in": "query",
+            "name": "counts_toward_budget",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "title": "Counts Toward Budget"
             }
           }
         ],

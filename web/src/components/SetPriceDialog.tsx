@@ -1,5 +1,5 @@
 import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ErrorBanner, InfoBanner } from "@/components/ui";
 
@@ -75,6 +75,18 @@ export function SetPriceDialog({
   const [output, setOutput] = useState("");
   const [cacheRead, setCacheRead] = useState("");
   const [cacheWrite, setCacheWrite] = useState("");
+
+  // The dialog stays mounted across close/reopen, so clear the rate fields each time
+  // it opens: reopening for a different selection must not inherit the last rates
+  // (a real footgun when the values set money).
+  useEffect(() => {
+    if (isOpen) {
+      setInput("");
+      setOutput("");
+      setCacheRead("");
+      setCacheWrite("");
+    }
+  }, [isOpen]);
 
   const inputRate = parseRate(input);
   const outputRate = parseRate(output);

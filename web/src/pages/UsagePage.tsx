@@ -1,4 +1,5 @@
 import { Button, Spinner } from "@heroui/react";
+import clsx from "clsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -475,6 +476,10 @@ export function UsagePage() {
   ).map((m) => ({ value: m, label: m }));
 
   const anyFilter = Boolean(modelFilter.trim() || userFilter || apiKeyFilter || preset.seconds !== null);
+  // On mobile the user/model/key controls collapse behind a "Filters" toggle so
+  // the tiles and breakdowns sit near the top; desktop shows them inline.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterCount = [modelFilter.trim(), userFilter, apiKeyFilter].filter(Boolean).length;
   // Distinguish "this gateway has never served a request" from "no rows match
   // these filters": the first is an onboarding state, the second is a filter hint.
   const isEmptyEver = Boolean(data && totals && totals.request_count === 0 && !anyFilter);
@@ -545,7 +550,20 @@ export function UsagePage() {
             </Button>
           ))}
         </div>
-        <div className="flex flex-wrap items-end gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="md:hidden"
+          onPress={() => setFiltersOpen((open) => !open)}
+          aria-expanded={filtersOpen}
+          aria-controls="usage-filters"
+        >
+          Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
+        </Button>
+        <div
+          id="usage-filters"
+          className={clsx("flex-wrap items-end gap-3 md:flex", filtersOpen ? "flex w-full md:w-auto" : "hidden")}
+        >
           <FilterComboBox
             label="User"
             value={userFilter}

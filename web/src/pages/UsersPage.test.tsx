@@ -230,4 +230,53 @@ describe("UsersPage", () => {
     expect(del).toBeDefined();
     expect(screen.queryByText("alice")).not.toBeInTheDocument();
   });
+
+  it("bulk-deletes the selected users after a confirm", async () => {
+    const fetchMock = mockApi({ users: [user({ user_id: "alice" }), user({ user_id: "bob" })] });
+    const user_ = userEvent.setup();
+    renderPage(<UsersPage />);
+
+    const row = (await screen.findByText("alice")).closest("tr")!;
+    await user_.click(within(row).getByRole("checkbox"));
+
+    const bar = (await screen.findByText("1 selected")).closest("div")!;
+    await user_.click(within(bar).getByRole("button", { name: "Delete" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await user_.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await vi.waitFor(() => {
+      const del = fetchMock.mock.calls.find(
+        ([u, init]) => String(u).includes("/v1/users/alice") && (init?.method ?? "").toUpperCase() === "DELETE",
+      );
+      expect(del).toBeTruthy();
+    });
+  });
+
+  it("bulk-assigns a budget to the selected users", async () => {
+    const fetchMock = mockApi({
+      users: [user({ user_id: "alice" })],
+      budgets: [budget({ budget_id: "bud-9", name: "team-cap" })],
+    });
+    const user_ = userEvent.setup();
+    renderPage(<UsersPage />);
+
+    const row = (await screen.findByText("alice")).closest("tr")!;
+    await user_.click(within(row).getByRole("checkbox"));
+
+    const bar = (await screen.findByText("1 selected")).closest("div")!;
+    await user_.click(within(bar).getByRole("button", { name: "Assign budget" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await user_.selectOptions(within(dialog).getByLabelText("Budget"), "bud-9");
+    await user_.click(within(dialog).getByRole("button", { name: "Assign" }));
+
+    await vi.waitFor(() => {
+      const patch = fetchMock.mock.calls.find(
+        ([u, init]) => String(u).includes("/v1/users/alice") && (init?.method ?? "").toUpperCase() === "PATCH",
+      );
+      expect(patch).toBeTruthy();
+      expect(JSON.parse(String(patch![1]!.body))).toMatchObject({ budget_id: "bud-9" });
+    });
+  });
 });

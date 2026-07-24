@@ -548,6 +548,7 @@ async def _summary_context(
     source: str | None = None,
     api_key_id: str | None = None,
     priced: bool | None = None,
+    counts_toward_budget: bool | None = None,
 ) -> tuple[datetime, datetime, list[ColumnElement[bool]], UsageTotals]:
     """Resolve the bounded window, the shared WHERE conditions, and the grand
     totals: the common preamble both summary endpoints run, kept in one place so a
@@ -564,6 +565,7 @@ async def _summary_context(
         source=source,
         api_key_id=api_key_id,
         priced=priced,
+        counts_toward_budget=counts_toward_budget,
     )
     totals = await _totals(db, conditions)
     return start, end, conditions, totals
@@ -623,6 +625,7 @@ async def usage_summary(
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
 ) -> UsageSummary:
     """Aggregate spend, tokens, and request volume for the dashboard Usage page.
@@ -643,6 +646,7 @@ async def usage_summary(
         source=source,
         api_key_id=api_key_id,
         priced=priced,
+        counts_toward_budget=counts_toward_budget,
     )
     by_model = await _breakdown(db, UsageLog.model, conditions, totals, limit=_BREAKDOWN_TOP_N)
     by_user = await _breakdown(db, UsageLog.user_id, conditions, totals, limit=_BREAKDOWN_TOP_N)
@@ -703,6 +707,7 @@ async def usage_summary_csv(
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
 ) -> Response:
     """Download the per-model / per-user / per-key / per-source breakdown as CSV.
 
@@ -722,6 +727,7 @@ async def usage_summary_csv(
         source=source,
         api_key_id=api_key_id,
         priced=priced,
+        counts_toward_budget=counts_toward_budget,
     )
     dimensions = (
         ("model", await _breakdown(db, UsageLog.model, conditions, totals, limit=None)),

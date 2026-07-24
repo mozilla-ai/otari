@@ -57,6 +57,7 @@ class UsageSelection(BaseModel):
     user_id: str | None = None
     api_key_id: str | None = None
     status: str | None = None
+    endpoint: str | None = None
     start_date: datetime | None = None
     end_date: datetime | None = None
     # None: any; True: only rows with a cost; False: only rows with no cost yet.
@@ -109,10 +110,25 @@ class UsageSetPriceResult(BaseModel):
 def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]]:
     """WHERE conditions for a selection, always scoped to imported rows.
 
-    ``counts_toward_budget = False`` is a fixed condition, so even an ``ids`` list that
-    names enforced gateway rows cannot reach them: they simply do not match.
+    Two fixed conditions pin the target set to imported usage regardless of the
+    caller's input:
+
+    - ``source != "gateway"`` is the provenance invariant: imported rows carry a
+      source slug (e.g. ``claude_code``), and "gateway" is reserved for usage Otari
+      served itself. This is the load-bearing guard, because ``counts_toward_budget``
+      alone is *not* an imported-only flag: gateway traffic on a budget-exempt API
+      key (``exclude_from_budget``) is also ``counts_toward_budget = False``, and
+      those are real gateway rows a cleanup / reprice must never touch.
+    - ``counts_toward_budget = False`` is kept as a defense-in-depth budget guard, so
+      the spend ledger can never be affected even if the provenance guard ever slips.
+
+    Together they mean even an ``ids`` list naming enforced or budget-exempt gateway
+    rows cannot reach them: they simply do not match.
     """
-    conditions: list[ColumnElement[bool]] = [UsageLog.counts_toward_budget.is_(False)]
+    conditions: list[ColumnElement[bool]] = [
+        UsageLog.source != "gateway",
+        UsageLog.counts_toward_budget.is_(False),
+    ]
     if selection.ids:
         conditions.append(UsageLog.id.in_(selection.ids))
         return conditions
@@ -126,6 +142,8 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
         conditions.append(UsageLog.api_key_id == selection.api_key_id)
     if selection.status is not None:
         conditions.append(UsageLog.status == selection.status)
+    if selection.endpoint is not None:
+        conditions.append(UsageLog.endpoint == selection.endpoint)
     if selection.start_date is not None:
         conditions.append(UsageLog.timestamp >= selection.start_date)
     if selection.end_date is not None:
@@ -181,9 +199,17 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
 
     Builds a transient ``ModelPricing`` from the supplied rates and reprices each
     matched row against its own token counts, writing ``cost`` / ``billing_meters`` /
-    ``pricing_breakdown`` back. Only ``counts_toward_budget=False`` rows are touched, so
-    recomputing cost can never desync ``users.spend``. Rows whose recomputed cost equals
-    the stored value are reported ``unchanged`` and left as-is.
+    ``pricing_breakdown`` back. Only imported rows are touched (see
+    ``_selection_conditions``), so recomputing cost can never desync ``users.spend``.
+    Rows whose recomputed cost equals the stored value are reported ``unchanged``.
+
+    Rows are walked in bounded keyset pages ordered by id, so memory stays flat even
+    for a large ``by_filter`` set (each page is detached after it is flushed). The
+    whole pass commits once at the end: like ``delete_usage`` it is all-or-nothing, so
+    an error partway through leaves no half-repriced set behind. Keyset paging is safe
+    while mutating because it only moves forward past ``last_id``; already-repriced
+    rows sit behind the cursor and are never revisited, even when a ``priced=False``
+    filter would no longer match them.
     """
     pricing = ModelPricing(
         model_key="__manual__",
@@ -195,17 +221,23 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
         pricing_tiers=[],
     )
     conditions = _selection_conditions(request)
-    ids = list((await db.execute(select(UsageLog.id).where(*conditions).order_by(UsageLog.id))).scalars().all())
-    result = UsageSetPriceResult(matched=len(ids))
-    if not ids:
-        return result
+    result = UsageSetPriceResult()
 
     try:
-        for start in range(0, len(ids), _REPRICE_CHUNK):
-            chunk = ids[start : start + _REPRICE_CHUNK]
-            rows = (await db.execute(select(UsageLog).where(UsageLog.id.in_(chunk)))).scalars().all()
-            dirty = False
+        last_id = ""
+        while True:
+            rows = (
+                await db.execute(
+                    select(UsageLog)
+                    .where(*conditions, UsageLog.id > last_id)
+                    .order_by(UsageLog.id)
+                    .limit(_REPRICE_CHUNK)
+                )
+            ).scalars().all()
+            if not rows:
+                break
             for row in rows:
+                result.matched += 1
                 cost, meters, breakdown = calculate_metered_cost(pricing, _row_usage(row))
                 if cost == row.cost:
                     result.unchanged += 1
@@ -214,9 +246,12 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
                 row.billing_meters = meters
                 row.pricing_breakdown = breakdown
                 result.updated += 1
-                dirty = True
-            if dirty:
-                await db.commit()
+            last_id = rows[-1].id
+            # Flush this page's UPDATEs into the (still open) transaction, then detach
+            # the objects so the session does not accumulate the whole matched set.
+            await db.flush()
+            db.expunge_all()
+        await db.commit()
     except SQLAlchemyError:
         await db.rollback()
         logger.exception("usage set-price failed")

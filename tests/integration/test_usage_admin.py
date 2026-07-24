@@ -170,6 +170,33 @@ def test_delete_by_filter_api_key(
     assert resp.json() == {"deleted": 0}
 
 
+def test_ops_skip_budget_exempt_gateway_rows(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # A gateway row from a budget-exempt key is counts_toward_budget=False but is NOT
+    # imported (source="gateway"); delete and set-price must never touch it.
+    _make_log(db_session, log_id="imp", counts_toward_budget=False, source="claude_code", cost=None)
+    _make_log(db_session, log_id="gw-exempt", counts_toward_budget=False, source="gateway", cost=0.5)
+    db_session.commit()
+
+    # Delete-all-imported by filter removes only the imported row.
+    resp = client.request("DELETE", DELETE_PATH, json={"by_filter": True}, headers=master_key_header)
+    assert resp.json() == {"deleted": 1}
+    db_session.expire_all()
+    assert _get(db_session, "imp") is None
+    assert _get(db_session, "gw-exempt") is not None
+
+    # Set-price by filter must not reprice the surviving gateway-exempt row.
+    resp = client.post(
+        SET_PRICE_PATH,
+        json={"by_filter": True, "input_price_per_million": 3.0, "output_price_per_million": 15.0},
+        headers=master_key_header,
+    )
+    assert resp.json() == {"matched": 0, "updated": 0, "unchanged": 0}
+    db_session.expire_all()
+    assert _get(db_session, "gw-exempt").cost == 0.5  # type: ignore[union-attr]
+
+
 def test_delete_requires_master_key(client: TestClient) -> None:
     resp = client.request("DELETE", DELETE_PATH, json={"ids": ["x"]})
     assert resp.status_code == 401

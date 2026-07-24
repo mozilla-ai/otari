@@ -45,8 +45,14 @@ export function useUrlState<K extends string>(defaults: Record<K, string>): UrlS
 
   const getNumber = useCallback(
     (key: K) => {
-      const parsed = Number.parseInt(params.get(key) ?? defaults[key], 10);
-      return Number.isNaN(parsed) ? 0 : parsed;
+      // A present but non-numeric param (e.g. a hand-edited `?size=abc`) must fall
+      // back to the key's default, not 0: a 0 page size would send `limit=0` and 422.
+      const parsed = Number.parseInt(params.get(key) ?? "", 10);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+      const fallback = Number.parseInt(defaults[key], 10);
+      return Number.isNaN(fallback) ? 0 : fallback;
     },
     [params, defaults],
   );

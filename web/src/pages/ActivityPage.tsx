@@ -1,4 +1,5 @@
 import { Button, Card } from "@heroui/react";
+import clsx from "clsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -308,6 +309,13 @@ export function ActivityPage() {
   const anyFilter = Boolean(
     statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || pricedFilter || hasWindow,
   );
+  // On mobile the status/priced/key/user/model controls collapse behind a
+  // "Filters" toggle (labelled with the active count) so the request table sits
+  // near the top; desktop shows them inline.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterCount = [statusFilter, pricedFilter, apiKeyFilter, userFilter, modelFilter.trim()].filter(
+    Boolean,
+  ).length;
 
   // Selection targets imported rows only; enforced gateway rows are disabled so
   // bulk delete / set-price can never reach them.
@@ -466,7 +474,20 @@ export function ActivityPage() {
             </label>
           </div>
         ) : null}
-        <div className="flex flex-wrap items-end gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="md:hidden"
+          onPress={() => setFiltersOpen((open) => !open)}
+          aria-expanded={filtersOpen}
+          aria-controls="activity-filters"
+        >
+          Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
+        </Button>
+        <div
+          id="activity-filters"
+          className={clsx("flex-wrap items-end gap-3 md:flex", filtersOpen ? "flex w-full md:w-auto" : "hidden")}
+        >
           <FilterSelect
             id="filter-status"
             label="Status"

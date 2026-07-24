@@ -360,4 +360,31 @@ describe("BudgetsPage", () => {
     expect(del).toBeDefined();
     expect(screen.queryByText("11111111")).not.toBeInTheDocument();
   });
+
+  it("bulk-deletes the selected budgets after a confirm", async () => {
+    const fetchMock = mockApi({
+      budgets: [
+        budget({ budget_id: "b1", name: "Team monthly" }),
+        budget({ budget_id: "b2", name: "Trial cap" }),
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage(<BudgetsPage />);
+
+    const row = (await screen.findByText("Team monthly")).closest("tr")!;
+    await user.click(within(row).getByRole("checkbox"));
+
+    const bar = (await screen.findByText("1 selected")).closest("div")!;
+    await user.click(within(bar).getByRole("button", { name: "Delete" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await vi.waitFor(() => {
+      const del = fetchMock.mock.calls.find(
+        ([u, init]) => String(u).includes("/v1/budgets/b1") && (init?.method ?? "").toUpperCase() === "DELETE",
+      );
+      expect(del).toBeTruthy();
+    });
+  });
 });

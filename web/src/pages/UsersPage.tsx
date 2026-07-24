@@ -1,5 +1,5 @@
 import { AlertDialog, Button, Card, Chip } from "@heroui/react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import { useBudgets, useCreateUser, useDeleteUser, useUpdateUser, useUsers } from "@/api/hooks";
 import type { Budget, CreateUserRequest, UpdateUserRequest, User } from "@/api/types";
@@ -293,6 +293,12 @@ function AssignBudgetDialog({
   onAssign: (budgetId: string) => void;
 }) {
   const [budgetId, setBudgetId] = useState("");
+  // Reset the picker each time the dialog opens so a prior selection is not inherited.
+  useEffect(() => {
+    if (isOpen) {
+      setBudgetId("");
+    }
+  }, [isOpen]);
   return (
     <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
       {isOpen ? (
