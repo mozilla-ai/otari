@@ -308,12 +308,13 @@ describe("BudgetsPage", () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: null, max_budget: null, budget_duration_sec: null });
   });
 
-  it("opens the edit form seeded from the row when a budget is clicked", async () => {
+  it("opens the edit form seeded from the row's Edit action", async () => {
     mockApi({ budgets: [budget({ max_budget: 42, budget_duration_sec: 86_400 })] });
     const user = userEvent.setup();
     renderPage(<BudgetsPage />);
 
-    await user.click(await screen.findByText("11111111"));
+    const row = (await screen.findByText("11111111")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
 
     expect(await screen.findByRole("button", { name: "Save changes" })).toBeInTheDocument();
     expect(screen.getByLabelText("Spending limit (USD)")).toHaveValue("42");
