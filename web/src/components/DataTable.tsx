@@ -84,12 +84,11 @@ export interface DataTableProps<Row> {
 
 const SELECTION_COLUMN_WIDTH = 44;
 
-// HeroUI's Table paints its header and columns with `--surface-secondary` (a gray
-// that reads wrong over the white card). Repaint the header row with the brand
-// tint and make the columns transparent so it shows through, with ink-colored
-// semibold labels, matching the rest of the dashboard chrome. `!` wins the
-// cascade because HeroUI's class ships after Tailwind's utilities.
-const COLUMN_CLASS = "bg-transparent! font-semibold! text-[var(--otari-ink)]!";
+// HeroUI's Table ships decorative column separators, pill corner-radii, and a
+// gray header surface that read wrong over the dashboard's white cards. Those are
+// neutralized in globals.css (scoped to `.otari-table`), leaving a flat brand-tint
+// header flush inside the card; `overflow-hidden` on the root clips the now-square
+// header corners to the card's rounded border.
 
 export function DataTable<Row>({
   ariaLabel,
@@ -112,7 +111,7 @@ export function DataTable<Row>({
   const Container = resizable ? Table.ResizableContainer : Table.ScrollContainer;
 
   return (
-    <Table.Root className="rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)]">
+    <Table.Root className="otari-table overflow-hidden rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)]">
       <Container className="overflow-x-auto">
         <Table.Content
           aria-label={ariaLabel}
@@ -127,13 +126,9 @@ export function DataTable<Row>({
           onSortChange={onSortChange}
           onRowAction={onRowAction ? (key) => onRowAction(String(key)) : undefined}
         >
-          <Table.Header className="border-[var(--otari-line)]! bg-[var(--otari-brand-tint)]!">
+          <Table.Header>
             {showSelection ? (
-              <Table.Column
-                width={SELECTION_COLUMN_WIDTH}
-                minWidth={SELECTION_COLUMN_WIDTH}
-                className={COLUMN_CLASS}
-              >
+              <Table.Column width={SELECTION_COLUMN_WIDTH} minWidth={SELECTION_COLUMN_WIDTH}>
                 <SelectionCheckbox ariaLabel="Select all rows" />
               </Table.Column>
             ) : null}
@@ -145,7 +140,7 @@ export function DataTable<Row>({
                 allowsSorting={col.allowsSorting}
                 width={col.width}
                 minWidth={col.minWidth}
-                className={col.align === "end" ? `${COLUMN_CLASS} text-right` : COLUMN_CLASS}
+                className={col.align === "end" ? "text-right" : undefined}
               >
                 {({ sortDirection }) => (
                   <div className={`flex items-center gap-1 ${col.align === "end" ? "justify-end" : ""}`}>
@@ -163,15 +158,17 @@ export function DataTable<Row>({
             ))}
           </Table.Header>
           <Table.Body
-            renderEmptyState={() =>
-              isLoading ? (
-                <span className="inline-flex items-center gap-2 text-[var(--otari-muted)]">
-                  <Spinner size="sm" /> Loading…
-                </span>
-              ) : (
-                <span className="text-[var(--otari-muted)]">{emptyContent}</span>
-              )
-            }
+            renderEmptyState={() => (
+              <div className="px-4 py-10 text-center text-[var(--otari-muted)]">
+                {isLoading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <Spinner size="sm" /> Loading…
+                  </span>
+                ) : (
+                  emptyContent
+                )}
+              </div>
+            )}
           >
             {(isLoading && rows.length === 0 ? [] : rows).map((row) => {
               const key = getRowKey(row);

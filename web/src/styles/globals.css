@@ -14,6 +14,33 @@
   --otari-bg: #f6f9fa;
 }
 
+/* Shared DataTable (HeroUI's Table). HeroUI decorates its table with vertical
+   column separators, pill corner-radii on the first/last columns, and a gray
+   `--surface-secondary` header, which read as an ugly floating band over the
+   dashboard's white cards. Strip those so the header is a clean, flat brand-tint
+   strip flush inside the card, and rows are separated by a single hairline.
+   Scoped to `.otari-table` and placed after the `@heroui/styles` import, so
+   these win the cascade on equal specificity without `!important`. */
+.otari-table .table__header {
+  background-color: var(--otari-brand-tint);
+  border-bottom: 1px solid var(--otari-line);
+}
+.otari-table .table__column {
+  background-color: transparent;
+  color: var(--otari-ink);
+  font-weight: 600;
+  border-radius: 0;
+}
+.otari-table .table__column::after {
+  content: none;
+}
+.otari-table .table__row .table__cell {
+  border-color: var(--otari-line);
+}
+.otari-table .table__row:hover .table__cell {
+  background-color: var(--otari-bg);
+}
+
 html,
 body,
 #root {
