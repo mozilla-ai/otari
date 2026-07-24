@@ -649,8 +649,11 @@ export function UsagePage() {
         </div>
       ) : (
         <>
-          {/* Tiles */}
-          <div className="flex flex-wrap gap-4">
+          {/* Tiles. A responsive grid, matching OverviewPage: StatCard is
+              flex-1/min-w-0 (sized by its track), so a wrapping flex row lets
+              all seven tiles shrink onto one unusable line on phones instead
+              of wrapping. */}
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
             <StatCard
               label="Tracked cost"
               value={totals ? formatUsd(totals.cost) : "—"}
