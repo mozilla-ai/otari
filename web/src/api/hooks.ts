@@ -37,8 +37,12 @@ import type {
   UpdateUserRequest,
   UsageBucket,
   UsageCount,
+  UsageDeleteResult,
   UsageEntry,
   UsageFilters,
+  UsageMutationSelection,
+  UsageSetPriceRequest,
+  UsageSetPriceResult,
   UsageSummary,
   User,
   CreateUserRequest,
@@ -641,6 +645,11 @@ function usageParams(filters: UsageFilters): URLSearchParams {
   if (filters.endpoint) params.set("endpoint", filters.endpoint);
   if (filters.user_id) params.set("user_id", filters.user_id);
   if (filters.api_key_id) params.set("api_key_id", filters.api_key_id);
+  if (filters.source) params.set("source", filters.source);
+  if (filters.priced !== undefined) params.set("priced", String(filters.priced));
+  if (filters.counts_toward_budget !== undefined) {
+    params.set("counts_toward_budget", String(filters.counts_toward_budget));
+  }
   return params;
 }
 
@@ -664,12 +673,39 @@ export function useUsageLogs(filters: UsageFilters, page: number, pageSize: numb
 
 // Total rows matching the same filters, for the paginator's "N of M". A separate
 // request so /v1/usage stays a bare array; run alongside the list.
-export function useUsageCount(filters: UsageFilters) {
+export function useUsageCount(filters: UsageFilters, enabled = true) {
   return useQuery({
     queryKey: [USAGE, "count", filters],
     queryFn: () => apiFetch<UsageCount>(`/v1/usage/count?${usageParams(filters).toString()}`),
+    enabled,
     placeholderData: keepPreviousData,
     staleTime: 10_000,
+  });
+}
+
+// Delete imported usage rows by selection (ids or by_filter). Only rows the
+// server treats as imported (counts_toward_budget = false) are removed; every
+// usage view is invalidated so the list, count, and analytics refresh.
+export function useDeleteUsage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UsageMutationSelection) =>
+      apiFetch<UsageDeleteResult>("/v1/usage", { method: "DELETE", body: JSON.stringify(body) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [USAGE] });
+    },
+  });
+}
+
+// Set the cost of imported usage rows from manual per-1M rates.
+export function useSetUsagePrice() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UsageSetPriceRequest) =>
+      apiFetch<UsageSetPriceResult>("/v1/usage/set-price", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [USAGE] });
+    },
   });
 }
 
