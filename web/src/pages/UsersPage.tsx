@@ -1,12 +1,15 @@
-import { Button, Card, Chip } from "@heroui/react";
+import { AlertDialog, Button, Card, Chip } from "@heroui/react";
 import { type ReactNode, useState } from "react";
 
 import { useBudgets, useCreateUser, useDeleteUser, useUpdateUser, useUsers } from "@/api/hooks";
 import type { Budget, CreateUserRequest, UpdateUserRequest, User } from "@/api/types";
+import { BulkActionBar } from "@/components/BulkActionBar";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { Field } from "@/components/Field";
 import { accessLabel, ModelScopeControl } from "@/components/ModelScopeControl";
-import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
-import { ErrorBanner, PageHeader } from "@/components/ui";
+import { ErrorBanner, FilterSelect, PageHeader } from "@/components/ui";
+import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // ---------- formatting ----------
 
@@ -271,6 +274,65 @@ function OnboardingPanel({ onCreate }: { onCreate: () => void }) {
   );
 }
 
+// Assign one budget to a set of selected users at once.
+function AssignBudgetDialog({
+  isOpen,
+  onOpenChange,
+  budgets,
+  count,
+  isPending,
+  error,
+  onAssign,
+}: {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  budgets: Budget[];
+  count: number;
+  isPending: boolean;
+  error: unknown;
+  onAssign: (budgetId: string) => void;
+}) {
+  const [budgetId, setBudgetId] = useState("");
+  return (
+    <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
+      {isOpen ? (
+        <AlertDialog.Backdrop>
+          <AlertDialog.Container placement="center" size="md">
+            <AlertDialog.Dialog>
+              <AlertDialog.Header>
+                <AlertDialog.Heading>Assign budget</AlertDialog.Heading>
+              </AlertDialog.Header>
+              <AlertDialog.Body className="flex flex-col gap-4">
+                <p className="text-sm text-[var(--otari-muted)]">
+                  Assign a budget to {count} selected {count === 1 ? "user" : "users"}.
+                </p>
+                <FilterSelect
+                  label="Budget"
+                  value={budgetId}
+                  onChange={setBudgetId}
+                  options={[
+                    { value: "", label: "Select a budget…" },
+                    ...budgets.map((b) => ({ value: b.budget_id, label: budgetLabel(b) })),
+                  ]}
+                />
+                <ErrorBanner error={error} />
+              </AlertDialog.Body>
+              <AlertDialog.Footer>
+                <Button variant="ghost" isDisabled={isPending} onPress={() => onOpenChange(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" isDisabled={!budgetId} isPending={isPending} onPress={() => onAssign(budgetId)}>
+                  Assign
+                </Button>
+              </AlertDialog.Footer>
+            </AlertDialog.Dialog>
+          </AlertDialog.Container>
+        </AlertDialog.Backdrop>
+      ) : null}
+    </AlertDialog>
+  );
+}
+
 // ---------- page ----------
 
 export function UsersPage() {
@@ -293,9 +355,117 @@ export function UsersPage() {
   const showOnboarding = !loading && rows.length === 0 && !addOpen;
 
   const budgetById = new Map((budgets.data ?? []).map((b) => [b.budget_id, b]));
+  const selection = useTableSelection();
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [bulkError, setBulkError] = useState<unknown>(undefined);
+  const [bulkPending, setBulkPending] = useState(false);
+
+  const selectableKeys = rows.map((u) => u.user_id);
+  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
 
   const setBlocked = (u: User, blocked: boolean) =>
     updateUser.mutate({ id: u.user_id, body: { blocked } });
+
+  const runBulk = async (action: (id: string) => Promise<unknown>, onDone: () => void) => {
+    setBulkPending(true);
+    setBulkError(undefined);
+    try {
+      for (const id of selectedIds) {
+        await action(id);
+      }
+      selection.clear();
+      onDone();
+    } catch (error) {
+      setBulkError(error);
+    } finally {
+      setBulkPending(false);
+    }
+  };
+
+  const columns: DataTableColumn<User>[] = [
+    {
+      id: "user",
+      header: "User",
+      isRowHeader: true,
+      cell: (u) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="inline-flex items-center gap-1.5">
+            <code className="text-xs font-medium text-[var(--otari-ink)]">{u.user_id}</code>
+            {isVirtualUser(u.user_id) ? (
+              <Chip size="sm" color="default">
+                virtual
+              </Chip>
+            ) : null}
+          </span>
+          {u.alias ? <span className="text-xs text-[var(--otari-muted)]">{u.alias}</span> : null}
+        </div>
+      ),
+    },
+    { id: "status", header: "Status", cell: (u) => <StatusChip user={u} /> },
+    {
+      id: "budget",
+      header: "Budget",
+      cell: (u) =>
+        u.budget_id ? (
+          <span className="text-[var(--otari-muted)]" title={u.budget_id}>
+            {budgetById.get(u.budget_id) ? budgetLabel(budgetById.get(u.budget_id)!) : shortId(u.budget_id)}
+          </span>
+        ) : (
+          <span className="text-[var(--otari-muted)]">—</span>
+        ),
+    },
+    {
+      id: "spend",
+      header: "Spend",
+      cell: (u) => (
+        <span className="text-[var(--otari-muted)]">
+          {formatUSD(u.spend)}
+          {u.reserved > 0 ? <span> (+{formatUSD(u.reserved)} held)</span> : null}
+        </span>
+      ),
+    },
+    { id: "access", header: "Model access", cell: (u) => <AccessChip allowed={u.allowed_models} /> },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "end",
+      cell: (u) => (
+        <div className="flex items-center justify-end gap-1.5">
+          <Button
+            size="sm"
+            variant="outline"
+            isDisabled={updateUser.isPending}
+            onPress={() => setBlocked(u, !u.blocked)}
+          >
+            {u.blocked ? "Unblock" : "Block"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => {
+              setAddOpen(false);
+              setEditing(u.user_id);
+            }}
+          >
+            Edit
+          </Button>
+          <InlineConfirm
+            trigger="Delete"
+            confirmLabel="Delete user"
+            isPending={deleteUser.isPending}
+            message={
+              <>
+                Delete <strong>{u.user_id}</strong>? This deactivates its API keys and hides the user; usage history is
+                preserved.
+              </>
+            }
+            onConfirm={() => deleteUser.mutate(u.user_id)}
+          />
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -340,119 +510,60 @@ export function UsersPage() {
           its fields seed from `user` on mount only. */}
       {editingUser ? <EditUserForm key={editingUser.user_id} user={editingUser} onClose={() => setEditing(null)} /> : null}
 
-      <Table>
-        <THead>
-          <tr>
-            <Th>User</Th>
-            <Th>Status</Th>
-            <Th>Budget</Th>
-            <Th>Spend</Th>
-            <Th>Model access</Th>
-            <Th className="text-right">Actions</Th>
-          </tr>
-        </THead>
-        <tbody>
-          {loading ? (
-            <LoadingRow colSpan={6} />
-          ) : rows.length === 0 ? (
-            <TableMessage colSpan={6}>No users yet. Create one, or create an API key to auto-create one.</TableMessage>
-          ) : (
-            rows.map((u) => {
-              const budget = u.budget_id ? budgetById.get(u.budget_id) : undefined;
-              return (
-                  <Tr
-                    key={u.user_id}
-                    selected={editing === u.user_id}
-                    onClick={() => {
-                      setAddOpen(false);
-                      setEditing(u.user_id);
-                    }}
-                  >
-                    <Td className="font-medium text-[var(--otari-ink)]">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="inline-flex items-center gap-1.5">
-                          <code className="text-xs">{u.user_id}</code>
-                          {isVirtualUser(u.user_id) ? (
-                            <Chip size="sm" color="default">
-                              virtual
-                            </Chip>
-                          ) : null}
-                        </span>
-                        {u.alias ? <span className="text-xs text-[var(--otari-muted)]">{u.alias}</span> : null}
-                      </div>
-                    </Td>
-                    <Td>
-                      <StatusChip user={u} />
-                    </Td>
-                    <Td className="text-[var(--otari-muted)]">
-                      {u.budget_id ? (
-                        <span title={u.budget_id}>{budget ? budgetLabel(budget) : shortId(u.budget_id)}</span>
-                      ) : (
-                        "—"
-                      )}
-                    </Td>
-                    <Td className="text-[var(--otari-muted)]">
-                      {formatUSD(u.spend)}
-                      {u.reserved > 0 ? (
-                        <span className="text-[var(--otari-muted)]"> (+{formatUSD(u.reserved)} held)</span>
-                      ) : null}
-                    </Td>
-                    <Td>
-                      <AccessChip allowed={u.allowed_models} />
-                    </Td>
-                    <Td>
-                      {/* Row click opens Edit; action buttons stop propagation so
-                          they fire their own handler instead of also opening Edit. */}
-                      <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                        {u.blocked ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            isDisabled={updateUser.isPending}
-                            onPress={() => setBlocked(u, false)}
-                          >
-                            Unblock
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            isDisabled={updateUser.isPending}
-                            onPress={() => setBlocked(u, true)}
-                          >
-                            Block
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onPress={() => {
-                            setAddOpen(false);
-                            setEditing(u.user_id);
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <InlineConfirm
-                          trigger="Delete"
-                          confirmLabel="Delete user"
-                          isPending={deleteUser.isPending}
-                          message={
-                            <>
-                              Delete <strong>{u.user_id}</strong>? This deactivates its API keys and hides the user;
-                              usage history is preserved.
-                            </>
-                          }
-                          onConfirm={() => deleteUser.mutate(u.user_id)}
-                        />
-                      </div>
-                    </Td>
-                  </Tr>
-              );
-            })
-          )}
-        </tbody>
-      </Table>
+      {selectedIds.length > 0 ? (
+        <BulkActionBar
+          selectedCount={selectedIds.length}
+          allMatching={false}
+          matchingTotal={null}
+          canSelectAllMatching={false}
+          onSelectAllMatching={() => {}}
+          onClear={selection.clear}
+        >
+          <Button size="sm" variant="primary" onPress={() => setAssignOpen(true)}>
+            Assign budget
+          </Button>
+          <Button size="sm" variant="danger" onPress={() => setBulkDeleteOpen(true)}>
+            Delete
+          </Button>
+        </BulkActionBar>
+      ) : null}
+
+      <DataTable
+        ariaLabel="Users"
+        columns={columns}
+        rows={rows}
+        getRowKey={(u) => u.user_id}
+        isLoading={loading}
+        emptyContent="No users yet. Create one, or create an API key to auto-create one."
+        selectionMode="multiple"
+        selectedKeys={selection.selectedKeys}
+        onSelectionChange={selection.onSelectionChange}
+      />
+
+      <ConfirmDialog
+        isOpen={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        heading="Delete users"
+        body={`Delete ${selectedIds.length} ${
+          selectedIds.length === 1 ? "user" : "users"
+        }? This deactivates their API keys and hides them; usage history is preserved.`}
+        confirmLabel="Delete"
+        isPending={bulkPending}
+        error={bulkError}
+        onConfirm={() => runBulk((id) => deleteUser.mutateAsync(id), () => setBulkDeleteOpen(false))}
+      />
+
+      <AssignBudgetDialog
+        isOpen={assignOpen}
+        onOpenChange={setAssignOpen}
+        budgets={budgets.data ?? []}
+        count={selectedIds.length}
+        isPending={bulkPending}
+        error={bulkError}
+        onAssign={(budgetId) =>
+          runBulk((id) => updateUser.mutateAsync({ id, body: { budget_id: budgetId } }), () => setAssignOpen(false))
+        }
+      />
     </div>
   );
 }

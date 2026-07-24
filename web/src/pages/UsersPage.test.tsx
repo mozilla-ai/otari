@@ -203,12 +203,13 @@ describe("UsersPage", () => {
     expect(within(blockedRow).getByRole("button", { name: "Unblock" })).toBeInTheDocument();
   });
 
-  it("opens the edit form when a user row is clicked, seeded from the row", async () => {
+  it("opens the edit form from the row's Edit action, seeded from the row", async () => {
     mockApi({ users: [user({ user_id: "alice", alias: "Alice" })] });
     const user_ = userEvent.setup();
     renderPage(<UsersPage />);
 
-    await user_.click(await screen.findByText("alice"));
+    const row = (await screen.findByText("alice")).closest("tr")!;
+    await user_.click(within(row).getByRole("button", { name: "Edit" }));
     expect(await screen.findByRole("button", { name: "Save changes" })).toBeInTheDocument();
     expect(screen.getByLabelText("Alias")).toHaveValue("Alice");
   });
