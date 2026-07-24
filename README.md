@@ -23,10 +23,8 @@ Put one endpoint in front of 40+ providers, then manage API keys, enforce budget
 
 Otari is the proxy server at the heart of [otari.ai](https://otari.ai). Your apps talk to Otari, which routes to your providers. Otari authenticates each request, enforces budgets before the call runs, resolves your provider credential, forwards the request, and logs the usage. Run it yourself and your provider keys and usage data stay in your environment. Or connect it to otari.ai and the platform runs it for you.
 
-<!-- Rendered from assets/architecture.mmd (kept in the repo). Regenerate with:
-     npx -y @mermaid-js/mermaid-cli -i assets/architecture.mmd -o assets/architecture.png -b transparent -s 3 -->
 <p align="center">
-  <img src="assets/architecture.png" width="560" alt="Otari sits between your apps and your providers: OpenAI and Anthropic SDKs call Otari, which handles auth, virtual keys, budgets, usage logging, guardrails, and built-in tools, then routes via any-llm to 40+ providers including OpenAI, Anthropic, and llamafile"/>
+  <img src="assets/control-plane-visual.webp" width="560" alt="Otari sits between your applications and your providers, with a control plane covering routing, budgets, governance, deployment, reliability, and agent harnesses, then connects out to providers including OpenAI, Anthropic, Azure, and Google"/>
 </p>
 
 ## Why Otari
