@@ -171,6 +171,26 @@ describe("DataTable", () => {
     expect(cellSpy.mock.calls.length).toBeGreaterThan(callsAfterMount);
   });
 
+  it("renders the detail panel as the row immediately under the matching row", async () => {
+    // Regression: after the shared-table migration the detail card rendered
+    // below the whole table, so on a long page a row click looked like it did
+    // nothing. The panel must open adjacent to the clicked row.
+    const user = userEvent.setup();
+    const onRowAction = vi.fn();
+    const renderDetail = (r: Row) => <div data-testid="detail">{`detail for ${r.name}`}</div>;
+    render(<DataTable {...base({ onRowAction, detailKey: "b", renderDetail })} />);
+
+    const rows = screen.getAllByRole("row");
+    const bravoIndex = rows.findIndex((r) => within(r).queryByText("Bravo"));
+    expect(bravoIndex).toBeGreaterThan(0);
+    expect(within(rows[bravoIndex + 1]).getByTestId("detail")).toHaveTextContent("detail for Bravo");
+
+    // Activating the detail row itself must not fire onRowAction (which would
+    // re-toggle the panel in callers).
+    await user.click(screen.getByTestId("detail"));
+    expect(onRowAction).not.toHaveBeenCalled();
+  });
+
   it("reports sort changes from a sortable column header", async () => {
     const user = userEvent.setup();
 

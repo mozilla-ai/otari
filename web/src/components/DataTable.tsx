@@ -1,5 +1,5 @@
 import { Spinner, Table } from "@heroui/react";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import type { ReactNode } from "react";
 import { Checkbox as AriaCheckbox } from "react-aria-components";
 import type { Key, Selection, SortDescriptor } from "react-aria-components";
@@ -81,6 +81,27 @@ export interface DataTableProps<Row> {
   rowClassName?: (row: Row) => string | undefined;
   /** Enables draggable column resize handles. */
   resizable?: boolean;
+  /**
+   * Inline detail: when `detailKey` matches a row's key, `renderDetail(row)`
+   * renders as a full-width row directly under that row (accordion style), so
+   * the panel opens where the user clicked instead of below the table. The
+   * detail row is selection-disabled and does not fire `onRowAction`. Keep
+   * `renderDetail` referentially stable like the other render inputs.
+   */
+  detailKey?: string | null;
+  renderDetail?: (row: Row) => ReactNode;
+}
+
+// Sentinel wrapping the expanded row; interleaved into the items collection so
+// react-aria's per-item row cache stays valid for every ordinary row.
+interface DetailItem<Row> {
+  __detail: true;
+  row: Row;
+  key: string;
+}
+
+function isDetailItem<Row extends object>(item: Row | DetailItem<Row>): item is DetailItem<Row> {
+  return (item as DetailItem<Row>).__detail === true;
 }
 
 const SELECTION_COLUMN_WIDTH = 44;
@@ -108,9 +129,30 @@ export function DataTable<Row extends object>({
   onRowAction,
   rowClassName,
   resizable = false,
+  detailKey = null,
+  renderDetail,
 }: DataTableProps<Row>) {
   const showSelection = selectionMode === "multiple";
   const Container = resizable ? Table.ResizableContainer : Table.ScrollContainer;
+  const columnCount = columns.length + (showSelection ? 1 : 0);
+
+  const detailItem = useMemo<DetailItem<Row> | null>(() => {
+    if (detailKey == null || !renderDetail) return null;
+    const row = rows.find((r) => getRowKey(r) === detailKey);
+    return row ? { __detail: true, row, key: `${detailKey}__detail` } : null;
+  }, [detailKey, renderDetail, rows, getRowKey]);
+
+  const items = useMemo<(Row | DetailItem<Row>)[]>(() => {
+    const base = isLoading && rows.length === 0 ? [] : rows;
+    if (!detailItem) return base;
+    return base.flatMap((row) => (getRowKey(row) === detailKey ? [row, detailItem] : [row]));
+  }, [rows, isLoading, detailItem, detailKey, getRowKey]);
+
+  // The detail row must never join the selection model ("select all" included).
+  const effectiveDisabledKeys = useMemo<Iterable<Key> | undefined>(() => {
+    if (!detailItem) return disabledKeys;
+    return [...(disabledKeys ?? []), detailItem.key];
+  }, [disabledKeys, detailItem]);
 
   // Rows render through react-aria's items-collection path so each row element
   // is cached per row object: a selection toggle re-renders only the affected
@@ -121,10 +163,17 @@ export function DataTable<Row extends object>({
   // referentially stable across unrelated re-renders for the cache to pay off;
   // an inline arrow for any of them rebuilds every row on each render.
   const renderRow = useCallback(
-    (row: Row) => {
-      const key = getRowKey(row);
+    (item: Row | DetailItem<Row>) => {
+      if (isDetailItem(item)) {
+        return (
+          <Table.Row key={item.key} id={item.key}>
+            <Table.Cell colSpan={columnCount}>{renderDetail?.(item.row)}</Table.Cell>
+          </Table.Row>
+        );
+      }
+      const key = getRowKey(item);
       return (
-        <Table.Row key={key} id={key} className={rowClassName?.(row)}>
+        <Table.Row key={key} id={key} className={rowClassName?.(item)}>
           {showSelection ? (
             <Table.Cell>
               <SelectionCheckbox ariaLabel="Select row" />
@@ -132,13 +181,13 @@ export function DataTable<Row extends object>({
           ) : null}
           {columns.map((col) => (
             <Table.Cell key={col.id} className={col.align === "end" ? "text-right tabular-nums" : undefined}>
-              {col.cell(row)}
+              {col.cell(item)}
             </Table.Cell>
           ))}
         </Table.Row>
       );
     },
-    [getRowKey, rowClassName, showSelection, columns],
+    [getRowKey, rowClassName, showSelection, columns, renderDetail, columnCount],
   );
 
   return (
@@ -152,10 +201,18 @@ export function DataTable<Row extends object>({
           disabledBehavior="selection"
           selectedKeys={selectedKeys}
           onSelectionChange={onSelectionChange}
-          disabledKeys={disabledKeys}
+          disabledKeys={effectiveDisabledKeys}
           sortDescriptor={sortDescriptor}
           onSortChange={onSortChange}
-          onRowAction={onRowAction ? (key) => onRowAction(String(key)) : undefined}
+          onRowAction={
+            onRowAction
+              ? (key) => {
+                  // Activating the detail row itself must not re-toggle it.
+                  if (detailItem && String(key) === detailItem.key) return;
+                  onRowAction(String(key));
+                }
+              : undefined
+          }
         >
           <Table.Header>
             {showSelection ? (
@@ -189,7 +246,7 @@ export function DataTable<Row extends object>({
             ))}
           </Table.Header>
           <Table.Body
-            items={isLoading && rows.length === 0 ? [] : rows}
+            items={items}
             dependencies={[renderRow]}
             renderEmptyState={() => (
               <div className="px-4 py-10 text-center text-[var(--otari-muted)]">
