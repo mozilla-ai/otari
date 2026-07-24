@@ -194,6 +194,35 @@ describe("DataTable", () => {
     expect(onRowAction).not.toHaveBeenCalled();
   });
 
+  it("keeps the detail panel attached through row reorders, removal, and return", async () => {
+    // The host <tr> lives outside react-aria's collection, so react's row
+    // reconciliation (sorting, filtering, pagination) must not strand or
+    // duplicate it: the insert effect re-runs on row changes and its cleanup
+    // removes the host when the target row disappears.
+    const renderDetail = (r: Row) => <div>{`detail for ${r.name}`}</div>;
+    const detailFor = (name: string) =>
+      screen.getByRole("row", { name: new RegExp(name) }).nextElementSibling?.textContent ?? null;
+
+    const { rerender } = render(<DataTable {...base({ detailKey: "b", renderDetail })} />);
+    await waitFor(() => expect(detailFor("Bravo")).toContain("detail for Bravo"));
+
+    // Reorder (a sort flipping Bravo to the top): panel follows its row.
+    const reordered = [ROWS[1], ROWS[2], ROWS[0]];
+    rerender(<DataTable {...base({ rows: reordered, detailKey: "b", renderDetail })} />);
+    await waitFor(() => expect(detailFor("Bravo")).toContain("detail for Bravo"));
+    expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(1);
+
+    // Target filtered out: panel is removed, nothing stranded.
+    rerender(<DataTable {...base({ rows: [ROWS[0], ROWS[2]], detailKey: "b", renderDetail })} />);
+    await waitFor(() => expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(0));
+    expect(screen.queryByText("detail for Bravo")).not.toBeInTheDocument();
+
+    // Target returns (filter cleared): panel re-attaches with correct content.
+    rerender(<DataTable {...base({ detailKey: "b", renderDetail })} />);
+    await waitFor(() => expect(detailFor("Bravo")).toContain("detail for Bravo"));
+    expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(1);
+  });
+
   it("still fires onRowAction on a row click while a selection is active", async () => {
     // react-aria's toggle behavior repurposes row clicks into selection
     // extension once any row is selected; DataTable intercepts those clicks so
