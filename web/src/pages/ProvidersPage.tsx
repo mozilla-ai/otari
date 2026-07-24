@@ -26,7 +26,7 @@ import type {
   UpdateStoredProviderRequest,
 } from "@/api/types";
 import { Field } from "@/components/Field";
-import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
+import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/components/ui";
 import { formatRelative } from "@/lib/format";
 
@@ -749,6 +749,108 @@ export function ProvidersPage() {
     });
   };
 
+  const columns: DataTableColumn<ProviderRow>[] = [
+    {
+      id: "provider",
+      header: "Provider",
+      isRowHeader: true,
+      cell: (row) => (
+        <Link
+          to={`/models?provider=${encodeURIComponent(row.instance)}`}
+          className="font-medium text-[var(--otari-ink)] hover:text-[var(--otari-brand-dark)] hover:underline"
+        >
+          {row.instance}
+        </Link>
+      ),
+    },
+    {
+      id: "type",
+      header: "Type",
+      cell: (row) => (
+        <span className="text-[var(--otari-muted)]">
+          {row.meta?.provider_type ?? row.stored?.provider_type ?? row.instance}
+        </span>
+      ),
+    },
+    {
+      id: "source",
+      header: "Source",
+      cell: (row) => (
+        <Chip size="sm" color={row.source === "stored" ? "accent" : "default"}>
+          {row.source === "stored" ? "stored" : "config"}
+        </Chip>
+      ),
+    },
+    {
+      id: "api_key",
+      header: "API key",
+      cell: (row) => (
+        <span className="text-[var(--otari-muted)]">
+          {row.source === "stored" ? (
+            row.stored && !row.stored.decryptable ? (
+              <span
+                className="text-amber-700"
+                title="This key can't be decrypted with the current OTARI_SECRET_KEY. Replace the key, or restore the original OTARI_SECRET_KEY."
+              >
+                ⚠ key unreadable
+              </span>
+            ) : (
+              <code>{row.stored?.last4 ? `••••${row.stored.last4}` : "none set"}</code>
+            )
+          ) : row.meta?.env_key ? (
+            <span>
+              via <code>{row.meta.env_key}</code>
+            </span>
+          ) : (
+            "config.yml"
+          )}
+        </span>
+      ),
+    },
+    { id: "status", header: "Status", cell: (row) => <HealthPill health={healthByInstance.get(row.instance)} /> },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "end",
+      cell: (row) =>
+        row.source === "stored" ? (
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                // A row whose key can't be decrypted can't be tested; Edit/Delete still recover it.
+                isDisabled={tests[row.instance]?.status === "pending" || row.stored?.decryptable === false}
+                onPress={() => runTest(row.instance)}
+              >
+                Test
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={() => {
+                  setAddOpen(false);
+                  setEditing(row.instance);
+                }}
+              >
+                Edit
+              </Button>
+              <ConfirmButton
+                confirmLabel="Delete"
+                isPending={deleteProvider.isPending}
+                onConfirm={() => deleteProvider.mutate(row.instance)}
+              >
+                Delete
+              </ConfirmButton>
+            </div>
+            <TestOutcome state={tests[row.instance]} />
+          </div>
+        ) : (
+          <span className="block text-right text-xs text-[var(--otari-muted)]">managed in config.yml</span>
+        ),
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
@@ -813,114 +915,14 @@ export function ProvidersPage() {
         <HealthSummary healthy={health.data.healthy} total={health.data.total} checkedAt={health.data.checked_at} />
       ) : null}
 
-      <Table>
-        <THead>
-          <tr>
-            <Th>Provider</Th>
-            <Th>Type</Th>
-            <Th>Source</Th>
-            <Th>API key</Th>
-            <Th>Status</Th>
-            <Th className="text-right">Actions</Th>
-          </tr>
-        </THead>
-        <tbody>
-          {loading ? (
-            <LoadingRow colSpan={6} />
-          ) : rows.length === 0 ? (
-            <TableMessage colSpan={6}>No providers yet. Add your first provider to start serving models.</TableMessage>
-          ) : (
-            rows.map((row) => (
-              <Tr key={row.instance}>
-                <Td className="font-medium">
-                  <Link
-                    to={`/models?provider=${encodeURIComponent(row.instance)}`}
-                    className="text-[var(--otari-ink)] hover:text-[var(--otari-brand-dark)] hover:underline"
-                  >
-                    {row.instance}
-                  </Link>
-                </Td>
-                <Td className="text-[var(--otari-muted)]">
-                  {row.meta?.provider_type ?? row.stored?.provider_type ?? row.instance}
-                </Td>
-                <Td>
-                  {row.source === "stored" ? (
-                    <Chip size="sm" color="accent">
-                      stored
-                    </Chip>
-                  ) : (
-                    <Chip size="sm" color="default">
-                      config
-                    </Chip>
-                  )}
-                </Td>
-                <Td className="text-[var(--otari-muted)]">
-                  {row.source === "stored" ? (
-                    row.stored && !row.stored.decryptable ? (
-                      <span
-                        className="text-amber-700"
-                        title="This key can't be decrypted with the current OTARI_SECRET_KEY. Replace the key, or restore the original OTARI_SECRET_KEY."
-                      >
-                        ⚠ key unreadable
-                      </span>
-                    ) : (
-                      <code>{row.stored?.last4 ? `••••${row.stored.last4}` : "none set"}</code>
-                    )
-                  ) : row.meta?.env_key ? (
-                    <span>
-                      via <code>{row.meta.env_key}</code>
-                    </span>
-                  ) : (
-                    "config.yml"
-                  )}
-                </Td>
-                <Td>
-                  <HealthPill health={healthByInstance.get(row.instance)} />
-                </Td>
-                <Td>
-                  {row.source === "stored" ? (
-                    <div className="flex flex-col items-end gap-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          // A row whose key can't be decrypted can't be tested; Edit/Delete still recover it.
-                          isDisabled={
-                            tests[row.instance]?.status === "pending" || row.stored?.decryptable === false
-                          }
-                          onPress={() => runTest(row.instance)}
-                        >
-                          Test
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onPress={() => {
-                            setAddOpen(false);
-                            setEditing(row.instance);
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <ConfirmButton
-                          confirmLabel="Delete"
-                          isPending={deleteProvider.isPending}
-                          onConfirm={() => deleteProvider.mutate(row.instance)}
-                        >
-                          Delete
-                        </ConfirmButton>
-                      </div>
-                      <TestOutcome state={tests[row.instance]} />
-                    </div>
-                  ) : (
-                    <span className="block text-right text-xs text-[var(--otari-muted)]">managed in config.yml</span>
-                  )}
-                </Td>
-              </Tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+      <DataTable
+        ariaLabel="Providers"
+        columns={columns}
+        rows={rows}
+        getRowKey={(row) => row.instance}
+        isLoading={loading}
+        emptyContent="No providers yet. Add your first provider to start serving models."
+      />
     </div>
   );
 }
