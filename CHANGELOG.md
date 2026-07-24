@@ -4,6 +4,50 @@ All notable changes to Otari will be documented in this file.
 
 The format follows [Conventional Commits](https://www.conventionalcommits.org/).
 
+## [0.4.0](https://github.com/mozilla-ai/otari/releases/tag/v0.4.0) - 2026-07-24
+
+
+
+### Bug Fixes
+
+- **dashboard:** Align input boxes on the tools & guardrails page in [#383](https://github.com/mozilla-ai/otari/pull/383) by [@njbrake](https://github.com/njbrake) ([`fa68234`](https://github.com/mozilla-ai/otari/commit/fa682347676832ac59535e0ed95cc7d14519ff55))
+- **models:** List env-credentialed providers in /v1/models in [#388](https://github.com/mozilla-ai/otari/pull/388) by [@njbrake](https://github.com/njbrake) ([`340bd4b`](https://github.com/mozilla-ai/otari/commit/340bd4bba2d68de38eda61d08086ea935e342427))
+- Surface actionable tools + reasoning_effort provider error in [#385](https://github.com/mozilla-ai/otari/pull/385) by [@njbrake](https://github.com/njbrake) ([`47c142c`](https://github.com/mozilla-ai/otari/commit/47c142cfccfd7335ae91d422fa0a10ac2c6be596))
+- **dashboard:** Make the provider picker open instantly (lazy split) in [#382](https://github.com/mozilla-ai/otari/pull/382) by [@njbrake](https://github.com/njbrake) ([`e16e49f`](https://github.com/mozilla-ai/otari/commit/e16e49fd6328b5b69f75b2f9bba85738e1a01b5f))
+- **dashboard:** Persist sign-in with an HttpOnly session cookie in [#384](https://github.com/mozilla-ai/otari/pull/384) by [@njbrake](https://github.com/njbrake) ([`f462b03`](https://github.com/mozilla-ai/otari/commit/f462b03e2832c9ca6345a3c9e2039ca884d7e40e))
+- **dashboard:** Make the dashboard mobile friendly in [#406](https://github.com/mozilla-ai/otari/pull/406) by [@njbrake](https://github.com/njbrake) ([`819681d`](https://github.com/mozilla-ai/otari/commit/819681d91c1aa7b4026e119b9a0b799014a2ed2c))
+- **hybrid:** Recognize SDK-wrapped timeout/connection errors for fallback in [#381](https://github.com/mozilla-ai/otari/pull/381) by [@tbille](https://github.com/tbille) ([`c463603`](https://github.com/mozilla-ai/otari/commit/c4636033ec0c2abb990324ad04befd0f9f159e91))
+- **dashboard:** CodeRabbit follow-ups on budgets, usage, and tool tests in [#404](https://github.com/mozilla-ai/otari/pull/404) by [@njbrake](https://github.com/njbrake) ([`6a8a165`](https://github.com/mozilla-ai/otari/commit/6a8a165c1f3356e9c98cfe416089a8a6a19b10c7))
+- **compose:** Bind quickstart postgres to localhost in [#413](https://github.com/mozilla-ai/otari/pull/413) by [@pcornelissen](https://github.com/pcornelissen) ([`a5e8058`](https://github.com/mozilla-ai/otari/commit/a5e80585736788ff89e54add5cccf3185ce8cc73))
+- **dashboard:** Stop table selection clicks from re-rendering every row in [#416](https://github.com/mozilla-ai/otari/pull/416) by [@njbrake](https://github.com/njbrake) ([`39428aa`](https://github.com/mozilla-ai/otari/commit/39428aa8bcdc5ae94591702cdf89d7786f7dda30))
+- **dashboard:** Reopen the request detail inline under the clicked activity row in [#417](https://github.com/mozilla-ai/otari/pull/417) by [@njbrake](https://github.com/njbrake) ([`4685d03`](https://github.com/mozilla-ai/otari/commit/4685d03698778dac832b9081474717fbaeec2a80))
+- **dashboard:** Wrap usage stat tiles into a responsive grid on mobile in [#418](https://github.com/mozilla-ai/otari/pull/418) by [@njbrake](https://github.com/njbrake) ([`50b0cdd`](https://github.com/mozilla-ai/otari/commit/50b0cdd4cb318325aae62bcc3164cdbc70ef7eac))
+
+
+### Features
+
+- **dashboard:** Code-split route bundles in [#373](https://github.com/mozilla-ai/otari/pull/373) by [@njbrake](https://github.com/njbrake) ([`b04d3cd`](https://github.com/mozilla-ai/otari/commit/b04d3cdce0c66eed34e39a9efdb0a44b1850e1c0))
+- **pricing:** Add reviewable price refresh in [#367](https://github.com/mozilla-ai/otari/pull/367) by [@njbrake](https://github.com/njbrake) ([`e5bdbb8`](https://github.com/mozilla-ai/otari/commit/e5bdbb80c595f5765b69f26f93dba751f0df0b9b))
+- **pricing:** Meter cache writes and long context in [#379](https://github.com/mozilla-ai/otari/pull/379) by [@njbrake](https://github.com/njbrake) ([`7559257`](https://github.com/mozilla-ai/otari/commit/755925776ef03c3818668bca274ca4341b40ca33))
+- **files:** Stream uploads and downloads instead of buffering in memory in [#380](https://github.com/mozilla-ai/otari/pull/380) by [@champ18ion](https://github.com/champ18ion) ([`cbee20e`](https://github.com/mozilla-ai/otari/commit/cbee20ebbd2db5bd5cb8d6cfc3af5927d6355cf6))
+- **dashboard:** Adopt recharts and retire hand-rolled UsageChart in [#386](https://github.com/mozilla-ai/otari/pull/386) by [@njbrake](https://github.com/njbrake) ([`de90d8a`](https://github.com/mozilla-ai/otari/commit/de90d8a21c022922bbe6a9159ccdb319b2e9bddd))
+- **dashboard:** Disable adding providers when OTARI_SECRET_KEY is unset in [#391](https://github.com/mozilla-ai/otari/pull/391) by [@njbrake](https://github.com/njbrake) ([`661aafc`](https://github.com/mozilla-ai/otari/commit/661aafc8c79a6aad9b6cc627e28471170782e385))
+- **usage:** Ingest external usage events for API-equivalent cost tracking in [#392](https://github.com/mozilla-ai/otari/pull/392) by [@njbrake](https://github.com/njbrake) ([`bf90e94`](https://github.com/mozilla-ai/otari/commit/bf90e94a1c09cf6acbeee242a116c5666a6c8a48))
+- **dashboard:** Shared table framework with filtering, pagination, selection, and bulk actions in [#415](https://github.com/mozilla-ai/otari/pull/415) by [@njbrake](https://github.com/njbrake) ([`c8e09b3`](https://github.com/mozilla-ai/otari/commit/c8e09b3b9a3b66e2ce86a9cc6a9109ed61034e53))
+
+
+### Other
+
+- Update README to remove GitHub repository link in [#394](https://github.com/mozilla-ai/otari/pull/394) by [@njbrake](https://github.com/njbrake) ([`ac51544`](https://github.com/mozilla-ai/otari/commit/ac5154469f731bfd2d10711b68ed2fdc6b094c57))
+
+
+
+### New Contributors
+
+- [@pcornelissen](https://github.com/pcornelissen) made their first contribution in [#413](https://github.com/mozilla-ai/otari/pull/413)
+- [@champ18ion](https://github.com/champ18ion) made their first contribution in [#380](https://github.com/mozilla-ai/otari/pull/380)
+
+**Full Changelog**: https://github.com/mozilla-ai/otari/compare/v0.3.0...v0.4.0
 ## [0.3.0](https://github.com/mozilla-ai/otari/releases/tag/v0.3.0) - 2026-07-22
 
 
