@@ -152,4 +152,30 @@ describe("AliasesPage", () => {
     expect(screen.getByText(/cannot contain/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create alias/i })).toBeDisabled();
   });
+
+  it("only lets stored aliases be selected, and bulk-deletes them", async () => {
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+    renderPage(<AliasesPage />);
+
+    const configRow = (await screen.findByText("fast-model")).closest("tr")!;
+    const storedRow = screen.getByText("smart").closest("tr")!;
+    // config alias is read-only, so its checkbox is disabled.
+    expect(within(configRow).getByRole("checkbox")).toBeDisabled();
+    await user.click(within(storedRow).getByRole("checkbox"));
+
+    const bar = (await screen.findByText("1 selected")).closest("div")!;
+    await user.click(within(bar).getByRole("button", { name: "Delete" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await vi.waitFor(() => {
+      const del = fetchMock.mock.calls.find(
+        ([u, init]) => String(u).includes("/v1/aliases/") && (init?.method ?? "").toUpperCase() === "DELETE",
+      );
+      expect(del).toBeTruthy();
+      expect(String(del![0])).toContain("smart");
+    });
+  });
 });
