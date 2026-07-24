@@ -84,6 +84,13 @@ export interface DataTableProps<Row> {
 
 const SELECTION_COLUMN_WIDTH = 44;
 
+// HeroUI's Table paints its header and columns with `--surface-secondary` (a gray
+// that reads wrong over the white card). Repaint the header row with the brand
+// tint and make the columns transparent so it shows through, with ink-colored
+// semibold labels, matching the rest of the dashboard chrome. `!` wins the
+// cascade because HeroUI's class ships after Tailwind's utilities.
+const COLUMN_CLASS = "bg-transparent! font-semibold! text-[var(--otari-ink)]!";
+
 export function DataTable<Row>({
   ariaLabel,
   columns,
@@ -120,9 +127,13 @@ export function DataTable<Row>({
           onSortChange={onSortChange}
           onRowAction={onRowAction ? (key) => onRowAction(String(key)) : undefined}
         >
-          <Table.Header>
+          <Table.Header className="border-[var(--otari-line)]! bg-[var(--otari-brand-tint)]!">
             {showSelection ? (
-              <Table.Column width={SELECTION_COLUMN_WIDTH} minWidth={SELECTION_COLUMN_WIDTH}>
+              <Table.Column
+                width={SELECTION_COLUMN_WIDTH}
+                minWidth={SELECTION_COLUMN_WIDTH}
+                className={COLUMN_CLASS}
+              >
                 <SelectionCheckbox ariaLabel="Select all rows" />
               </Table.Column>
             ) : null}
@@ -134,7 +145,7 @@ export function DataTable<Row>({
                 allowsSorting={col.allowsSorting}
                 width={col.width}
                 minWidth={col.minWidth}
-                className={col.align === "end" ? "text-right" : undefined}
+                className={col.align === "end" ? `${COLUMN_CLASS} text-right` : COLUMN_CLASS}
               >
                 {({ sortDirection }) => (
                   <div className={`flex items-center gap-1 ${col.align === "end" ? "justify-end" : ""}`}>
