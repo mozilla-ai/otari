@@ -84,11 +84,12 @@ export interface DataTableProps<Row> {
 
 const SELECTION_COLUMN_WIDTH = 44;
 
-// HeroUI's Table ships decorative column separators, pill corner-radii, and a
-// gray header surface that read wrong over the dashboard's white cards. Those are
-// neutralized in globals.css (scoped to `.otari-table`), leaving a flat brand-tint
-// header flush inside the card; `overflow-hidden` on the root clips the now-square
-// header corners to the card's rounded border.
+// HeroUI's Table.Root is itself a card. Rather than wrap it in a second card
+// (which left two mismatched radii and an inset gap), the `.otari-table` class
+// owns the whole container's styling in globals.css: our surface + border +
+// single 12px radius, the brand-tint header, and no column separators. The root's
+// `overflow: hidden` (also in globals.css) clips the header and last row to that
+// one radius, so the header meets the card corner exactly.
 
 export function DataTable<Row>({
   ariaLabel,
@@ -111,7 +112,7 @@ export function DataTable<Row>({
   const Container = resizable ? Table.ResizableContainer : Table.ScrollContainer;
 
   return (
-    <Table.Root className="otari-table overflow-hidden rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)]">
+    <Table.Root className="otari-table">
       <Container className="overflow-x-auto">
         <Table.Content
           aria-label={ariaLabel}
