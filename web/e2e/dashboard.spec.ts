@@ -62,7 +62,8 @@ test.describe("dashboard core flows", () => {
     await page.getByLabel("Spending limit (USD)").fill("100");
     await page.getByRole("button", { name: "Create budget" }).click();
 
-    await expect(page.getByRole("cell", { name: "$100.00" })).toBeVisible();
+    // The shared table renders on react-aria, so non-row-header cells are gridcells.
+    await expect(page.getByRole("gridcell", { name: "$100.00" })).toBeVisible();
     await expect(page.getByText("e2e-budget")).toBeVisible();
     await expect(page.getByText("No budgets yet")).toBeHidden();
   });
@@ -117,6 +118,7 @@ test.describe("dashboard core flows", () => {
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Create alias" }).click();
 
-    await expect(page.getByRole("cell", { name: "fast" })).toBeVisible();
+    // The alias name is the table's row-header cell (react-aria rowheader).
+    await expect(page.getByRole("rowheader", { name: "fast" })).toBeVisible();
   });
 });

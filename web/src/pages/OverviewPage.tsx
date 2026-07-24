@@ -13,7 +13,7 @@ import {
 } from "@/api/hooks";
 import type { UsageEntry } from "@/api/types";
 import { Sparkline } from "@/components/charts";
-import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
+import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { DeltaHint, ErrorBanner, PageHeader, StatCard } from "@/components/ui";
 import { deltaFraction, formatNumber, formatPct, formatRelative, formatUsd } from "@/lib/format";
 import { budgetHealth, errorRateHealth, providerHealthStatus, toStatStatus } from "@/lib/overview";
@@ -313,6 +313,35 @@ function statusWord(status: string): string {
 // Newest few requests, as an at-a-glance preview. Rows are read-only; a single
 // "View all" link opens the full Activity log. Cost is nullable per row.
 function RecentActivity({ entries, loading, error }: { entries: UsageEntry[]; loading: boolean; error: unknown }) {
+  const columns: DataTableColumn<UsageEntry>[] = [
+    {
+      id: "time",
+      header: "Time",
+      cell: (entry) => (
+        <span className="text-[var(--otari-muted)]" title={new Date(entry.timestamp).toLocaleString()}>
+          {formatRelative(entry.timestamp)}
+        </span>
+      ),
+    },
+    { id: "model", header: "Model", isRowHeader: true, cell: (entry) => <span className="text-[var(--otari-ink)]">{entry.model}</span> },
+    { id: "cost", header: "Cost", align: "end", cell: (entry) => (entry.cost === null ? "—" : formatUsd(entry.cost)) },
+    {
+      id: "status",
+      header: "Status",
+      cell: (entry) => (
+        <span
+          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+            entry.status === "error"
+              ? "border-red-200 bg-red-50 text-red-700"
+              : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
+          }`}
+        >
+          {statusWord(entry.status)}
+        </span>
+      ),
+    },
+  ];
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
@@ -322,44 +351,14 @@ function RecentActivity({ entries, loading, error }: { entries: UsageEntry[]; lo
         </NavLink>
       </div>
       <ErrorBanner error={error} />
-      <Table>
-        <THead>
-          <tr>
-            <Th>Time</Th>
-            <Th>Model</Th>
-            <Th className="text-right">Cost</Th>
-            <Th>Status</Th>
-          </tr>
-        </THead>
-        <tbody>
-          {loading ? (
-            <LoadingRow colSpan={4} />
-          ) : entries.length === 0 ? (
-            <TableMessage colSpan={4}>No requests yet. Once the gateway serves traffic, it appears here.</TableMessage>
-          ) : (
-            entries.map((entry) => (
-              <Tr key={entry.id}>
-                <Td className="text-[var(--otari-muted)]">
-                  <span title={new Date(entry.timestamp).toLocaleString()}>{formatRelative(entry.timestamp)}</span>
-                </Td>
-                <Td className="text-[var(--otari-ink)]">{entry.model}</Td>
-                <Td className="text-right tabular-nums">{entry.cost === null ? "—" : formatUsd(entry.cost)}</Td>
-                <Td>
-                  <span
-                    className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
-                      entry.status === "error"
-                        ? "border-red-200 bg-red-50 text-red-700"
-                        : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
-                    }`}
-                  >
-                    {statusWord(entry.status)}
-                  </span>
-                </Td>
-              </Tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+      <DataTable
+        ariaLabel="Recent activity"
+        columns={columns}
+        rows={entries}
+        getRowKey={(entry) => entry.id}
+        isLoading={loading}
+        emptyContent="No requests yet. Once the gateway serves traffic, it appears here."
+      />
     </div>
   );
 }

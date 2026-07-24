@@ -314,7 +314,8 @@ describe("BudgetsPage", () => {
     const user = userEvent.setup();
     renderPage(<BudgetsPage />);
 
-    await user.click(await screen.findByText("11111111"));
+    const row = (await screen.findByText("11111111")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
     const field = await screen.findByLabelText("Every N days");
     expect(field).toHaveValue("14");
 
@@ -343,12 +344,13 @@ describe("BudgetsPage", () => {
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: null, max_budget: null, budget_duration_sec: null });
   });
 
-  it("opens the edit form seeded from the row when a budget is clicked", async () => {
+  it("opens the edit form seeded from the row's Edit action", async () => {
     mockApi({ budgets: [budget({ max_budget: 42, budget_duration_sec: 86_400 })] });
     const user = userEvent.setup();
     renderPage(<BudgetsPage />);
 
-    await user.click(await screen.findByText("11111111"));
+    const row = (await screen.findByText("11111111")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
 
     expect(await screen.findByRole("button", { name: "Save changes" })).toBeInTheDocument();
     expect(screen.getByLabelText("Spending limit (USD)")).toHaveValue("42");
@@ -393,5 +395,32 @@ describe("BudgetsPage", () => {
     );
     expect(del).toBeDefined();
     expect(screen.queryByText("11111111")).not.toBeInTheDocument();
+  });
+
+  it("bulk-deletes the selected budgets after a confirm", async () => {
+    const fetchMock = mockApi({
+      budgets: [
+        budget({ budget_id: "b1", name: "Team monthly" }),
+        budget({ budget_id: "b2", name: "Trial cap" }),
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage(<BudgetsPage />);
+
+    const row = (await screen.findByText("Team monthly")).closest("tr")!;
+    await user.click(within(row).getByRole("checkbox"));
+
+    const bar = (await screen.findByText("1 selected")).closest("div")!;
+    await user.click(within(bar).getByRole("button", { name: "Delete" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await vi.waitFor(() => {
+      const del = fetchMock.mock.calls.find(
+        ([u, init]) => String(u).includes("/v1/budgets/b1") && (init?.method ?? "").toUpperCase() === "DELETE",
+      );
+      expect(del).toBeTruthy();
+    });
   });
 });

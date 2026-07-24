@@ -1,14 +1,34 @@
 import { Button, Spinner } from "@heroui/react";
-import { clsx } from "clsx";
-import { useMemo, useState } from "react";
+import clsx from "clsx";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useKeys, useUsageSummary, useUsers } from "@/api/hooks";
-import type { UsageBucket, UsageFilters, UsageGroupRow, UsageSeriesPoint } from "@/api/types";
+import {
+  useDeleteUsage,
+  useKeys,
+  useSetUsagePrice,
+  useUsageCount,
+  useUsageLogs,
+  useUsageSummary,
+  useUsers,
+} from "@/api/hooks";
+import type {
+  UsageBucket,
+  UsageEntry,
+  UsageFilters,
+  UsageGroupRow,
+  UsageMutationSelection,
+  UsageSeriesPoint,
+} from "@/api/types";
+import { BulkActionBar } from "@/components/BulkActionBar";
 import { BarTrendChart, Sparkline } from "@/components/charts";
-import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataTable, type DataTableColumn } from "@/components/DataTable";
+import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
+import { TablePagination } from "@/components/TablePagination";
 import { DeltaHint, ErrorBanner, FilterComboBox, PageHeader, StatCard } from "@/components/ui";
 import { deltaFraction, formatPct, formatTokens, formatUsd } from "@/lib/format";
+import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // ---------- formatting ----------
 
@@ -71,6 +91,9 @@ interface BreakdownProps {
 // share-of-total bar; clicking a named row drills into the Activity log filtered
 // to that dimension. The synthesized "other" fold row (null key) is shown but not
 // clickable, so the visible spend still reconciles with the total-spend tile.
+const OTHER_KEY = "__other__";
+const UNKNOWN_KEY = "__unknown__";
+
 function BreakdownTable({
   title,
   rows,
@@ -83,63 +106,57 @@ function BreakdownTable({
   const visible = showAll ? rows : rows.slice(0, TABLE_TOP_N);
   const hidden = rows.length - visible.length;
 
+  // Fold and deleted-user rows both carry a null key and are not drill targets;
+  // give them stable sentinel keys so the collection stays unique.
+  const rowKey = (row: UsageGroupRow) => (row.is_other ? OTHER_KEY : (row.key ?? UNKNOWN_KEY));
+
+  const columns: DataTableColumn<UsageGroupRow>[] = [
+    {
+      id: "name",
+      header: title.replace("Spend by ", ""),
+      isRowHeader: true,
+      cell: (row) => {
+        const share = totalCost > 0 ? row.cost / totalCost : 0;
+        return (
+          <div className="flex flex-col gap-1">
+            <span className="truncate text-[var(--otari-ink)]">
+              {row.is_other
+                ? `Other (${row.requests.toLocaleString()} req)`
+                : row.key === null
+                  ? "(unknown)"
+                  : row.key}
+            </span>
+            <span className="h-1 w-full overflow-hidden rounded-full bg-[var(--otari-line)]">
+              <span
+                className="block h-full rounded-full bg-[var(--otari-brand)]"
+                style={{ width: `${Math.min(100, share * 100)}%` }}
+              />
+            </span>
+          </div>
+        );
+      },
+    },
+    { id: "requests", header: "Requests", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatCount(row.requests)}</span> },
+    { id: "spend", header: "Spend", align: "end", cell: (row) => <span className="text-[var(--otari-ink)]">{formatUsd(row.cost)}</span> },
+  ];
+
   return (
     <div className="flex flex-col gap-2">
       <h2 className="text-sm font-semibold text-[var(--otari-ink)]">{title}</h2>
-      <Table>
-        <THead>
-          <tr>
-            <Th>{title.replace("Spend by ", "")}</Th>
-            <Th className="text-right">Requests</Th>
-            <Th className="text-right">Spend</Th>
-          </tr>
-        </THead>
-        <tbody>
-          {loading ? (
-            <LoadingRow colSpan={3} />
-          ) : rows.length === 0 ? (
-            <TableMessage colSpan={3}>{emptyLabel}</TableMessage>
-          ) : (
-            visible.map((row, index) => {
-              const isOther = row.is_other;
-              // A real group can also have a null key (usage from a since-deleted
-              // user); it is shown as "(unknown)" and, like the fold, is not a
-              // drill target because there is no id to filter on.
-              const drillable = !isOther && row.key !== null;
-              const share = totalCost > 0 ? row.cost / totalCost : 0;
-              return (
-                <Tr
-                  // Null keys (fold or deleted-user) collide; index keeps it unique.
-                  key={row.key ?? `__null_${index}`}
-                  onClick={drillable ? () => onDrill(row.key as string) : undefined}
-                >
-                  <Td className="text-[var(--otari-ink)]">
-                    <div className="flex flex-col gap-1">
-                      <span className="truncate">
-                        {isOther
-                          ? `Other (${row.requests.toLocaleString()} req)`
-                          : row.key === null
-                            ? "(unknown)"
-                            : row.key}
-                      </span>
-                      {/* Share-of-total bar. Width is data-driven, so it rides an
-                          inline style like the Table's computed column widths. */}
-                      <span className="h-1 w-full overflow-hidden rounded-full bg-[var(--otari-line)]">
-                        <span
-                          className="block h-full rounded-full bg-[var(--otari-brand)]"
-                          style={{ width: `${Math.min(100, share * 100)}%` }}
-                        />
-                      </span>
-                    </div>
-                  </Td>
-                  <Td className="text-right tabular-nums text-[var(--otari-muted)]">{formatCount(row.requests)}</Td>
-                  <Td className="text-right tabular-nums text-[var(--otari-ink)]">{formatUsd(row.cost)}</Td>
-                </Tr>
-              );
-            })
-          )}
-        </tbody>
-      </Table>
+      <DataTable
+        ariaLabel={title}
+        columns={columns}
+        rows={visible}
+        getRowKey={rowKey}
+        isLoading={loading}
+        emptyContent={emptyLabel}
+        onRowAction={(key) => {
+          // Only real groups drill; the fold and deleted-user rows have no id to filter on.
+          if (key !== OTHER_KEY && key !== UNKNOWN_KEY) {
+            onDrill(key);
+          }
+        }}
+      />
       {!loading && hidden > 0 ? (
         <Button size="sm" variant="ghost" onPress={() => setShowAll(true)}>
           Show all {rows.length}
@@ -194,6 +211,202 @@ function trendData(series: UsageSeriesPoint[], metric: ChartMetric, bucket: Usag
   return { points, peak, count: series.length };
 }
 
+// ---------- individual requests (raw rows under the breakdowns) ----------
+
+const REQUESTS_PAGE_SIZE = 50;
+
+function requestTimeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+function RequestStatusPill({ status }: { status: string }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
+        status === "error"
+          ? "border-red-200 bg-red-50 text-red-700"
+          : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
+      }`}
+    >
+      {status}
+    </span>
+  );
+}
+
+// The raw usage rows for the current filter window, paginated, with selection
+// and the imported-row bulk actions (Delete, Set price). Only imported rows are
+// selectable; enforced gateway rows are disabled so bulk ops never touch them.
+function UsageRequests({ filters, anyFilter }: { filters: UsageFilters; anyFilter: boolean }) {
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(REQUESTS_PAGE_SIZE);
+  const selection = useTableSelection();
+  const deleteUsage = useDeleteUsage();
+  const setPrice = useSetUsagePrice();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [priceOpen, setPriceOpen] = useState(false);
+
+  const filtersKey = JSON.stringify(filters);
+  const prevFiltersKey = useRef(filtersKey);
+  useEffect(() => {
+    if (prevFiltersKey.current !== filtersKey) {
+      prevFiltersKey.current = filtersKey;
+      setPage(0);
+      selection.clear();
+    }
+  }, [filtersKey, selection]);
+
+  const usage = useUsageLogs(filters, page, pageSize);
+  const count = useUsageCount(filters);
+  const rows = usage.data ?? [];
+  const totalIsExact = count.isSuccess && !count.isPlaceholderData;
+  const total = totalIsExact ? (count.data?.total ?? 0) : null;
+
+  const selectableKeys = rows.filter((r) => !r.counts_toward_budget).map((r) => r.id);
+  const disabledKeys = rows.filter((r) => r.counts_toward_budget).map((r) => r.id);
+  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
+  const pageSelectedCount = selectedIds.length;
+  const hasSelection = selection.allMatching || pageSelectedCount > 0;
+
+  const importedFilters = useMemo<UsageFilters>(() => ({ ...filters, counts_toward_budget: false }), [filters]);
+  const importedCount = useUsageCount(importedFilters, hasSelection);
+  const matchingTotal = importedCount.isSuccess ? (importedCount.data?.total ?? null) : null;
+  const allPageSelected = selectableKeys.length > 0 && pageSelectedCount === selectableKeys.length;
+  const canSelectAllMatching = allPageSelected && matchingTotal != null && matchingTotal > pageSelectedCount;
+  const effectiveCount = selection.allMatching ? (matchingTotal ?? pageSelectedCount) : pageSelectedCount;
+
+  const selectionBody = (): UsageMutationSelection =>
+    selection.allMatching
+      ? {
+          by_filter: true,
+          model: filters.model,
+          user_id: filters.user_id,
+          api_key_id: filters.api_key_id,
+          start_date: filters.start_date,
+          end_date: filters.end_date,
+          priced: filters.priced,
+        }
+      : { ids: selectedIds };
+
+  const onDeleteConfirm = () =>
+    deleteUsage.mutate(selectionBody(), {
+      onSuccess: () => {
+        setDeleteOpen(false);
+        selection.clear();
+      },
+    });
+
+  const onSetPrice = (rates: ManualRates) =>
+    setPrice.mutate(
+      { ...selectionBody(), ...rates },
+      {
+        onSuccess: () => {
+          setPriceOpen(false);
+          selection.clear();
+        },
+      },
+    );
+
+  const columns: DataTableColumn<UsageEntry>[] = [
+    {
+      id: "time",
+      header: "Time",
+      isRowHeader: true,
+      cell: (e) => (
+        <span className="text-[var(--otari-muted)]" title={new Date(e.timestamp).toLocaleString()}>
+          {requestTimeAgo(e.timestamp)}
+        </span>
+      ),
+    },
+    { id: "model", header: "Model", cell: (e) => <span className="text-[var(--otari-ink)]">{e.model}</span> },
+    { id: "user", header: "User", cell: (e) => <span className="text-[var(--otari-muted)]">{e.user_id ?? "—"}</span> },
+    { id: "tokens", header: "Tokens", align: "end", cell: (e) => (e.total_tokens === null ? "—" : e.total_tokens.toLocaleString()) },
+    { id: "cost", header: "Cost", align: "end", cell: (e) => (e.cost === null ? "—" : formatUsd(e.cost)) },
+    { id: "status", header: "Status", cell: (e) => <RequestStatusPill status={e.status} /> },
+  ];
+
+  return (
+    <div className="flex flex-col gap-3">
+      <h2 className="text-sm font-semibold text-[var(--otari-ink)]">Individual requests</h2>
+      <ErrorBanner error={usage.error ?? count.error} />
+
+      {hasSelection ? (
+        <BulkActionBar
+          selectedCount={effectiveCount}
+          allMatching={selection.allMatching}
+          matchingTotal={matchingTotal}
+          canSelectAllMatching={canSelectAllMatching}
+          onSelectAllMatching={selection.enableAllMatching}
+          onClear={selection.clear}
+        >
+          <Button size="sm" variant="primary" onPress={() => setPriceOpen(true)}>
+            Set price
+          </Button>
+          <Button size="sm" variant="danger" onPress={() => setDeleteOpen(true)}>
+            Delete
+          </Button>
+        </BulkActionBar>
+      ) : null}
+
+      <DataTable
+        ariaLabel="Individual requests"
+        columns={columns}
+        rows={rows}
+        getRowKey={(e) => e.id}
+        isLoading={usage.isLoading}
+        emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
+        selectionMode="multiple"
+        selectedKeys={selection.selectedKeys}
+        onSelectionChange={selection.onSelectionChange}
+        disabledKeys={disabledKeys}
+      />
+
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        rowsOnPage={rows.length}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(0);
+        }}
+        isFetching={usage.isFetching}
+        hasNextFallback={rows.length === pageSize}
+      />
+
+      <ConfirmDialog
+        isOpen={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        heading="Delete usage rows"
+        body={`Delete ${effectiveCount.toLocaleString()} imported ${
+          effectiveCount === 1 ? "row" : "rows"
+        }? Only imported rows are removed, and this cannot be undone.`}
+        confirmLabel="Delete"
+        isPending={deleteUsage.isPending}
+        error={deleteUsage.error}
+        onConfirm={onDeleteConfirm}
+      />
+
+      <SetPriceDialog
+        isOpen={priceOpen}
+        onOpenChange={setPriceOpen}
+        targetCount={effectiveCount}
+        isPending={setPrice.isPending}
+        error={setPrice.error}
+        onSubmit={onSetPrice}
+      />
+    </div>
+  );
+}
+
 // ---------- page ----------
 
 export function UsagePage() {
@@ -205,28 +418,40 @@ export function UsagePage() {
   const [startDate, setStartDate] = useState<string | undefined>(() =>
     DEFAULT_PRESET.seconds === null ? undefined : isoAgo(DEFAULT_PRESET.seconds),
   );
+  // Custom range: an explicit from/to window (like the Activity page), buckets
+  // daily. When active it overrides the preset window.
+  const [customMode, setCustomMode] = useState(false);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [modelFilter, setModelFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [metric, setMetric] = useState<ChartMetric>("cost");
-  // On mobile the user/model/key controls collapse behind a "Filters" toggle so
-  // the stat tiles are not pushed far down the page; desktop shows them inline.
-  // The time-range presets stay visible either way.
-  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const winStart = customMode ? customFrom || undefined : startDate;
+  const winEnd = customMode ? customTo || undefined : undefined;
+  const bucket: UsageBucket = customMode ? "day" : preset.bucket;
 
   const filters: UsageFilters = useMemo(
     () => ({
-      start_date: startDate,
+      start_date: winStart,
+      end_date: winEnd,
       model: modelFilter.trim() || undefined,
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
     }),
-    [startDate, modelFilter, userFilter, apiKeyFilter],
+    [winStart, winEnd, modelFilter, userFilter, apiKeyFilter],
   );
 
   // The immediately-preceding window of equal length, for period-over-period
   // deltas. Only meaningful for a bounded range.
   const previousFilters: UsageFilters | null = useMemo(() => {
+    if (customMode) {
+      if (!winStart || !winEnd) return null;
+      const span = new Date(winEnd).getTime() - new Date(winStart).getTime();
+      if (!(span > 0)) return null;
+      return { ...filters, start_date: new Date(new Date(winStart).getTime() - span).toISOString(), end_date: winStart };
+    }
     if (preset.seconds === null || !startDate) return null;
     return {
       ...filters,
@@ -234,10 +459,10 @@ export function UsagePage() {
       // Cap the previous window at the current window's start.
       end_date: startDate,
     };
-  }, [filters, preset.seconds, startDate]);
+  }, [customMode, winStart, winEnd, filters, preset.seconds, startDate]);
 
-  const summary = useUsageSummary(filters, preset.bucket);
-  const previous = useUsageSummary(previousFilters ?? filters, preset.bucket, previousFilters !== null);
+  const summary = useUsageSummary(filters, bucket);
+  const previous = useUsageSummary(previousFilters ?? filters, bucket, previousFilters !== null);
 
   const data = summary.data;
   const totals = data?.totals;
@@ -248,7 +473,7 @@ export function UsagePage() {
   // omits the model filter, so the list stays complete when a model is selected,
   // and derived directly from query data rather than mirrored into state.
   const modelSuggestFilters: UsageFilters = useMemo(() => ({ ...filters, model: undefined }), [filters]);
-  const modelSuggest = useUsageSummary(modelSuggestFilters, preset.bucket);
+  const modelSuggest = useUsageSummary(modelSuggestFilters, bucket);
   const modelOptions =
     modelSuggest.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
 
@@ -266,21 +491,26 @@ export function UsagePage() {
     modelFilter && !modelOptions.includes(modelFilter) ? [modelFilter, ...modelOptions] : modelOptions
   ).map((m) => ({ value: m, label: m }));
 
-  const anyFilter = Boolean(modelFilter.trim() || userFilter || apiKeyFilter || preset.seconds !== null);
-  // Count only the collapsible controls (not the always-visible time range) so
-  // the mobile toggle can advertise how many are active while hidden.
+  const timeFiltered = customMode ? Boolean(winStart || winEnd) : preset.seconds !== null;
+  const anyFilter = Boolean(modelFilter.trim() || userFilter || apiKeyFilter || timeFiltered);
+  // On mobile the user/model/key controls collapse behind a "Filters" toggle so
+  // the tiles and breakdowns sit near the top; desktop shows them inline.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const activeFilterCount = [modelFilter.trim(), userFilter, apiKeyFilter].filter(Boolean).length;
   // Distinguish "this gateway has never served a request" from "no rows match
   // these filters": the first is an onboarding state, the second is a filter hint.
   const isEmptyEver = Boolean(data && totals && totals.request_count === 0 && !anyFilter);
 
   const pickPreset = (next: Preset) => {
+    setCustomMode(false);
     setPreset(next);
     setStartDate(next.seconds === null ? undefined : isoAgo(next.seconds));
   };
 
   const clearFilters = () => {
     pickPreset(TIME_PRESETS[TIME_PRESETS.length - 1]); // All
+    setCustomFrom("");
+    setCustomTo("");
     setModelFilter("");
     setUserFilter("");
     setApiKeyFilter("");
@@ -310,7 +540,7 @@ export function UsagePage() {
   // single point has no trend to draw, so sparklines only appear with 2+ buckets.
   const series = data?.series ?? [];
   const hasTrend = series.length > 1;
-  const trend = trendData(series, metric, preset.bucket);
+  const trend = trendData(series, metric, bucket);
 
   return (
     <div className="flex flex-col gap-6">
@@ -326,21 +556,45 @@ export function UsagePage() {
 
       <ErrorBanner error={summary.error} />
 
-      {/* Filters. On mobile the boxes collapse behind the "Filters" toggle so the
-          stat tiles stay near the top; the time-range presets stay visible. */}
+      {/* Filters */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-wrap gap-2">
           {TIME_PRESETS.map((option) => (
             <Button
               key={option.label}
               size="sm"
-              variant={preset.label === option.label ? "primary" : "outline"}
+              variant={!customMode && preset.label === option.label ? "primary" : "outline"}
               onPress={() => pickPreset(option)}
             >
               {option.label}
             </Button>
           ))}
+          <Button size="sm" variant={customMode ? "primary" : "outline"} onPress={() => setCustomMode(true)}>
+            Custom…
+          </Button>
         </div>
+        {customMode ? (
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1 text-xs font-medium text-[var(--otari-muted)]">
+              From
+              <input
+                type="datetime-local"
+                value={customFrom}
+                onChange={(event) => setCustomFrom(event.target.value)}
+                className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-[var(--otari-muted)]">
+              To
+              <input
+                type="datetime-local"
+                value={customTo}
+                onChange={(event) => setCustomTo(event.target.value)}
+                className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
+              />
+            </label>
+          </div>
+        ) : null}
         <Button
           size="sm"
           variant="outline"
@@ -390,10 +644,8 @@ export function UsagePage() {
         </div>
       ) : (
         <>
-          {/* Tiles. A responsive grid rather than flex-wrap so two fit per row on
-              mobile (a fixed-min flex child would wrap one-up), widening to three
-              then four as the viewport grows. */}
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+          {/* Tiles */}
+          <div className="flex flex-wrap gap-4">
             <StatCard
               label="Tracked cost"
               value={totals ? formatUsd(totals.cost) : "—"}
@@ -502,6 +754,9 @@ export function UsagePage() {
             />
           </div>
 
+          {/* Raw rows for the same window, with the imported-row bulk actions. */}
+          <UsageRequests filters={filters} anyFilter={anyFilter} />
+
           {/* Trend */}
           <div className="flex flex-col gap-3 rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)] p-4">
             <div className="flex items-center justify-between gap-3">
@@ -533,10 +788,10 @@ export function UsagePage() {
                 <BarTrendChart
                   data={trend.points}
                   formatValue={(value) => formatMetric(value, metric)}
-                  ariaLabel={`${metric} per ${preset.bucket}`}
+                  ariaLabel={`${metric} per ${bucket}`}
                 />
                 <figcaption className="text-xs text-[var(--otari-muted)]">
-                  {formatMetric(trend.peak, metric)} peak · {trend.count} {preset.bucket === "hour" ? "hours" : "days"} (times
+                  {formatMetric(trend.peak, metric)} peak · {trend.count} {bucket === "hour" ? "hours" : "days"} (times
                   in UTC)
                 </figcaption>
               </figure>

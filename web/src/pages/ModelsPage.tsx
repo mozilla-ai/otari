@@ -1,6 +1,7 @@
 import { Button, Card, Chip } from "@heroui/react";
-import { Fragment, type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import type { Selection, SortDescriptor } from "react-aria-components";
 
 import {
   useDeletePricing,
@@ -12,10 +13,14 @@ import {
   useSettings,
 } from "@/api/hooks";
 import type { ModelMetadata, PricingTier } from "@/api/types";
-import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
+import { BulkActionBar } from "@/components/BulkActionBar";
+import { DataTable, type DataTableColumn } from "@/components/DataTable";
+import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
+import { TablePagination } from "@/components/TablePagination";
 import { ConfirmButton, ErrorBanner, errorMessage, FilterSelect, InfoBanner, PageHeader } from "@/components/ui";
-import { formatContext, formatCost, formatNumber, formatReleaseDate } from "@/lib/format";
+import { formatContext, formatCost, formatReleaseDate } from "@/lib/format";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
+import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // `owned_by` the gateway stamps on a configured alias (ALIAS_OWNED_BY in
 // src/gateway/api/routes/models.py). Aliases are display names declared in
@@ -647,12 +652,6 @@ function ModelDetailPanel({
 }
 
 const DEFAULT_PAGE_SIZE = 15;
-const PAGE_SIZE_OPTIONS = [
-  { value: "15", label: "15 per page" },
-  { value: "25", label: "25 per page" },
-  { value: "50", label: "50 per page" },
-];
-
 function SearchInput({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
     <input
@@ -663,49 +662,6 @@ function SearchInput({ value, onChange, placeholder }: { value: string; onChange
       aria-label={placeholder}
       className="w-full max-w-xs rounded-md border border-[var(--otari-line)] bg-white px-3 py-1.5 text-sm focus:border-[var(--otari-brand)] focus:outline-none"
     />
-  );
-}
-
-function Pagination({
-  page,
-  pageCount,
-  total,
-  pageSize,
-  onPage,
-  onPageSize,
-}: {
-  page: number;
-  pageCount: number;
-  total: number;
-  pageSize: number;
-  onPage: (page: number) => void;
-  onPageSize: (pageSize: number) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between px-1 pt-1 text-sm text-[var(--otari-muted)]">
-      <span>
-        {pageCount > 1 ? `Page ${page + 1} of ${pageCount} · ` : ""}
-        {formatNumber(total)} model{total === 1 ? "" : "s"}
-      </span>
-      <span className="inline-flex gap-2">
-        <FilterSelect
-          ariaLabel="Rows per page"
-          value={String(pageSize)}
-          onChange={(value) => onPageSize(Number(value))}
-          options={PAGE_SIZE_OPTIONS}
-        />
-        {pageCount > 1 ? (
-          <>
-            <Button size="sm" variant="outline" isDisabled={page === 0} onPress={() => onPage(page - 1)}>
-              Prev
-            </Button>
-            <Button size="sm" variant="outline" isDisabled={page >= pageCount - 1} onPress={() => onPage(page + 1)}>
-              Next
-            </Button>
-          </>
-        ) : null}
-      </span>
-    </div>
   );
 }
 
@@ -731,44 +687,6 @@ function readStoredSort(): Sort {
     // Ignore malformed storage and fall back to the default.
   }
   return DEFAULT_SORT;
-}
-
-function SortableTh({
-  label,
-  col,
-  sort,
-  onSort,
-  align = "left",
-  info,
-}: {
-  label: string;
-  col: SortCol;
-  sort: { col: SortCol; dir: SortDir };
-  onSort: (col: SortCol) => void;
-  align?: "left" | "right";
-  info?: ReactNode;
-}) {
-  const active = sort.col === col;
-  return (
-    <Th
-      className={align === "right" ? "text-right" : undefined}
-      ariaSort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
-    >
-      <span className={`inline-flex items-center gap-1.5 ${align === "right" ? "flex-row-reverse" : ""}`}>
-        <button
-          type="button"
-          onClick={() => onSort(col)}
-          className={`inline-flex items-center gap-1 ${align === "right" ? "flex-row-reverse" : ""} hover:text-[var(--otari-ink)]`}
-        >
-          {label}
-          <span className="text-[10px] text-[var(--otari-muted)]">
-            {active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}
-          </span>
-        </button>
-        {info}
-      </span>
-    </Th>
-  );
 }
 
 // Compact inline price editor shown in a sub-row under a model, so you can
@@ -950,91 +868,97 @@ function ModelTable({
   rows,
   isLoading,
   empty,
-  sort,
-  onSort,
+  sortDescriptor,
+  onSortChange,
   selectedKey,
   onSelect,
-  pricingKey,
-  onSetPricingKey,
+  onEditPricing,
   comparisonContextTokens,
+  selectedKeys,
+  onSelectionChange,
 }: {
   rows: ModelRow[];
   isLoading: boolean;
   empty: ReactNode;
-  sort: { col: SortCol; dir: SortDir };
-  onSort: (col: SortCol) => void;
+  sortDescriptor: SortDescriptor;
+  onSortChange: (descriptor: SortDescriptor) => void;
   selectedKey: string | null;
   onSelect: (key: string) => void;
-  pricingKey: string | null;
-  onSetPricingKey: (key: string | null) => void;
+  onEditPricing: (key: string) => void;
   comparisonContextTokens: number | null;
+  selectedKeys: Selection;
+  onSelectionChange: (keys: Selection) => void;
 }) {
   const comparisonLabel = comparisonContextTokens == null ? "Base" : `at ${formatContext(comparisonContextTokens)}`;
-  return (
-    <Table>
-      <THead>
-        <Tr>
-          <SortableTh label="Model" col="model" sort={sort} onSort={onSort} />
-          <Th>Provider</Th>
-          <SortableTh
-            label={`${comparisonLabel} in / out $ / 1M`}
-            col="input"
-            sort={sort}
-            onSort={onSort}
-            align="right"
-            info={<PricingInfo />}
+  const columns: DataTableColumn<ModelRow>[] = [
+    {
+      id: "model",
+      header: "Model",
+      isRowHeader: true,
+      allowsSorting: true,
+      cell: (row) => (
+        <span className="font-medium break-all">
+          {row.model}
+          <span className="sr-only">{row.key}</span>
+        </span>
+      ),
+    },
+    { id: "provider", header: "Provider", cell: (row) => <span className="text-[var(--otari-muted)]">{row.provider}</span> },
+    {
+      id: "input",
+      header: (
+        <span className="inline-flex items-center gap-1">
+          {`${comparisonLabel} in / out $ / 1M`}
+          <PricingInfo />
+        </span>
+      ),
+      align: "end",
+      allowsSorting: true,
+      cell: (row) => {
+        const rates = effectiveRatesAtContext(row, comparisonContextTokens);
+        return (
+          <PriceCell
+            primary={rates.inputPrice}
+            secondary={rates.outputPrice}
+            rowKey={row.key}
+            primaryLabel="input"
+            secondaryLabel="output"
+            onEdit={() => onEditPricing(row.key)}
           />
-          <Th className="text-right">Caching {comparisonContextTokens == null ? "policy" : comparisonLabel}</Th>
-          <Th className="text-right">Pricing policy</Th>
-        </Tr>
-      </THead>
-      <tbody>
-        {isLoading ? (
-          <LoadingRow colSpan={5} />
-        ) : rows.length > 0 ? (
-          rows.map((row) => {
-            const edit = () => onSetPricingKey(pricingKey === row.key ? null : row.key);
-            const rates = effectiveRatesAtContext(row, comparisonContextTokens);
-            return (
-              <Fragment key={row.key}>
-                <Tr onClick={() => onSelect(row.key)} selected={row.key === selectedKey}>
-                  <Td className="font-medium break-all">
-                    {row.model}
-                    <span className="sr-only">{row.key}</span>
-                  </Td>
-                  <Td className="text-[var(--otari-muted)]">{row.provider}</Td>
-                  <Td className="text-right">
-                    <PriceCell
-                      primary={rates.inputPrice}
-                      secondary={rates.outputPrice}
-                      rowKey={row.key}
-                      primaryLabel="input"
-                      secondaryLabel="output"
-                      onEdit={edit}
-                    />
-                  </Td>
-                  <Td className="text-right">
-                    <CachingCell rates={rates} rowKey={row.key} onEdit={edit} />
-                  </Td>
-                  <Td className="text-right">
-                    <PricingPolicyCell row={row} onEdit={edit} />
-                  </Td>
-                </Tr>
-                {pricingKey === row.key ? (
-                  <tr className="border-b border-[var(--otari-line)] bg-[var(--otari-bg)] last:border-b-0">
-                    <td colSpan={5}>
-                      <InlinePriceForm row={row} onClose={() => onSetPricingKey(null)} />
-                    </td>
-                  </tr>
-                ) : null}
-              </Fragment>
-            );
-          })
-        ) : (
-          <TableMessage colSpan={5}>{empty}</TableMessage>
-        )}
-      </tbody>
-    </Table>
+        );
+      },
+    },
+    {
+      id: "caching",
+      header: `Caching ${comparisonContextTokens == null ? "policy" : comparisonLabel}`,
+      align: "end",
+      cell: (row) => (
+        <CachingCell rates={effectiveRatesAtContext(row, comparisonContextTokens)} rowKey={row.key} onEdit={() => onEditPricing(row.key)} />
+      ),
+    },
+    {
+      id: "policy",
+      header: "Pricing policy",
+      align: "end",
+      cell: (row) => <PricingPolicyCell row={row} onEdit={() => onEditPricing(row.key)} />,
+    },
+  ];
+  return (
+    <DataTable
+      ariaLabel="Models"
+      columns={columns}
+      rows={rows}
+      getRowKey={(row) => row.key}
+      isLoading={isLoading}
+      emptyContent={empty}
+      selectionMode="multiple"
+      selectedKeys={selectedKeys}
+      onSelectionChange={onSelectionChange}
+      sortDescriptor={sortDescriptor}
+      onSortChange={onSortChange}
+      onRowAction={onSelect}
+      rowClassName={(row) => (row.key === selectedKey ? "bg-[var(--otari-brand-tint)]" : undefined)}
+    />
   );
 }
 
@@ -1058,12 +982,17 @@ export function ModelsPage() {
   const discoverable = useDiscoverableModels();
   const metadata = useModelMetadata();
 
+  const setPricing = useSetPricing();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [pricingKey, setPricingKey] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>(readStoredSort);
+  const selection = useTableSelection();
+  const [bulkPriceOpen, setBulkPriceOpen] = useState(false);
+  const [bulkPending, setBulkPending] = useState(false);
+  const [bulkError, setBulkError] = useState<unknown>(undefined);
 
   useEffect(() => {
     try {
@@ -1100,14 +1029,6 @@ export function ModelsPage() {
   };
   const changeFilter = (setter: (value: string) => void) => (value: string) => {
     setter(value);
-    setPage(0);
-  };
-  const onSort = (col: SortCol) => {
-    setSort((current) =>
-      current.col === col
-        ? { col, dir: current.dir === "asc" ? "desc" : "asc" }
-        : { col, dir: col === "released" ? "desc" : "asc" },
-    );
     setPage(0);
   };
 
@@ -1333,6 +1254,52 @@ export function ModelsPage() {
   const start = clampedPage * pageSize;
   const pageModels = filteredModels.slice(start, start + pageSize);
 
+  const sortDescriptor: SortDescriptor = {
+    column: sort.col,
+    direction: sort.dir === "asc" ? "ascending" : "descending",
+  };
+  const onSortChange = (descriptor: SortDescriptor) => {
+    setSort({ col: String(descriptor.column) as SortCol, dir: descriptor.direction === "ascending" ? "asc" : "desc" });
+    setPage(0);
+  };
+  const onEditPricing = (key: string) => setPricingKey((current) => (current === key ? null : key));
+
+  // Selection targets the visible page; "select all matching" expands to every
+  // filtered model so a bulk price can be applied to the whole result set.
+  const selectableKeys = pageModels.map((row) => row.key);
+  const selectedModelKeys = resolveSelectedIds(selection.selectedKeys, selectableKeys);
+  const allPageSelected = selectableKeys.length > 0 && selectedModelKeys.length === selectableKeys.length;
+  const canSelectAllMatching = allPageSelected && total > selectedModelKeys.length;
+  const bulkTargetKeys = selection.allMatching ? filteredModels.map((row) => row.key) : selectedModelKeys;
+  const bulkCount = selection.allMatching ? total : selectedModelKeys.length;
+  const pricingRow = pricingKey
+    ? (filteredModels.find((row) => row.key === pricingKey) ?? rowsByKey.get(pricingKey) ?? null)
+    : null;
+
+  const runBulkPricing = async (rates: ManualRates) => {
+    setBulkPending(true);
+    setBulkError(undefined);
+    try {
+      for (const key of bulkTargetKeys) {
+        await setPricing.mutateAsync({
+          model_key: key,
+          input_price_per_million: rates.input_price_per_million,
+          output_price_per_million: rates.output_price_per_million,
+          cache_read_price_per_million: rates.cache_read_price_per_million ?? null,
+          cache_write_price_per_million: rates.cache_write_price_per_million ?? null,
+          cache_write_1h_price_per_million: null,
+          pricing_tiers: [],
+        });
+      }
+      selection.clear();
+      setBulkPriceOpen(false);
+    } catch (error) {
+      setBulkError(error);
+    } finally {
+      setBulkPending(false);
+    }
+  };
+
   const modelsLoading = models.isLoading || pricing.isLoading || discoverable.isLoading;
   const hasActiveFilters =
     query !== "" ||
@@ -1436,32 +1403,61 @@ export function ModelsPage() {
 
             <DiscoveredErrors providers={discoveredErrors} />
 
+            {selectedModelKeys.length > 0 ? (
+              <BulkActionBar
+                selectedCount={bulkCount}
+                allMatching={selection.allMatching}
+                matchingTotal={total}
+                canSelectAllMatching={canSelectAllMatching}
+                onSelectAllMatching={selection.enableAllMatching}
+                onClear={selection.clear}
+              >
+                <Button size="sm" variant="primary" onPress={() => setBulkPriceOpen(true)}>
+                  Set pricing
+                </Button>
+              </BulkActionBar>
+            ) : null}
+
             <ModelTable
               rows={pageModels}
               isLoading={modelsLoading}
               empty={emptyModels}
-              sort={sort}
-              onSort={onSort}
+              sortDescriptor={sortDescriptor}
+              onSortChange={onSortChange}
               selectedKey={selectedKey}
               onSelect={setSelectedKey}
-              pricingKey={pricingKey}
-              onSetPricingKey={setPricingKey}
+              onEditPricing={onEditPricing}
               comparisonContextTokens={comparisonContextTokens}
+              selectedKeys={selection.selectedKeys}
+              onSelectionChange={selection.onSelectionChange}
             />
 
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Pagination
-                page={clampedPage}
-                pageCount={pageCount}
-                total={total}
-                pageSize={pageSize}
-                onPage={setPage}
-                onPageSize={(size) => {
-                  setPageSize(size);
-                  setPage(0);
-                }}
-              />
-            </div>
+            {pricingRow ? (
+              <Card>
+                <Card.Content className="p-0">
+                  <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
+                    <span className="text-sm font-medium text-[var(--otari-ink)]">Edit pricing</span>
+                    <Button size="sm" variant="ghost" onPress={() => setPricingKey(null)}>
+                      Close
+                    </Button>
+                  </div>
+                  <InlinePriceForm row={pricingRow} onClose={() => setPricingKey(null)} />
+                </Card.Content>
+              </Card>
+            ) : null}
+
+            <TablePagination
+              page={clampedPage}
+              pageSize={pageSize}
+              total={total}
+              rowsOnPage={pageModels.length}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(0);
+              }}
+              pageSizeOptions={[15, 25, 50]}
+            />
           </div>
 
           {selectedRow ? (
@@ -1476,6 +1472,21 @@ export function ModelsPage() {
             </aside>
           ) : null}
         </div>
+
+      <SetPriceDialog
+        isOpen={bulkPriceOpen}
+        onOpenChange={setBulkPriceOpen}
+        targetCount={bulkCount}
+        isPending={bulkPending}
+        error={bulkError}
+        onSubmit={runBulkPricing}
+        title="Set pricing"
+        description={(count) =>
+          `Apply these per-1M rates to ${count.toLocaleString()} selected ${
+            count === 1 ? "model" : "models"
+          }. This replaces each model's price; pricing tiers and the 1h cache rate are cleared. Edit a single model for tiers.`
+        }
+      />
     </div>
   );
 }

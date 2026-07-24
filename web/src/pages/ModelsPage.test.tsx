@@ -154,7 +154,8 @@ const ALIASES: AliasResponse[] = [
 ];
 
 function table(): HTMLElement {
-  return screen.getByRole("table");
+  // react-aria's Table exposes role="grid" once row selection is enabled.
+  return screen.getByRole("grid");
 }
 
 function tableRow(text: string): HTMLElement {
@@ -465,7 +466,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
     await screen.findByText("openai:gpt-4o");
 
-    await user.click(screen.getByRole("button", { name: /Base in \/ out \$ \/ 1M/ }));
+    await user.click(screen.getByRole("columnheader", { name: /Base in \/ out \$ \/ 1M/ }));
 
     const order = modelOrder();
     const miniIndex = order.findIndex((text) => text.includes("gpt-4o-mini"));
@@ -496,7 +497,7 @@ describe("ModelsPage", () => {
     await screen.findByText("openai:gpt-4o");
 
     // Flip the Model column to Z→A and confirm it is persisted.
-    await user.click(screen.getByRole("button", { name: /^Model/ }));
+    await user.click(screen.getByRole("columnheader", { name: /^Model/ }));
     expect(JSON.parse(window.localStorage.getItem("otari.dashboard.modelsSort") ?? "{}")).toEqual({
       col: "model",
       dir: "desc",
@@ -537,7 +538,7 @@ describe("ModelsPage", () => {
     expect(within(table()).getByText("openai:m24")).toBeInTheDocument();
     expect(within(table()).queryByText("openai:m25")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next page" }));
     expect(within(table()).getByText("openai:m25")).toBeInTheDocument();
     expect(within(table()).queryByText("openai:m00")).not.toBeInTheDocument();
   });
@@ -753,4 +754,34 @@ describe("ModelsPage", () => {
     expect(screen.queryByRole("button", { name: /backfill/i })).not.toBeInTheDocument();
   });
 
+  it("bulk-sets pricing on the selected models", async () => {
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    const row = tableRow("openai:gpt-4o");
+    await user.click(within(row).getByRole("checkbox"));
+
+    const bar = (await screen.findByText("1 selected")).closest("div")!;
+    await user.click(within(bar).getByRole("button", { name: "Set pricing" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await user.type(within(dialog).getByLabelText("Input $ / 1M"), "5");
+    await user.type(within(dialog).getByLabelText("Output $ / 1M"), "12");
+    await user.click(within(dialog).getByRole("button", { name: "Set price" }));
+
+    await vi.waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([u, init]) => String(u).includes("/v1/pricing") && (init?.method ?? "").toUpperCase() === "POST",
+      );
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call![1]!.body))).toMatchObject({
+        model_key: "openai:gpt-4o",
+        input_price_per_million: 5,
+        output_price_per_million: 12,
+      });
+    });
+  });
 });

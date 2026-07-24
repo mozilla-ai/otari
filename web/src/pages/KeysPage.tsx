@@ -3,11 +3,14 @@ import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, us
 
 import { useCreateKey, useDeleteKey, useKeys, useRotateKey, useUpdateKey, useUsers } from "@/api/hooks";
 import type { ApiKey, CreateKeyRequest, CreateKeyResponse, User } from "@/api/types";
+import { BulkActionBar } from "@/components/BulkActionBar";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { Field } from "@/components/Field";
 import { accessLabel, ModelScopeControl } from "@/components/ModelScopeControl";
 import { UserComboBox } from "@/components/UserComboBox";
-import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
+import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // ---------- helpers ----------
 
@@ -577,6 +580,14 @@ export function KeysPage() {
   const loading = keys.isLoading;
   const editingKey = rows.find((k) => k.id === editing) ?? null;
   const showOnboarding = !loading && rows.length === 0 && !addOpen;
+  const selection = useTableSelection();
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkError, setBulkError] = useState<unknown>(undefined);
+  const [bulkPending, setBulkPending] = useState(false);
+
+  const selectableKeys = rows.map((k) => k.id);
+  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
+  const selectedKeys = rows.filter((k) => selectedIds.includes(k.id));
 
   const label = (k: ApiKey) => k.key_name ?? k.id;
 
@@ -586,6 +597,135 @@ export function KeysPage() {
     rotateKey.mutate(k.id, {
       onSuccess: (result) => setRevealed({ title: `New secret for ${label(k)}`, result }),
     });
+
+  const runBulk = async (targets: ApiKey[], action: (k: ApiKey) => Promise<unknown>, onDone?: () => void) => {
+    setBulkPending(true);
+    setBulkError(undefined);
+    try {
+      for (const key of targets) {
+        await action(key);
+      }
+      selection.clear();
+      onDone?.();
+    } catch (error) {
+      setBulkError(error);
+    } finally {
+      setBulkPending(false);
+    }
+  };
+
+  const columns: DataTableColumn<ApiKey>[] = [
+    {
+      id: "name",
+      header: "Name",
+      isRowHeader: true,
+      cell: (k) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-medium text-[var(--otari-ink)]">
+            {k.key_name ?? <span className="text-[var(--otari-muted)]">(unnamed)</span>}
+          </span>
+          <div className="flex flex-wrap items-center gap-1">
+            <AccessChip allowed={k.allowed_models} />
+            {k.exclude_from_budget ? (
+              <span
+                className="inline-flex items-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] px-2 py-0.5 text-xs font-medium text-[var(--otari-brand-dark)]"
+                title="Requests on this key are logged with cost but never counted toward budget"
+              >
+                Budget-exempt
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ),
+    },
+    { id: "status", header: "Status", cell: (k) => <StatusChip apiKey={k} /> },
+    {
+      id: "owner",
+      header: "Owner",
+      cell: (k) =>
+        isVirtualUser(k.user_id) ? (
+          <Chip size="sm" color="default">
+            virtual
+          </Chip>
+        ) : (
+          <code className="text-xs text-[var(--otari-muted)]">{k.user_id ?? "—"}</code>
+        ),
+    },
+    {
+      id: "key",
+      header: "Key",
+      cell: (k) => <code className="text-xs text-[var(--otari-muted)]">{k.key_prefix ? `${k.key_prefix}…` : "—"}</code>,
+    },
+    { id: "created", header: "Created", cell: (k) => <span className="text-[var(--otari-muted)]">{absolute(k.created_at)}</span> },
+    {
+      id: "last_used",
+      header: "Last used",
+      cell: (k) => <span className="text-[var(--otari-muted)]">{relative(k.last_used_at) ?? "never"}</span>,
+    },
+    {
+      id: "expires",
+      header: "Expires",
+      cell: (k) => (
+        <span className="text-[var(--otari-muted)]" title={k.expires_at ? new Date(k.expires_at).toLocaleString() : undefined}>
+          {k.expires_at ? absolute(k.expires_at) : "never"}
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "end",
+      cell: (k) => (
+        <div className="flex items-center justify-end gap-1.5">
+          <Button size="sm" variant="outline" isDisabled={updateKey.isPending} onPress={() => setActive(k, !k.is_active)}>
+            {k.is_active ? "Disable" : "Enable"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => {
+              setAddOpen(false);
+              setEditing(k.id);
+            }}
+          >
+            Edit
+          </Button>
+          <InlineConfirm
+            trigger="Regenerate"
+            confirmLabel="Regenerate"
+            isPending={rotateKey.isPending}
+            message={
+              <>
+                Regenerate the secret for <strong>{label(k)}</strong>? The current secret stops working immediately, with
+                no grace period.
+              </>
+            }
+            onConfirm={() => regenerate(k)}
+          />
+          {/* Permanent delete is only offered once a key is disabled, so a live
+              caller can't be broken (and its audit trail erased) in one click. */}
+          {k.is_active ? null : (
+            <InlineConfirm
+              trigger="Delete"
+              confirmLabel="Delete permanently"
+              isPending={deleteKey.isPending}
+              message={
+                <>
+                  Permanently delete <strong>{label(k)}</strong>? This removes the key and unlinks its usage history.
+                  Cannot be undone.
+                </>
+              }
+              onConfirm={() => deleteKey.mutate(k.id)}
+            />
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  // Bulk delete targets only already-disabled keys, mirroring the per-row rule
+  // that a live key must be disabled before it can be permanently deleted.
+  const deletableSelected = selectedKeys.filter((k) => !k.is_active);
 
   return (
     <div className="flex flex-col gap-6">
@@ -629,133 +769,68 @@ export function KeysPage() {
           a second Edit would keep the first key's values and PATCH the wrong row. */}
       {editingKey ? <EditKeyForm key={editingKey.id} apiKey={editingKey} onClose={() => setEditing(null)} /> : null}
 
-      <Table>
-        <THead>
-          <tr>
-            <Th>Name</Th>
-            <Th>Status</Th>
-            <Th>Owner</Th>
-            <Th>Key</Th>
-            <Th>Created</Th>
-            <Th>Last used</Th>
-            <Th>Expires</Th>
-            <Th className="text-right">Actions</Th>
-          </tr>
-        </THead>
-        <tbody>
-          {loading ? (
-            <LoadingRow colSpan={8} />
-          ) : rows.length === 0 ? (
-            <TableMessage colSpan={8}>No API keys yet. Create one to authenticate a caller.</TableMessage>
-          ) : (
-            rows.map((k) => (
-              <Tr
-                key={k.id}
-                selected={editing === k.id}
-                onClick={() => {
-                  setAddOpen(false);
-                  setEditing(k.id);
-                }}
-              >
-                <Td className="font-medium text-[var(--otari-ink)]">
-                  <div className="flex flex-col gap-0.5">
-                    <span>{k.key_name ?? <span className="text-[var(--otari-muted)]">(unnamed)</span>}</span>
-                    <div className="flex flex-wrap items-center gap-1">
-                      <AccessChip allowed={k.allowed_models} />
-                      {k.exclude_from_budget ? (
-                        <span
-                          className="inline-flex items-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] px-2 py-0.5 text-xs font-medium text-[var(--otari-brand-dark)]"
-                          title="Requests on this key are logged with cost but never counted toward budget"
-                        >
-                          Budget-exempt
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-                </Td>
-                <Td>
-                  <StatusChip apiKey={k} />
-                </Td>
-                <Td className="text-[var(--otari-muted)]">
-                  {isVirtualUser(k.user_id) ? (
-                    <span className="inline-flex items-center gap-1.5">
-                      <Chip size="sm" color="default">
-                        virtual
-                      </Chip>
-                    </span>
-                  ) : (
-                    <code className="text-xs">{k.user_id ?? "—"}</code>
-                  )}
-                </Td>
-                <Td>
-                  <code className="text-xs text-[var(--otari-muted)]">{k.key_prefix ? `${k.key_prefix}…` : "—"}</code>
-                </Td>
-                <Td className="text-[var(--otari-muted)]">{absolute(k.created_at)}</Td>
-                <Td className="text-[var(--otari-muted)]">{relative(k.last_used_at) ?? "never"}</Td>
-                <Td className="text-[var(--otari-muted)]">
-                  <span title={k.expires_at ? new Date(k.expires_at).toLocaleString() : undefined}>
-                    {k.expires_at ? absolute(k.expires_at) : "never"}
-                  </span>
-                </Td>
-                <Td>
-                  {/* Row click opens Edit; the action buttons stop propagation so
-                      they fire their own handler instead of also opening Edit. */}
-                  <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                    {k.is_active ? (
-                      <Button size="sm" variant="outline" isDisabled={updateKey.isPending} onPress={() => setActive(k, false)}>
-                        Disable
-                      </Button>
-                    ) : (
-                      <Button size="sm" variant="outline" isDisabled={updateKey.isPending} onPress={() => setActive(k, true)}>
-                        Enable
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onPress={() => {
-                        setAddOpen(false);
-                        setEditing(k.id);
-                      }}
-                    >
-                      Edit
-                    </Button>
-                    <InlineConfirm
-                      trigger="Regenerate"
-                      confirmLabel="Regenerate"
-                      isPending={rotateKey.isPending}
-                      message={
-                        <>
-                          Regenerate the secret for <strong>{label(k)}</strong>? The current secret stops working
-                          immediately, with no grace period.
-                        </>
-                      }
-                      onConfirm={() => regenerate(k)}
-                    />
-                    {/* Permanent delete is only offered once a key is disabled, so a
-                        live caller can't be broken (and its audit trail erased) in one
-                        click. Disable is the reversible revoke. */}
-                    {k.is_active ? null : (
-                      <InlineConfirm
-                        trigger="Delete"
-                        confirmLabel="Delete permanently"
-                        isPending={deleteKey.isPending}
-                        message={
-                          <>
-                            Permanently delete <strong>{label(k)}</strong>? This removes the key and unlinks its usage
-                            history. Cannot be undone.
-                          </>
-                        }
-                        onConfirm={() => deleteKey.mutate(k.id)}
-                      />
-                    )}
-                  </div>
-                </Td>
-              </Tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+      {selectedIds.length > 0 ? (
+        <BulkActionBar
+          selectedCount={selectedIds.length}
+          allMatching={false}
+          matchingTotal={null}
+          canSelectAllMatching={false}
+          onSelectAllMatching={() => {}}
+          onClear={selection.clear}
+        >
+          <Button
+            size="sm"
+            variant="outline"
+            isDisabled={bulkPending}
+            onPress={() => void runBulk(selectedKeys, (k) => updateKey.mutateAsync({ id: k.id, body: { is_active: false } }))}
+          >
+            Disable
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            isDisabled={bulkPending}
+            onPress={() =>
+              void runBulk(selectedKeys, (k) => updateKey.mutateAsync({ id: k.id, body: { exclude_from_budget: true } }))
+            }
+          >
+            Budget-exempt
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            isDisabled={deletableSelected.length === 0}
+            onPress={() => setBulkDeleteOpen(true)}
+          >
+            Delete
+          </Button>
+        </BulkActionBar>
+      ) : null}
+
+      <DataTable
+        ariaLabel="API keys"
+        columns={columns}
+        rows={rows}
+        getRowKey={(k) => k.id}
+        isLoading={loading}
+        emptyContent="No API keys yet. Create one to authenticate a caller."
+        selectionMode="multiple"
+        selectedKeys={selection.selectedKeys}
+        onSelectionChange={selection.onSelectionChange}
+      />
+
+      <ConfirmDialog
+        isOpen={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        heading="Delete API keys"
+        body={`Permanently delete ${deletableSelected.length} disabled ${
+          deletableSelected.length === 1 ? "key" : "keys"
+        }? This removes them and unlinks their usage history. Cannot be undone. Active keys in the selection are skipped; disable them first.`}
+        confirmLabel="Delete permanently"
+        isPending={bulkPending}
+        error={bulkError}
+        onConfirm={() => void runBulk(deletableSelected, (k) => deleteKey.mutateAsync(k.id), () => setBulkDeleteOpen(false))}
+      />
 
       {revealed ? (
         <RevealSecretModal

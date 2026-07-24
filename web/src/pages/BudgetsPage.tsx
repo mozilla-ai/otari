@@ -1,5 +1,5 @@
 import { Button, Card, Spinner } from "@heroui/react";
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   useBudgetResetLogs,
@@ -11,10 +11,13 @@ import {
   useUsers,
 } from "@/api/hooks";
 import type { Budget, BudgetResetLog, CreateBudgetRequest, User } from "@/api/types";
+import { BulkActionBar } from "@/components/BulkActionBar";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { Field } from "@/components/Field";
-import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
 import { UserMultiSelect } from "@/components/UserMultiSelect";
+import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // ---------- formatting ----------
 
@@ -418,11 +421,92 @@ export function BudgetsPage() {
   const [assignmentError, setAssignmentError] = useState<Error | null>(null);
   const [pendingAssignments, setPendingAssignments] = useState<{ budgetId: string; userIds: string[] } | null>(null);
   const [assigningUsers, setAssigningUsers] = useState(false);
+  const selection = useTableSelection();
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkError, setBulkError] = useState<unknown>(undefined);
+  const [bulkPending, setBulkPending] = useState(false);
 
   const rows = budgets.data ?? [];
   const loading = budgets.isLoading;
   const editingBudget = rows.find((b) => b.budget_id === editing) ?? null;
+  const historyBudget = rows.find((b) => b.budget_id === historyOpen) ?? null;
   const showOnboarding = !loading && rows.length === 0 && !addOpen;
+  const selectableKeys = rows.map((b) => b.budget_id);
+  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
+
+  const onBulkDelete = async () => {
+    setBulkPending(true);
+    setBulkError(undefined);
+    try {
+      for (const id of selectedIds) {
+        await deleteBudget.mutateAsync(id);
+      }
+      selection.clear();
+      setBulkDeleteOpen(false);
+    } catch (error) {
+      setBulkError(error);
+    } finally {
+      setBulkPending(false);
+    }
+  };
+
+  const columns: DataTableColumn<Budget>[] = [
+    {
+      id: "budget",
+      header: "Budget",
+      isRowHeader: true,
+      cell: (b) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-medium text-[var(--otari-ink)]">
+            {b.name ?? <span className="text-[var(--otari-muted)]">(unnamed)</span>}
+          </span>
+          <code className="text-[11px] text-[var(--otari-muted)]" title={b.budget_id}>
+            {shortId(b.budget_id)}
+          </code>
+        </div>
+      ),
+    },
+    {
+      id: "limit",
+      header: "Limit (per user)",
+      cell: (b) =>
+        b.max_budget === null ? <span className="text-[var(--otari-muted)]">Unlimited</span> : formatUSD(b.max_budget),
+    },
+    { id: "reset", header: "Reset", cell: (b) => <span className="text-[var(--otari-muted)]">{formatDuration(b.budget_duration_sec)}</span> },
+    { id: "users", header: "Users", cell: (b) => <span className="text-[var(--otari-muted)]">{b.user_count}</span> },
+    { id: "usage", header: "Usage", cell: (b) => <UsageCell budget={b} /> },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "end",
+      cell: (b) => (
+        <div className="flex items-center justify-end gap-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => setHistoryOpen((current) => (current === b.budget_id ? null : b.budget_id))}
+          >
+            {historyOpen === b.budget_id ? "Hide history" : "History"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => {
+              setAddOpen(false);
+              setEditing(b.budget_id);
+            }}
+          >
+            Edit
+          </Button>
+          <InlineDelete
+            label={budgetLabel(b)}
+            isPending={deleteBudget.isPending}
+            onConfirm={() => deleteBudget.mutate(b.budget_id)}
+          />
+        </div>
+      ),
+    },
+  ];
 
   const assignUsers = async (budgetId: string, userIds: string[]) => {
     setAssigningUsers(true);
@@ -543,89 +627,61 @@ export function BudgetsPage() {
         />
       ) : null}
 
-      <Table>
-        <THead>
-          <tr>
-            <Th>Budget</Th>
-            <Th>Limit (per user)</Th>
-            <Th>Reset</Th>
-            <Th>Users</Th>
-            <Th>Usage</Th>
-            <Th className="text-right">Actions</Th>
-          </tr>
-        </THead>
-        <tbody>
-          {loading ? (
-            <LoadingRow colSpan={6} />
-          ) : rows.length === 0 ? (
-            <TableMessage colSpan={6}>No budgets yet. Create one to cap spending.</TableMessage>
-          ) : (
-            rows.map((b) => (
-              <Fragment key={b.budget_id}>
-                <Tr
-                  selected={editing === b.budget_id}
-                  onClick={() => {
-                    setAddOpen(false);
-                    setEditing(b.budget_id);
-                  }}
-                >
-                  <Td className="font-medium text-[var(--otari-ink)]">
-                    <div className="flex flex-col gap-0.5">
-                      <span>{b.name ?? <span className="text-[var(--otari-muted)]">(unnamed)</span>}</span>
-                      <code className="text-[11px] text-[var(--otari-muted)]" title={b.budget_id}>
-                        {shortId(b.budget_id)}
-                      </code>
-                    </div>
-                  </Td>
-                  <Td>{b.max_budget === null ? <span className="text-[var(--otari-muted)]">Unlimited</span> : formatUSD(b.max_budget)}</Td>
-                  <Td className="text-[var(--otari-muted)]">{formatDuration(b.budget_duration_sec)}</Td>
-                  <Td className="text-[var(--otari-muted)]">{b.user_count}</Td>
-                  <Td>
-                    <UsageCell budget={b} />
-                  </Td>
-                  <Td>
-                    {/* Row click opens Edit; the action buttons stop propagation so
-                        they fire their own handler instead of also opening Edit. */}
-                    <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onPress={() =>
-                          setHistoryOpen((current) => (current === b.budget_id ? null : b.budget_id))
-                        }
-                      >
-                        {historyOpen === b.budget_id ? "Hide history" : "History"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onPress={() => {
-                          setAddOpen(false);
-                          setEditing(b.budget_id);
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <InlineDelete
-                        label={budgetLabel(b)}
-                        isPending={deleteBudget.isPending}
-                        onConfirm={() => deleteBudget.mutate(b.budget_id)}
-                      />
-                    </div>
-                  </Td>
-                </Tr>
-                {historyOpen === b.budget_id ? (
-                  <tr className="border-b border-[var(--otari-line)] bg-[var(--otari-bg)]">
-                    <td colSpan={6}>
-                      <ResetHistory budgetId={b.budget_id} />
-                    </td>
-                  </tr>
-                ) : null}
-              </Fragment>
-            ))
-          )}
-        </tbody>
-      </Table>
+      {selectedIds.length > 0 ? (
+        <BulkActionBar
+          selectedCount={selectedIds.length}
+          allMatching={false}
+          matchingTotal={null}
+          canSelectAllMatching={false}
+          onSelectAllMatching={() => {}}
+          onClear={selection.clear}
+        >
+          <Button size="sm" variant="danger" onPress={() => setBulkDeleteOpen(true)}>
+            Delete
+          </Button>
+        </BulkActionBar>
+      ) : null}
+
+      <DataTable
+        ariaLabel="Budgets"
+        columns={columns}
+        rows={rows}
+        getRowKey={(b) => b.budget_id}
+        isLoading={loading}
+        emptyContent="No budgets yet. Create one to cap spending."
+        selectionMode="multiple"
+        selectedKeys={selection.selectedKeys}
+        onSelectionChange={selection.onSelectionChange}
+      />
+
+      {historyBudget ? (
+        <Card>
+          <Card.Content className="p-0">
+            <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
+              <span className="text-sm font-medium text-[var(--otari-ink)]">
+                Reset history — {budgetLabel(historyBudget)}
+              </span>
+              <Button size="sm" variant="ghost" onPress={() => setHistoryOpen(null)}>
+                Close
+              </Button>
+            </div>
+            <ResetHistory budgetId={historyBudget.budget_id} />
+          </Card.Content>
+        </Card>
+      ) : null}
+
+      <ConfirmDialog
+        isOpen={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        heading="Delete budgets"
+        body={`Delete ${selectedIds.length} ${selectedIds.length === 1 ? "budget" : "budgets"}? Users on ${
+          selectedIds.length === 1 ? "it" : "them"
+        } will no longer be capped.`}
+        confirmLabel="Delete"
+        isPending={bulkPending}
+        error={bulkError}
+        onConfirm={onBulkDelete}
+      />
     </div>
   );
 }

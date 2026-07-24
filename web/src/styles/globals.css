@@ -14,6 +14,51 @@
   --otari-bg: #f6f9fa;
 }
 
+/* Shared DataTable styling (HeroUI's Table).
+
+   HeroUI's Table.Root already IS a card: its default `primary` variant gives the
+   root its own gray surface, a 32px border-radius, and 4px inner padding. Wrapping
+   it in a second card (our border + rounded-xl) left two mismatched radii and a
+   4px inset gap, so the header floated instead of meeting the card corner. Fix it
+   by making `.otari-table` the single card: neutralize the variant's surface,
+   radius, and padding, then own the container styling here. The header fills to
+   the edges and the root's `overflow: hidden` clips it (and the last row) to one
+   12px radius, so header and card share the same corner. Rules are scoped to
+   `.otari-table` and placed after the `@heroui/styles` import, so they win the
+   cascade without `!important`.
+
+   Column selectors are replicated with the `.otari-table` prefix so they outrank
+   HeroUI's own first/last-column radius rules (which are more specific than a
+   bare `.table__column`). */
+.otari-table.table-root {
+  background-color: var(--otari-surface);
+  border: 1px solid var(--otari-line);
+  border-radius: 0.75rem; /* rounded-xl */
+  padding: 0;
+  overflow: hidden;
+}
+.otari-table .table__header {
+  background-color: var(--otari-brand-tint);
+  border-bottom: 1px solid var(--otari-line);
+}
+.otari-table .table__column,
+.otari-table [role="row"] > [role="presentation"]:first-of-type > .table__column,
+.otari-table [role="row"] > [role="presentation"]:last-of-type > .table__column {
+  background-color: transparent;
+  color: var(--otari-ink);
+  font-weight: 600;
+  border-radius: 0;
+}
+.otari-table .table__column::after {
+  content: none;
+}
+.otari-table .table__row .table__cell {
+  border-color: var(--otari-line);
+}
+.otari-table .table__row:hover .table__cell {
+  background-color: var(--otari-bg);
+}
+
 html,
 body,
 #root {

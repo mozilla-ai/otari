@@ -18,7 +18,6 @@ of upstream calls:
 """
 
 import asyncio
-import os
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -221,72 +220,18 @@ def _supports_list_models(provider_name: str) -> bool:
         return False
 
 
-def _env_provider_instances(configured_impls: set[str]) -> list[str]:
-    """any-llm provider implementations made callable by their credential env var.
-
-    Completion routing works for any any-llm provider once its native credential
-    env var is set: ``get_provider_kwargs`` returns ``{}`` for a provider absent
-    from ``config.providers``, so any-llm reads the env var directly. Discovery
-    would otherwise only see ``config.providers``, so such a provider is callable
-    yet missing from GET /v1/models. This closes that gap by treating a provider
-    whose credential env var is present as discoverable under its implementation
-    name, which is exactly the request selector ``<impl>:<model>`` that routing
-    resolves.
-
-    Only providers that support live model listing are included; one that cannot
-    list models would just error out and be dropped from the catalog. A provider
-    whose implementation already backs a configured instance is skipped
-    (``configured_impls`` holds those implementation names): otherwise a custom
-    instance such as ``my-anthropic`` (``provider_type: anthropic``) alongside
-    ``ANTHROPIC_API_KEY`` would dial the same credential twice and list the same
-    models under two keys.
-
-    A keyless local provider (``ollama``/``llamacpp``/``llamafile``, whose
-    ``env_key`` is absent) has no credential signal to detect and so is not
-    surfaced here; discovering it would mean dialing a fixed localhost endpoint on
-    spec. That narrow callable-but-undiscoverable case is tracked in issue #389.
-    """
-    detected: list[str] = []
-    try:
-        all_metadata = AnyLLM.get_all_provider_metadata()
-    except Exception:
-        # Match the module's defensive posture (see _supports_list_models and the
-        # return_exceptions fanouts): a registry hiccup must not 500 GET /v1/models
-        # or /v1/models/discoverable. Fall back to configured-only discovery.
-        logger.warning("Could not enumerate provider metadata for env-based discovery", exc_info=True)
-        return detected
-    for metadata in all_metadata:
-        name = metadata.name
-        if name in configured_impls or not metadata.list_models:
-            continue
-        env_key = metadata.env_key
-        if not env_key:
-            continue
-        # ENV_API_KEY_NAME may name interchangeable alternatives separated by "/"
-        # (e.g. gemini's "GEMINI_API_KEY/GOOGLE_API_KEY"); any one set is enough.
-        # Compound descriptions ("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY")
-        # and the literal "None" are not real single variable names and simply
-        # never match os.environ. A blank or whitespace-only value (common from
-        # container templating) is treated as unset, so it does not add a provider
-        # that would only fail to authenticate.
-        candidates = (part.strip() for part in env_key.split("/"))
-        if any(part and os.environ.get(part, "").strip() for part in candidates):
-            detected.append(name)
-    return detected
-
-
 def _discoverable_instances(config: GatewayConfig) -> list[str]:
-    """Instance names to run discovery for.
+    """Instance names to run discovery for: the configured provider instances only.
 
-    Configured instances first, then any-llm providers made discoverable by an
-    env var alone (see ``_env_provider_instances``), so GET /v1/models matches
-    what completion routing can actually reach. Env detection is deduplicated
-    against the *implementations* the configured instances resolve to, so a
-    custom-named instance is never shadowed by a bare env-detected duplicate.
+    "Configured" means the instances in ``config.providers``, which is the
+    ``providers:`` block from config.yml plus any provider added at runtime through
+    the Providers page (overlaid onto ``config.providers`` by the provider store).
+    Discovery is scoped to these deliberately: a provider is only a source of models
+    once an operator has configured it, so an empty gateway (no configured
+    providers) lists no discovered models even when a provider's credential env var
+    happens to be present in the environment.
     """
-    configured = list(config.providers.keys())
-    configured_impls = {config.provider_instance_type(instance) for instance in configured}
-    return configured + _env_provider_instances(configured_impls)
+    return list(config.providers.keys())
 
 
 def _declared_models(config: GatewayConfig, instance: str) -> list[Model]:
@@ -478,8 +423,8 @@ async def discover_models_with_status(config: GatewayConfig) -> list[ProviderDis
     Deliberately not gated on ``config.model_discovery``: that flag governs what
     GET /v1/models publishes to API callers, and an operator who curates that
     listing still has to be able to see what their own credentials can reach.
-    Includes providers made callable by an env var alone, so this operator view
-    agrees with completion routing and with GET /v1/models.
+    Scoped to the configured provider instances (``_discoverable_instances``), so
+    this operator view agrees with GET /v1/models.
     """
     instances = _discoverable_instances(config)
     # return_exceptions so one provider that somehow escapes _discover_uncached
@@ -505,11 +450,12 @@ async def discover_all_models(
     config: GatewayConfig,
     provider_filter: str | None = None,
 ) -> list[tuple[str, Model]]:
-    """Discover models from discoverable providers with caching.
+    """Discover models from the configured providers with caching.
 
-    Discoverable providers are the configured instances plus any-llm providers
-    made callable by an env var alone (see ``_discoverable_instances``), so the
-    catalog matches what completion routing can actually reach.
+    Discovery is scoped to the configured provider instances
+    (``_discoverable_instances``): a provider only sources models once an operator
+    has configured it (in config.yml or via the Providers page), so an empty
+    gateway lists nothing even if a provider's credential env var is present.
 
     Args:
         config: Gateway configuration with provider credentials.

@@ -1,13 +1,26 @@
-import { Button, Spinner } from "@heroui/react";
-import { clsx } from "clsx";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Button, Card } from "@heroui/react";
+import clsx from "clsx";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useSearchParams } from "react-router-dom";
 
-import { useKeys, useUsageCount, useUsageLogs, useUsageSummary, useUsers } from "@/api/hooks";
-import type { UsageEntry, UsageFilters } from "@/api/types";
-import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
+import {
+  useDeleteUsage,
+  useKeys,
+  useSetUsagePrice,
+  useUsageCount,
+  useUsageLogs,
+  useUsageSummary,
+  useUsers,
+} from "@/api/hooks";
+import type { UsageEntry, UsageFilters, UsageMutationSelection } from "@/api/types";
+import { BulkActionBar } from "@/components/BulkActionBar";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataTable, type DataTableColumn } from "@/components/DataTable";
+import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
+import { TablePagination } from "@/components/TablePagination";
 import { ErrorBanner, FilterComboBox, FilterSelect, PageHeader } from "@/components/ui";
+import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
+import { useUrlState } from "@/lib/urlState";
 
 // ---------- formatting ----------
 
@@ -53,12 +66,15 @@ function timeAgo(iso: string): string {
 const HOUR_S = 3_600;
 const DAY_S = 86_400;
 
-const TIME_PRESETS: { label: string; seconds: number | null }[] = [
-  { label: "Last hour", seconds: HOUR_S },
-  { label: "24h", seconds: DAY_S },
-  { label: "7d", seconds: 7 * DAY_S },
-  { label: "All", seconds: null },
+const RANGE_PRESETS: { key: string; label: string; seconds: number | null }[] = [
+  { key: "1h", label: "1h", seconds: HOUR_S },
+  { key: "24h", label: "24h", seconds: DAY_S },
+  { key: "7d", label: "7d", seconds: 7 * DAY_S },
+  { key: "30d", label: "30d", seconds: 30 * DAY_S },
+  { key: "all", label: "All", seconds: null },
 ];
+
+const DEFAULT_RANGE = "24h";
 
 const STATUS_OPTIONS: { label: string; value: string }[] = [
   { label: "All", value: "" },
@@ -66,10 +82,45 @@ const STATUS_OPTIONS: { label: string; value: string }[] = [
   { label: "Error", value: "error" },
 ];
 
-const PAGE_SIZE = 50;
+const PRICED_OPTIONS: { label: string; value: string }[] = [
+  { label: "All", value: "" },
+  { label: "Priced", value: "true" },
+  { label: "Unpriced", value: "false" },
+];
+
+const DEFAULT_PAGE_SIZE = 50;
+
+// All filter + pagination state, with defaults, kept in the URL.
+const URL_DEFAULTS = {
+  range: DEFAULT_RANGE,
+  start_date: "",
+  end_date: "",
+  status: "",
+  model: "",
+  user_id: "",
+  api_key_id: "",
+  priced: "",
+  page: "0",
+  size: String(DEFAULT_PAGE_SIZE),
+} as const;
 
 function isoAgo(seconds: number): string {
   return new Date(Date.now() - seconds * 1000).toISOString();
+}
+
+// Resolve the query window. Explicit start_date/end_date bounds (a custom range,
+// or a drill-down from the Usage page) take precedence; otherwise a preset anchors
+// `start` to "now minus N", and "all" (or an empty custom range) leaves it open.
+function resolveWindow(range: string, start: string, end: string): { start?: string; end?: string } {
+  if (start || end) {
+    return { start: start || undefined, end: end || undefined };
+  }
+  if (range === "custom") {
+    return {};
+  }
+  const preset = RANGE_PRESETS.find((p) => p.key === range) ?? RANGE_PRESETS.find((p) => p.key === DEFAULT_RANGE);
+  const seconds = preset?.seconds ?? null;
+  return { start: seconds == null ? undefined : isoAgo(seconds), end: undefined };
 }
 
 // ---------- small presentational pieces ----------
@@ -117,18 +168,14 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
   );
 }
 
-// The expandable detail panel for one request: a safe error summary plus the
-// metadata that does not fit the row. Provider diagnostics stay server-side.
+// The detail panel for one request: a safe error summary plus the metadata that
+// does not fit the row. Provider diagnostics stay server-side.
 function RequestDetail({ entry }: { entry: UsageEntry }) {
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
       {entry.error_message ? (
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
-              Error
-            </span>
-          </div>
+          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">Error</span>
           <pre className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-red-50 p-3 text-xs whitespace-pre-wrap break-all text-red-700">
             The provider returned an error. Inspect gateway logs for details.
           </pre>
@@ -153,7 +200,9 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
       </div>
       {entry.pricing_breakdown?.length ? (
         <div className="flex flex-col gap-2">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">Billed meters</span>
+          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+            Billed meters
+          </span>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {entry.pricing_breakdown.map((line) => (
               <DetailField key={line.meter} label={line.meter.replaceAll("_", " ")}>
@@ -169,139 +218,205 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
 
 // ---------- page ----------
 
-const COLS = 8;
-
 export function ActivityPage() {
   const users = useUsers();
   const keys = useKeys();
-  // Map an api_key_id to a human label (the key's name, else a short id). Imported
-  // usage carries the importing key; a null id is a master-key or historical row.
   const keyLabels = useMemo(() => {
     const map = new Map<string, string>();
     for (const k of keys.data ?? []) map.set(k.id, k.key_name ?? `${k.id.slice(0, 8)}…`);
     return map;
   }, [keys.data]);
   const apiKeyLabel = (id: string | null): string => (id === null ? "—" : (keyLabels.get(id) ?? `${id.slice(0, 8)}…`));
-  // Drill-down from the Usage page arrives with model / user_id / start_date /
-  // status in the query string; seed the initial filter state from it (once, on
-  // mount) so the log opens pre-filtered on what the operator clicked.
-  const [searchParams] = useSearchParams();
-  const initialStart = searchParams.get("start_date") ?? undefined;
 
-  const [rangeSeconds, setRangeSeconds] = useState<number | null>(initialStart ? null : DAY_S);
-  // Snapshotted when a range is picked (and on refresh), so the query key is
-  // stable across renders instead of recomputing "now" every render.
-  const [startDate, setStartDate] = useState<string | undefined>(() => initialStart ?? isoAgo(DAY_S));
-  const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") ?? "");
-  const [modelFilter, setModelFilter] = useState(() => searchParams.get("model") ?? "");
-  const [userFilter, setUserFilter] = useState(() => searchParams.get("user_id") ?? "");
-  const [apiKeyFilter, setApiKeyFilter] = useState(() => searchParams.get("api_key_id") ?? "");
-  const [page, setPage] = useState(0);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  // On mobile the status/key/user/model controls collapse behind a "Filters"
-  // toggle so they do not push the request table far down the page; desktop shows
-  // them inline. The time-range presets stay visible either way.
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Filter + pagination state lives in the URL, so a filtered view is shareable
+  // and survives the back button. `patch` batches related changes into one entry.
+  const url = useUrlState(URL_DEFAULTS);
+  const range = url.get("range");
+  const startParam = url.get("start_date");
+  const endParam = url.get("end_date");
+  const statusFilter = url.get("status");
+  const modelFilter = url.get("model");
+  const userFilter = url.get("user_id");
+  const apiKeyFilter = url.get("api_key_id");
+  const pricedFilter = url.get("priced");
+  const page = url.getNumber("page");
+  const pageSize = url.getNumber("size");
+
+  // Snapshot the window so a rolling preset does not recompute "now" every render
+  // (which would churn the query key). Re-anchored when the range changes or on refresh.
+  const [win, setWin] = useState(() => resolveWindow(range, startParam, endParam));
+  useEffect(() => {
+    setWin(resolveWindow(range, startParam, endParam));
+  }, [range, startParam, endParam]);
+
+  // A custom range is active whenever explicit bounds are set (including a
+  // drill-down), otherwise the URL's preset drives the highlight.
+  const activeRange = startParam || endParam ? "custom" : range;
+  const hasWindow = Boolean(win.start || win.end);
+
+  const priced = pricedFilter === "true" ? true : pricedFilter === "false" ? false : undefined;
 
   const filters: UsageFilters = useMemo(
     () => ({
-      start_date: startDate,
+      start_date: win.start,
+      end_date: win.end,
       status: statusFilter || undefined,
       model: modelFilter.trim() || undefined,
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
+      priced,
     }),
-    [startDate, statusFilter, modelFilter, userFilter, apiKeyFilter],
+    [win, statusFilter, modelFilter, userFilter, apiKeyFilter, priced],
   );
 
-  // Any change to the filter set returns to the first page.
-  useEffect(() => {
-    setPage(0);
-  }, [filters]);
+  const selection = useTableSelection();
 
-  const usage = useUsageLogs(filters, page, PAGE_SIZE);
+  // Any change to the filter set returns to the first page and drops the
+  // selection, but not on mount, so a shared URL keeps its page.
+  const filtersKey = JSON.stringify(filters);
+  const prevFiltersKey = useRef(filtersKey);
+  useEffect(() => {
+    if (prevFiltersKey.current !== filtersKey) {
+      prevFiltersKey.current = filtersKey;
+      url.patch({ page: 0 });
+      selection.clear();
+    }
+  }, [filtersKey, url, selection]);
+
+  const usage = useUsageLogs(filters, page, pageSize);
   const count = useUsageCount(filters);
 
-  // Model suggestions: models with usage in the current window (the other filters
-  // applied, the model filter itself omitted so the full list stays offered). The
-  // picker still accepts any typed model, so one outside this window is reachable.
+  // Model suggestions: models with usage in the window (other filters applied, the
+  // model filter omitted so the full list stays offered).
   const modelSuggestFilters: UsageFilters = useMemo(
     () => ({
-      start_date: startDate,
+      start_date: win.start,
+      end_date: win.end,
       status: statusFilter || undefined,
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
     }),
-    [startDate, statusFilter, userFilter, apiKeyFilter],
+    [win, statusFilter, userFilter, apiKeyFilter],
   );
   const modelSummary = useUsageSummary(modelSuggestFilters, "day");
-  // Derived from query data, not mirrored into state. modelSuggestFilters omits
-  // the model filter, so the list is always the full set of in-window models.
   const modelOptions =
     modelSummary.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
-  // API-key options for the filter: every key's human name (or a short id), so an
-  // operator can scope the log to one key. Imported OTLP usage carries its
-  // importer key, so this reaches those rows too.
-  const keyOptions = (keys.data ?? []).map((k) => ({
-    value: k.id,
-    label: k.key_name ?? `${k.id.slice(0, 8)}…`,
-  }));
+  const keyOptions = (keys.data ?? []).map((k) => ({ value: k.id, label: k.key_name ?? `${k.id.slice(0, 8)}…` }));
 
   const rows = usage.data ?? [];
-  const total = count.data?.total ?? 0;
+  const totalIsExact = count.isSuccess && !count.isPlaceholderData;
+  const total = totalIsExact ? (count.data?.total ?? 0) : null;
   const anyFilter = Boolean(
-    statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || rangeSeconds !== null,
+    statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || pricedFilter || hasWindow,
   );
-  // Count only the collapsible controls (not the always-visible time range) so
-  // the mobile toggle can advertise how many are active while hidden.
-  const activeFilterCount = [statusFilter, modelFilter.trim(), userFilter, apiKeyFilter].filter(Boolean).length;
+  // On mobile the status/priced/key/user/model controls collapse behind a
+  // "Filters" toggle (labelled with the active count) so the request table sits
+  // near the top; desktop shows them inline.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterCount = [statusFilter, pricedFilter, apiKeyFilter, userFilter, modelFilter.trim()].filter(
+    Boolean,
+  ).length;
 
-  const pickRange = (seconds: number | null) => {
-    setRangeSeconds(seconds);
-    setStartDate(seconds === null ? undefined : isoAgo(seconds));
+  // Selection targets imported rows only; enforced gateway rows are disabled so
+  // bulk delete / set-price can never reach them.
+  const selectableKeys = useMemo(() => rows.filter((r) => !r.counts_toward_budget).map((r) => r.id), [rows]);
+  const disabledKeys = useMemo(() => rows.filter((r) => r.counts_toward_budget).map((r) => r.id), [rows]);
+  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
+  const pageSelectedCount = selectedIds.length;
+  const hasSelection = selection.allMatching || pageSelectedCount > 0;
+
+  // Total imported rows matching the filter, for the "select all N" affordance
+  // and the bulk-op copy; only fetched once there is a selection.
+  const importedFilters = useMemo<UsageFilters>(() => ({ ...filters, counts_toward_budget: false }), [filters]);
+  const importedCount = useUsageCount(importedFilters, hasSelection);
+  const matchingTotal = importedCount.isSuccess ? (importedCount.data?.total ?? null) : null;
+  const allPageSelected = selectableKeys.length > 0 && pageSelectedCount === selectableKeys.length;
+  const canSelectAllMatching = allPageSelected && matchingTotal != null && matchingTotal > pageSelectedCount;
+  const effectiveCount = selection.allMatching ? (matchingTotal ?? pageSelectedCount) : pageSelectedCount;
+
+  const deleteUsage = useDeleteUsage();
+  const setPrice = useSetUsagePrice();
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [priceOpen, setPriceOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const expanded = rows.find((r) => r.id === expandedId) ?? null;
+
+  // A bulk op targets either the current page selection (ids) or, once the operator
+  // opted into "all matching", the filter itself (by_filter). The server scopes
+  // either to imported rows.
+  const selectionBody = (): UsageMutationSelection =>
+    selection.allMatching
+      ? {
+          by_filter: true,
+          model: filters.model,
+          user_id: filters.user_id,
+          api_key_id: filters.api_key_id,
+          status: filters.status,
+          start_date: filters.start_date,
+          end_date: filters.end_date,
+          priced: filters.priced,
+        }
+      : { ids: selectedIds };
+
+  const onDeleteConfirm = () => {
+    deleteUsage.mutate(selectionBody(), {
+      onSuccess: () => {
+        setDeleteOpen(false);
+        selection.clear();
+      },
+    });
+  };
+
+  const onSetPrice = (rates: ManualRates) => {
+    setPrice.mutate(
+      { ...selectionBody(), ...rates },
+      {
+        onSuccess: () => {
+          setPriceOpen(false);
+          selection.clear();
+        },
+      },
+    );
   };
 
   const clearFilters = () => {
-    setRangeSeconds(null);
-    setStartDate(undefined);
-    setStatusFilter("");
-    setModelFilter("");
-    setUserFilter("");
-    setApiKeyFilter("");
+    // "All" time plus no filters is the true-empty baseline.
+    url.patch({
+      range: "all",
+      start_date: "",
+      end_date: "",
+      status: "",
+      model: "",
+      user_id: "",
+      api_key_id: "",
+      priced: "",
+    });
   };
 
   const refresh = () => {
-    // Re-anchor a rolling window to "now" before refetching.
-    if (rangeSeconds !== null) {
-      setStartDate(isoAgo(rangeSeconds));
-    }
+    setWin(resolveWindow(range, startParam, endParam));
     void usage.refetch();
     void count.refetch();
   };
 
-  // Anchored on the rows actually on screen, not the total, so the range stays
-  // truthful when the count request failed and `total` is therefore 0.
-  const hasRows = rows.length > 0;
-  const rangeStart = hasRows ? page * PAGE_SIZE + 1 : 0;
-  const rangeEnd = page * PAGE_SIZE + rows.length;
-  // The total is only exact when the newest count for *these* filters succeeded.
-  // `count.data` alone is not that test: TanStack keeps the last successful data
-  // when a refetch errors, and keepPreviousData serves the previous filters'
-  // total while a new one loads. Either would drive the pager off a stale number.
-  const totalIsExact = count.isSuccess && !count.isPlaceholderData;
-  // Without an exact total, show just the visible range: "0 of 0" would
-  // contradict the rows on screen.
-  const pagerLabel = !totalIsExact
-    ? hasRows
-      ? `${rangeStart}–${rangeEnd}`
-      : "0"
-    : total === 0
-      ? "0 of 0"
-      : `${rangeStart}–${rangeEnd} of ${total.toLocaleString()}`;
-  // Fall back to "a full page came back, so there is probably more" when the
-  // total is not exact. Otherwise a failed count would strand the operator on
-  // page 1 with rows they cannot reach.
-  const hasNext = totalIsExact ? (page + 1) * PAGE_SIZE < total : rows.length === PAGE_SIZE;
+  const columns: DataTableColumn<UsageEntry>[] = [
+    {
+      id: "time",
+      header: "Time",
+      cell: (e) => (
+        <span title={absolute(e.timestamp)} className="text-[var(--otari-muted)]">
+          {timeAgo(e.timestamp)}
+        </span>
+      ),
+    },
+    { id: "user", header: "User", cell: (e) => e.user_id ?? "—" },
+    { id: "model", header: "Model", isRowHeader: true, cell: (e) => e.model },
+    { id: "api_key", header: "API key", cell: (e) => <span className="text-[var(--otari-muted)]">{apiKeyLabel(e.api_key_id)}</span> },
+    { id: "tokens", header: "Tokens", align: "end", cell: (e) => formatTokens(e.total_tokens) },
+    { id: "cost", header: "Cost", align: "end", cell: (e) => formatUSD(e.cost) },
+    { id: "latency", header: "Total time", align: "end", cell: (e) => formatLatency(e.latency_ms) },
+    { id: "status", header: "Status", cell: (e) => <StatusPill status={e.status} /> },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -317,23 +432,48 @@ export function ActivityPage() {
 
       <ErrorBanner error={usage.error ?? count.error} />
 
-      {/* Filters. The time-range presets share a row with the filter boxes when the
-          window is wide enough, and wrap onto their own line when it is not. On
-          mobile the boxes collapse behind the "Filters" toggle to keep the table
-          near the top. */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-wrap gap-2">
-          {TIME_PRESETS.map((preset) => (
+          {RANGE_PRESETS.map((preset) => (
             <Button
-              key={preset.label}
+              key={preset.key}
               size="sm"
-              variant={rangeSeconds === preset.seconds ? "primary" : "outline"}
-              onPress={() => pickRange(preset.seconds)}
+              variant={activeRange === preset.key ? "primary" : "outline"}
+              onPress={() => url.patch({ range: preset.key, start_date: "", end_date: "" })}
             >
               {preset.label}
             </Button>
           ))}
+          <Button
+            size="sm"
+            variant={activeRange === "custom" ? "primary" : "outline"}
+            onPress={() => url.patch({ range: "custom" })}
+          >
+            Custom…
+          </Button>
         </div>
+        {activeRange === "custom" ? (
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1 text-xs font-medium text-[var(--otari-muted)]">
+              From
+              <input
+                type="datetime-local"
+                value={startParam}
+                onChange={(event) => url.patch({ start_date: event.target.value })}
+                className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-[var(--otari-muted)]">
+              To
+              <input
+                type="datetime-local"
+                value={endParam}
+                onChange={(event) => url.patch({ end_date: event.target.value })}
+                className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
+              />
+            </label>
+          </div>
+        ) : null}
         <Button
           size="sm"
           variant="outline"
@@ -348,8 +488,25 @@ export function ActivityPage() {
           id="activity-filters"
           className={clsx("flex-wrap items-end gap-3 md:flex", filtersOpen ? "flex w-full md:w-auto" : "hidden")}
         >
-          <FilterSelect id="filter-status" label="Status" value={statusFilter} onChange={setStatusFilter}>
+          <FilterSelect
+            id="filter-status"
+            label="Status"
+            value={statusFilter}
+            onChange={(value) => url.patch({ status: value })}
+          >
             {STATUS_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </FilterSelect>
+          <FilterSelect
+            id="filter-priced"
+            label="Priced?"
+            value={pricedFilter}
+            onChange={(value) => url.patch({ priced: value })}
+          >
+            {PRICED_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
@@ -358,14 +515,14 @@ export function ActivityPage() {
           <FilterComboBox
             label="API key"
             value={apiKeyFilter}
-            onChange={setApiKeyFilter}
+            onChange={(value) => url.patch({ api_key_id: value })}
             placeholder="All keys"
             options={keyOptions}
           />
           <FilterComboBox
             label="User"
             value={userFilter}
-            onChange={setUserFilter}
+            onChange={(value) => url.patch({ user_id: value })}
             placeholder="All users"
             options={(users.data ?? []).map((u) => ({
               value: u.user_id,
@@ -375,7 +532,7 @@ export function ActivityPage() {
           <FilterComboBox
             label="Model"
             value={modelFilter}
-            onChange={setModelFilter}
+            onChange={(value) => url.patch({ model: value })}
             allowsCustom
             placeholder="Any model"
             options={(modelFilter && !modelOptions.includes(modelFilter)
@@ -391,79 +548,85 @@ export function ActivityPage() {
         </div>
       </div>
 
-      <Table>
-        <THead>
-          <tr>
-            <Th>Time</Th>
-            <Th>User</Th>
-            <Th>Model</Th>
-            <Th>API key</Th>
-            <Th className="text-right">Tokens</Th>
-            <Th className="text-right">Cost</Th>
-            <Th className="text-right">Total time</Th>
-            <Th>Status</Th>
-          </tr>
-        </THead>
-        <tbody>
-          {usage.isLoading ? (
-            <LoadingRow colSpan={COLS} />
-          ) : rows.length === 0 ? (
-            <TableMessage colSpan={COLS}>
-              {anyFilter ? "No requests match these filters." : "No requests recorded yet."}
-            </TableMessage>
-          ) : (
-            rows.map((entry) => {
-              const isError = entry.status === "error";
-              const isOpen = expanded === entry.id;
-              return (
-                <Fragment key={entry.id}>
-                  <Tr
-                    selected={isOpen}
-                    className={isError ? "bg-red-50" : ""}
-                    onClick={() => setExpanded((current) => (current === entry.id ? null : entry.id))}
-                  >
-                    <Td className="text-[var(--otari-muted)]">
-                      <span title={absolute(entry.timestamp)}>{timeAgo(entry.timestamp)}</span>
-                    </Td>
-                    <Td className="text-[var(--otari-ink)]">{entry.user_id ?? "—"}</Td>
-                    <Td className="text-[var(--otari-ink)]">{entry.model}</Td>
-                    <Td className="text-[var(--otari-muted)]">{apiKeyLabel(entry.api_key_id)}</Td>
-                    <Td className="text-right tabular-nums">{formatTokens(entry.total_tokens)}</Td>
-                    <Td className="text-right tabular-nums">{formatUSD(entry.cost)}</Td>
-                    <Td className="text-right tabular-nums">{formatLatency(entry.latency_ms)}</Td>
-                    <Td>
-                      <StatusPill status={entry.status} />
-                    </Td>
-                  </Tr>
-                  {isOpen ? (
-                    <tr className="border-b border-[var(--otari-line)] bg-[var(--otari-bg)]">
-                      <td colSpan={COLS}>
-                        <RequestDetail entry={entry} />
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
-              );
-            })
-          )}
-        </tbody>
-      </Table>
+      {hasSelection ? (
+        <BulkActionBar
+          selectedCount={effectiveCount}
+          allMatching={selection.allMatching}
+          matchingTotal={matchingTotal}
+          canSelectAllMatching={canSelectAllMatching}
+          onSelectAllMatching={selection.enableAllMatching}
+          onClear={selection.clear}
+        >
+          <Button size="sm" variant="primary" onPress={() => setPriceOpen(true)}>
+            Set price
+          </Button>
+          <Button size="sm" variant="danger" onPress={() => setDeleteOpen(true)}>
+            Delete
+          </Button>
+        </BulkActionBar>
+      ) : null}
 
-      {/* Pager */}
-      <div className="flex items-center justify-between gap-3">
-        <span className="inline-flex items-center gap-2 text-sm text-[var(--otari-muted)]">
-          {pagerLabel}
-          {usage.isFetching ? <Spinner size="sm" /> : null}
-        </span>
-        <span className="inline-flex gap-1.5">
-          <Button size="sm" variant="outline" isDisabled={page === 0} onPress={() => setPage((p) => Math.max(0, p - 1))}>
-            Previous
-          </Button>
-          <Button size="sm" variant="outline" isDisabled={!hasNext} onPress={() => setPage((p) => p + 1)}>
-            Next
-          </Button>
-        </span>
-      </div>
+      <DataTable
+        ariaLabel="Activity log"
+        columns={columns}
+        rows={rows}
+        getRowKey={(e) => e.id}
+        isLoading={usage.isLoading}
+        emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
+        selectionMode="multiple"
+        selectedKeys={selection.selectedKeys}
+        onSelectionChange={selection.onSelectionChange}
+        disabledKeys={disabledKeys}
+        onRowAction={(key) => setExpandedId((current) => (current === key ? null : key))}
+        rowClassName={(e) => (e.status === "error" ? "bg-red-50" : undefined)}
+      />
+
+      {expanded ? (
+        <Card>
+          <Card.Content className="p-0">
+            <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
+              <span className="text-sm font-medium text-[var(--otari-ink)]">Request detail</span>
+              <Button size="sm" variant="ghost" onPress={() => setExpandedId(null)}>
+                Close
+              </Button>
+            </div>
+            <RequestDetail entry={expanded} />
+          </Card.Content>
+        </Card>
+      ) : null}
+
+      <TablePagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        rowsOnPage={rows.length}
+        onPageChange={(next) => url.patch({ page: next })}
+        onPageSizeChange={(size) => url.patch({ size, page: 0 })}
+        isFetching={usage.isFetching}
+        hasNextFallback={rows.length === pageSize}
+      />
+
+      <ConfirmDialog
+        isOpen={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        heading="Delete usage rows"
+        body={`Delete ${effectiveCount.toLocaleString()} imported ${
+          effectiveCount === 1 ? "row" : "rows"
+        }? Only imported rows are removed, and this cannot be undone.`}
+        confirmLabel="Delete"
+        isPending={deleteUsage.isPending}
+        error={deleteUsage.error}
+        onConfirm={onDeleteConfirm}
+      />
+
+      <SetPriceDialog
+        isOpen={priceOpen}
+        onOpenChange={setPriceOpen}
+        targetCount={effectiveCount}
+        isPending={setPrice.isPending}
+        error={setPrice.error}
+        onSubmit={onSetPrice}
+      />
     </div>
   );
 }

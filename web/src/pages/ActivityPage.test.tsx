@@ -22,6 +22,9 @@ function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
     total_tokens: 1500,
     cache_read_tokens: null,
     cache_write_tokens: null,
+    cache_write_1h_tokens: null,
+    billing_meters: null,
+    pricing_breakdown: null,
     cost: 0.0123,
     status: "success",
     error_message: null,
@@ -37,19 +40,34 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-// Mock fetch for /v1/usage (list), /v1/usage/count, and /v1/users. Records every
-// list URL so tests can assert the query params the filters produced.
+interface FetchCall {
+  url: string;
+  method: string;
+  body: string | undefined;
+}
+
+// Mock fetch for the usage list/count/summary reads plus the delete and
+// set-price mutations. Records every call so tests can assert URLs and bodies.
 function mockApi(opts: { rows?: UsageEntry[]; total?: number } = {}) {
   const rows = opts.rows ?? [];
   const total = opts.total ?? rows.length;
+  const calls: FetchCall[] = [];
 
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+  const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
+    const method = (init?.method ?? "GET").toUpperCase();
+    calls.push({ url, method, body: typeof init?.body === "string" ? init.body : undefined });
+
+    if (url.endsWith("/v1/usage") && method === "DELETE") {
+      return jsonResponse({ deleted: 1 });
+    }
+    if (url.includes("/v1/usage/set-price")) {
+      return jsonResponse({ matched: 1, updated: 1, unchanged: 0 });
+    }
     if (url.includes("/v1/usage/count")) {
       return jsonResponse({ total });
     }
     if (url.includes("/v1/usage/summary")) {
-      // Model-suggestion query: distinct models drawn from the mocked rows.
       const models = Array.from(new Set(rows.map((r) => r.model)));
       return jsonResponse({
         start_date: "",
@@ -75,11 +93,13 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number } = {}) {
     if (url.includes("/v1/usage")) {
       return jsonResponse(rows);
     }
-    if (url.includes("/v1/users")) {
+    if (url.includes("/v1/users") || url.includes("/v1/keys")) {
       return jsonResponse([]);
     }
     return jsonResponse([]);
   });
+
+  return { mock, calls };
 }
 
 function renderPage(ui: ReactElement, route = "/activity") {
@@ -91,12 +111,19 @@ function renderPage(ui: ReactElement, route = "/activity") {
   );
 }
 
-// Only the list requests (not /count, not the /summary model-suggestion query)
-// carry the pagination + filter params.
-function listCalls(fetchMock: ReturnType<typeof mockApi>): string[] {
-  return fetchMock.mock.calls
-    .map(([u]) => String(u))
-    .filter((u) => u.includes("/v1/usage") && !u.includes("/count") && !u.includes("/summary"));
+// Only the list requests (not /count, /summary, or mutations) carry the
+// pagination + filter params.
+function listCalls(calls: FetchCall[]): string[] {
+  return calls
+    .filter(
+      (c) =>
+        c.method === "GET" &&
+        c.url.includes("/v1/usage") &&
+        !c.url.includes("/count") &&
+        !c.url.includes("/summary") &&
+        !c.url.includes("/set-price"),
+    )
+    .map((c) => c.url);
 }
 
 describe("ActivityPage", () => {
@@ -125,16 +152,15 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />);
 
     const importedRow = (await screen.findByText("imported-model")).closest("tr")!;
-    // Null api_key_id (master-key / historical) renders as an em-dash.
     expect(within(importedRow).getByText("—")).toBeInTheDocument();
   });
 
   it("sends the api key filter to the API", async () => {
-    const fetchMock = mockApi({ rows: [entry({ api_key_id: "key-1" })] });
+    const { calls } = mockApi({ rows: [entry({ api_key_id: "key-1" })] });
     renderPage(<ActivityPage />, "/activity?api_key_id=key-1");
 
     await screen.findByText("gpt-4o");
-    expect(listCalls(fetchMock).some((url) => url.includes("api_key_id=key-1"))).toBe(true);
+    expect(listCalls(calls).some((url) => url.includes("api_key_id=key-1"))).toBe(true);
   });
 
   it("renders latency over a second as seconds and null latency as an em-dash", async () => {
@@ -152,7 +178,7 @@ describe("ActivityPage", () => {
     expect(within(batch).getByText("—")).toBeInTheDocument();
   });
 
-  it("expands an error row without exposing provider diagnostics", async () => {
+  it("opens an error row's detail without exposing provider diagnostics", async () => {
     const user = userEvent.setup();
     mockApi({ rows: [entry({ status: "error", error_message: "provider exploded: quota exceeded" })] });
     renderPage(<ActivityPage />);
@@ -163,13 +189,11 @@ describe("ActivityPage", () => {
     await user.click(row);
     expect(screen.getByText("The provider returned an error. Inspect gateway logs for details.")).toBeInTheDocument();
     expect(screen.queryByText("provider exploded: quota exceeded")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
   });
 
   it("reports copying only after the clipboard write succeeds", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     const copied = await copyToClipboard("provider exploded", { writeText });
-
     expect(writeText).toHaveBeenCalledWith("provider exploded");
     expect(copied).toBe(true);
   });
@@ -177,22 +201,30 @@ describe("ActivityPage", () => {
   it("does not report success when the clipboard write fails", async () => {
     const writeText = vi.fn().mockRejectedValue(new Error("clipboard denied"));
     const copied = await copyToClipboard("provider exploded", { writeText });
-
     expect(writeText).toHaveBeenCalledWith("provider exploded");
     expect(copied).toBe(false);
   });
 
   it("sends the status filter to the API", async () => {
-    const fetchMock = mockApi({ rows: [entry()] });
+    const { calls } = mockApi({ rows: [entry()] });
     const user = userEvent.setup();
     renderPage(<ActivityPage />);
 
     await screen.findByText("gpt-4o");
     await user.selectOptions(screen.getByLabelText("Status"), "error");
 
-    // The most recent list request must carry status=error.
-    const calls = listCalls(fetchMock);
-    expect(calls.at(-1)).toContain("status=error");
+    await waitFor(() => expect(listCalls(calls).at(-1)).toContain("status=error"));
+  });
+
+  it("sends the priced filter to the API", async () => {
+    const { calls } = mockApi({ rows: [entry()] });
+    const user = userEvent.setup();
+    renderPage(<ActivityPage />);
+
+    await screen.findByText("gpt-4o");
+    await user.selectOptions(screen.getByLabelText("Priced?"), "false");
+
+    await waitFor(() => expect(listCalls(calls).at(-1)).toContain("priced=false"));
   });
 
   it("distinguishes filtered-empty from never-used", async () => {
@@ -200,33 +232,21 @@ describe("ActivityPage", () => {
     mockApi({ rows: [], total: 0 });
     renderPage(<ActivityPage />);
 
-    // Default 24h window counts as a filter, so an empty result reads as filtered.
+    // The default 24h window bounds the query, so an empty result reads as filtered.
     expect(await screen.findByText("No requests match these filters.")).toBeInTheDocument();
 
-    // Clearing all filters (including the time window) shows the true-empty copy.
     await user.click(screen.getByRole("button", { name: "Clear filters" }));
     expect(await screen.findByText("No requests recorded yet.")).toBeInTheDocument();
   });
 
-  it("filters by API key, not by endpoint or source", async () => {
-    // The Activity log scopes by API key; the endpoint and source selects were
-    // removed. (Source is still shown per-row in the expanded detail.)
-    mockApi({ rows: [entry()] });
-    renderPage(<ActivityPage />);
-
-    await screen.findByText("gpt-4o");
-    expect(screen.getByRole("combobox", { name: "API key" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Endpoint")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Source")).not.toBeInTheDocument();
-  });
-
   it("keeps Next reachable when the count request fails", async () => {
-    // A failed /count must not strand the operator on page 1 with a full page of
-    // rows they cannot page past.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
       if (url.includes("/v1/usage/count")) {
         return jsonResponse({ detail: "boom" }, 500);
+      }
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({ by_model: [], by_user: [], by_api_key: [], series: [] });
       }
       if (url.includes("/v1/usage")) {
         return jsonResponse(Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })));
@@ -236,37 +256,17 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />);
 
     await screen.findAllByText("gpt-4o");
-    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
-    // The range must reflect the rows on screen rather than reading "0 of 0",
-    // which would contradict the 50 visible rows.
+    expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled();
     expect(screen.getByText("1–50")).toBeInTheDocument();
     expect(screen.queryByText("0 of 0")).not.toBeInTheDocument();
   });
 
-  it("suggests in-window models in the picker and commits the picked one", async () => {
-    const fetchMock = mockApi({
-      rows: [entry({ model: "gpt-4o" }), entry({ id: "b", model: "claude-sonnet-5" })],
-    });
-    const user = userEvent.setup();
-    renderPage(<ActivityPage />);
-    await screen.findAllByText("gpt-4o");
-
-    const modelInput = screen.getByRole("combobox", { name: "Model" });
-    await user.click(modelInput);
-    await user.type(modelInput, "claude");
-    // The suggestion comes from the window's usage, not a free-text guess.
-    await user.click(await screen.findByRole("option", { name: "claude-sonnet-5" }));
-
-    await waitFor(() => expect(listCalls(fetchMock).at(-1)).toContain("model=claude-sonnet-5"));
-  });
-
   it("seeds filters from the drill-down query string", async () => {
-    // A row click on the Usage page navigates here with the dimension + window.
-    const fetchMock = mockApi({ rows: [entry()] });
+    const { calls } = mockApi({ rows: [entry()] });
     renderPage(<ActivityPage />, "/activity?model=gpt-4o&user_id=alice&status=error");
 
     await screen.findByText("gpt-4o");
-    const latest = listCalls(fetchMock).at(-1)!;
+    const latest = listCalls(calls).at(-1)!;
     expect(latest).toContain("model=gpt-4o");
     expect(latest).toContain("user_id=alice");
     expect(latest).toContain("status=error");
@@ -277,8 +277,75 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />);
 
     expect(await screen.findByText("1–50 of 120")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled();
+  });
+
+  it("only lets imported rows be selected", async () => {
+    mockApi({
+      rows: [
+        entry({ id: "gw", model: "gateway-model", counts_toward_budget: true }),
+        entry({ id: "imp", model: "imported-model", counts_toward_budget: false }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    const gatewayRow = (await screen.findByText("gateway-model")).closest("tr")!;
+    const importedRow = screen.getByText("imported-model").closest("tr")!;
+    expect(within(gatewayRow).getByRole("checkbox")).toBeDisabled();
+    expect(within(importedRow).getByRole("checkbox")).toBeEnabled();
+  });
+
+  it("deletes the selected imported rows by id", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockApi({
+      rows: [entry({ id: "imp-1", model: "imported-model", counts_toward_budget: false })],
+      total: 1,
+    });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("imported-model")).closest("tr")!;
+    await user.click(within(row).getByRole("checkbox"));
+
+    // Bulk bar appears with the page selection count.
+    expect(await screen.findByText("1 selected")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    // Confirm in the dialog.
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      const del = calls.find((c) => c.url.endsWith("/v1/usage") && c.method === "DELETE");
+      expect(del).toBeTruthy();
+      expect(del!.body).toContain("imp-1");
+    });
+  });
+
+  it("sets a manual price on the selected imported rows", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockApi({
+      rows: [entry({ id: "imp-1", model: "imported-model", counts_toward_budget: false })],
+      total: 1,
+    });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("imported-model")).closest("tr")!;
+    await user.click(within(row).getByRole("checkbox"));
+    await user.click(screen.getByRole("button", { name: "Set price" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await user.type(within(dialog).getByLabelText("Input $ / 1M"), "3");
+    await user.type(within(dialog).getByLabelText("Output $ / 1M"), "15");
+    await user.click(within(dialog).getByRole("button", { name: "Set price" }));
+
+    await waitFor(() => {
+      const priceCall = calls.find((c) => c.url.includes("/v1/usage/set-price") && c.method === "POST");
+      expect(priceCall).toBeTruthy();
+      expect(priceCall!.body).toContain("imp-1");
+      expect(priceCall!.body).toContain("\"input_price_per_million\":3");
+      expect(priceCall!.body).toContain("\"output_price_per_million\":15");
+    });
   });
 
   it("collapses the filter controls behind a mobile toggle that expands them", async () => {

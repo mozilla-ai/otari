@@ -409,12 +409,13 @@ describe("KeysPage", () => {
     expect(screen.getByText(/starts unrestricted/)).toBeInTheDocument();
   });
 
-  it("opens the edit form when a key row is clicked", async () => {
+  it("opens the edit form from a key row's Edit action", async () => {
     mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot" })] });
     const user = userEvent.setup();
     renderPage(<KeysPage />);
 
-    await user.click(await screen.findByText("ci-bot"));
+    const row = (await screen.findByText("ci-bot")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
 
     // The inline edit card appears (its Save button is unique to edit mode).
     expect(await screen.findByRole("button", { name: "Save changes" })).toBeInTheDocument();
@@ -425,7 +426,8 @@ describe("KeysPage", () => {
     const user = userEvent.setup();
     renderPage(<KeysPage />);
 
-    await user.click(await screen.findByText("ci-bot"));
+    const row = (await screen.findByText("ci-bot")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
     await user.click(await screen.findByLabelText("Exempt this key from budget"));
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
@@ -442,12 +444,14 @@ describe("KeysPage", () => {
     const user = userEvent.setup();
     renderPage(<KeysPage />);
 
-    await user.click(await screen.findByText("alpha"));
+    const alphaRow = (await screen.findByText("alpha")).closest("tr")!;
+    await user.click(within(alphaRow).getByRole("button", { name: "Edit" }));
     expect(await screen.findByLabelText("Name")).toHaveValue("alpha");
 
     // Switching to another key must remount the form; without a keyed remount it
     // would keep "alpha" and PATCH the wrong key.
-    await user.click(screen.getByText("bravo"));
+    const bravoRow = screen.getByText("bravo").closest("tr")!;
+    await user.click(within(bravoRow).getByRole("button", { name: "Edit" }));
     expect(await screen.findByLabelText("Name")).toHaveValue("bravo");
   });
 

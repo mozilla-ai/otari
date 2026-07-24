@@ -2184,6 +2184,18 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+                  "disabled": true,
+                  "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "disabled": true,
+                  "key": "counts_toward_budget",
+                  "value": ""
+                },
+                {
                   "description": "",
                   "disabled": true,
                   "key": "skip",
@@ -2196,14 +2208,32 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&skip=&limit="
+              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget=&skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Delete Usage Rows",
+          "request": {
+            "description": "Delete imported usage rows by explicit ids or by filter (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /\n``status`` / date range / ``priced``). Only imported rows\n(``counts_toward_budget = false``) are ever removed: enforced gateway rows and\nthe spend ledger (``users.spend``) are untouched, so a delete can never desync a\nbudget. Master-key only.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "usage"
+              ],
+              "raw": "{{baseUrl}}/v1/usage"
             }
           }
         },
         {
           "name": "Count Usage",
           "request": {
-            "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load.",
+            "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load. With\n``counts_toward_budget=false`` it also backs the \"select all N matching this\nfilter\" affordance for bulk delete / set-price, which touch imported rows only.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2263,9 +2293,21 @@
                   "disabled": true,
                   "key": "api_key_id",
                   "value": ""
+                },
+                {
+                  "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+                  "disabled": true,
+                  "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "disabled": true,
+                  "key": "counts_toward_budget",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id="
+              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget="
             }
           }
         },
@@ -2299,6 +2341,39 @@
                 "external-events"
               ],
               "raw": "{{baseUrl}}/v1/usage/external-events"
+            }
+          }
+        },
+        {
+          "name": "Set Usage Price Rows",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
+            },
+            "description": "Set the cost of imported usage rows from manual per-1M rates (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed\nfrom each row's own token counts at the supplied ``input`` / ``output`` /\n``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from\nconfigured pricing). Only imported rows (``counts_toward_budget = false``) are\ntouched, so ``users.spend`` is never affected. Master-key only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "usage",
+                "set-price"
+              ],
+              "raw": "{{baseUrl}}/v1/usage/set-price"
             }
           }
         },
@@ -2367,13 +2442,25 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+                  "disabled": true,
+                  "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "disabled": true,
+                  "key": "counts_toward_budget",
+                  "value": ""
+                },
+                {
                   "description": "Time-series granularity: 'hour' or 'day'",
                   "disabled": true,
                   "key": "bucket",
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&bucket="
+              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget=&bucket="
             }
           }
         },
@@ -2440,9 +2527,21 @@
                   "disabled": true,
                   "key": "api_key_id",
                   "value": ""
+                },
+                {
+                  "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+                  "disabled": true,
+                  "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "disabled": true,
+                  "key": "counts_toward_budget",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id="
+              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget="
             }
           }
         }

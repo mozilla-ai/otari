@@ -23,6 +23,14 @@ from gateway.services.external_usage_service import (
     ExternalIngestResult,
     ingest_external_events,
 )
+from gateway.services.usage_admin_service import (
+    UsageDeleteRequest,
+    UsageDeleteResult,
+    UsageSetPriceRequest,
+    UsageSetPriceResult,
+    delete_usage,
+    set_usage_price,
+)
 
 router = APIRouter(prefix="/v1/usage", tags=["usage"])
 
@@ -121,6 +129,11 @@ _MODEL_DESC = "Filter to a single model"
 _ENDPOINT_DESC = "Filter to a single endpoint (e.g. '/v1/chat/completions')"
 _SOURCE_DESC = "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')"
 _API_KEY_DESC = "Filter to a single API key id"
+_PRICED_DESC = "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)"
+_COUNTS_DESC = (
+    "Filter by budget participation: true = only enforced gateway rows, "
+    "false = only imported rows that never touch a budget"
+)
 
 
 def _usage_filters(
@@ -133,6 +146,8 @@ def _usage_filters(
     endpoint: str | None,
     source: str | None = None,
     api_key_id: str | None = None,
+    priced: bool | None = None,
+    counts_toward_budget: bool | None = None,
 ) -> list[ColumnElement[bool]]:
     """Build the shared WHERE conditions for the list and count endpoints.
 
@@ -156,6 +171,12 @@ def _usage_filters(
         conditions.append(UsageLog.source == source)
     if api_key_id is not None:
         conditions.append(UsageLog.api_key_id == api_key_id)
+    if priced is True:
+        conditions.append(UsageLog.cost.is_not(None))
+    elif priced is False:
+        conditions.append(UsageLog.cost.is_(None))
+    if counts_toward_budget is not None:
+        conditions.append(UsageLog.counts_toward_budget.is_(counts_toward_budget))
     return conditions
 
 
@@ -170,6 +191,8 @@ async def list_usage(
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
+    priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[UsageEntry]:
@@ -191,6 +214,8 @@ async def list_usage(
         endpoint=endpoint,
         source=source,
         api_key_id=api_key_id,
+        priced=priced,
+        counts_toward_budget=counts_toward_budget,
     )
     stmt = (
         select(UsageLog)
@@ -244,12 +269,16 @@ async def count_usage(
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
+    priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
 ) -> UsageCount:
     """Total number of usage logs matching the given filters.
 
     Serves the dashboard paginator's "N of M" total without changing the bare
     array contract of ``GET /v1/usage``. Runs only when the client asks (a
-    separate request), so the ``COUNT(*)`` is not paid on every page load.
+    separate request), so the ``COUNT(*)`` is not paid on every page load. With
+    ``counts_toward_budget=false`` it also backs the "select all N matching this
+    filter" affordance for bulk delete / set-price, which touch imported rows only.
     """
     conditions = _usage_filters(
         start_date=start_date,
@@ -260,10 +289,46 @@ async def count_usage(
         endpoint=endpoint,
         source=source,
         api_key_id=api_key_id,
+        priced=priced,
+        counts_toward_budget=counts_toward_budget,
     )
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
     total = (await db.execute(stmt)).scalar_one()
     return UsageCount(total=total)
+
+
+@router.delete("", dependencies=[Depends(verify_master_key)])
+async def delete_usage_rows(
+    request: UsageDeleteRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UsageDeleteResult:
+    """Delete imported usage rows by explicit ids or by filter (standalone).
+
+    Target either the current selection (``ids``) or everything matching a filter
+    (``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /
+    ``status`` / date range / ``priced``). Only imported rows
+    (``counts_toward_budget = false``) are ever removed: enforced gateway rows and
+    the spend ledger (``users.spend``) are untouched, so a delete can never desync a
+    budget. Master-key only.
+    """
+    return await delete_usage(db, request)
+
+
+@router.post("/set-price", dependencies=[Depends(verify_master_key)])
+async def set_usage_price_rows(
+    request: UsageSetPriceRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UsageSetPriceResult:
+    """Set the cost of imported usage rows from manual per-1M rates (standalone).
+
+    Target either the current selection (``ids``) or everything matching a filter
+    (``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed
+    from each row's own token counts at the supplied ``input`` / ``output`` /
+    ``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from
+    configured pricing). Only imported rows (``counts_toward_budget = false``) are
+    touched, so ``users.spend`` is never affected. Master-key only.
+    """
+    return await set_usage_price(db, request)
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +547,8 @@ async def _summary_context(
     endpoint: str | None,
     source: str | None = None,
     api_key_id: str | None = None,
+    priced: bool | None = None,
+    counts_toward_budget: bool | None = None,
 ) -> tuple[datetime, datetime, list[ColumnElement[bool]], UsageTotals]:
     """Resolve the bounded window, the shared WHERE conditions, and the grand
     totals: the common preamble both summary endpoints run, kept in one place so a
@@ -497,6 +564,8 @@ async def _summary_context(
         endpoint=endpoint,
         source=source,
         api_key_id=api_key_id,
+        priced=priced,
+        counts_toward_budget=counts_toward_budget,
     )
     totals = await _totals(db, conditions)
     return start, end, conditions, totals
@@ -555,6 +624,8 @@ async def usage_summary(
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
+    priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
 ) -> UsageSummary:
     """Aggregate spend, tokens, and request volume for the dashboard Usage page.
@@ -574,6 +645,8 @@ async def usage_summary(
         endpoint=endpoint,
         source=source,
         api_key_id=api_key_id,
+        priced=priced,
+        counts_toward_budget=counts_toward_budget,
     )
     by_model = await _breakdown(db, UsageLog.model, conditions, totals, limit=_BREAKDOWN_TOP_N)
     by_user = await _breakdown(db, UsageLog.user_id, conditions, totals, limit=_BREAKDOWN_TOP_N)
@@ -633,6 +706,8 @@ async def usage_summary_csv(
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
+    priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
 ) -> Response:
     """Download the per-model / per-user / per-key / per-source breakdown as CSV.
 
@@ -651,6 +726,8 @@ async def usage_summary_csv(
         endpoint=endpoint,
         source=source,
         api_key_id=api_key_id,
+        priced=priced,
+        counts_toward_budget=counts_toward_budget,
     )
     dimensions = (
         ("model", await _breakdown(db, UsageLog.model, conditions, totals, limit=None)),

@@ -26,3 +26,6 @@ otari-smoke.db
 .DS_Store
 
 .idea/
+
+# Stray node_modules from running npx at the repo root (web has its own)
+node_modules/

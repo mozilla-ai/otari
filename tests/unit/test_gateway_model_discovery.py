@@ -21,23 +21,6 @@ from gateway.services.model_discovery_service import (
 )
 
 
-@pytest.fixture(autouse=True)
-def _no_env_providers() -> Any:
-    """Pin these tests to configured-provider discovery only.
-
-    Discovery now also picks up any-llm providers made callable by an env var
-    alone. The runner's ambient environment (e.g. a real ``OPENAI_API_KEY``)
-    would otherwise leak extra instances into these configured-provider
-    assertions. Env-based detection is covered in
-    ``test_model_discovery_env_providers``.
-    """
-    with patch(
-        "gateway.services.model_discovery_service._env_provider_instances",
-        return_value=[],
-    ):
-        yield
-
-
 def _make_model(model_id: str, owned_by: str = "openai", created: int = 1700000000) -> Model:
     """Create a minimal Model instance for testing."""
     return Model(id=model_id, object="model", created=created, owned_by=owned_by)

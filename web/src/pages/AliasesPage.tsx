@@ -4,10 +4,13 @@ import { useSearchParams } from "react-router-dom";
 
 import type { AliasResponse } from "@/api/types";
 import { useAliases, useCreateAlias, useDeleteAlias } from "@/api/hooks";
+import { BulkActionBar } from "@/components/BulkActionBar";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { Field } from "@/components/Field";
 import { ModelComboBox } from "@/components/ModelComboBox";
-import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
-import { ConfirmButton, ErrorBanner, errorMessage, PageHeader } from "@/components/ui";
+import { ConfirmButton, ErrorBanner, PageHeader } from "@/components/ui";
+import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // Edit an existing stored alias's target. The name is the lookup key and is shown
 // read-only; the backend POST /v1/aliases upserts by name, so the same hook serves both.
@@ -124,8 +127,82 @@ export function AliasesPage() {
   const initialTarget = searchParams.get("target") ?? "";
   const [adding, setAdding] = useState(initialTarget !== "");
   const [editing, setEditing] = useState<AliasResponse | null>(null);
+  const selection = useTableSelection();
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkError, setBulkError] = useState<unknown>(undefined);
+  const [bulkPending, setBulkPending] = useState(false);
 
   const rows = [...(aliases.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
+  // Only stored aliases can be deleted; config.yml aliases are read-only.
+  const selectableKeys = rows.filter((a) => a.source === "stored").map((a) => a.name);
+  const disabledKeys = rows.filter((a) => a.source !== "stored").map((a) => a.name);
+  const selectedNames = resolveSelectedIds(selection.selectedKeys, selectableKeys);
+
+  const onBulkDelete = async () => {
+    setBulkPending(true);
+    setBulkError(undefined);
+    try {
+      // No bulk endpoint for aliases; delete sequentially so one failure surfaces
+      // without firing the rest in parallel against the same small list.
+      for (const name of selectedNames) {
+        await deleteAlias.mutateAsync(name);
+      }
+      selection.clear();
+      setBulkDeleteOpen(false);
+    } catch (error) {
+      setBulkError(error);
+    } finally {
+      setBulkPending(false);
+    }
+  };
+
+  const columns: DataTableColumn<AliasResponse>[] = [
+    {
+      id: "alias",
+      header: "Alias",
+      isRowHeader: true,
+      cell: (a) => <span className="font-medium break-all text-[var(--otari-ink)]">{a.name}</span>,
+    },
+    { id: "target", header: "Target", cell: (a) => <span className="break-all text-[var(--otari-muted)]">{a.target}</span> },
+    {
+      id: "source",
+      header: "Source",
+      cell: (a) => (
+        <Chip size="sm" color={a.source === "stored" ? "accent" : "default"}>
+          {a.source}
+        </Chip>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      align: "end",
+      cell: (a) =>
+        a.source === "stored" ? (
+          <span className="inline-flex items-center gap-2 whitespace-nowrap">
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={() => {
+                setAdding(false);
+                setEditing(a);
+              }}
+            >
+              Edit
+            </Button>
+            <ConfirmButton
+              confirmLabel="Delete"
+              isPending={deleteAlias.isPending}
+              onConfirm={() => deleteAlias.mutate(a.name)}
+            >
+              Delete
+            </ConfirmButton>
+          </span>
+        ) : (
+          <span className="text-xs text-[var(--otari-muted)]">set in config.yml</span>
+        ),
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -152,63 +229,48 @@ export function AliasesPage() {
       {adding ? <NewAliasForm initialTarget={initialTarget} onClose={() => setAdding(false)} /> : null}
       {editing ? <EditAliasForm alias={editing} onClose={() => setEditing(null)} /> : null}
 
-      <Table>
-        <THead>
-          <Tr>
-            <Th>Alias</Th>
-            <Th>Target</Th>
-            <Th>Source</Th>
-            <Th className="text-right">Actions</Th>
-          </Tr>
-        </THead>
-        <tbody>
-          {aliases.isLoading ? (
-            <LoadingRow colSpan={4} />
-          ) : rows.length === 0 ? (
-            <TableMessage colSpan={4}>No aliases yet. Create one to give a model a friendly name.</TableMessage>
-          ) : (
-            rows.map((alias) => (
-              <Tr key={alias.name}>
-                <Td className="font-medium break-all text-[var(--otari-ink)]">{alias.name}</Td>
-                <Td className="break-all text-[var(--otari-muted)]">{alias.target}</Td>
-                <Td>
-                  <Chip size="sm" color={alias.source === "stored" ? "accent" : "default"}>
-                    {alias.source}
-                  </Chip>
-                </Td>
-                <Td className="text-right whitespace-nowrap">
-                  {alias.source === "stored" ? (
-                    <span className="inline-flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onPress={() => {
-                          setAdding(false);
-                          setEditing(alias);
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <ConfirmButton
-                        confirmLabel="Delete"
-                        isPending={deleteAlias.isPending}
-                        onConfirm={() => deleteAlias.mutate(alias.name)}
-                      >
-                        Delete
-                      </ConfirmButton>
-                      {deleteAlias.error ? (
-                        <span className="text-xs text-red-700">{errorMessage(deleteAlias.error)}</span>
-                      ) : null}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-[var(--otari-muted)]">set in config.yml</span>
-                  )}
-                </Td>
-              </Tr>
-            ))
-          )}
-        </tbody>
-      </Table>
+      {deleteAlias.error ? <ErrorBanner error={deleteAlias.error} /> : null}
+
+      {selectedNames.length > 0 ? (
+        <BulkActionBar
+          selectedCount={selectedNames.length}
+          allMatching={false}
+          matchingTotal={null}
+          canSelectAllMatching={false}
+          onSelectAllMatching={() => {}}
+          onClear={selection.clear}
+        >
+          <Button size="sm" variant="danger" onPress={() => setBulkDeleteOpen(true)}>
+            Delete
+          </Button>
+        </BulkActionBar>
+      ) : null}
+
+      <DataTable
+        ariaLabel="Aliases"
+        columns={columns}
+        rows={rows}
+        getRowKey={(a) => a.name}
+        isLoading={aliases.isLoading}
+        emptyContent="No aliases yet. Create one to give a model a friendly name."
+        selectionMode="multiple"
+        selectedKeys={selection.selectedKeys}
+        onSelectionChange={selection.onSelectionChange}
+        disabledKeys={disabledKeys}
+      />
+
+      <ConfirmDialog
+        isOpen={bulkDeleteOpen}
+        onOpenChange={setBulkDeleteOpen}
+        heading="Delete aliases"
+        body={`Delete ${selectedNames.length} stored ${selectedNames.length === 1 ? "alias" : "aliases"}? Callers using ${
+          selectedNames.length === 1 ? "it" : "them"
+        } will get a model-not-found error.`}
+        confirmLabel="Delete"
+        isPending={bulkPending}
+        error={bulkError}
+        onConfirm={onBulkDelete}
+      />
     </div>
   );
 }

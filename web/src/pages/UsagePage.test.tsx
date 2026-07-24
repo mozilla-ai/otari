@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -124,6 +124,27 @@ describe("UsagePage", () => {
 
     await screen.findByText("$1,240.50");
     expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+  });
+
+  it("queries a custom from/to window when a custom range is set", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.click(screen.getByRole("button", { name: "Custom…" }));
+    fetchMock.mockClear();
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-07-01T00:00" } });
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-07-15T00:00" } });
+
+    await vi.waitFor(() => {
+      const summaryCalls = fetchMock.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("/v1/usage/summary"));
+      // The current-window query carries both bounds (a separate call fetches the
+      // preceding window for deltas, so assert on the set, not just the last call).
+      expect(summaryCalls.some((u) => u.includes("start_date=2026-07-01") && u.includes("end_date=2026-07-15"))).toBe(
+        true,
+      );
+    });
   });
 
   it("shows cache read and write totals as tiles", async () => {
@@ -316,6 +337,62 @@ describe("UsagePage", () => {
     expect(await screen.findByText(/No usage yet/)).toBeInTheDocument();
   });
 
+  it("bulk-deletes imported rows from the Individual requests list", async () => {
+    const importedRow = {
+      id: "imp-1",
+      user_id: "alice",
+      api_key_id: null,
+      timestamp: new Date().toISOString(),
+      model: "claude-sonnet-5",
+      provider: "anthropic",
+      endpoint: "external",
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      total_tokens: 150,
+      cache_read_tokens: null,
+      cache_write_tokens: null,
+      cache_write_1h_tokens: null,
+      billing_meters: null,
+      pricing_breakdown: null,
+      cost: null,
+      status: "success",
+      error_message: null,
+      latency_ms: 120,
+      source: "claude_code",
+      source_label: null,
+      counts_toward_budget: false,
+    };
+    const calls: { url: string; method: string; body: string | undefined }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      calls.push({ url, method, body: typeof init?.body === "string" ? init.body : undefined });
+      if (url.endsWith("/v1/usage") && method === "DELETE") return jsonResponse({ deleted: 1 });
+      if (url.includes("/v1/usage/summary")) return jsonResponse(summary());
+      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 1 });
+      if (url.includes("/v1/users")) return jsonResponse([{ user_id: "alice", alias: "Alice" }]);
+      if (url.includes("/v1/keys")) return jsonResponse([]);
+      if (url.includes("/v1/usage")) return jsonResponse([importedRow]);
+      return jsonResponse([]);
+    });
+    const user = userEvent.setup();
+    renderPage(<UsagePage />);
+
+    const row = (await screen.findByText("claude-sonnet-5")).closest("tr")!;
+    await user.click(within(row).getByRole("checkbox"));
+
+    const bar = (await screen.findByText("1 selected")).closest("div")!;
+    await user.click(within(bar).getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await vi.waitFor(() => {
+      const del = calls.find((c) => c.url.endsWith("/v1/usage") && c.method === "DELETE");
+      expect(del).toBeTruthy();
+      expect(del!.body).toContain("imp-1");
+    });
+  });
+
   it("collapses the filter controls behind a mobile toggle that expands them", async () => {
     mockApi(summary());
     const user = userEvent.setup();
@@ -349,5 +426,4 @@ describe("UsagePage", () => {
 
     expect(await screen.findByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
   });
-
 });

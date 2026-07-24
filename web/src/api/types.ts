@@ -418,12 +418,50 @@ export interface UsageFilters {
   endpoint?: string;
   user_id?: string;
   api_key_id?: string;
+  source?: string;
+  // Pricing state: true = only priced rows, false = only unpriced (cost null).
+  priced?: boolean;
+  // Budget participation: false scopes to imported rows (the bulk-op target set).
+  counts_toward_budget?: boolean;
 }
 
 // Total matching rows for a set of filters (from /v1/usage/count). Kept separate
 // from the list so /v1/usage stays a bare array for external export consumers.
 export interface UsageCount {
   total: number;
+}
+
+// Selection for a bulk usage mutation: either an explicit `ids` list (the current
+// page selection) or `by_filter: true` plus filter fields (everything matching).
+// Only imported rows (counts_toward_budget = false) are ever affected server-side.
+export interface UsageMutationSelection {
+  ids?: string[];
+  by_filter?: boolean;
+  source?: string;
+  model?: string;
+  user_id?: string;
+  api_key_id?: string;
+  status?: string;
+  start_date?: string;
+  end_date?: string;
+  priced?: boolean;
+}
+
+export interface UsageDeleteResult {
+  deleted: number;
+}
+
+export interface UsageSetPriceRequest extends UsageMutationSelection {
+  input_price_per_million: number;
+  output_price_per_million: number;
+  cache_read_price_per_million?: number;
+  cache_write_price_per_million?: number;
+}
+
+export interface UsageSetPriceResult {
+  matched: number;
+  updated: number;
+  unchanged: number;
 }
 
 // Time-series granularity for the analytics summary.
