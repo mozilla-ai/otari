@@ -1,6 +1,6 @@
-import { Button, Card } from "@heroui/react";
+import { Button } from "@heroui/react";
 import clsx from "clsx";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
@@ -354,7 +354,24 @@ export function ActivityPage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [priceOpen, setPriceOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const expanded = rows.find((r) => r.id === expandedId) ?? null;
+
+  // Inline accordion panel under the clicked row (DataTable renderDetail).
+  // Stable (setter-only closure) so the row cache holds; see the DataTable
+  // docstring.
+  const renderDetail = useCallback(
+    (entry: UsageEntry) => (
+      <div>
+        <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
+          <span className="text-sm font-medium text-[var(--otari-ink)]">Request detail</span>
+          <Button size="sm" variant="ghost" onPress={() => setExpandedId(null)}>
+            Close
+          </Button>
+        </div>
+        <RequestDetail entry={entry} />
+      </div>
+    ),
+    [],
+  );
 
   // A bulk op targets either the current page selection (ids) or, once the operator
   // opted into "all matching", the filter itself (by_filter). The server scopes
@@ -600,21 +617,9 @@ export function ActivityPage() {
         disabledKeys={disabledKeys}
         onRowAction={(key) => setExpandedId((current) => (current === key ? null : key))}
         rowClassName={activityRowClassName}
+        detailKey={expandedId}
+        renderDetail={renderDetail}
       />
-
-      {expanded ? (
-        <Card>
-          <Card.Content className="p-0">
-            <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
-              <span className="text-sm font-medium text-[var(--otari-ink)]">Request detail</span>
-              <Button size="sm" variant="ghost" onPress={() => setExpandedId(null)}>
-                Close
-              </Button>
-            </div>
-            <RequestDetail entry={expanded} />
-          </Card.Content>
-        </Card>
-      ) : null}
 
       <TablePagination
         page={page}

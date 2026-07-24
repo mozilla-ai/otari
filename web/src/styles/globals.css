@@ -59,6 +59,65 @@
   background-color: var(--otari-bg);
 }
 
+/* Inline row detail (DataTable detailKey/renderDetail). The host <tr> lives
+   outside react-aria's collection (see DataTable.tsx), so it is styled here
+   rather than through the table variant. The reveal animates the CSS grid
+   0fr -> 1fr track so the panel slides open from under its row instead of
+   popping in and shoving the rows below. */
+.otari-table .otari-detail-row > td {
+  padding: 0;
+  border-bottom: 1px solid var(--otari-line);
+  background-color: var(--otari-bg);
+}
+/* Same-frame acknowledgment of a row click while react-aria's interaction
+   render (linear in page size) catches up and the panel slides in. */
+.otari-table .otari-detail-opening .table__cell {
+  background-color: var(--otari-brand-tint);
+}
+.otari-detail-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  animation: otari-detail-open 180ms ease-out forwards;
+}
+.otari-detail-reveal > div {
+  overflow: hidden;
+}
+@keyframes otari-detail-open {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0.5;
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+  }
+}
+/* The floating bulk bar slides up from the viewport edge; fixed positioning
+   means it never reflows the table it acts on. */
+.otari-bulk-bar {
+  animation: otari-bulk-bar-in 160ms ease-out;
+}
+@keyframes otari-bulk-bar-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .otari-detail-reveal {
+    animation: none;
+    grid-template-rows: 1fr;
+  }
+  .otari-bulk-bar {
+    animation: none;
+  }
+}
+
 html,
 body,
 #root {

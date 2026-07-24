@@ -191,6 +191,24 @@ describe("ActivityPage", () => {
     expect(screen.queryByText("provider exploded: quota exceeded")).not.toBeInTheDocument();
   });
 
+  it("opens the detail inline directly under the clicked row, and Close collapses it", async () => {
+    // Regression: the shared-table migration rendered the detail below the
+    // whole table, so on a full page a row click looked like it did nothing.
+    const user = userEvent.setup();
+    mockApi({ rows: [entry({ id: "r1" }), entry({ id: "r2", model: "gpt-4o-mini" })] });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("gpt-4o")).closest("tr")!;
+    await user.click(row);
+
+    expect(screen.getByText("Request detail")).toBeInTheDocument();
+    // The panel is the row's next sibling (accordion), not a card after the table.
+    expect(row.nextElementSibling?.textContent).toContain("Request detail");
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByText("Request detail")).not.toBeInTheDocument();
+  });
+
   it("reports copying only after the clipboard write succeeds", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     const copied = await copyToClipboard("provider exploded", { writeText });
