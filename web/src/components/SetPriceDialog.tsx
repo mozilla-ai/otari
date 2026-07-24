@@ -50,9 +50,27 @@ export interface SetPriceDialogProps {
   isPending: boolean;
   error: unknown;
   onSubmit: (rates: ManualRates) => void;
+  /** Dialog heading; defaults to "Set price". */
+  title?: string;
+  /** Body copy explaining what the rates apply to; a sensible usage default is used when omitted. */
+  description?: (count: number) => string;
 }
 
-export function SetPriceDialog({ isOpen, onOpenChange, targetCount, isPending, error, onSubmit }: SetPriceDialogProps) {
+const defaultDescription = (count: number): string =>
+  `Recompute cost for ${count.toLocaleString()} imported ${
+    count === 1 ? "row" : "rows"
+  } from each row's own token counts at these per-1M rates. Enforced gateway rows are never affected.`;
+
+export function SetPriceDialog({
+  isOpen,
+  onOpenChange,
+  targetCount,
+  isPending,
+  error,
+  onSubmit,
+  title = "Set price",
+  description = defaultDescription,
+}: SetPriceDialogProps) {
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [cacheRead, setCacheRead] = useState("");
@@ -92,13 +110,10 @@ export function SetPriceDialog({ isOpen, onOpenChange, targetCount, isPending, e
           <AlertDialog.Container placement="center" size="lg">
             <AlertDialog.Dialog>
               <AlertDialog.Header>
-                <AlertDialog.Heading>Set price</AlertDialog.Heading>
+                <AlertDialog.Heading>{title}</AlertDialog.Heading>
               </AlertDialog.Header>
               <AlertDialog.Body className="flex flex-col gap-4">
-                <p className="text-sm text-[var(--otari-muted)]">
-                  Recompute cost for {targetCount.toLocaleString()} imported {targetCount === 1 ? "row" : "rows"} from
-                  each row&rsquo;s own token counts at these per-1M rates. Enforced gateway rows are never affected.
-                </p>
+                <p className="text-sm text-[var(--otari-muted)]">{description(targetCount)}</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <RateField label="Input $ / 1M" value={input} onChange={setInput} isRequired autoFocus />
                   <RateField label="Output $ / 1M" value={output} onChange={setOutput} isRequired />
