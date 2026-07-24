@@ -1,5 +1,5 @@
 import { Button, Card, Spinner } from "@heroui/react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   useBudgetResetLogs,
@@ -399,6 +399,9 @@ function InlineDelete({ label, isPending, onConfirm }: { label: string; isPendin
 
 // A short, stable fingerprint for a budget id (its leading segment), shown when a
 // budget has no name and used as a fallback label.
+// Stable row-key getter so DataTable's per-row cache holds across re-renders.
+const getBudgetRowKey = (b: Budget): string => b.budget_id;
+
 function shortId(budgetId: string): string {
   return budgetId.split("-")[0];
 }
@@ -450,7 +453,11 @@ export function BudgetsPage() {
     }
   };
 
-  const columns: DataTableColumn<Budget>[] = [
+  // Memoized on the values the cells actually read so DataTable's per-row
+  // cache holds across selection clicks (see the DataTable docstring).
+  // historyOpen is a real dependency: it drives the History button label, so
+  // toggling it must invalidate the cached rows.
+  const columns = useMemo<DataTableColumn<Budget>[]>(() => [
     {
       id: "budget",
       header: "Budget",
@@ -506,7 +513,7 @@ export function BudgetsPage() {
         </div>
       ),
     },
-  ];
+  ], [historyOpen, deleteBudget.isPending, deleteBudget.mutate]);
 
   const assignUsers = async (budgetId: string, userIds: string[]) => {
     setAssigningUsers(true);
@@ -646,7 +653,7 @@ export function BudgetsPage() {
         ariaLabel="Budgets"
         columns={columns}
         rows={rows}
-        getRowKey={(b) => b.budget_id}
+        getRowKey={getBudgetRowKey}
         isLoading={loading}
         emptyContent="No budgets yet. Create one to cap spending."
         selectionMode="multiple"

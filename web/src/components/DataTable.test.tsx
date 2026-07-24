@@ -23,8 +23,12 @@ const COLUMNS: DataTableColumn<Row>[] = [
   { id: "cost", header: "Cost", cell: (r) => r.cost, align: "end", allowsSorting: true },
 ];
 
+// Stable identity matters: DataTable caches rendered rows on getRowKey (and
+// columns), so an inline arrow here would rebuild every row on each re-render.
+const getRowKey = (r: Row) => r.id;
+
 function base<T extends object>(props: T) {
-  return { ariaLabel: "Test table", columns: COLUMNS, rows: ROWS, getRowKey: (r: Row) => r.id, ...props };
+  return { ariaLabel: "Test table", columns: COLUMNS, rows: ROWS, getRowKey, ...props };
 }
 
 describe("DataTable", () => {
@@ -96,6 +100,75 @@ describe("DataTable", () => {
     const bravoRow = screen.getByRole("row", { name: /Bravo/ });
     await user.click(within(bravoRow).getByRole("checkbox"));
     expect(screen.getByTestId("count")).toHaveTextContent("0");
+  });
+
+  it("does not re-render row cells when the selection changes", async () => {
+    // Selection toggles re-render the controlling parent, and with hundreds of
+    // rows per page a full row rebuild made each checkbox click lag by whole
+    // seconds. Rendered rows are cached per row object (react-aria's items
+    // collection), so a selection change must not re-invoke cell renderers.
+    const user = userEvent.setup();
+    const cellSpy = vi.fn((r: Row) => r.name);
+    const spiedColumns: DataTableColumn<Row>[] = [
+      { id: "name", header: "Name", cell: cellSpy, isRowHeader: true },
+    ];
+
+    function Harness() {
+      const [selected, setSelected] = useState<Selection>(new Set());
+      return (
+        <DataTable
+          {...base({
+            columns: spiedColumns,
+            selectionMode: "multiple",
+            selectedKeys: selected,
+            onSelectionChange: setSelected,
+          })}
+        />
+      );
+    }
+
+    render(<Harness />);
+    const callsAfterMount = cellSpy.mock.calls.length;
+
+    const alphaRow = screen.getByRole("row", { name: /Alpha/ });
+    await user.click(within(alphaRow).getByRole("checkbox"));
+    expect(alphaRow).toHaveAttribute("aria-selected", "true");
+    expect(cellSpy.mock.calls.length).toBe(callsAfterMount);
+  });
+
+  it("re-invokes cell renderers on selection when columns are unstable (the contract's failure mode)", async () => {
+    // Companion to the caching test above: a caller that rebuilds `columns`
+    // each render defeats the row cache, and every selection click re-renders
+    // the whole page of rows again. This documents the cost of violating the
+    // stability contract so it stays visible if a page regresses to inline
+    // columns; the fix is memoization at the call site, not a DataTable change.
+    const user = userEvent.setup();
+    const cellSpy = vi.fn((r: Row) => r.name);
+
+    function Harness() {
+      const [selected, setSelected] = useState<Selection>(new Set());
+      const unstableColumns: DataTableColumn<Row>[] = [
+        { id: "name", header: "Name", cell: cellSpy, isRowHeader: true },
+      ];
+      return (
+        <DataTable
+          {...base({
+            columns: unstableColumns,
+            selectionMode: "multiple",
+            selectedKeys: selected,
+            onSelectionChange: setSelected,
+          })}
+        />
+      );
+    }
+
+    render(<Harness />);
+    const callsAfterMount = cellSpy.mock.calls.length;
+
+    const alphaRow = screen.getByRole("row", { name: /Alpha/ });
+    await user.click(within(alphaRow).getByRole("checkbox"));
+    expect(alphaRow).toHaveAttribute("aria-selected", "true");
+    expect(cellSpy.mock.calls.length).toBeGreaterThan(callsAfterMount);
   });
 
   it("reports sort changes from a sortable column header", async () => {

@@ -1,5 +1,5 @@
 import { Button, Card, Chip } from "@heroui/react";
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Selection, SortDescriptor } from "react-aria-components";
 
@@ -119,6 +119,9 @@ type EffectiveRates = Pick<
   ModelRow,
   "inputPrice" | "outputPrice" | "cacheReadPrice" | "cacheWritePrice" | "cacheWrite1hPrice"
 >;
+
+// Stable row-key getter so DataTable's per-row cache holds across re-renders.
+const getModelRowKey = (row: ModelRow): string => row.key;
 
 function displayModelName(selector: string, provider: string): string {
   const instancePrefix = `${provider}:`;
@@ -889,8 +892,13 @@ function ModelTable({
   selectedKeys: Selection;
   onSelectionChange: (keys: Selection) => void;
 }) {
-  const comparisonLabel = comparisonContextTokens == null ? "Base" : `at ${formatContext(comparisonContextTokens)}`;
-  const columns: DataTableColumn<ModelRow>[] = [
+  // Memoized on their real inputs so DataTable's per-row cache holds across
+  // selection clicks (see the DataTable docstring). rowClassName intentionally
+  // depends on selectedKey: the drilled-row highlight must invalidate the
+  // cache when the selection target changes.
+  const columns = useMemo<DataTableColumn<ModelRow>[]>(() => {
+    const comparisonLabel = comparisonContextTokens == null ? "Base" : `at ${formatContext(comparisonContextTokens)}`;
+    return [
     {
       id: "model",
       header: "Model",
@@ -942,13 +950,20 @@ function ModelTable({
       align: "end",
       cell: (row) => <PricingPolicyCell row={row} onEdit={() => onEditPricing(row.key)} />,
     },
-  ];
+    ];
+  }, [comparisonContextTokens, onEditPricing]);
+
+  const rowClassName = useCallback(
+    (row: ModelRow) => (row.key === selectedKey ? "bg-[var(--otari-brand-tint)]" : undefined),
+    [selectedKey],
+  );
+
   return (
     <DataTable
       ariaLabel="Models"
       columns={columns}
       rows={rows}
-      getRowKey={(row) => row.key}
+      getRowKey={getModelRowKey}
       isLoading={isLoading}
       emptyContent={empty}
       selectionMode="multiple"
@@ -957,7 +972,7 @@ function ModelTable({
       sortDescriptor={sortDescriptor}
       onSortChange={onSortChange}
       onRowAction={onSelect}
-      rowClassName={(row) => (row.key === selectedKey ? "bg-[var(--otari-brand-tint)]" : undefined)}
+      rowClassName={rowClassName}
     />
   );
 }
@@ -1262,7 +1277,9 @@ export function ModelsPage() {
     setSort({ col: String(descriptor.column) as SortCol, dir: descriptor.direction === "ascending" ? "asc" : "desc" });
     setPage(0);
   };
-  const onEditPricing = (key: string) => setPricingKey((current) => (current === key ? null : key));
+  // Stable so ModelTable's memoized columns (which close over it) survive
+  // parent re-renders; the setter-callback form needs no dependencies.
+  const onEditPricing = useCallback((key: string) => setPricingKey((current) => (current === key ? null : key)), []);
 
   // Selection targets the visible page; "select all matching" expands to every
   // filtered model so a bulk price can be applied to the whole result set.

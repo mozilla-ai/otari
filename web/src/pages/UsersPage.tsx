@@ -1,5 +1,5 @@
 import { AlertDialog, Button, Card, Chip } from "@heroui/react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { useBudgets, useCreateUser, useDeleteUser, useUpdateUser, useUsers } from "@/api/hooks";
 import type { Budget, CreateUserRequest, UpdateUserRequest, User } from "@/api/types";
@@ -21,6 +21,9 @@ function formatUSD(value: number): string {
 
 // A user auto-created to own a single API key (id "apikey-..."), rather than one
 // an operator named. Shown as such so the list is not full of opaque virtual ids.
+// Stable row-key getter so DataTable's per-row cache holds across re-renders.
+const getUserRowKey = (u: User): string => u.user_id;
+
 const isVirtualUser = (userId: string): boolean => userId.startsWith("apikey-");
 
 function shortId(budgetId: string): string {
@@ -360,7 +363,7 @@ export function UsersPage() {
   const editingUser = allRows.find((u) => u.user_id === editing) ?? null;
   const showOnboarding = !loading && rows.length === 0 && !addOpen;
 
-  const budgetById = new Map((budgets.data ?? []).map((b) => [b.budget_id, b]));
+  const budgetById = useMemo(() => new Map((budgets.data ?? []).map((b) => [b.budget_id, b])), [budgets.data]);
   const selection = useTableSelection();
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
@@ -370,8 +373,10 @@ export function UsersPage() {
   const selectableKeys = rows.map((u) => u.user_id);
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
 
-  const setBlocked = (u: User, blocked: boolean) =>
-    updateUser.mutate({ id: u.user_id, body: { blocked } });
+  const setBlocked = useCallback(
+    (u: User, blocked: boolean) => updateUser.mutate({ id: u.user_id, body: { blocked } }),
+    [updateUser.mutate],
+  );
 
   const runBulk = async (action: (id: string) => Promise<unknown>, onDone: () => void) => {
     setBulkPending(true);
@@ -389,7 +394,9 @@ export function UsersPage() {
     }
   };
 
-  const columns: DataTableColumn<User>[] = [
+  // Memoized on the values the cells actually read so DataTable's per-row
+  // cache holds across selection clicks; see the DataTable docstring.
+  const columns = useMemo<DataTableColumn<User>[]>(() => [
     {
       id: "user",
       header: "User",
@@ -471,7 +478,7 @@ export function UsersPage() {
         </div>
       ),
     },
-  ];
+  ], [budgetById, updateUser.isPending, deleteUser.isPending, deleteUser.mutate, setBlocked]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -538,7 +545,7 @@ export function UsersPage() {
         ariaLabel="Users"
         columns={columns}
         rows={rows}
-        getRowKey={(u) => u.user_id}
+        getRowKey={getUserRowKey}
         isLoading={loading}
         emptyContent="No users yet. Create one, or create an API key to auto-create one."
         selectionMode="multiple"

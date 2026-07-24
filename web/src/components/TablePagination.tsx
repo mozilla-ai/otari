@@ -8,7 +8,12 @@ import { FilterSelect } from "@/components/ui";
 // / last controls on the right. Pages are 0-based in props; the type-a-page box
 // shows 1-based numbers to the operator.
 
-export const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500];
+// Capped at 100: react-aria's Table re-renders every mounted row on each
+// selection change, so click-to-select latency grows linearly with page size
+// (~35 ms at 50 rows, ~320 ms at 500, beyond a second on a slower machine).
+// Bulk actions over more rows than a page go through "select all N matching
+// this filter" instead of a bigger page.
+export const PAGE_SIZE_OPTIONS = [25, 50, 100];
 
 export interface TablePaginationProps {
   /** 0-based current page. */

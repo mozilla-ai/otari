@@ -1,5 +1,5 @@
 import { Button, Card, Chip } from "@heroui/react";
-import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useCreateKey, useDeleteKey, useKeys, useRotateKey, useUpdateKey, useUsers } from "@/api/hooks";
 import type { ApiKey, CreateKeyRequest, CreateKeyResponse, User } from "@/api/types";
@@ -54,6 +54,11 @@ function toDatetimeLocal(iso: string | null): string {
 }
 
 const isVirtualUser = (userId: string | null): boolean => (userId ?? "").startsWith("apikey-");
+
+const label = (k: ApiKey): string => k.key_name ?? k.id;
+
+// Stable row-key getter so DataTable's per-row cache holds across re-renders.
+const getKeyRowKey = (k: ApiKey): string => k.id;
 
 // ---------- copy field (graceful on non-HTTPS origins) ----------
 
@@ -589,14 +594,21 @@ export function KeysPage() {
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
   const selectedKeys = rows.filter((k) => selectedIds.includes(k.id));
 
-  const label = (k: ApiKey) => k.key_name ?? k.id;
 
-  const setActive = (k: ApiKey, active: boolean) => updateKey.mutate({ id: k.id, body: { is_active: active } });
+  // Stable handlers (mutate fns are referentially stable in TanStack Query) so
+  // the memoized columns below survive unrelated re-renders.
+  const setActive = useCallback(
+    (k: ApiKey, active: boolean) => updateKey.mutate({ id: k.id, body: { is_active: active } }),
+    [updateKey.mutate],
+  );
 
-  const regenerate = (k: ApiKey) =>
-    rotateKey.mutate(k.id, {
-      onSuccess: (result) => setRevealed({ title: `New secret for ${label(k)}`, result }),
-    });
+  const regenerate = useCallback(
+    (k: ApiKey) =>
+      rotateKey.mutate(k.id, {
+        onSuccess: (result) => setRevealed({ title: `New secret for ${label(k)}`, result }),
+      }),
+    [rotateKey.mutate],
+  );
 
   const runBulk = async (targets: ApiKey[], action: (k: ApiKey) => Promise<unknown>, onDone?: () => void) => {
     setBulkPending(true);
@@ -614,7 +626,10 @@ export function KeysPage() {
     }
   };
 
-  const columns: DataTableColumn<ApiKey>[] = [
+  // Memoized on the values the cells actually read (mutation pending flags and
+  // the stable handlers) so DataTable's per-row cache holds across selection
+  // clicks; see the DataTable docstring.
+  const columns = useMemo<DataTableColumn<ApiKey>[]>(() => [
     {
       id: "name",
       header: "Name",
@@ -721,7 +736,7 @@ export function KeysPage() {
         </div>
       ),
     },
-  ];
+  ], [updateKey.isPending, rotateKey.isPending, deleteKey.isPending, deleteKey.mutate, setActive, regenerate]);
 
   // Bulk delete targets only already-disabled keys, mirroring the per-row rule
   // that a live key must be disabled before it can be permanently deleted.
@@ -811,7 +826,7 @@ export function KeysPage() {
         ariaLabel="API keys"
         columns={columns}
         rows={rows}
-        getRowKey={(k) => k.id}
+        getRowKey={getKeyRowKey}
         isLoading={loading}
         emptyContent="No API keys yet. Create one to authenticate a caller."
         selectionMode="multiple"

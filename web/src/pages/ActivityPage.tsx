@@ -17,7 +17,7 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
-import { TablePagination } from "@/components/TablePagination";
+import { PAGE_SIZE_OPTIONS, TablePagination } from "@/components/TablePagination";
 import { ErrorBanner, FilterComboBox, FilterSelect, PageHeader } from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 import { useUrlState } from "@/lib/urlState";
@@ -60,6 +60,14 @@ function timeAgo(iso: string): string {
   if (hours < 24) return `${hours}h ago`;
   return `${Math.round(hours / 24)}d ago`;
 }
+
+// Stable row-key getter and row class so DataTable's per-row cache holds
+// across re-renders (see the DataTable docstring); an inline arrow here would
+// rebuild every row on each selection click.
+const getActivityRowKey = (e: UsageEntry): string => e.id;
+
+const activityRowClassName = (e: UsageEntry): string | undefined =>
+  e.status === "error" ? "bg-red-50" : undefined;
 
 // ---------- filter option sets ----------
 
@@ -226,7 +234,6 @@ export function ActivityPage() {
     for (const k of keys.data ?? []) map.set(k.id, k.key_name ?? `${k.id.slice(0, 8)}…`);
     return map;
   }, [keys.data]);
-  const apiKeyLabel = (id: string | null): string => (id === null ? "—" : (keyLabels.get(id) ?? `${id.slice(0, 8)}…`));
 
   // Filter + pagination state lives in the URL, so a filtered view is shareable
   // and survives the back button. `patch` batches related changes into one entry.
@@ -239,8 +246,16 @@ export function ActivityPage() {
   const userFilter = url.get("user_id");
   const apiKeyFilter = url.get("api_key_id");
   const pricedFilter = url.get("priced");
-  const page = url.getNumber("page");
-  const pageSize = url.getNumber("size");
+  const page = Math.max(0, url.getNumber("page"));
+  // Snap URL-supplied sizes to the nearest offered option: selection latency
+  // grows linearly with rows on the page, so an old bookmark with size=500
+  // must not resurrect second-long checkbox clicks, and a hand-edited size=0
+  // or size=-5 must not reach the API as an invalid limit (or leave the
+  // rows-per-page select showing a value it does not offer).
+  const rawPageSize = url.getNumber("size");
+  const pageSize = PAGE_SIZE_OPTIONS.reduce((best, option) =>
+    Math.abs(option - rawPageSize) < Math.abs(best - rawPageSize) ? option : best,
+  );
 
   // Snapshot the window so a rolling preset does not recompute "now" every render
   // (which would churn the query key). Re-anchored when the range changes or on refresh.
@@ -399,24 +414,30 @@ export function ActivityPage() {
     void count.refetch();
   };
 
-  const columns: DataTableColumn<UsageEntry>[] = [
-    {
-      id: "time",
-      header: "Time",
-      cell: (e) => (
-        <span title={absolute(e.timestamp)} className="text-[var(--otari-muted)]">
-          {timeAgo(e.timestamp)}
-        </span>
-      ),
-    },
-    { id: "user", header: "User", cell: (e) => e.user_id ?? "—" },
-    { id: "model", header: "Model", isRowHeader: true, cell: (e) => e.model },
-    { id: "api_key", header: "API key", cell: (e) => <span className="text-[var(--otari-muted)]">{apiKeyLabel(e.api_key_id)}</span> },
-    { id: "tokens", header: "Tokens", align: "end", cell: (e) => formatTokens(e.total_tokens) },
-    { id: "cost", header: "Cost", align: "end", cell: (e) => formatUSD(e.cost) },
-    { id: "latency", header: "Total time", align: "end", cell: (e) => formatLatency(e.latency_ms) },
-    { id: "status", header: "Status", cell: (e) => <StatusPill status={e.status} /> },
-  ];
+  // Memoized on keyLabels (the only per-render input) so DataTable's per-row
+  // cache holds: a fresh array every render would rebuild all rows per click.
+  const columns = useMemo<DataTableColumn<UsageEntry>[]>(() => {
+    const apiKeyLabel = (id: string | null): string =>
+      id === null ? "—" : (keyLabels.get(id) ?? `${id.slice(0, 8)}…`);
+    return [
+      {
+        id: "time",
+        header: "Time",
+        cell: (e) => (
+          <span title={absolute(e.timestamp)} className="text-[var(--otari-muted)]">
+            {timeAgo(e.timestamp)}
+          </span>
+        ),
+      },
+      { id: "user", header: "User", cell: (e) => e.user_id ?? "—" },
+      { id: "model", header: "Model", isRowHeader: true, cell: (e) => e.model },
+      { id: "api_key", header: "API key", cell: (e) => <span className="text-[var(--otari-muted)]">{apiKeyLabel(e.api_key_id)}</span> },
+      { id: "tokens", header: "Tokens", align: "end", cell: (e) => formatTokens(e.total_tokens) },
+      { id: "cost", header: "Cost", align: "end", cell: (e) => formatUSD(e.cost) },
+      { id: "latency", header: "Total time", align: "end", cell: (e) => formatLatency(e.latency_ms) },
+      { id: "status", header: "Status", cell: (e) => <StatusPill status={e.status} /> },
+    ];
+  }, [keyLabels]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -570,7 +591,7 @@ export function ActivityPage() {
         ariaLabel="Activity log"
         columns={columns}
         rows={rows}
-        getRowKey={(e) => e.id}
+        getRowKey={getActivityRowKey}
         isLoading={usage.isLoading}
         emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
         selectionMode="multiple"
@@ -578,7 +599,7 @@ export function ActivityPage() {
         onSelectionChange={selection.onSelectionChange}
         disabledKeys={disabledKeys}
         onRowAction={(key) => setExpandedId((current) => (current === key ? null : key))}
-        rowClassName={(e) => (e.status === "error" ? "bg-red-50" : undefined)}
+        rowClassName={activityRowClassName}
       />
 
       {expanded ? (
