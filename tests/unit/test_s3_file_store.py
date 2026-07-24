@@ -68,10 +68,13 @@ async def test_get_stream_yields_all_bytes(s3_store: S3FileStore) -> None:
 
 @pytest.mark.asyncio
 async def test_delete_removes_object(s3_store: S3FileStore) -> None:
+    from botocore.exceptions import ClientError
+
     ref = await s3_store.put("file-deadbeef", b"data")
     await s3_store.delete(ref)
-    with pytest.raises(Exception, match="Not Found|NoSuchKey|404"):
+    with pytest.raises(ClientError) as exc_info:
         await s3_store.get(ref)
+    assert exc_info.value.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "NotFound"}
 
 
 @pytest.mark.asyncio
@@ -165,7 +168,10 @@ async def test_put_stream_removes_orphaned_upload_when_cancelled_after_success(
     monkeypatch.setattr(client, "upload_fileobj", _gated_upload_fileobj)
 
     task = asyncio.ensure_future(s3_store.put_stream("file-orphancheck01", _iter([b"data"])))
-    await asyncio.to_thread(upload_started.wait, 5)  # don't cancel until the upload thread is truly running
+    # Don't cancel until the upload thread is truly running: an ignored
+    # timeout here would let the test proceed anyway, cancelling before the
+    # race it's meant to reproduce even started, silently.
+    assert await asyncio.to_thread(upload_started.wait, 5), "upload thread never started"
     task.cancel()
     release_upload.set()  # let the (already-committed-to) background upload finish
 
