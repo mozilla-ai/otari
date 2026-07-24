@@ -71,11 +71,15 @@ services:
   postgres:
     image: postgres:16-alpine
     ports:
-      # Host port 5433 (container still :5432) — avoids clashing with another
-      # local postgres on the default port. Gateway connects via the Docker
-      # network at postgres:5432, so the host mapping is only for external
-      # tools (psql / TablePlus / etc.). Override with $OTARI_POSTGRES_PORT.
-      - "${OTARI_POSTGRES_PORT:-5433}:5432"
+      # Bound to localhost only. The database holds API key hashes, users,
+      # budgets, usage, and dashboard sessions, so an open port on the host
+      # network would expose all of it (default creds otari/otari) to anyone
+      # on the LAN. The Otari container reaches it via the Docker network at
+      # postgres:5432; this host mapping is only for external tools (psql /
+      # TablePlus / etc.) on the operator's own machine.
+      # Host port 5433 (container still :5432) avoids clashing with another
+      # local postgres on the default port. Override with $OTARI_POSTGRES_PORT.
+      - "127.0.0.1:${OTARI_POSTGRES_PORT:-5433}:5432"
     environment:
       - POSTGRES_USER=otari
       - POSTGRES_PASSWORD=otari
