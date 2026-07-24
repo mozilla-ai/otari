@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, Literal, NamedTuple, TypeVar
 
 import httpx
 from anthropic import APIConnectionError as _AnthropicAPIConnectionError
@@ -510,17 +510,24 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
     )
 
 
-def upstream_exception_shape(exc: BaseException) -> tuple[str | None, int | None]:
+UpstreamErrorKind = Literal["timeout", "conn_err"]
+
+
+def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | None, int | None]:
     """Classify the *shape* of an upstream exception, independent of retry policy.
 
     Returns ``(kind, status_code)`` where ``kind`` is ``"timeout"``,
     ``"conn_err"``, or ``None``, and ``status_code`` is the HTTP status the
-    exception carries, or ``None``. At most one of the two is set. Shared by
-    :func:`_classify_upstream_error` (drives the hybrid-mode fallback decision)
-    and :func:`gateway.api.routes._pipeline.classify_provider_error` (drives the
+    exception carries, or ``None``. At most one of the two is set. ``kind`` is
+    a ``Literal``, not a bare ``str``, so a typo at a ``kind == "..."``
+    comparison site (e.g. in :func:`_classify_upstream_error`) is a mypy error
+    instead of a silent no-op. Shared by :func:`_classify_upstream_error`
+    (drives the hybrid-mode fallback decision) and
+    :func:`gateway.api.routes._pipeline.classify_provider_error` (drives the
     final client-facing status/detail), so the two stay in sync.
 
-    Recognizes, in order:
+    Recognizes, in order, walking ``.original_exception`` when the current
+    exception carries no signal of its own:
 
     1. Stdlib/httpx timeout and network exceptions directly.
     2. The OpenAI and Anthropic SDKs' own ``APITimeoutError`` /
@@ -543,34 +550,51 @@ def upstream_exception_shape(exc: BaseException) -> tuple[str | None, int | None
        heuristic ``any_llm.utils.exception_handler.convert_exception`` already
        uses internally. Only applies when the exception carries no status code
        at all, so it never shadows a real HTTP-status classification.
+    5. If none of the above match, ``.original_exception`` (set by any-llm's
+       ``AnyLLMError`` family, e.g. via ``convert_exception``) is unwrapped and
+       reclassified from step 1. This keeps detection working once
+       ``ANY_LLM_UNIFIED_EXCEPTIONS=1`` becomes the default: any-llm's
+       ``convert_exception`` re-wraps a raw SDK timeout/connection error into
+       a generic ``any_llm.exceptions.ProviderError`` (class name matches
+       neither ``*TimeoutError`` nor ``*ConnectionError``, no ``status_code``),
+       but always preserves the original SDK exception on
+       ``original_exception``. Bounded by an ``id()``-based seen-set so a
+       (pathological, self-referential) cycle terminates instead of looping.
     """
-    if isinstance(
-        exc,
-        (
-            asyncio.TimeoutError,
-            TimeoutError,
-            httpx.TimeoutException,
-            _OpenAIAPITimeoutError,
-            _AnthropicAPITimeoutError,
-        ),
-    ):
-        return "timeout", None
-    if isinstance(exc, (httpx.NetworkError, _OpenAIAPIConnectionError, _AnthropicAPIConnectionError)):
-        return "conn_err", None
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
 
-    status_code = getattr(exc, "status_code", None)
-    if status_code is None:
-        resp = getattr(exc, "response", None)
-        if resp is not None:
-            status_code = getattr(resp, "status_code", None)
-    if isinstance(status_code, int):
-        return None, status_code
+        if isinstance(
+            current,
+            (
+                asyncio.TimeoutError,
+                TimeoutError,
+                httpx.TimeoutException,
+                _OpenAIAPITimeoutError,
+                _AnthropicAPITimeoutError,
+            ),
+        ):
+            return "timeout", None
+        if isinstance(current, (httpx.NetworkError, _OpenAIAPIConnectionError, _AnthropicAPIConnectionError)):
+            return "conn_err", None
 
-    class_name = type(exc).__name__
-    if class_name.endswith("TimeoutError"):
-        return "timeout", None
-    if class_name.endswith("ConnectionError"):
-        return "conn_err", None
+        status_code = getattr(current, "status_code", None)
+        if status_code is None:
+            resp = getattr(current, "response", None)
+            if resp is not None:
+                status_code = getattr(resp, "status_code", None)
+        if isinstance(status_code, int):
+            return None, status_code
+
+        class_name = type(current).__name__
+        if class_name.endswith("TimeoutError"):
+            return "timeout", None
+        if class_name.endswith("ConnectionError"):
+            return "conn_err", None
+
+        current = getattr(current, "original_exception", None)
 
     return None, None
 

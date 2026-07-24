@@ -113,6 +113,57 @@ def test_duck_typed_fallback_for_unenumerated_sdks(class_name: str, expected_cla
     assert error_class == expected_class
 
 
+class _WrappedByAnyLLM(Exception):
+    """Mimics ``any_llm.exceptions.AnyLLMError`` once ``ANY_LLM_UNIFIED_EXCEPTIONS=1``
+    is enabled: the outer exception carries no ``status_code`` and a class name
+    the duck-typed fallback doesn't recognize (``convert_exception`` maps a raw
+    SDK timeout/connection error to the generic ``ProviderError`` bucket), but
+    preserves the raw SDK exception on ``original_exception``.
+    """
+
+    def __init__(self, original_exception: BaseException) -> None:
+        super().__init__(str(original_exception))
+        self.original_exception = original_exception
+
+
+@pytest.mark.parametrize(
+    "sdk_error, expected_class",
+    [
+        (OpenAIAPITimeoutError, "timeout"),
+        (AnthropicAPITimeoutError, "timeout"),
+        (OpenAIAPIConnectionError, "conn_err"),
+        (AnthropicAPIConnectionError, "conn_err"),
+    ],
+)
+def test_unwraps_original_exception_for_unified_any_llm_errors(sdk_error: type, expected_class: str) -> None:
+    """Once otari enables ``ANY_LLM_UNIFIED_EXCEPTIONS=1``, a raw SDK
+    timeout/connection error arrives wrapped in a generic ``AnyLLMError``
+    subclass rather than the SDK type directly. The classifier must still
+    recognize it by unwrapping ``original_exception``, or this regresses back
+    to the exact "unknown"/non-retryable bug this module fixes.
+    """
+    request = httpx.Request("POST", "http://upstream")
+    wrapped = _WrappedByAnyLLM(sdk_error(request=request))
+
+    retryable, error_class = _classify_upstream_error(wrapped)
+    assert retryable is True
+    assert error_class == expected_class
+
+
+def test_unwrap_terminates_on_self_referential_original_exception() -> None:
+    """Defensive: a (pathological, shouldn't-happen-in-practice) exception
+    whose ``original_exception`` points back to itself must not loop forever;
+    it should fall through to the same terminal ``unknown`` classification as
+    any other unrecognized exception.
+    """
+    exc = _WrappedByAnyLLM(ValueError("placeholder"))
+    exc.original_exception = exc  # self-reference, must not loop
+
+    retryable, error_class = _classify_upstream_error(exc)
+    assert retryable is False
+    assert error_class == "unknown"
+
+
 @pytest.mark.parametrize("sdk_error", [AnthropicAPIStatusError, OpenAIAPIStatusError])
 @pytest.mark.parametrize("status, retryable", [(404, True), (410, True), (400, False), (422, False)])
 def test_classifies_provider_sdk_status_errors(sdk_error: type, status: int, retryable: bool) -> None:

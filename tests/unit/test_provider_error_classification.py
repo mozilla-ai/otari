@@ -86,6 +86,24 @@ def test_sdk_wrapped_timeout_maps_to_504() -> None:
         assert classify_provider_error(exc) == (504, PROVIDER_TIMEOUT_DETAIL)
 
 
+def test_unified_any_llm_wrapped_timeout_maps_to_504() -> None:
+    """Once otari enables ``ANY_LLM_UNIFIED_EXCEPTIONS=1``, a raw SDK timeout
+    error arrives wrapped in a generic ``AnyLLMError`` subclass (no
+    ``status_code``, a class name the duck-typed fallback won't recognize)
+    rather than the SDK type directly. ``classify_provider_error`` must still
+    resolve it to 504 via the shared ``original_exception`` unwrap, not fall
+    back to the generic 502."""
+
+    class _WrappedByAnyLLM(Exception):
+        def __init__(self, original_exception: BaseException) -> None:
+            super().__init__(str(original_exception))
+            self.original_exception = original_exception
+
+    request = httpx.Request("POST", "http://upstream")
+    wrapped = _WrappedByAnyLLM(OpenAIAPITimeoutError(request=request))
+    assert classify_provider_error(wrapped) == (504, PROVIDER_TIMEOUT_DETAIL)
+
+
 @pytest.mark.parametrize(
     ("status_code", "expected"),
     [

@@ -747,6 +747,74 @@ def test_hybrid_mode_streaming_returns_502_when_all_attempts_fail(
     assert response.json() == {"detail": "All upstream providers failed"}
 
 
+def test_hybrid_mode_streaming_returns_504_when_all_attempts_time_out(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If every attempt fails with the OpenAI SDK's own ``APITimeoutError``
+    (not a raw ``httpx`` exception; see the non-streaming
+    ``test_hybrid_mode_maps_provider_timeout``), the terminal streaming
+    aggregate must still surface 504 with the timeout-specific wording, not
+    the generic 502. Covers ``raise_all_streaming_attempts_failed``'s timeout
+    branch, which none of the other streaming tests exercise."""
+    import openai
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "stream-req-timeout",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "att-a",
+                            "position": 0,
+                            "provider": "anthropic",
+                            "model": "claude-haiku-4-5",
+                            "api_key": "sk-ant-slow",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "att-b",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-openai-slow",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        raise openai.APITimeoutError(request=httpx.Request("POST", "http://upstream"))
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 504
+    assert response.json() == {"detail": "All upstream providers timed out"}
+
+
 def test_hybrid_mode_streaming_reports_every_attempt_when_all_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
