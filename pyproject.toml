@@ -44,9 +44,18 @@ ocr = [
     "rapidocr-onnxruntime>=1.3.0",
     "numpy>=1.26.0",
 ]
+# S3-compatible (AWS S3 or MinIO/any S3-compatible endpoint) files backend.
+# boto3 is already present transitively via any-llm-sdk[all] (Bedrock), but
+# this extra is what build_file_store checks for and documents, so the S3
+# backend stays decoupled from that implementation detail.
+s3 = [
+    "boto3>=1.42.0",
+]
 
 [dependency-groups]
 dev = [
+    "boto3-stubs[s3]",
+    "moto[s3]>=5.0.0",
     "mypy",
     "pytest>=9.0.3,<10",
     "pytest-asyncio>=0.26.0",

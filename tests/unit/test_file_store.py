@@ -185,3 +185,16 @@ def test_build_file_store_rejects_unknown_backend() -> None:
     config = GatewayConfig(files_backend="ceph")
     with pytest.raises(ValueError, match="Unsupported files_backend"):
         build_file_store(config)
+
+
+def test_build_file_store_s3_requires_bucket() -> None:
+    config = GatewayConfig(files_backend="s3", files_s3_bucket=None)
+    with pytest.raises(ValueError, match="files_s3_bucket is required"):
+        build_file_store(config)
+
+
+def test_build_file_store_s3() -> None:
+    from gateway.services.file_store import S3FileStore
+
+    config = GatewayConfig(files_backend="s3", files_s3_bucket="my-bucket")
+    assert isinstance(build_file_store(config), S3FileStore)

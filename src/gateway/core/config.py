@@ -357,11 +357,30 @@ class GatewayConfig(BaseSettings):
     )
     files_backend: str = Field(
         default="local",
-        description="Blob backend for uploaded file bytes: 'local' (filesystem). Future: 's3', 'gcs'.",
+        description="Blob backend for uploaded file bytes: 'local' (filesystem) or 's3'. Future: 'gcs'.",
     )
     files_local_dir: str = Field(
         default="./otari-files",
         description="Directory for the 'local' files backend to store uploaded bytes.",
+    )
+    files_s3_bucket: str | None = Field(
+        default=None,
+        description="Bucket name for the 's3' files backend. Required when files_backend is 's3'.",
+    )
+    files_s3_endpoint_url: str | None = Field(
+        default=None,
+        description=(
+            "S3-compatible endpoint URL for the 's3' files backend, e.g. a self-hosted MinIO "
+            "instance. None uses AWS S3's default endpoint resolution (region-based)."
+        ),
+    )
+    files_s3_region: str | None = Field(
+        default=None,
+        description=(
+            "AWS region for the 's3' files backend. Most self-hosted S3-compatible stores "
+            "(e.g. MinIO) ignore this; it still must resolve to some value, so it defaults to "
+            "'us-east-1' when unset."
+        ),
     )
     files_max_bytes: int = Field(
         default=512 * 1024 * 1024,

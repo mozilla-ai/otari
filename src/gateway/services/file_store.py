@@ -18,15 +18,37 @@ can implement the same :class:`FileStore` protocol without touching callers.
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import IO, Protocol, runtime_checkable
+from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 
+if TYPE_CHECKING:
+    from mypy_boto3_s3 import S3Client
+
 _STREAM_CHUNK_BYTES = 1024 * 1024
+# Incoming upload chunks spool here before handing the whole thing to boto3's
+# upload_fileobj (sync boto3 has no streaming-from-async-iterator primitive).
+# Small uploads never touch disk; past this threshold SpooledTemporaryFile
+# transparently rolls over to a real temp file, so memory stays bounded.
+_SPOOL_MAX_MEMORY_BYTES = 10 * 1024 * 1024
+
+
+def _shard_key(file_id: str) -> str:
+    """Shard ``file_id`` into 256 buckets by the first two hex characters.
+
+    Shared by every backend that benefits from not dumping every object into
+    one flat namespace (local avoids pathologically large directories; S3
+    avoids a hot-prefix pattern under high request rates).
+    """
+    # file ids look like ``file-<hex>``; shard on the first two hex chars.
+    token = file_id.split("-", 1)[-1] or file_id
+    prefix = (token[:2] or "00").lower()
+    return f"{prefix}/{file_id}"
 
 
 @asynccontextmanager
@@ -96,12 +118,6 @@ class LocalDirFileStore:
     def __init__(self, root: str) -> None:
         self._root = Path(root)
 
-    def _shard(self, file_id: str) -> str:
-        # file ids look like ``file-<hex>``; shard on the first two hex chars.
-        token = file_id.split("-", 1)[-1] or file_id
-        prefix = (token[:2] or "00").lower()
-        return f"{prefix}/{file_id}"
-
     def _resolve(self, storage_ref: str) -> Path:
         """Resolve ``storage_ref`` under the root, rejecting any escape.
 
@@ -117,7 +133,7 @@ class LocalDirFileStore:
         return path
 
     async def put(self, file_id: str, data: bytes) -> str:
-        ref = self._shard(file_id)
+        ref = _shard_key(file_id)
         path = self._resolve(ref)
 
         def _write() -> None:
@@ -132,7 +148,7 @@ class LocalDirFileStore:
         return await asyncio.to_thread(path.read_bytes)
 
     async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
-        ref = self._shard(file_id)
+        ref = _shard_key(file_id)
         path = self._resolve(ref)
 
         def _mkparent() -> None:
@@ -192,10 +208,88 @@ class LocalDirFileStore:
         await asyncio.to_thread(_unlink)
 
 
+class S3FileStore:
+    """S3-compatible object-storage :class:`FileStore` (AWS S3, MinIO, or any
+    S3 API-compatible endpoint via ``endpoint_url``).
+
+    Uses the synchronous ``boto3`` client via :func:`asyncio.to_thread` rather
+    than ``aioboto3``: the latter pins an older ``botocore`` range that
+    conflicts with the version already required elsewhere for Bedrock support
+    (see #156). Credentials resolve through boto3's standard chain
+    (environment variables, ``~/.aws/credentials``, IAM role); this class
+    never handles them directly.
+    """
+
+    def __init__(self, bucket: str, endpoint_url: str | None, region: str | None) -> None:
+        try:
+            import boto3
+        except ImportError as exc:
+            msg = "S3FileStore requires boto3. Install it with: pip install otari[s3]"
+            raise ImportError(msg) from exc
+
+        self._bucket = bucket
+        self._client: S3Client = boto3.client("s3", endpoint_url=endpoint_url, region_name=region or "us-east-1")
+
+    async def put(self, file_id: str, data: bytes) -> str:
+        key = _shard_key(file_id)
+        await asyncio.to_thread(self._client.put_object, Bucket=self._bucket, Key=key, Body=data)
+        return key
+
+    async def get(self, storage_ref: str) -> bytes:
+        def _get() -> bytes:
+            response = self._client.get_object(Bucket=self._bucket, Key=storage_ref)
+            return response["Body"].read()
+
+        return await asyncio.to_thread(_get)
+
+    async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
+        key = _shard_key(file_id)
+        total = 0
+        spool: IO[bytes] = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_MEMORY_BYTES)
+        try:
+            async for chunk in chunks:
+                total += len(chunk)
+                await asyncio.to_thread(spool.write, chunk)
+            await asyncio.to_thread(spool.seek, 0)
+            # upload_fileobj manages multipart upload internally, including
+            # aborting an incomplete multipart upload if it fails partway, so
+            # no manual abort_multipart_upload is needed here.
+            await asyncio.to_thread(self._client.upload_fileobj, spool, self._bucket, key)
+        finally:
+            # Shielded like _open_handle: this runs during unwind on a
+            # cancelled upload too, and an unshielded await here could be cut
+            # off by a repeated cancel() before the spool file actually closes.
+            try:
+                await asyncio.shield(asyncio.to_thread(spool.close))
+            except Exception as cleanup_exc:
+                logger.warning("put_stream: failed to close spool file for %s: %s", key, cleanup_exc)
+        return key, total
+
+    async def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
+        response = await asyncio.to_thread(self._client.get_object, Bucket=self._bucket, Key=storage_ref)
+        body = response["Body"]
+        try:
+            while chunk := await asyncio.to_thread(body.read, _STREAM_CHUNK_BYTES):
+                yield chunk
+        finally:
+            try:
+                await asyncio.shield(asyncio.to_thread(body.close))
+            except Exception as close_exc:
+                logger.warning("get_stream: failed to close S3 response body for %s: %s", storage_ref, close_exc)
+
+    async def delete(self, storage_ref: str) -> None:
+        await asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=storage_ref)
+
+
 def build_file_store(config: GatewayConfig) -> FileStore:
     """Construct the configured :class:`FileStore` backend."""
     backend = config.files_backend.strip().lower()
     if backend == "local":
         return LocalDirFileStore(config.files_local_dir)
-    msg = f"Unsupported files_backend: {config.files_backend!r} (supported: 'local')"
+    if backend == "s3":
+        if not config.files_s3_bucket:
+            msg = "files_s3_bucket is required when files_backend is 's3'"
+            raise ValueError(msg)
+        return S3FileStore(config.files_s3_bucket, config.files_s3_endpoint_url, config.files_s3_region)
+    msg = f"Unsupported files_backend: {config.files_backend!r} (supported: 'local', 's3')"
     raise ValueError(msg)
