@@ -253,8 +253,14 @@ export function AppShell() {
       setIsMobile(event.matches);
       if (!event.matches) setMobileNavOpen(false);
     };
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
+    // Safari < 14 (and some older engines) only expose the deprecated
+    // addListener/removeListener; fall back to it so the shell doesn't throw.
+    if (typeof query.addEventListener === "function") {
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    }
+    query.addListener(onChange);
+    return () => query.removeListener(onChange);
   }, []);
 
   // Escape closes the drawer, matching the dismissible-overlay convention.
@@ -353,10 +359,18 @@ export function AppShell() {
   // The collapse rail and resize handle are desktop-only affordances; on mobile
   // the drawer always shows the full-width, labelled nav.
   const effectiveCollapsed = isMobile ? false : collapsed;
+  // While the mobile drawer is open, make everything behind it (header + page)
+  // inert so a modal really is modal: aria-modal alone isn't universally honored,
+  // so this is what keeps an AT virtual cursor and Tab out of the obscured
+  // controls, not just the aside's own focus trap.
+  const backgroundInert = isMobile && mobileNavOpen ? true : undefined;
 
   return (
     <div className={clsx("relative flex h-full flex-col overflow-hidden", resizing && "cursor-col-resize select-none")}>
-      <header className="flex shrink-0 items-center justify-between border-b border-[var(--otari-line)] bg-[var(--otari-surface)] px-5 py-3">
+      <header
+        inert={backgroundInert}
+        className="flex shrink-0 items-center justify-between border-b border-[var(--otari-line)] bg-[var(--otari-surface)] px-5 py-3"
+      >
         <div className="flex items-center gap-2.5">
           <button
             type="button"
@@ -529,7 +543,7 @@ export function AppShell() {
             />
           )}
         </aside>
-        <main className="flex-1 overflow-y-auto">
+        <main inert={backgroundInert} className="flex-1 overflow-y-auto">
           <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
             <Outlet />
           </div>

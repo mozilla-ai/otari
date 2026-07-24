@@ -10,18 +10,22 @@ import { Provider } from "@/provider";
 // effect. The mobile-vs-desktop branch keys off window.matchMedia instead, which
 // jsdom also does not implement, so tests drive it through this stub. The stub
 // captures listeners so a viewport change can be simulated.
-function mockMatchMedia(matches: boolean) {
+function mockMatchMedia(matches: boolean, options: { legacy?: boolean } = {}) {
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
-  const mql = {
+  const mql: Record<string, unknown> = {
     matches,
     media: "",
     onchange: null,
-    addEventListener: (_type: string, cb: (event: MediaQueryListEvent) => void) => listeners.add(cb),
-    removeEventListener: (_type: string, cb: (event: MediaQueryListEvent) => void) => listeners.delete(cb),
+    // Deprecated Safari < 14 API; always present.
     addListener: (cb: (event: MediaQueryListEvent) => void) => listeners.add(cb),
     removeListener: (cb: (event: MediaQueryListEvent) => void) => listeners.delete(cb),
     dispatchEvent: () => true,
   };
+  // `legacy` omits the modern API so the component must fall back to addListener.
+  if (!options.legacy) {
+    mql.addEventListener = (_type: string, cb: (event: MediaQueryListEvent) => void) => listeners.add(cb);
+    mql.removeEventListener = (_type: string, cb: (event: MediaQueryListEvent) => void) => listeners.delete(cb);
+  }
   vi.stubGlobal("matchMedia", vi.fn().mockReturnValue(mql));
   return { mql, listeners };
 }
@@ -143,5 +147,42 @@ describe("AppShell responsive layout", () => {
     // Off-canvas and inert by default: the nav is not reachable until opened.
     expect(container.querySelector("aside")).toHaveAttribute("inert");
     expect(container.querySelector("aside")).toHaveAttribute("aria-label", "Navigation");
+  });
+
+  it("makes the background (header + main) inert while the drawer is open", async () => {
+    mockMatchMedia(true);
+    const user = userEvent.setup();
+    const { container } = renderShell();
+
+    const header = container.querySelector("header")!;
+    const main = container.querySelector("main")!;
+    // Background is interactive until the modal drawer opens.
+    expect(header).not.toHaveAttribute("inert");
+    expect(main).not.toHaveAttribute("inert");
+
+    await user.click(screen.getByRole("button", { name: "Open navigation" }));
+
+    // aria-modal isn't universally honored, so inert is what actually keeps the
+    // obscured page out of the tab order and the accessibility tree.
+    expect(header).toHaveAttribute("inert");
+    expect(main).toHaveAttribute("inert");
+  });
+
+  it("subscribes via the legacy matchMedia API when addEventListener is absent", () => {
+    // Safari < 14 exposes only addListener/removeListener; the shell must still
+    // react to breakpoint changes rather than throwing on a missing method.
+    const { listeners } = mockMatchMedia(true, { legacy: true });
+    renderShell();
+
+    // The component registered through addListener, so the captured set is live.
+    expect(listeners.size).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Open navigation" })).toBeInTheDocument();
+
+    act(() => {
+      listeners.forEach((cb) => cb({ matches: false } as MediaQueryListEvent));
+    });
+
+    // A desktop-width change still flips the layout off the mobile drawer.
+    expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
   });
 });
