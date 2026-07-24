@@ -34,7 +34,9 @@ _STREAM_CHUNK_BYTES = 1024 * 1024
 # Incoming upload chunks spool here before handing the whole thing to boto3's
 # upload_fileobj (sync boto3 has no streaming-from-async-iterator primitive).
 # Small uploads never touch disk; past this threshold SpooledTemporaryFile
-# transparently rolls over to a real temp file, so memory stays bounded.
+# transparently rolls over to a real temp file, so memory stays bounded. This
+# is a per-upload budget, not a global one: N concurrent put_stream calls can
+# hold up to N * this many bytes in memory before any of them spill to disk.
 _SPOOL_MAX_MEMORY_BYTES = 10 * 1024 * 1024
 
 
@@ -218,6 +220,11 @@ class S3FileStore:
     (see #156). Credentials resolve through boto3's standard chain
     (environment variables, ``~/.aws/credentials``, IAM role); this class
     never handles them directly.
+
+    Objects are written with no ``ServerSideEncryption`` set, so they inherit
+    whatever default encryption (or lack of it) the bucket itself is
+    configured with; enabling encryption at rest is the bucket operator's
+    responsibility, not something this class enforces.
     """
 
     def __init__(self, bucket: str, endpoint_url: str | None, region: str | None) -> None:
@@ -231,11 +238,18 @@ class S3FileStore:
         self._client: S3Client = boto3.client("s3", endpoint_url=endpoint_url, region_name=region or "us-east-1")
 
     async def put(self, file_id: str, data: bytes) -> str:
+        # Intentionally mirrors LocalDirFileStore.put: the caller already has
+        # the full blob in memory here, same as the local backend's put, so
+        # this isn't a new memory regression (put_stream is the streaming
+        # path for both). Not a priority to stream, since files_max_bytes
+        # already bounds the worst case the same way it does for local.
         key = _shard_key(file_id)
         await asyncio.to_thread(self._client.put_object, Bucket=self._bucket, Key=key, Body=data)
         return key
 
     async def get(self, storage_ref: str) -> bytes:
+        # Same intentional symmetry with LocalDirFileStore.get: full-buffer by
+        # design (get_stream is the streaming download path).
         def _get() -> bytes:
             response = self._client.get_object(Bucket=self._bucket, Key=storage_ref)
             body = response["Body"]
@@ -264,7 +278,7 @@ class S3FileStore:
                 # Task lets us find out what actually happened even after
                 # being cancelled, instead of assuming "cancelled" means
                 # "nothing was uploaded".
-                upload_task = asyncio.ensure_future(
+                upload_task = asyncio.create_task(
                     asyncio.to_thread(self._client.upload_fileobj, spool, self._bucket, key)
                 )
                 # upload_fileobj manages multipart upload internally,
