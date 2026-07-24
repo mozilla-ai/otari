@@ -55,6 +55,7 @@ class UsageSelection(BaseModel):
     source: str | None = None
     model: str | None = None
     user_id: str | None = None
+    api_key_id: str | None = None
     status: str | None = None
     start_date: datetime | None = None
     end_date: datetime | None = None
@@ -121,6 +122,8 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
         conditions.append(UsageLog.model == selection.model)
     if selection.user_id is not None:
         conditions.append(UsageLog.user_id == selection.user_id)
+    if selection.api_key_id is not None:
+        conditions.append(UsageLog.api_key_id == selection.api_key_id)
     if selection.status is not None:
         conditions.append(UsageLog.status == selection.status)
     if selection.start_date is not None:

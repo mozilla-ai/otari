@@ -4896,6 +4896,17 @@
       "UsageDeleteRequest": {
         "description": "Selection of imported usage rows to delete.",
         "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Id"
+          },
           "by_filter": {
             "default": false,
             "title": "By Filter",
@@ -5467,6 +5478,17 @@
       "UsageSetPriceRequest": {
         "description": "Selection of imported usage rows plus the manual per-1M rates to price them at.\n\n``input`` and ``output`` are required (every row is charged for them); the cache\nrates are optional and, when omitted, those tokens fold into the fresh-input charge\nexactly as an unpriced cache rate does in normal metered pricing.",
         "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Id"
+          },
           "by_filter": {
             "default": false,
             "title": "By Filter",

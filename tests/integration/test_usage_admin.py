@@ -152,6 +152,24 @@ def test_delete_by_filter_never_touches_gateway_rows(
     assert _get(db_session, "gw-1") is not None
 
 
+def test_delete_by_filter_api_key(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _make_log(db_session, log_id="k1-a", counts_toward_budget=False)
+    _make_log(db_session, log_id="k1-b", counts_toward_budget=False)
+    db_session.query(UsageLog).filter(UsageLog.id.in_(["k1-a", "k1-b"])).update(
+        {UsageLog.api_key_id: None}, synchronize_session=False
+    )
+    db_session.commit()
+
+    # No key set on these rows; filtering to a specific key matches nothing.
+    resp = client.request(
+        "DELETE", DELETE_PATH, json={"by_filter": True, "api_key_id": "does-not-exist"}, headers=master_key_header
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 0}
+
+
 def test_delete_requires_master_key(client: TestClient) -> None:
     resp = client.request("DELETE", DELETE_PATH, json={"ids": ["x"]})
     assert resp.status_code == 401
