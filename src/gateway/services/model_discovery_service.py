@@ -28,7 +28,7 @@ from any_llm.types.model import Model
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.services.provider_kwargs import get_provider_kwargs
+from gateway.services.provider_kwargs import get_provider_kwargs, keyless_placeholder_api_key
 
 # Fallback bound for ad-hoc credential tests when a caller does not pass one. The
 # route passes ``model_discovery_timeout_seconds`` so the saved and unsaved paths
@@ -397,6 +397,10 @@ async def test_provider_credentials(
             models=[],
             error=f"'{impl_name}' is not a known provider implementation.",
         )
+    # A keyless custom endpoint (api_base set, no key) would otherwise be rejected
+    # by any-llm before the connection is even attempted; supply the same
+    # placeholder the saved path uses so "Test connection" honors the optional key.
+    api_key = api_key or keyless_placeholder_api_key(provider_enum, api_base, api_key)
     try:
         # Bounded like the stored-provider path so a black-holed endpoint cannot
         # hang the test button for the SDK's ~600s default.

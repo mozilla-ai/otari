@@ -19,6 +19,10 @@ from gateway.services.model_discovery_service import (
     discover_models_with_status,
     discover_provider_models,
 )
+from gateway.services.model_discovery_service import (
+    test_provider_credentials as run_credentials_test,  # aliased so pytest does not collect it
+)
+from gateway.services.provider_kwargs import _KEYLESS_PLACEHOLDER_API_KEY
 
 
 def _make_model(model_id: str, owned_by: str = "openai", created: int = 1700000000) -> Model:
@@ -668,3 +672,40 @@ class TestDiscoveryStallGuards:
         by_provider = {d.provider: d for d in statuses}
         assert by_provider["good"].error is None
         assert by_provider["bad"].error is not None  # surfaced as an error, not raised
+
+
+class TestKeylessProviderConnectionTest:
+    """test_provider_credentials must honor the optional key for custom endpoints (otari#421)."""
+
+    @pytest.mark.asyncio
+    async def test_keyless_custom_endpoint_supplies_placeholder(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A keyless "Test connection" for a custom endpoint would otherwise be
+        # rejected by any-llm with MissingApiKeyError; the ad-hoc test path injects
+        # the same placeholder the saved path uses so the endpoint is dialed.
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        mock_alist = AsyncMock(return_value=[_make_model("local-model")])
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", mock_alist),
+        ):
+            result = await run_credentials_test("openai", api_key=None, api_base="http://localhost:8000/v1")
+
+        assert result.error is None
+        assert [m.id for m in result.models] == ["local-model"]
+        assert mock_alist.await_args is not None
+        assert mock_alist.await_args.kwargs["api_key"] == _KEYLESS_PLACEHOLDER_API_KEY
+
+    @pytest.mark.asyncio
+    async def test_explicit_key_is_used_verbatim(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        mock_alist = AsyncMock(return_value=[])
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", mock_alist),
+        ):
+            await run_credentials_test("openai", api_key="sk-real", api_base="http://localhost:8000/v1")
+
+        assert mock_alist.await_args is not None
+        assert mock_alist.await_args.kwargs["api_key"] == "sk-real"
