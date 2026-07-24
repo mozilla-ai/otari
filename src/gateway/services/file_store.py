@@ -238,7 +238,11 @@ class S3FileStore:
     async def get(self, storage_ref: str) -> bytes:
         def _get() -> bytes:
             response = self._client.get_object(Bucket=self._bucket, Key=storage_ref)
-            return response["Body"].read()
+            body = response["Body"]
+            try:
+                return body.read()
+            finally:
+                body.close()
 
         return await asyncio.to_thread(_get)
 
@@ -246,15 +250,51 @@ class S3FileStore:
         key = _shard_key(file_id)
         total = 0
         spool: IO[bytes] = tempfile.SpooledTemporaryFile(max_size=_SPOOL_MAX_MEMORY_BYTES)
+        upload_task: asyncio.Task[None] | None = None
         try:
-            async for chunk in chunks:
-                total += len(chunk)
-                await asyncio.to_thread(spool.write, chunk)
-            await asyncio.to_thread(spool.seek, 0)
-            # upload_fileobj manages multipart upload internally, including
-            # aborting an incomplete multipart upload if it fails partway, so
-            # no manual abort_multipart_upload is needed here.
-            await asyncio.to_thread(self._client.upload_fileobj, spool, self._bucket, key)
+            try:
+                async for chunk in chunks:
+                    total += len(chunk)
+                    await asyncio.to_thread(spool.write, chunk)
+                await asyncio.to_thread(spool.seek, 0)
+                # upload_fileobj runs in a worker thread and, once started,
+                # keeps running there even if *we* get cancelled while
+                # awaiting it: to_thread's cancellation only detaches us from
+                # waiting, it does not stop the thread. Wrapping it in a real
+                # Task lets us find out what actually happened even after
+                # being cancelled, instead of assuming "cancelled" means
+                # "nothing was uploaded".
+                upload_task = asyncio.ensure_future(
+                    asyncio.to_thread(self._client.upload_fileobj, spool, self._bucket, key)
+                )
+                # upload_fileobj manages multipart upload internally,
+                # including aborting an incomplete multipart upload if it
+                # fails partway, so no manual abort_multipart_upload is
+                # needed here.
+                await asyncio.shield(upload_task)
+            except BaseException:
+                if upload_task is not None:
+                    try:
+                        # Our await above may have been cancelled while the
+                        # upload was still running in its thread; shield
+                        # keeps upload_task itself uncancelled, so wait for
+                        # it to actually settle and see how it really
+                        # turned out.
+                        await asyncio.shield(upload_task)
+                    except Exception:
+                        pass  # the upload itself failed; s3transfer already aborts multipart on its own failure
+                    else:
+                        # It finished successfully despite the cancellation:
+                        # the object really landed in S3 with nothing that
+                        # will ever reference or clean it up, so remove it
+                        # ourselves.
+                        try:
+                            await asyncio.shield(
+                                asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=key)
+                            )
+                        except Exception as cleanup_exc:
+                            logger.warning("put_stream: failed to remove orphaned upload %s: %s", key, cleanup_exc)
+                raise
         finally:
             # Shielded like _open_handle: this runs during unwind on a
             # cancelled upload too, and an unshielded await here could be cut

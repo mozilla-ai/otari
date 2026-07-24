@@ -1,13 +1,11 @@
-"""Unit tests for the S3-compatible file store, mocked with moto (no Docker/MinIO needed).
-
-Real MinIO-via-testcontainers integration coverage is a separate concern (see
-tests/integration/), same split as LocalDirFileStore's unit vs integration tests.
-"""
+"""Unit tests for the S3-compatible file store, mocked with moto."""
 
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncIterator, Generator
+from typing import IO
 
 import boto3
 import pytest
@@ -137,3 +135,42 @@ async def test_put_stream_aborts_multipart_upload_on_mid_upload_failure(
 
     lingering = await asyncio.to_thread(client.list_multipart_uploads, Bucket=_BUCKET)
     assert lingering.get("Uploads", []) == []
+
+
+@pytest.mark.asyncio
+async def test_put_stream_removes_orphaned_upload_when_cancelled_after_success(
+    s3_store: S3FileStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """upload_fileobj runs in a worker thread that to_thread cannot interrupt:
+    if *our* await gets cancelled while that thread is still working, the
+    upload can still complete successfully afterward. Confirms put_stream
+    notices that and deletes the now-orphaned object instead of silently
+    leaving it in the bucket with nothing that will ever reference it.
+
+    Uses threading.Event gates instead of sleep-based timing so the sequence
+    (upload thread actually started -> cancel -> release it to finish) is
+    deterministic rather than a timing guess.
+    """
+    client = s3_store._client  # noqa: SLF001 - need the raw client to patch upload_fileobj
+    original_upload_fileobj = client.upload_fileobj
+
+    upload_started = threading.Event()
+    release_upload = threading.Event()
+
+    def _gated_upload_fileobj(fileobj: IO[bytes], bucket: str, key: str) -> None:
+        upload_started.set()
+        release_upload.wait(timeout=5)
+        original_upload_fileobj(fileobj, bucket, key)
+
+    monkeypatch.setattr(client, "upload_fileobj", _gated_upload_fileobj)
+
+    task = asyncio.ensure_future(s3_store.put_stream("file-orphancheck01", _iter([b"data"])))
+    await asyncio.to_thread(upload_started.wait, 5)  # don't cancel until the upload thread is truly running
+    task.cancel()
+    release_upload.set()  # let the (already-committed-to) background upload finish
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    listing = await asyncio.to_thread(client.list_objects_v2, Bucket=_BUCKET, Prefix="or/")
+    assert listing.get("KeyCount", 0) == 0
