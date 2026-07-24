@@ -138,17 +138,17 @@ def test_list_models_with_discovery(
     assert "openai:gpt-4o-mini" in ids
 
 
-def test_list_models_includes_env_only_provider(
+def test_list_models_excludes_env_only_provider(
     postgres_url: str,
     discovery_master_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A provider callable via its env var alone appears in GET /v1/models (issue #221).
+    """A provider with only a credential env var (not configured) is NOT listed.
 
-    Setting only ANTHROPIC_API_KEY makes ``anthropic:<model>`` callable for
-    completions (get_provider_kwargs returns {} and any-llm reads the env var),
-    so discovery must list it too even though ``anthropic`` is not in
-    ``config.providers``.
+    Discovery is scoped to the configured provider instances: a provider only
+    sources models once an operator configures it (config.yml or the Providers
+    page). An empty ``providers`` block therefore lists nothing even when a
+    provider's credential env var (here ANTHROPIC_API_KEY) is present.
     """
     from any_llm.types.model import Model
 
@@ -186,7 +186,7 @@ def test_list_models_includes_env_only_provider(
 
     assert resp.status_code == 200
     ids = [m["id"] for m in resp.json()["data"]]
-    assert "anthropic:claude-3-5-sonnet" in ids
+    assert "anthropic:claude-3-5-sonnet" not in ids
 
 
 def test_list_models_discovery_disabled(
