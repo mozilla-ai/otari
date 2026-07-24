@@ -1,4 +1,5 @@
 import { Button, Spinner } from "@heroui/react";
+import { clsx } from "clsx";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -208,6 +209,10 @@ export function UsagePage() {
   const [userFilter, setUserFilter] = useState("");
   const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [metric, setMetric] = useState<ChartMetric>("cost");
+  // On mobile the user/model/key controls collapse behind a "Filters" toggle so
+  // the stat tiles are not pushed far down the page; desktop shows them inline.
+  // The time-range presets stay visible either way.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const filters: UsageFilters = useMemo(
     () => ({
@@ -262,6 +267,9 @@ export function UsagePage() {
   ).map((m) => ({ value: m, label: m }));
 
   const anyFilter = Boolean(modelFilter.trim() || userFilter || apiKeyFilter || preset.seconds !== null);
+  // Count only the collapsible controls (not the always-visible time range) so
+  // the mobile toggle can advertise how many are active while hidden.
+  const activeFilterCount = [modelFilter.trim(), userFilter, apiKeyFilter].filter(Boolean).length;
   // Distinguish "this gateway has never served a request" from "no rows match
   // these filters": the first is an onboarding state, the second is a filter hint.
   const isEmptyEver = Boolean(data && totals && totals.request_count === 0 && !anyFilter);
@@ -318,7 +326,8 @@ export function UsagePage() {
 
       <ErrorBanner error={summary.error} />
 
-      {/* Filters */}
+      {/* Filters. On mobile the boxes collapse behind the "Filters" toggle so the
+          stat tiles stay near the top; the time-range presets stay visible. */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-wrap gap-2">
           {TIME_PRESETS.map((option) => (
@@ -332,7 +341,20 @@ export function UsagePage() {
             </Button>
           ))}
         </div>
-        <div className="flex flex-wrap items-end gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="md:hidden"
+          onPress={() => setFiltersOpen((open) => !open)}
+          aria-expanded={filtersOpen}
+          aria-controls="usage-filters"
+        >
+          Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
+        </Button>
+        <div
+          id="usage-filters"
+          className={clsx("flex-wrap items-end gap-3 md:flex", filtersOpen ? "flex w-full md:w-auto" : "hidden")}
+        >
           <FilterComboBox
             label="User"
             value={userFilter}
@@ -368,8 +390,10 @@ export function UsagePage() {
         </div>
       ) : (
         <>
-          {/* Tiles */}
-          <div className="flex flex-wrap gap-4">
+          {/* Tiles. A responsive grid rather than flex-wrap so two fit per row on
+              mobile (a fixed-min flex child would wrap one-up), widening to three
+              then four as the viewport grows. */}
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
             <StatCard
               label="Tracked cost"
               value={totals ? formatUsd(totals.cost) : "—"}

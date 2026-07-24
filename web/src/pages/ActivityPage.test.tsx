@@ -280,4 +280,33 @@ describe("ActivityPage", () => {
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
   });
+
+  it("collapses the filter controls behind a mobile toggle that expands them", async () => {
+    mockApi({ rows: [entry()] });
+    const user = userEvent.setup();
+    renderPage(<ActivityPage />);
+    await screen.findByText("gpt-4o");
+
+    const toggle = screen.getByRole("button", { name: "Filters" });
+    const region = document.getElementById("activity-filters")!;
+    // Collapsed by default on mobile (display:none there; the md: variant reveals
+    // it on desktop). Expanding flips the classes and the toggle's aria state.
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(region.className).toContain("hidden");
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(region.className).toContain("flex");
+    expect(region.className).not.toContain("hidden");
+  });
+
+  it("labels the mobile filter toggle with the active filter count", async () => {
+    mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?model=gpt-4o&status=error");
+    await screen.findByText("gpt-4o");
+
+    // Two collapsible filters active (model + status); the time range is excluded.
+    expect(screen.getByRole("button", { name: "Filters (2)" })).toBeInTheDocument();
+  });
 });
