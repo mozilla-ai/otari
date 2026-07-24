@@ -4893,6 +4893,124 @@
         "title": "UsageCount",
         "type": "object"
       },
+      "UsageDeleteRequest": {
+        "description": "Selection of imported usage rows to delete.",
+        "properties": {
+          "by_filter": {
+            "default": false,
+            "title": "By Filter",
+            "type": "boolean"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ids"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "priced": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priced"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "title": "UsageDeleteRequest",
+        "type": "object"
+      },
+      "UsageDeleteResult": {
+        "description": "How many imported rows the delete removed.",
+        "properties": {
+          "deleted": {
+            "default": 0,
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "title": "UsageDeleteResult",
+        "type": "object"
+      },
       "UsageEntry": {
         "description": "A single usage log entry.",
         "properties": {
@@ -5344,6 +5462,172 @@
           "requests"
         ],
         "title": "UsageSeriesPoint",
+        "type": "object"
+      },
+      "UsageSetPriceRequest": {
+        "description": "Selection of imported usage rows plus the manual per-1M rates to price them at.\n\n``input`` and ``output`` are required (every row is charged for them); the cache\nrates are optional and, when omitted, those tokens fold into the fresh-input charge\nexactly as an unpriced cache rate does in normal metered pricing.",
+        "properties": {
+          "by_filter": {
+            "default": false,
+            "title": "By Filter",
+            "type": "boolean"
+          },
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ids"
+          },
+          "input_price_per_million": {
+            "minimum": 0.0,
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "output_price_per_million": {
+            "minimum": 0.0,
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "priced": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priced"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "input_price_per_million",
+          "output_price_per_million"
+        ],
+        "title": "UsageSetPriceRequest",
+        "type": "object"
+      },
+      "UsageSetPriceResult": {
+        "description": "Outcome of a manual repricing pass.\n\n``matched`` imported rows were recomputed; ``updated`` had their stored cost\nchanged and ``unchanged`` already matched the recomputed value.",
+        "properties": {
+          "matched": {
+            "default": 0,
+            "title": "Matched",
+            "type": "integer"
+          },
+          "unchanged": {
+            "default": 0,
+            "title": "Unchanged",
+            "type": "integer"
+          },
+          "updated": {
+            "default": 0,
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "title": "UsageSetPriceResult",
         "type": "object"
       },
       "UsageSummary": {
@@ -9091,6 +9375,54 @@
       }
     },
     "/v1/usage": {
+      "delete": {
+        "description": "Delete imported usage rows by explicit ids or by filter (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true`` plus optional ``source`` / ``model`` / ``user_id`` /\n``status`` / date range / ``priced``). Only imported rows\n(``counts_toward_budget = false``) are ever removed: enforced gateway rows and\nthe spend ledger (``users.spend``) are untouched, so a delete can never desync a\nbudget. Master-key only.",
+        "operationId": "delete_usage_rows_v1_usage_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageDeleteResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Usage Rows",
+        "tags": [
+          "usage"
+        ]
+      },
       "get": {
         "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, and endpoint.\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
         "operationId": "list_usage_v1_usage_get",
@@ -9242,6 +9574,42 @@
             }
           },
           {
+            "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+            "in": "query",
+            "name": "priced",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+              "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "in": "query",
+            "name": "counts_toward_budget",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "title": "Counts Toward Budget"
+            }
+          },
+          {
             "in": "query",
             "name": "skip",
             "required": false,
@@ -9307,7 +9675,7 @@
     },
     "/v1/usage/count": {
       "get": {
-        "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load.",
+        "description": "Total number of usage logs matching the given filters.\n\nServes the dashboard paginator's \"N of M\" total without changing the bare\narray contract of ``GET /v1/usage``. Runs only when the client asks (a\nseparate request), so the ``COUNT(*)`` is not paid on every page load. With\n``counts_toward_budget=false`` it also backs the \"select all N matching this\nfilter\" affordance for bulk delete / set-price, which touch imported rows only.",
         "operationId": "count_usage_v1_usage_count_get",
         "parameters": [
           {
@@ -9455,6 +9823,42 @@
               "description": "Filter to a single API key id",
               "title": "Api Key Id"
             }
+          },
+          {
+            "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+            "in": "query",
+            "name": "priced",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+              "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "in": "query",
+            "name": "counts_toward_budget",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "title": "Counts Toward Budget"
+            }
           }
         ],
         "responses": {
@@ -9538,6 +9942,56 @@
           }
         ],
         "summary": "Ingest External Usage",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/usage/set-price": {
+      "post": {
+        "description": "Set the cost of imported usage rows from manual per-1M rates (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed\nfrom each row's own token counts at the supplied ``input`` / ``output`` /\n``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from\nconfigured pricing). Only imported rows (``counts_toward_budget = false``) are\ntouched, so ``users.spend`` is never affected. Master-key only.",
+        "operationId": "set_usage_price_rows_v1_usage_set_price_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageSetPriceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSetPriceResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Usage Price Rows",
         "tags": [
           "usage"
         ]
@@ -9692,6 +10146,24 @@
               ],
               "description": "Filter to a single API key id",
               "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+            "in": "query",
+            "name": "priced",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+              "title": "Priced"
             }
           },
           {
@@ -9896,6 +10368,24 @@
               ],
               "description": "Filter to a single API key id",
               "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+            "in": "query",
+            "name": "priced",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+              "title": "Priced"
             }
           }
         ],
