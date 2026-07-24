@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
-from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -210,6 +210,35 @@ class LocalDirFileStore:
         await asyncio.to_thread(_unlink)
 
 
+@contextmanager
+def _translate_s3_errors(storage_ref: str) -> Iterator[None]:
+    """Re-raise boto3/botocore failures as the ``OSError`` family callers expect.
+
+    The local backend surfaces storage failures as ``OSError`` (a missing blob
+    is ``FileNotFoundError``), and the route/service callers catch ``OSError``
+    accordingly: the download route maps it to a clean 500 and the delete
+    route's best-effort cleanup swallows it so a committed soft-delete never
+    becomes a 500. Those callers live in the default local-only install and
+    cannot import ``botocore`` (it ships behind the optional ``otari[s3]``
+    extra), so translating here keeps them backend-agnostic. A missing object
+    maps to ``FileNotFoundError`` to mirror the local backend; every other S3
+    failure maps to ``OSError``.
+    """
+    from botocore.exceptions import BotoCoreError, ClientError
+
+    try:
+        yield
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code in {"NoSuchKey", "NoSuchBucket", "404", "NotFound"}:
+            raise FileNotFoundError(storage_ref) from exc
+        msg = f"S3 operation failed for {storage_ref!r}: {exc}"
+        raise OSError(msg) from exc
+    except BotoCoreError as exc:
+        msg = f"S3 operation failed for {storage_ref!r}: {exc}"
+        raise OSError(msg) from exc
+
+
 class S3FileStore:
     """S3-compatible object-storage :class:`FileStore` (AWS S3, MinIO, or any
     S3 API-compatible endpoint via ``endpoint_url``).
@@ -258,7 +287,8 @@ class S3FileStore:
             finally:
                 body.close()
 
-        return await asyncio.to_thread(_get)
+        with _translate_s3_errors(storage_ref):
+            return await asyncio.to_thread(_get)
 
     async def put_stream(self, file_id: str, chunks: AsyncIterator[bytes]) -> tuple[str, int]:
         key = _shard_key(file_id)
@@ -320,7 +350,8 @@ class S3FileStore:
         return key, total
 
     async def get_stream(self, storage_ref: str) -> AsyncGenerator[bytes, None]:
-        response = await asyncio.to_thread(self._client.get_object, Bucket=self._bucket, Key=storage_ref)
+        with _translate_s3_errors(storage_ref):
+            response = await asyncio.to_thread(self._client.get_object, Bucket=self._bucket, Key=storage_ref)
         body = response["Body"]
         try:
             while chunk := await asyncio.to_thread(body.read, _STREAM_CHUNK_BYTES):
@@ -332,7 +363,8 @@ class S3FileStore:
                 logger.warning("get_stream: failed to close S3 response body for %s: %s", storage_ref, close_exc)
 
     async def delete(self, storage_ref: str) -> None:
-        await asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=storage_ref)
+        with _translate_s3_errors(storage_ref):
+            await asyncio.to_thread(self._client.delete_object, Bucket=self._bucket, Key=storage_ref)
 
 
 def build_file_store(config: GatewayConfig) -> FileStore:

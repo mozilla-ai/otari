@@ -68,13 +68,37 @@ async def test_get_stream_yields_all_bytes(s3_store: S3FileStore) -> None:
 
 @pytest.mark.asyncio
 async def test_delete_removes_object(s3_store: S3FileStore) -> None:
-    from botocore.exceptions import ClientError
-
     ref = await s3_store.put("file-deadbeef", b"data")
     await s3_store.delete(ref)
-    with pytest.raises(ClientError) as exc_info:
+    # S3FileStore translates a missing object into FileNotFoundError, mirroring
+    # the local backend so route callers can keep catching OSError.
+    with pytest.raises(FileNotFoundError):
         await s3_store.get(ref)
-    assert exc_info.value.response.get("Error", {}).get("Code") in {"NoSuchKey", "404", "NotFound"}
+
+
+@pytest.mark.asyncio
+async def test_get_stream_missing_key_raises_file_not_found(s3_store: S3FileStore) -> None:
+    # get_stream is primed by the download route before the OSError handler;
+    # a missing object must surface as FileNotFoundError (an OSError), not a
+    # raw botocore ClientError that would escape that handler.
+    with pytest.raises(FileNotFoundError):
+        async for _ in s3_store.get_stream("no/such-key"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_delete_failure_raises_oserror(s3_store: S3FileStore, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A non-404 backend failure during delete must map to OSError so the delete
+    # route's best-effort `except OSError` catches it and a committed
+    # soft-delete never turns into a 500.
+    from botocore.exceptions import ClientError
+
+    def _boom(**kwargs: object) -> object:
+        raise ClientError({"Error": {"Code": "AccessDenied", "Message": "nope"}}, "DeleteObject")
+
+    monkeypatch.setattr(s3_store._client, "delete_object", _boom)  # noqa: SLF001 - inject a backend failure
+    with pytest.raises(OSError):  # noqa: PT011 - translated botocore error, message not asserted
+        await s3_store.delete("ab/file-whatever")
 
 
 @pytest.mark.asyncio
