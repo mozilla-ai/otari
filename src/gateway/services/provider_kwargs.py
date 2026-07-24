@@ -9,6 +9,7 @@ any-llm provider (the common case, no ``provider_type`` declared), the two
 coincide and behavior is identical to splitting the selector directly.
 """
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
@@ -22,6 +23,44 @@ from gateway.services.alias_service import resolve_effective_alias
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
 _INSTANCE_META_KEYS = ("provider_type", "models")
+
+# any-llm rejects a keyless call to most providers (openai, anthropic, ...) with
+# MissingApiKeyError, but a self-hosted OpenAI-/Anthropic-compatible backend
+# (vLLM, llama.cpp, Ollama) usually needs no auth. When an instance points at a
+# custom api_base and supplies no key anywhere, hand any-llm this harmless
+# placeholder so the keyless endpoint is reachable, making good on the
+# dashboard's "API key (optional)" promise for custom endpoints. A local server
+# ignores the value; a real one that does need a key rejects it, which is the
+# same failure the operator would already get. Mirrors any-llm's own keyless
+# tolerance (mozilla-ai/any-llm#1198).
+_KEYLESS_PLACEHOLDER_API_KEY = "otari-no-key-required"
+
+
+def _provider_env_key_present(provider: LLMProvider) -> bool:
+    """Whether the provider's native API-key env var (e.g. OPENAI_API_KEY) is set.
+
+    Read directly from the environment because these are any-llm's own SDK
+    variables, not otari config: any-llm falls back to them before raising, so
+    the placeholder must not shadow a key the operator supplied that way.
+    """
+    try:
+        env_name = AnyLLM.get_provider_class(provider).ENV_API_KEY_NAME
+    except (ImportError, AttributeError):
+        return False
+    return bool(env_name and os.getenv(env_name))
+
+
+def keyless_placeholder_api_key(provider: LLMProvider, api_base: Any, api_key: Any) -> str | None:
+    """Return a placeholder key for a keyless custom endpoint, else ``None``.
+
+    A custom endpoint is one with an ``api_base`` set; it is keyless when no key
+    is configured for it and the provider's native env var is unset. Only that
+    case (which any-llm would otherwise reject) gets a placeholder, so this never
+    overrides a real key or the documented env-var fallback.
+    """
+    if api_base and not api_key and not _provider_env_key_present(provider):
+        return _KEYLESS_PLACEHOLDER_API_KEY
+    return None
 
 
 def get_provider_kwargs(
@@ -68,6 +107,10 @@ def get_provider_kwargs(
             kwargs = {k: v for k, v in provider_config.items() if k != "client_args"}
             if "client_args" in provider_config:
                 kwargs["client_args"] = provider_config["client_args"]
+
+    placeholder = keyless_placeholder_api_key(provider, kwargs.get("api_base"), kwargs.get("api_key"))
+    if placeholder is not None:
+        kwargs["api_key"] = placeholder
 
     return kwargs
 

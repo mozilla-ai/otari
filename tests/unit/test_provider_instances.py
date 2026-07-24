@@ -10,7 +10,9 @@ from gateway.api.routes.pricing import _candidate_model_keys
 from gateway.core.config import GatewayConfig, ModelCapabilityConfig
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
+    _KEYLESS_PLACEHOLDER_API_KEY,
     get_provider_kwargs,
+    keyless_placeholder_api_key,
     normalize_pricing_key,
     resolve_provider_selector,
     split_selector,
@@ -187,6 +189,57 @@ def test_get_provider_kwargs_strips_provider_type_and_models() -> None:
     assert "provider_type" not in kwargs
     assert "models" not in kwargs
     assert kwargs == {"api_base": "http://x/v1", "api_key": "k"}
+
+
+# ---------------------------------------------------------------------------
+# get_provider_kwargs: keyless custom-endpoint placeholder (mozilla-ai/otari#421)
+# ---------------------------------------------------------------------------
+
+
+def test_keyless_custom_endpoint_gets_placeholder_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A custom OpenAI-compatible endpoint with no key would otherwise be rejected
+    # by any-llm before it is even dialed; the placeholder makes the key optional.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    config = GatewayConfig(providers={"home_lab": {"provider_type": "openai", "api_base": "http://x/v1"}})
+    kwargs = get_provider_kwargs(config, LLMProvider.OPENAI, instance="home_lab")
+    assert kwargs == {"api_base": "http://x/v1", "api_key": _KEYLESS_PLACEHOLDER_API_KEY}
+
+
+def test_explicit_key_is_not_overridden_by_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    config = GatewayConfig(
+        providers={"home_lab": {"provider_type": "openai", "api_base": "http://x/v1", "api_key": "sk-real"}}
+    )
+    kwargs = get_provider_kwargs(config, LLMProvider.OPENAI, instance="home_lab")
+    assert kwargs["api_key"] == "sk-real"
+
+
+def test_no_placeholder_without_api_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A default hosted endpoint (no custom api_base) still relies on the provider's
+    # native env var; injecting a placeholder there would shadow it.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    config = GatewayConfig(providers={"openai": {}})
+    kwargs = get_provider_kwargs(config, LLMProvider.OPENAI, instance="openai")
+    assert "api_key" not in kwargs
+
+
+def test_env_var_fallback_preserved_over_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:
+    # any-llm falls back to OPENAI_API_KEY before raising, so the placeholder must
+    # not shadow a key the operator supplied that way.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    config = GatewayConfig(providers={"home_lab": {"provider_type": "openai", "api_base": "http://x/v1"}})
+    kwargs = get_provider_kwargs(config, LLMProvider.OPENAI, instance="home_lab")
+    assert "api_key" not in kwargs
+
+
+def test_keyless_placeholder_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # Keyless custom endpoint: placeholder.
+    assert keyless_placeholder_api_key(LLMProvider.ANTHROPIC, "http://x/v1", None) == _KEYLESS_PLACEHOLDER_API_KEY
+    # No api_base (hosted default): no placeholder.
+    assert keyless_placeholder_api_key(LLMProvider.ANTHROPIC, None, None) is None
+    # Key already present: no placeholder.
+    assert keyless_placeholder_api_key(LLMProvider.ANTHROPIC, "http://x/v1", "sk-real") is None
 
 
 # ---------------------------------------------------------------------------
