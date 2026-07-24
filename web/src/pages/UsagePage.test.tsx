@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -124,6 +124,27 @@ describe("UsagePage", () => {
 
     await screen.findByText("$1,240.50");
     expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+  });
+
+  it("queries a custom from/to window when a custom range is set", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.click(screen.getByRole("button", { name: "Custom…" }));
+    fetchMock.mockClear();
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-07-01T00:00" } });
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-07-15T00:00" } });
+
+    await vi.waitFor(() => {
+      const summaryCalls = fetchMock.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("/v1/usage/summary"));
+      // The current-window query carries both bounds (a separate call fetches the
+      // preceding window for deltas, so assert on the set, not just the last call).
+      expect(summaryCalls.some((u) => u.includes("start_date=2026-07-01") && u.includes("end_date=2026-07-15"))).toBe(
+        true,
+      );
+    });
   });
 
   it("shows cache read and write totals as tiles", async () => {

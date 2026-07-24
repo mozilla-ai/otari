@@ -418,24 +418,40 @@ export function UsagePage() {
   const [startDate, setStartDate] = useState<string | undefined>(() =>
     DEFAULT_PRESET.seconds === null ? undefined : isoAgo(DEFAULT_PRESET.seconds),
   );
+  // Custom range: an explicit from/to window (like the Activity page), buckets
+  // daily. When active it overrides the preset window.
+  const [customMode, setCustomMode] = useState(false);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [modelFilter, setModelFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [metric, setMetric] = useState<ChartMetric>("cost");
 
+  const winStart = customMode ? customFrom || undefined : startDate;
+  const winEnd = customMode ? customTo || undefined : undefined;
+  const bucket: UsageBucket = customMode ? "day" : preset.bucket;
+
   const filters: UsageFilters = useMemo(
     () => ({
-      start_date: startDate,
+      start_date: winStart,
+      end_date: winEnd,
       model: modelFilter.trim() || undefined,
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
     }),
-    [startDate, modelFilter, userFilter, apiKeyFilter],
+    [winStart, winEnd, modelFilter, userFilter, apiKeyFilter],
   );
 
   // The immediately-preceding window of equal length, for period-over-period
   // deltas. Only meaningful for a bounded range.
   const previousFilters: UsageFilters | null = useMemo(() => {
+    if (customMode) {
+      if (!winStart || !winEnd) return null;
+      const span = new Date(winEnd).getTime() - new Date(winStart).getTime();
+      if (!(span > 0)) return null;
+      return { ...filters, start_date: new Date(new Date(winStart).getTime() - span).toISOString(), end_date: winStart };
+    }
     if (preset.seconds === null || !startDate) return null;
     return {
       ...filters,
@@ -443,10 +459,10 @@ export function UsagePage() {
       // Cap the previous window at the current window's start.
       end_date: startDate,
     };
-  }, [filters, preset.seconds, startDate]);
+  }, [customMode, winStart, winEnd, filters, preset.seconds, startDate]);
 
-  const summary = useUsageSummary(filters, preset.bucket);
-  const previous = useUsageSummary(previousFilters ?? filters, preset.bucket, previousFilters !== null);
+  const summary = useUsageSummary(filters, bucket);
+  const previous = useUsageSummary(previousFilters ?? filters, bucket, previousFilters !== null);
 
   const data = summary.data;
   const totals = data?.totals;
@@ -457,7 +473,7 @@ export function UsagePage() {
   // omits the model filter, so the list stays complete when a model is selected,
   // and derived directly from query data rather than mirrored into state.
   const modelSuggestFilters: UsageFilters = useMemo(() => ({ ...filters, model: undefined }), [filters]);
-  const modelSuggest = useUsageSummary(modelSuggestFilters, preset.bucket);
+  const modelSuggest = useUsageSummary(modelSuggestFilters, bucket);
   const modelOptions =
     modelSuggest.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
 
@@ -475,7 +491,8 @@ export function UsagePage() {
     modelFilter && !modelOptions.includes(modelFilter) ? [modelFilter, ...modelOptions] : modelOptions
   ).map((m) => ({ value: m, label: m }));
 
-  const anyFilter = Boolean(modelFilter.trim() || userFilter || apiKeyFilter || preset.seconds !== null);
+  const timeFiltered = customMode ? Boolean(winStart || winEnd) : preset.seconds !== null;
+  const anyFilter = Boolean(modelFilter.trim() || userFilter || apiKeyFilter || timeFiltered);
   // On mobile the user/model/key controls collapse behind a "Filters" toggle so
   // the tiles and breakdowns sit near the top; desktop shows them inline.
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -485,12 +502,15 @@ export function UsagePage() {
   const isEmptyEver = Boolean(data && totals && totals.request_count === 0 && !anyFilter);
 
   const pickPreset = (next: Preset) => {
+    setCustomMode(false);
     setPreset(next);
     setStartDate(next.seconds === null ? undefined : isoAgo(next.seconds));
   };
 
   const clearFilters = () => {
     pickPreset(TIME_PRESETS[TIME_PRESETS.length - 1]); // All
+    setCustomFrom("");
+    setCustomTo("");
     setModelFilter("");
     setUserFilter("");
     setApiKeyFilter("");
@@ -520,7 +540,7 @@ export function UsagePage() {
   // single point has no trend to draw, so sparklines only appear with 2+ buckets.
   const series = data?.series ?? [];
   const hasTrend = series.length > 1;
-  const trend = trendData(series, metric, preset.bucket);
+  const trend = trendData(series, metric, bucket);
 
   return (
     <div className="flex flex-col gap-6">
@@ -543,13 +563,38 @@ export function UsagePage() {
             <Button
               key={option.label}
               size="sm"
-              variant={preset.label === option.label ? "primary" : "outline"}
+              variant={!customMode && preset.label === option.label ? "primary" : "outline"}
               onPress={() => pickPreset(option)}
             >
               {option.label}
             </Button>
           ))}
+          <Button size="sm" variant={customMode ? "primary" : "outline"} onPress={() => setCustomMode(true)}>
+            Custom…
+          </Button>
         </div>
+        {customMode ? (
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1 text-xs font-medium text-[var(--otari-muted)]">
+              From
+              <input
+                type="datetime-local"
+                value={customFrom}
+                onChange={(event) => setCustomFrom(event.target.value)}
+                className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-[var(--otari-muted)]">
+              To
+              <input
+                type="datetime-local"
+                value={customTo}
+                onChange={(event) => setCustomTo(event.target.value)}
+                className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
+              />
+            </label>
+          </div>
+        ) : null}
         <Button
           size="sm"
           variant="outline"
@@ -743,10 +788,10 @@ export function UsagePage() {
                 <BarTrendChart
                   data={trend.points}
                   formatValue={(value) => formatMetric(value, metric)}
-                  ariaLabel={`${metric} per ${preset.bucket}`}
+                  ariaLabel={`${metric} per ${bucket}`}
                 />
                 <figcaption className="text-xs text-[var(--otari-muted)]">
-                  {formatMetric(trend.peak, metric)} peak · {trend.count} {preset.bucket === "hour" ? "hours" : "days"} (times
+                  {formatMetric(trend.peak, metric)} peak · {trend.count} {bucket === "hour" ? "hours" : "days"} (times
                   in UTC)
                 </figcaption>
               </figure>
