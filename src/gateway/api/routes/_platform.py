@@ -14,12 +14,16 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, Literal, NamedTuple, TypeVar
 
 import httpx
+from anthropic import APIConnectionError as _AnthropicAPIConnectionError
+from anthropic import APITimeoutError as _AnthropicAPITimeoutError
 from any_llm import LLMProvider
 from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, Request, status
+from openai import APIConnectionError as _OpenAIAPIConnectionError
+from openai import APITimeoutError as _OpenAIAPITimeoutError
 from pydantic import BaseModel
 
 from gateway.core.config import GatewayConfig
@@ -293,7 +297,7 @@ async def run_platform_attempts(
         failures,
     )
     is_single_attempt = len(attempts) <= 1
-    if last_exc is not None and isinstance(last_exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
+    if last_exc is not None and upstream_exception_shape(last_exc)[0] == "timeout":
         detail = "LLM provider timeout" if is_single_attempt else "All upstream providers timed out"
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -506,6 +510,95 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
     )
 
 
+UpstreamErrorKind = Literal["timeout", "conn_err"]
+
+
+def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | None, int | None]:
+    """Classify the *shape* of an upstream exception, independent of retry policy.
+
+    Returns ``(kind, status_code)`` where ``kind`` is ``"timeout"``,
+    ``"conn_err"``, or ``None``, and ``status_code`` is the HTTP status the
+    exception carries, or ``None``. At most one of the two is set. ``kind`` is
+    a ``Literal``, not a bare ``str``, so a typo at a ``kind == "..."``
+    comparison site (e.g. in :func:`_classify_upstream_error`) is a mypy error
+    instead of a silent no-op. Shared by :func:`_classify_upstream_error`
+    (drives the hybrid-mode fallback decision) and
+    :func:`gateway.api.routes._pipeline.classify_provider_error` (drives the
+    final client-facing status/detail), so the two stay in sync.
+
+    Recognizes, in order, walking ``.original_exception`` when the current
+    exception carries no signal of its own:
+
+    1. Stdlib/httpx timeout and network exceptions directly.
+    2. The OpenAI and Anthropic SDKs' own ``APITimeoutError`` /
+       ``APIConnectionError``. any-llm calls these SDKs directly (it does not
+       wrap httpx itself unless ``ANY_LLM_UNIFIED_EXCEPTIONS=1``), and both
+       SDKs catch ``httpx.TimeoutException`` / network errors internally and
+       re-raise as their own types. Those wrapped types are not instances of
+       any httpx exception and carry no ``status_code``/``response``, so a
+       real provider timeout or "provider unreachable" would otherwise be
+       unclassifiable. ``APITimeoutError`` subclasses ``APIConnectionError``
+       in both SDKs, so the timeout check must run first. This covers the
+       majority of any-llm providers, which reuse ``BaseOpenAIProvider`` or
+       ``BaseAnthropicProvider``.
+    3. An HTTP status code carried directly on the exception or on its
+       attached ``.response``.
+    4. A conservative duck-typed fallback, by exception class name, for the
+       remaining any-llm provider SDKs that don't reuse the OpenAI/Anthropic
+       base classes (e.g. cohere, mistral, groq, bedrock) and whose own
+       timeout/connection exception types aren't imported here. Mirrors the
+       heuristic ``any_llm.utils.exception_handler.convert_exception`` already
+       uses internally. Only applies when the exception carries no status code
+       at all, so it never shadows a real HTTP-status classification.
+    5. If none of the above match, ``.original_exception`` (set by any-llm's
+       ``AnyLLMError`` family, e.g. via ``convert_exception``) is unwrapped and
+       reclassified from step 1. This keeps detection working once
+       ``ANY_LLM_UNIFIED_EXCEPTIONS=1`` becomes the default: any-llm's
+       ``convert_exception`` re-wraps a raw SDK timeout/connection error into
+       a generic ``any_llm.exceptions.ProviderError`` (class name matches
+       neither ``*TimeoutError`` nor ``*ConnectionError``, no ``status_code``),
+       but always preserves the original SDK exception on
+       ``original_exception``. Bounded by an ``id()``-based seen-set so a
+       (pathological, self-referential) cycle terminates instead of looping.
+    """
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+
+        if isinstance(
+            current,
+            (
+                asyncio.TimeoutError,
+                TimeoutError,
+                httpx.TimeoutException,
+                _OpenAIAPITimeoutError,
+                _AnthropicAPITimeoutError,
+            ),
+        ):
+            return "timeout", None
+        if isinstance(current, (httpx.NetworkError, _OpenAIAPIConnectionError, _AnthropicAPIConnectionError)):
+            return "conn_err", None
+
+        status_code = getattr(current, "status_code", None)
+        if status_code is None:
+            resp = getattr(current, "response", None)
+            if resp is not None:
+                status_code = getattr(resp, "status_code", None)
+        if isinstance(status_code, int):
+            return None, status_code
+
+        class_name = type(current).__name__
+        if class_name.endswith("TimeoutError"):
+            return "timeout", None
+        if class_name.endswith("ConnectionError"):
+            return "conn_err", None
+
+        current = getattr(current, "original_exception", None)
+
+    return None, None
+
+
 def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
     """Classify an upstream provider error.
 
@@ -513,16 +606,9 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
     for logging and reporting back to the platform. Streaming-only failures still
     pass through this classifier; the caller decides whether to actually retry.
     """
-    if isinstance(exc, (asyncio.TimeoutError, TimeoutError, httpx.TimeoutException)):
-        return True, "timeout"
-    if isinstance(exc, httpx.NetworkError):
-        return True, "conn_err"
-
-    status_code = getattr(exc, "status_code", None)
-    if status_code is None:
-        resp = getattr(exc, "response", None)
-        if resp is not None:
-            status_code = getattr(resp, "status_code", None)
+    kind, status_code = upstream_exception_shape(exc)
+    if kind is not None:
+        return True, kind
 
     if isinstance(status_code, int):
         if status_code in _FALLBACK_NON_RETRYABLE_STATUS_CODES:

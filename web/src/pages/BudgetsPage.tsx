@@ -1,5 +1,5 @@
 import { Button, Card, Spinner } from "@heroui/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   useBudgetResetLogs,
@@ -66,12 +66,46 @@ function parseLimit(raw: string): { value: number | null; valid: boolean } {
   return { value: n, valid: true };
 }
 
-// seconds shown as a whole number of days when it divides evenly, so the custom
-// field speaks the same unit an operator thinks in.
-function PeriodPicker({ value, onChange }: { value: number | null; onChange: (seconds: number | null) => void }) {
+// Whole-day string for a duration, or "" when it is not a whole number of days,
+// so the custom field speaks the same unit an operator thinks in.
+function daysString(seconds: number | null): string {
+  return seconds !== null && seconds % DAY === 0 ? String(seconds / DAY) : "";
+}
+
+function PeriodPicker({
+  value,
+  onChange,
+  onInvalidChange,
+}: {
+  value: number | null;
+  onChange: (seconds: number | null) => void;
+  // Reports whether the custom field currently holds an invalid entry, so the
+  // form can block Save (an invalid entry emits null, which would otherwise
+  // clear the committed period on save).
+  onInvalidChange?: (invalid: boolean) => void;
+}) {
   const isPreset = PERIOD_PRESETS.some((p) => p.seconds === value);
   const [custom, setCustom] = useState(!isPreset);
-  const customDays = value !== null && value % DAY === 0 ? String(value / DAY) : "";
+  // The custom field's own draft, so an in-progress, not-yet-valid entry (e.g.
+  // "1.5") stays on screen to be flagged rather than being coerced. It is seeded
+  // on mount and reset only by an explicit action here (a preset click), never
+  // from `value`: the only thing that changes `value` in place is this component's
+  // own onChange, so reseeding from it would wipe the invalid entry on the very
+  // null we emit for it, before the operator can read the error. Editing a
+  // different budget remounts the form (it is keyed), reseeding from the new value.
+  const [draft, setDraft] = useState(() => daysString(value));
+
+  const trimmedDays = draft.trim();
+  const daysValue = Number(trimmedDays);
+  // Whole days only: a fractional, non-positive, or non-finite entry is rejected
+  // outright (surfaced below and left unsaved) rather than silently rounded, so
+  // 1.5 never becomes 2. isSafeInteger also rules out an overflowing day count.
+  const invalidDays = trimmedDays !== "" && (!Number.isSafeInteger(daysValue) || daysValue <= 0);
+
+  // Surface validity to the form so Save is gated on it (like the limit field).
+  useEffect(() => {
+    onInvalidChange?.(invalidDays);
+  }, [invalidDays, onInvalidChange]);
 
   return (
     <div className="flex flex-col gap-2">
@@ -84,6 +118,9 @@ function PeriodPicker({ value, onChange }: { value: number | null; onChange: (se
             variant={!custom && value === preset.seconds ? "primary" : "outline"}
             onPress={() => {
               setCustom(false);
+              // Keep the (hidden) custom draft in step, so reopening Custom shows
+              // the preset's day count rather than a stale earlier entry.
+              setDraft(daysString(preset.seconds));
               onChange(preset.seconds);
             }}
           >
@@ -98,18 +135,22 @@ function PeriodPicker({ value, onChange }: { value: number | null; onChange: (se
         <div className="flex items-end gap-2">
           <Field
             label="Every N days"
-            value={customDays}
+            value={draft}
             onChange={(raw) => {
+              setDraft(raw);
               const n = Number(raw.trim());
-              const seconds = Math.round(n) * DAY;
-              onChange(
-                raw.trim() === "" || !Number.isFinite(n) || n <= 0 || !Number.isFinite(seconds) || seconds <= 0
-                  ? null
-                  : seconds,
-              );
+              // Reject a non-integer or non-positive value instead of rounding it;
+              // it is held as null (unsaved) until the operator types whole days.
+              onChange(raw.trim() === "" || !Number.isSafeInteger(n) || n <= 0 ? null : n * DAY);
             }}
             placeholder="14"
-            description="Whole days between resets."
+            description={
+              invalidDays ? (
+                <span className="text-red-700">Enter a whole number of days.</span>
+              ) : (
+                "Whole days between resets."
+              )
+            }
           />
         </div>
       ) : null}
@@ -147,12 +188,14 @@ function BudgetForm({
   const [name, setName] = useState(initial.name ?? "");
   const [limit, setLimit] = useState(initial.max_budget === null ? "" : String(initial.max_budget));
   const [durationSec, setDurationSec] = useState<number | null>(initial.budget_duration_sec);
+  const [periodInvalid, setPeriodInvalid] = useState(false);
   const [userIds, setUserIds] = useState<string[]>([]);
 
   const parsed = parseLimit(limit);
+  const canSubmit = !isPending && parsed.valid && !periodInvalid;
 
   const submit = () => {
-    if (isPending || !parsed.valid) return;
+    if (!canSubmit) return;
     // Send name as null (not "") when blank so it clears to unnamed on the wire.
     onSubmit({ name: name.trim() || null, max_budget: parsed.value, budget_duration_sec: durationSec }, userIds);
   };
@@ -183,7 +226,7 @@ function BudgetForm({
             )
           }
         />
-        <PeriodPicker value={durationSec} onChange={setDurationSec} />
+        <PeriodPicker value={durationSec} onChange={setDurationSec} onInvalidChange={setPeriodInvalid} />
         {assignUsers ? (
           <UserMultiSelect
             label="Assign to users (optional)"
@@ -194,7 +237,7 @@ function BudgetForm({
           />
         ) : null}
         <div className="flex gap-2">
-          <Button variant="primary" isDisabled={isPending || !parsed.valid} onPress={submit}>
+          <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
             {isPending ? "Saving…" : submitLabel}
           </Button>
           <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
