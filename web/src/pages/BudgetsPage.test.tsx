@@ -271,7 +271,7 @@ describe("BudgetsPage", () => {
     ).toBe(false);
   });
 
-  it("does not submit a custom period that rounds down to zero days", async () => {
+  it("blocks a custom period below one whole day instead of rounding it to zero", async () => {
     const fetchMock = mockApi({ budgets: [] });
     const user = userEvent.setup();
     renderPage(<BudgetsPage />);
@@ -280,16 +280,12 @@ describe("BudgetsPage", () => {
     await user.click(screen.getByRole("button", { name: "Custom" }));
     await user.click(screen.getByLabelText("Every N days"));
     await user.paste("0.1");
-    await user.click(screen.getByRole("button", { name: "Create budget" }));
 
-    const post = await vi.waitFor(() => {
-      const call = fetchMock.mock.calls.find(
-        ([url, init]) => String(url).includes("/v1/budgets") && (init?.method ?? "") === "POST",
-      );
-      if (!call) throw new Error("no budget POST");
-      return call;
-    });
-    expect(JSON.parse(String(post[1]?.body))).toMatchObject({ budget_duration_sec: null });
+    expect(await screen.findByText("Enter a whole number of days.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create budget" })).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.some(([u, init]) => String(u).includes("/v1/budgets") && (init?.method ?? "") === "POST"),
+    ).toBe(false);
   });
 
   it("rejects a fractional custom period instead of rounding it up", async () => {
@@ -302,18 +298,33 @@ describe("BudgetsPage", () => {
     await user.click(screen.getByLabelText("Every N days"));
     await user.paste("1.5");
 
-    // 1.5 is flagged and held unsaved, never silently rounded to 2 days.
+    // 1.5 is flagged and blocks submit, never silently rounded to 2 days.
     expect(await screen.findByText("Enter a whole number of days.")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Create budget" }));
+    expect(screen.getByRole("button", { name: "Create budget" })).toBeDisabled();
+    expect(
+      fetchMock.mock.calls.some(([u, init]) => String(u).includes("/v1/budgets") && (init?.method ?? "") === "POST"),
+    ).toBe(false);
+  });
 
-    const post = await vi.waitFor(() => {
-      const call = fetchMock.mock.calls.find(
-        ([url, init]) => String(url).includes("/v1/budgets") && (init?.method ?? "") === "POST",
-      );
-      if (!call) throw new Error("no budget POST");
-      return call;
-    });
-    expect(JSON.parse(String(post[1]?.body))).toMatchObject({ budget_duration_sec: null });
+  it("keeps a fractional edit visible with an error and blocks save (does not wipe the field)", async () => {
+    // 14 days is a custom period (not a preset), so Edit opens with the field
+    // seeded to "14"; making it fractional exercises the committed-value path the
+    // paste-into-empty tests miss.
+    mockApi({ budgets: [budget({ budget_duration_sec: 1_209_600 })] });
+    const user = userEvent.setup();
+    renderPage(<BudgetsPage />);
+
+    await user.click(await screen.findByText("11111111"));
+    const field = await screen.findByLabelText("Every N days");
+    expect(field).toHaveValue("14");
+
+    await user.type(field, ".5");
+
+    // The invalid entry persists with an error instead of being wiped, and Save is
+    // blocked so it cannot clear the committed period to "no reset".
+    expect(field).toHaveValue("14.5");
+    expect(screen.getByText("Enter a whole number of days.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
   });
 
   it("creates an unlimited budget when the limit is left blank", async () => {
