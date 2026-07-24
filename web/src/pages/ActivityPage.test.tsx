@@ -26,6 +26,9 @@ function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
     status: "success",
     error_message: null,
     latency_ms: 842,
+    source: "gateway",
+    source_label: null,
+    counts_toward_budget: true,
     ...overrides,
   };
 }
@@ -112,6 +115,28 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("success")).toBeInTheDocument();
   });
 
+  it("shows the api key column, and an em-dash for master-key rows", async () => {
+    mockApi({
+      rows: [
+        entry({ id: "g", model: "gateway-model", api_key_id: "key-1" }),
+        entry({ id: "x", model: "imported-model", api_key_id: null }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    const importedRow = (await screen.findByText("imported-model")).closest("tr")!;
+    // Null api_key_id (master-key / historical) renders as an em-dash.
+    expect(within(importedRow).getByText("—")).toBeInTheDocument();
+  });
+
+  it("sends the api key filter to the API", async () => {
+    const fetchMock = mockApi({ rows: [entry({ api_key_id: "key-1" })] });
+    renderPage(<ActivityPage />, "/activity?api_key_id=key-1");
+
+    await screen.findByText("gpt-4o");
+    expect(listCalls(fetchMock).some((url) => url.includes("api_key_id=key-1"))).toBe(true);
+  });
+
   it("renders latency over a second as seconds and null latency as an em-dash", async () => {
     mockApi({
       rows: [
@@ -183,18 +208,16 @@ describe("ActivityPage", () => {
     expect(await screen.findByText("No requests recorded yet.")).toBeInTheDocument();
   });
 
-  it("offers every endpoint that writes a usage log, including batches", async () => {
-    // Batch rows are written by log_batch_usage under /v1/batches and
-    // /v1/batches/results; omitting them made those rows unreachable by filter.
+  it("filters by API key, not by endpoint or source", async () => {
+    // The Activity log scopes by API key; the endpoint and source selects were
+    // removed. (Source is still shown per-row in the expanded detail.)
     mockApi({ rows: [entry()] });
     renderPage(<ActivityPage />);
 
     await screen.findByText("gpt-4o");
-    const select = screen.getByLabelText("Endpoint");
-    const offered = Array.from(select.querySelectorAll("option")).map((o) => o.getAttribute("value"));
-    for (const ep of ["/v1/chat/completions", "/v1/embeddings", "/v1/batches", "/v1/batches/results"]) {
-      expect(offered).toContain(ep);
-    }
+    expect(screen.getByRole("combobox", { name: "API key" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Endpoint")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Source")).not.toBeInTheDocument();
   });
 
   it("keeps Next reachable when the count request fails", async () => {
@@ -256,5 +279,34 @@ describe("ActivityPage", () => {
     expect(await screen.findByText("1–50 of 120")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Next" })).toBeEnabled();
+  });
+
+  it("collapses the filter controls behind a mobile toggle that expands them", async () => {
+    mockApi({ rows: [entry()] });
+    const user = userEvent.setup();
+    renderPage(<ActivityPage />);
+    await screen.findByText("gpt-4o");
+
+    const toggle = screen.getByRole("button", { name: "Filters" });
+    const region = document.getElementById("activity-filters")!;
+    // Collapsed by default on mobile (display:none there; the md: variant reveals
+    // it on desktop). Expanding flips the classes and the toggle's aria state.
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(region.className).toContain("hidden");
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(region.className).toContain("flex");
+    expect(region.className).not.toContain("hidden");
+  });
+
+  it("labels the mobile filter toggle with the active filter count", async () => {
+    mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?model=gpt-4o&status=error");
+    await screen.findByText("gpt-4o");
+
+    // Two collapsible filters active (model + status); the time range is excluded.
+    expect(screen.getByRole("button", { name: "Filters (2)" })).toBeInTheDocument();
   });
 });

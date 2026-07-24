@@ -55,6 +55,9 @@ function mockApi(body: UsageSummary | null) {
     if (url.includes("/v1/users")) {
       return jsonResponse([{ user_id: "alice", alias: "Alice" }]);
     }
+    if (url.includes("/v1/keys")) {
+      return jsonResponse([{ id: "key-1", key_name: "ci-bot", user_id: "alice", allowed_models: null }]);
+    }
     return jsonResponse([]);
   });
 }
@@ -98,6 +101,21 @@ describe("UsagePage", () => {
     expect(screen.getByText("12.4M")).toBeInTheDocument();
     // 1764 / 84000 = 2.1% errors.
     expect(screen.getByText(/2\.1% errors/)).toBeInTheDocument();
+  });
+
+  it("filters usage by API key", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.click(screen.getByPlaceholderText("All keys"));
+    await user.click(await screen.findByRole("option", { name: "ci-bot" }));
+
+    const summaryCalls = fetchMock.mock.calls
+      .map(([u]) => String(u))
+      .filter((u) => u.includes("/v1/usage/summary"));
+    expect(summaryCalls.some((u) => u.includes("api_key_id=key-1"))).toBe(true);
   });
 
   it("does not render the CSV export action", async () => {
@@ -201,6 +219,26 @@ describe("UsagePage", () => {
     expect(loc).toContain("model=gpt-5.6");
   });
 
+  it("keeps an active API key filter when drilling into a model", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("gpt-5.6");
+
+    // Filter by an API key, then drill into a model row. The key constraint must
+    // survive the navigation alongside the clicked model.
+    await user.click(screen.getByPlaceholderText("All keys"));
+    await user.click(await screen.findByRole("option", { name: "ci-bot" }));
+
+    const row = (await screen.findByText("gpt-5.6")).closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
+    expect(loc.startsWith("/activity")).toBe(true);
+    expect(loc).toContain("model=gpt-5.6");
+    expect(loc).toContain("api_key_id=key-1");
+  });
+
   it("filters models by typeahead and commits the exact picked model", async () => {
     const fetchMock = mockApi(summary());
     const user = userEvent.setup();
@@ -276,6 +314,40 @@ describe("UsagePage", () => {
     await screen.findByText("Spend by model");
     await userEvent.setup().click(screen.getByRole("button", { name: "Clear filters" }));
     expect(await screen.findByText(/No usage yet/)).toBeInTheDocument();
+  });
+
+  it("collapses the filter controls behind a mobile toggle that expands them", async () => {
+    mockApi(summary());
+    const user = userEvent.setup();
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    const toggle = screen.getByRole("button", { name: "Filters" });
+    const region = document.getElementById("usage-filters")!;
+    // Collapsed on mobile by default (display:none there; md: reveals it).
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(region.className).toContain("hidden");
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(region.className).toContain("flex");
+    expect(region.className).not.toContain("hidden");
+  });
+
+  it("labels the mobile filter toggle with the active filter count", async () => {
+    mockApi(summary());
+    const user = userEvent.setup();
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    // No collapsible filters active yet (only the default time range).
+    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+
+    await user.click(screen.getByPlaceholderText("All keys"));
+    await user.click(await screen.findByRole("option", { name: "ci-bot" }));
+
+    expect(await screen.findByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
   });
 
 });

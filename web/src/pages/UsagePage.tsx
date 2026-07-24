@@ -1,8 +1,9 @@
 import { Button, Spinner } from "@heroui/react";
+import { clsx } from "clsx";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { useUsageSummary, useUsers } from "@/api/hooks";
+import { useKeys, useUsageSummary, useUsers } from "@/api/hooks";
 import type { UsageBucket, UsageFilters, UsageGroupRow, UsageSeriesPoint } from "@/api/types";
 import { BarTrendChart, Sparkline } from "@/components/charts";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
@@ -70,7 +71,14 @@ interface BreakdownProps {
 // share-of-total bar; clicking a named row drills into the Activity log filtered
 // to that dimension. The synthesized "other" fold row (null key) is shown but not
 // clickable, so the visible spend still reconciles with the total-spend tile.
-function BreakdownTable({ title, rows, totalCost, emptyLabel, onDrill, loading }: BreakdownProps) {
+function BreakdownTable({
+  title,
+  rows,
+  totalCost,
+  emptyLabel,
+  onDrill,
+  loading,
+}: BreakdownProps) {
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? rows : rows.slice(0, TABLE_TOP_N);
   const hidden = rows.length - visible.length;
@@ -108,7 +116,11 @@ function BreakdownTable({ title, rows, totalCost, emptyLabel, onDrill, loading }
                   <Td className="text-[var(--otari-ink)]">
                     <div className="flex flex-col gap-1">
                       <span className="truncate">
-                        {isOther ? `Other (${row.requests.toLocaleString()} req)` : (row.key ?? "(unknown)")}
+                        {isOther
+                          ? `Other (${row.requests.toLocaleString()} req)`
+                          : row.key === null
+                            ? "(unknown)"
+                            : row.key}
                       </span>
                       {/* Share-of-total bar. Width is data-driven, so it rides an
                           inline style like the Table's computed column widths. */}
@@ -187,6 +199,7 @@ function trendData(series: UsageSeriesPoint[], metric: ChartMetric, bucket: Usag
 export function UsagePage() {
   const navigate = useNavigate();
   const users = useUsers();
+  const keys = useKeys();
 
   const [preset, setPreset] = useState<Preset>(DEFAULT_PRESET);
   const [startDate, setStartDate] = useState<string | undefined>(() =>
@@ -194,15 +207,21 @@ export function UsagePage() {
   );
   const [modelFilter, setModelFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
+  const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [metric, setMetric] = useState<ChartMetric>("cost");
+  // On mobile the user/model/key controls collapse behind a "Filters" toggle so
+  // the stat tiles are not pushed far down the page; desktop shows them inline.
+  // The time-range presets stay visible either way.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const filters: UsageFilters = useMemo(
     () => ({
       start_date: startDate,
       model: modelFilter.trim() || undefined,
       user_id: userFilter || undefined,
+      api_key_id: apiKeyFilter || undefined,
     }),
-    [startDate, modelFilter, userFilter],
+    [startDate, modelFilter, userFilter, apiKeyFilter],
   );
 
   // The immediately-preceding window of equal length, for period-over-period
@@ -223,6 +242,7 @@ export function UsagePage() {
   const data = summary.data;
   const totals = data?.totals;
   const prevTotals = previousFilters !== null ? previous.data?.totals : undefined;
+  const costDelta = totals ? deltaFraction(totals.cost, prevTotals?.cost) : null;
 
   // Model typeahead options: the in-window models. Sourced from a summary that
   // omits the model filter, so the list stays complete when a model is selected,
@@ -236,12 +256,20 @@ export function UsagePage() {
     value: u.user_id,
     label: u.alias ? `${u.alias} (${u.user_id})` : u.user_id,
   }));
+  // API key options label by name (falling back to a short id), value is the id.
+  const keyOptions = (keys.data ?? []).map((k) => ({
+    value: k.id,
+    label: k.key_name ?? `${k.id.slice(0, 8)}…`,
+  }));
   // Keep a selected-but-not-in-list model visible (e.g. seeded from elsewhere).
   const modelOptionList = (
     modelFilter && !modelOptions.includes(modelFilter) ? [modelFilter, ...modelOptions] : modelOptions
   ).map((m) => ({ value: m, label: m }));
 
-  const anyFilter = Boolean(modelFilter.trim() || userFilter || preset.seconds !== null);
+  const anyFilter = Boolean(modelFilter.trim() || userFilter || apiKeyFilter || preset.seconds !== null);
+  // Count only the collapsible controls (not the always-visible time range) so
+  // the mobile toggle can advertise how many are active while hidden.
+  const activeFilterCount = [modelFilter.trim(), userFilter, apiKeyFilter].filter(Boolean).length;
   // Distinguish "this gateway has never served a request" from "no rows match
   // these filters": the first is an onboarding state, the second is a filter hint.
   const isEmptyEver = Boolean(data && totals && totals.request_count === 0 && !anyFilter);
@@ -255,6 +283,7 @@ export function UsagePage() {
     pickPreset(TIME_PRESETS[TIME_PRESETS.length - 1]); // All
     setModelFilter("");
     setUserFilter("");
+    setApiKeyFilter("");
   };
 
   const refresh = () => {
@@ -297,7 +326,8 @@ export function UsagePage() {
 
       <ErrorBanner error={summary.error} />
 
-      {/* Filters */}
+      {/* Filters. On mobile the boxes collapse behind the "Filters" toggle so the
+          stat tiles stay near the top; the time-range presets stay visible. */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-wrap gap-2">
           {TIME_PRESETS.map((option) => (
@@ -311,7 +341,20 @@ export function UsagePage() {
             </Button>
           ))}
         </div>
-        <div className="flex flex-wrap items-end gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="md:hidden"
+          onPress={() => setFiltersOpen((open) => !open)}
+          aria-expanded={filtersOpen}
+          aria-controls="usage-filters"
+        >
+          Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
+        </Button>
+        <div
+          id="usage-filters"
+          className={clsx("flex-wrap items-end gap-3 md:flex", filtersOpen ? "flex w-full md:w-auto" : "hidden")}
+        >
           <FilterComboBox
             label="User"
             value={userFilter}
@@ -325,6 +368,13 @@ export function UsagePage() {
             onChange={setModelFilter}
             options={modelOptionList}
             placeholder="All models"
+          />
+          <FilterComboBox
+            label="API key"
+            value={apiKeyFilter}
+            onChange={setApiKeyFilter}
+            options={keyOptions}
+            placeholder="All keys"
           />
           {anyFilter ? (
             <Button size="sm" variant="ghost" onPress={clearFilters}>
@@ -340,12 +390,23 @@ export function UsagePage() {
         </div>
       ) : (
         <>
-          {/* Tiles */}
-          <div className="flex flex-wrap gap-4">
+          {/* Tiles. A responsive grid rather than flex-wrap so two fit per row on
+              mobile (a fixed-min flex child would wrap one-up), widening to three
+              then four as the viewport grows. */}
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
             <StatCard
-              label="Spend"
+              label="Tracked cost"
               value={totals ? formatUsd(totals.cost) : "—"}
-              hint={totals ? <DeltaHint fraction={deltaFraction(totals.cost, prevTotals?.cost)} /> : null}
+              hint={
+                totals ? (
+                  <span className="text-[var(--otari-muted)]">
+                    <DeltaHint fraction={costDelta} />
+                    {totals.unpriced_requests
+                      ? `${costDelta !== null ? " · " : ""}${formatCount(totals.unpriced_requests)} unpriced`
+                      : null}
+                  </span>
+                ) : null
+              }
               chart={hasTrend ? <Sparkline values={series.map((p) => p.cost)} ariaLabel="Spend trend over the selected window" /> : undefined}
             />
             <StatCard
@@ -415,9 +476,12 @@ export function UsagePage() {
               rows={data?.by_model ?? []}
               totalCost={totals?.cost ?? 0}
               emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
-              // Drilling into a model keeps any active user filter, so the log stays
-              // scoped to that user instead of showing every user's spend on the model.
-              onDrill={(key) => drillTo({ model: key, user_id: userFilter || undefined })}
+              // Drilling into a model keeps the other active filters (user, API key),
+              // so the log stays scoped to them instead of showing every request for
+              // the model.
+              onDrill={(key) =>
+                drillTo({ model: key, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined })
+              }
               loading={summary.isLoading}
             />
             <BreakdownTable
@@ -425,8 +489,15 @@ export function UsagePage() {
               rows={data?.by_user ?? []}
               totalCost={totals?.cost ?? 0}
               emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
-              // Likewise, drilling into a user keeps any active model filter.
-              onDrill={(key) => drillTo({ user_id: key, model: modelFilter.trim() || undefined })}
+              // Likewise, drilling into a user keeps the other active filters (model,
+              // API key).
+              onDrill={(key) =>
+                drillTo({
+                  user_id: key,
+                  model: modelFilter.trim() || undefined,
+                  api_key_id: apiKeyFilter || undefined,
+                })
+              }
               loading={summary.isLoading}
             />
           </div>

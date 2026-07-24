@@ -1,9 +1,10 @@
 import { Button, Spinner } from "@heroui/react";
+import { clsx } from "clsx";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { useUsageCount, useUsageLogs, useUsageSummary, useUsers } from "@/api/hooks";
+import { useKeys, useUsageCount, useUsageLogs, useUsageSummary, useUsers } from "@/api/hooks";
 import type { UsageEntry, UsageFilters } from "@/api/types";
 import { LoadingRow, Table, TableMessage, Td, Th, THead, Tr } from "@/components/Table";
 import { ErrorBanner, FilterComboBox, FilterSelect, PageHeader } from "@/components/ui";
@@ -65,23 +66,6 @@ const STATUS_OPTIONS: { label: string; value: string }[] = [
   { label: "Error", value: "error" },
 ];
 
-// Every endpoint that writes a usage_logs row, so the filter can reach all of
-// them. A curated list keeps this a simple select without a separate "distinct
-// endpoints" query; it must be extended when a new billable route is added.
-const ENDPOINT_OPTIONS = [
-  "/v1/chat/completions",
-  "/v1/messages",
-  "/v1/responses",
-  "/v1/embeddings",
-  "/v1/moderations",
-  "/v1/audio/transcriptions",
-  "/v1/audio/speech",
-  "/v1/images/generations",
-  "/v1/rerank",
-  "/v1/batches",
-  "/v1/batches/results",
-];
-
 const PAGE_SIZE = 50;
 
 function isoAgo(seconds: number): string {
@@ -102,6 +86,13 @@ function StatusPill({ status }: { status: string }) {
       {status}
     </span>
   );
+}
+
+// Friendly labels for known provenance sources; unknown sources render their slug.
+const SOURCE_LABELS: Record<string, string> = { gateway: "Gateway", claude_code: "Claude Code", codex: "Codex" };
+
+function sourceLabel(source: string): string {
+  return SOURCE_LABELS[source] ?? source;
 }
 
 export async function copyToClipboard(
@@ -146,6 +137,8 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <DetailField label="Provider">{entry.provider ?? "—"}</DetailField>
         <DetailField label="Endpoint">{entry.endpoint}</DetailField>
+        <DetailField label="Source">{sourceLabel(entry.source)}</DetailField>
+        {entry.source_label ? <DetailField label="Session">{entry.source_label}</DetailField> : null}
         <DetailField label="User">{entry.user_id ?? "—"}</DetailField>
         <DetailField label="API key">{entry.api_key_id ?? "—"}</DetailField>
         <DetailField label="Prompt tokens">{formatTokens(entry.prompt_tokens)}</DetailField>
@@ -176,10 +169,19 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
 
 // ---------- page ----------
 
-const COLS = 7;
+const COLS = 8;
 
 export function ActivityPage() {
   const users = useUsers();
+  const keys = useKeys();
+  // Map an api_key_id to a human label (the key's name, else a short id). Imported
+  // usage carries the importing key; a null id is a master-key or historical row.
+  const keyLabels = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const k of keys.data ?? []) map.set(k.id, k.key_name ?? `${k.id.slice(0, 8)}…`);
+    return map;
+  }, [keys.data]);
+  const apiKeyLabel = (id: string | null): string => (id === null ? "—" : (keyLabels.get(id) ?? `${id.slice(0, 8)}…`));
   // Drill-down from the Usage page arrives with model / user_id / start_date /
   // status in the query string; seed the initial filter state from it (once, on
   // mount) so the log opens pre-filtered on what the operator clicked.
@@ -192,20 +194,24 @@ export function ActivityPage() {
   const [startDate, setStartDate] = useState<string | undefined>(() => initialStart ?? isoAgo(DAY_S));
   const [statusFilter, setStatusFilter] = useState(() => searchParams.get("status") ?? "");
   const [modelFilter, setModelFilter] = useState(() => searchParams.get("model") ?? "");
-  const [endpointFilter, setEndpointFilter] = useState("");
   const [userFilter, setUserFilter] = useState(() => searchParams.get("user_id") ?? "");
+  const [apiKeyFilter, setApiKeyFilter] = useState(() => searchParams.get("api_key_id") ?? "");
   const [page, setPage] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // On mobile the status/key/user/model controls collapse behind a "Filters"
+  // toggle so they do not push the request table far down the page; desktop shows
+  // them inline. The time-range presets stay visible either way.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const filters: UsageFilters = useMemo(
     () => ({
       start_date: startDate,
       status: statusFilter || undefined,
       model: modelFilter.trim() || undefined,
-      endpoint: endpointFilter || undefined,
       user_id: userFilter || undefined,
+      api_key_id: apiKeyFilter || undefined,
     }),
-    [startDate, statusFilter, modelFilter, endpointFilter, userFilter],
+    [startDate, statusFilter, modelFilter, userFilter, apiKeyFilter],
   );
 
   // Any change to the filter set returns to the first page.
@@ -223,22 +229,32 @@ export function ActivityPage() {
     () => ({
       start_date: startDate,
       status: statusFilter || undefined,
-      endpoint: endpointFilter || undefined,
       user_id: userFilter || undefined,
+      api_key_id: apiKeyFilter || undefined,
     }),
-    [startDate, statusFilter, endpointFilter, userFilter],
+    [startDate, statusFilter, userFilter, apiKeyFilter],
   );
   const modelSummary = useUsageSummary(modelSuggestFilters, "day");
   // Derived from query data, not mirrored into state. modelSuggestFilters omits
   // the model filter, so the list is always the full set of in-window models.
   const modelOptions =
     modelSummary.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
+  // API-key options for the filter: every key's human name (or a short id), so an
+  // operator can scope the log to one key. Imported OTLP usage carries its
+  // importer key, so this reaches those rows too.
+  const keyOptions = (keys.data ?? []).map((k) => ({
+    value: k.id,
+    label: k.key_name ?? `${k.id.slice(0, 8)}…`,
+  }));
 
   const rows = usage.data ?? [];
   const total = count.data?.total ?? 0;
   const anyFilter = Boolean(
-    statusFilter || modelFilter.trim() || endpointFilter || userFilter || rangeSeconds !== null,
+    statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || rangeSeconds !== null,
   );
+  // Count only the collapsible controls (not the always-visible time range) so
+  // the mobile toggle can advertise how many are active while hidden.
+  const activeFilterCount = [statusFilter, modelFilter.trim(), userFilter, apiKeyFilter].filter(Boolean).length;
 
   const pickRange = (seconds: number | null) => {
     setRangeSeconds(seconds);
@@ -250,8 +266,8 @@ export function ActivityPage() {
     setStartDate(undefined);
     setStatusFilter("");
     setModelFilter("");
-    setEndpointFilter("");
     setUserFilter("");
+    setApiKeyFilter("");
   };
 
   const refresh = () => {
@@ -302,7 +318,9 @@ export function ActivityPage() {
       <ErrorBanner error={usage.error ?? count.error} />
 
       {/* Filters. The time-range presets share a row with the filter boxes when the
-          window is wide enough, and wrap onto their own line when it is not. */}
+          window is wide enough, and wrap onto their own line when it is not. On
+          mobile the boxes collapse behind the "Filters" toggle to keep the table
+          near the top. */}
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-wrap gap-2">
           {TIME_PRESETS.map((preset) => (
@@ -316,7 +334,20 @@ export function ActivityPage() {
             </Button>
           ))}
         </div>
-        <div className="flex flex-wrap items-end gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          className="md:hidden"
+          onPress={() => setFiltersOpen((open) => !open)}
+          aria-expanded={filtersOpen}
+          aria-controls="activity-filters"
+        >
+          Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
+        </Button>
+        <div
+          id="activity-filters"
+          className={clsx("flex-wrap items-end gap-3 md:flex", filtersOpen ? "flex w-full md:w-auto" : "hidden")}
+        >
           <FilterSelect id="filter-status" label="Status" value={statusFilter} onChange={setStatusFilter}>
             {STATUS_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -324,14 +355,13 @@ export function ActivityPage() {
               </option>
             ))}
           </FilterSelect>
-          <FilterSelect id="filter-endpoint" label="Endpoint" value={endpointFilter} onChange={setEndpointFilter}>
-            <option value="">All endpoints</option>
-            {ENDPOINT_OPTIONS.map((ep) => (
-              <option key={ep} value={ep}>
-                {ep}
-              </option>
-            ))}
-          </FilterSelect>
+          <FilterComboBox
+            label="API key"
+            value={apiKeyFilter}
+            onChange={setApiKeyFilter}
+            placeholder="All keys"
+            options={keyOptions}
+          />
           <FilterComboBox
             label="User"
             value={userFilter}
@@ -367,6 +397,7 @@ export function ActivityPage() {
             <Th>Time</Th>
             <Th>User</Th>
             <Th>Model</Th>
+            <Th>API key</Th>
             <Th className="text-right">Tokens</Th>
             <Th className="text-right">Cost</Th>
             <Th className="text-right">Total time</Th>
@@ -396,6 +427,7 @@ export function ActivityPage() {
                     </Td>
                     <Td className="text-[var(--otari-ink)]">{entry.user_id ?? "—"}</Td>
                     <Td className="text-[var(--otari-ink)]">{entry.model}</Td>
+                    <Td className="text-[var(--otari-muted)]">{apiKeyLabel(entry.api_key_id)}</Td>
                     <Td className="text-right tabular-nums">{formatTokens(entry.total_tokens)}</Td>
                     <Td className="text-right tabular-nums">{formatUSD(entry.cost)}</Td>
                     <Td className="text-right tabular-nums">{formatLatency(entry.latency_ms)}</Td>
