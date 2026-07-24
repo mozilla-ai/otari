@@ -246,11 +246,16 @@ export function ActivityPage() {
   const userFilter = url.get("user_id");
   const apiKeyFilter = url.get("api_key_id");
   const pricedFilter = url.get("priced");
-  const page = url.getNumber("page");
-  // Cap URL-supplied sizes at the largest offered option: selection latency
+  const page = Math.max(0, url.getNumber("page"));
+  // Snap URL-supplied sizes to the nearest offered option: selection latency
   // grows linearly with rows on the page, so an old bookmark with size=500
-  // must not resurrect second-long checkbox clicks.
-  const pageSize = Math.min(url.getNumber("size"), Math.max(...PAGE_SIZE_OPTIONS));
+  // must not resurrect second-long checkbox clicks, and a hand-edited size=0
+  // or size=-5 must not reach the API as an invalid limit (or leave the
+  // rows-per-page select showing a value it does not offer).
+  const rawPageSize = url.getNumber("size");
+  const pageSize = PAGE_SIZE_OPTIONS.reduce((best, option) =>
+    Math.abs(option - rawPageSize) < Math.abs(best - rawPageSize) ? option : best,
+  );
 
   // Snapshot the window so a rolling preset does not recompute "now" every render
   // (which would churn the query key). Re-anchored when the range changes or on refresh.

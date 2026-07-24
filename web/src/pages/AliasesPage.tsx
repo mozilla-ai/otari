@@ -1,5 +1,5 @@
 import { Button, Card, Chip } from "@heroui/react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import type { AliasResponse } from "@/api/types";
@@ -11,6 +11,9 @@ import { Field } from "@/components/Field";
 import { ModelComboBox } from "@/components/ModelComboBox";
 import { ConfirmButton, ErrorBanner, PageHeader } from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
+
+// Stable row-key getter so DataTable's per-row cache holds across re-renders.
+const getAliasRowKey = (a: AliasResponse): string => a.name;
 
 // Edit an existing stored alias's target. The name is the lookup key and is shown
 // read-only; the backend POST /v1/aliases upserts by name, so the same hook serves both.
@@ -156,7 +159,9 @@ export function AliasesPage() {
     }
   };
 
-  const columns: DataTableColumn<AliasResponse>[] = [
+  // Memoized on the values the cells actually read so DataTable's per-row
+  // cache holds across selection clicks; see the DataTable docstring.
+  const columns = useMemo<DataTableColumn<AliasResponse>[]>(() => [
     {
       id: "alias",
       header: "Alias",
@@ -202,7 +207,7 @@ export function AliasesPage() {
           <span className="text-xs text-[var(--otari-muted)]">set in config.yml</span>
         ),
     },
-  ];
+  ], [deleteAlias.isPending, deleteAlias.mutate]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -250,7 +255,7 @@ export function AliasesPage() {
         ariaLabel="Aliases"
         columns={columns}
         rows={rows}
-        getRowKey={(a) => a.name}
+        getRowKey={getAliasRowKey}
         isLoading={aliases.isLoading}
         emptyContent="No aliases yet. Create one to give a model a friendly name."
         selectionMode="multiple"

@@ -272,6 +272,21 @@ describe("ActivityPage", () => {
     expect(latest).toContain("status=error");
   });
 
+  it("snaps URL-supplied page sizes to the nearest offered option", async () => {
+    // An old size=500 bookmark must not resurrect second-long selection
+    // clicks, and a hand-edited size=-5 must not reach the API as a bad limit.
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?size=500");
+
+    await screen.findByText("gpt-4o");
+    expect(listCalls(calls).at(-1)).toContain("limit=100");
+
+    const { calls: negativeCalls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?size=-5");
+    await waitFor(() => expect(listCalls(negativeCalls).length).toBeGreaterThan(0));
+    expect(listCalls(negativeCalls).at(-1)).toContain("limit=25");
+  });
+
   it("shows the paginator range and total", async () => {
     mockApi({ rows: Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })), total: 120 });
     renderPage(<ActivityPage />);

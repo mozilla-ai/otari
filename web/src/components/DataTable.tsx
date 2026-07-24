@@ -117,8 +117,9 @@ export function DataTable<Row extends object>({
   // row instead of the whole page of rows (which made checkbox clicks lag by
   // whole seconds at large page sizes). The cache is invalidated when any input
   // that changes row rendering does (the `dependencies` on Table.Body below),
-  // so callers must keep `columns` (and `rowClassName`, if used) referentially
-  // stable across unrelated re-renders for the cache to pay off.
+  // so callers must keep `columns`, `getRowKey`, and `rowClassName` (if used)
+  // referentially stable across unrelated re-renders for the cache to pay off;
+  // an inline arrow for any of them rebuilds every row on each render.
   const renderRow = useCallback(
     (row: Row) => {
       const key = getRowKey(row);
