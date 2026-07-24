@@ -177,17 +177,17 @@ describe("DataTable", () => {
     // nothing. The panel must open adjacent to the clicked row.
     const user = userEvent.setup();
     const onRowAction = vi.fn();
-    const renderDetail = (r: Row) => <div data-testid="detail">{`detail for ${r.name}`}</div>;
+    const renderDetail = (r: Row) => <div>{`detail for ${r.name}`}</div>;
     render(<DataTable {...base({ onRowAction, detailKey: "b", renderDetail })} />);
 
     const rows = screen.getAllByRole("row");
     const bravoIndex = rows.findIndex((r) => within(r).queryByText("Bravo"));
     expect(bravoIndex).toBeGreaterThan(0);
-    expect(within(rows[bravoIndex + 1]).getByTestId("detail")).toHaveTextContent("detail for Bravo");
+    expect(within(rows[bravoIndex + 1]).getByText("detail for Bravo")).toBeInTheDocument();
 
     // Activating the detail row itself must not fire onRowAction (which would
     // re-toggle the panel in callers).
-    await user.click(screen.getByTestId("detail"));
+    await user.click(screen.getByText("detail for Bravo"));
     expect(onRowAction).not.toHaveBeenCalled();
   });
 
