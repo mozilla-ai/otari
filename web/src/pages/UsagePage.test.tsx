@@ -65,7 +65,11 @@ function mockApi(body: UsageSummary | null) {
 // Surfaces the current location so a drill-down navigation can be asserted.
 function LocationProbe() {
   const loc = useLocation();
-  return <div data-testid="loc">{`${loc.pathname}${loc.search}`}</div>;
+  // A status role with an accessible name so tests query the probe by role
+  // rather than a test id.
+  return (
+    <div role="status" aria-label="Current location">{`${loc.pathname}${loc.search}`}</div>
+  );
 }
 
 function renderPage(ui: ReactElement) {
@@ -166,9 +170,73 @@ describe("UsagePage", () => {
     const row = (await screen.findByText("gpt-5.6")).closest("tr")!;
     await user.click(row);
 
-    const loc = screen.getByTestId("loc").textContent ?? "";
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
     expect(loc.startsWith("/activity")).toBe(true);
     expect(loc).toContain("model=gpt-5.6");
+  });
+
+  it("keeps an active user filter when drilling into a model", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("gpt-5.6");
+
+    // Filter by a user, then drill into a model row. The user constraint must
+    // survive the navigation, not be dropped in favor of only the clicked model.
+    const userInput = screen.getByRole("combobox", { name: "User" });
+    await user.click(userInput);
+    await user.type(userInput, "alice");
+    await user.click(await screen.findByRole("option", { name: /alice/ }));
+
+    const row = (await screen.findByText("gpt-5.6")).closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
+    expect(loc.startsWith("/activity")).toBe(true);
+    expect(loc).toContain("model=gpt-5.6");
+    expect(loc).toContain("user_id=alice");
+  });
+
+  it("keeps an active model filter when drilling into a user", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("alice");
+
+    // Filter by a model, then drill into a user row. The model constraint must
+    // survive the navigation, not be dropped in favor of only the clicked user.
+    const modelInput = screen.getByRole("combobox", { name: "Model" });
+    await user.click(modelInput);
+    await user.type(modelInput, "gpt");
+    await user.click(await screen.findByRole("option", { name: /gpt-5.6/ }));
+
+    const row = (await screen.findByText("alice")).closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
+    expect(loc.startsWith("/activity")).toBe(true);
+    expect(loc).toContain("user_id=alice");
+    expect(loc).toContain("model=gpt-5.6");
+  });
+
+  it("keeps an active API key filter when drilling into a model", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("gpt-5.6");
+
+    // Filter by an API key, then drill into a model row. The key constraint must
+    // survive the navigation alongside the clicked model.
+    await user.click(screen.getByPlaceholderText("All keys"));
+    await user.click(await screen.findByRole("option", { name: "ci-bot" }));
+
+    const row = (await screen.findByText("gpt-5.6")).closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
+    expect(loc.startsWith("/activity")).toBe(true);
+    expect(loc).toContain("model=gpt-5.6");
+    expect(loc).toContain("api_key_id=key-1");
   });
 
   it("filters models by typeahead and commits the exact picked model", async () => {

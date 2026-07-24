@@ -476,7 +476,12 @@ export function UsagePage() {
               rows={data?.by_model ?? []}
               totalCost={totals?.cost ?? 0}
               emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
-              onDrill={(key) => drillTo({ model: key })}
+              // Drilling into a model keeps the other active filters (user, API key),
+              // so the log stays scoped to them instead of showing every request for
+              // the model.
+              onDrill={(key) =>
+                drillTo({ model: key, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined })
+              }
               loading={summary.isLoading}
             />
             <BreakdownTable
@@ -484,7 +489,15 @@ export function UsagePage() {
               rows={data?.by_user ?? []}
               totalCost={totals?.cost ?? 0}
               emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
-              onDrill={(key) => drillTo({ user_id: key })}
+              // Likewise, drilling into a user keeps the other active filters (model,
+              // API key).
+              onDrill={(key) =>
+                drillTo({
+                  user_id: key,
+                  model: modelFilter.trim() || undefined,
+                  api_key_id: apiKeyFilter || undefined,
+                })
+              }
               loading={summary.isLoading}
             />
           </div>

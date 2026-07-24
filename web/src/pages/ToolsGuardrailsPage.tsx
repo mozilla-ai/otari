@@ -120,6 +120,10 @@ function UrlRow({
 }) {
   const committed = typeof field.value === "string" ? field.value : "";
   const [draft, setDraft] = useState(committed);
+  // The URL a still-relevant test result belongs to. A pending request for the old
+  // URL can resolve after the field is edited; only render a result whose URL still
+  // matches the field, so an outcome is never shown against a different URL.
+  const [testedUrl, setTestedUrl] = useState<string | null>(null);
   const test = useTestService();
 
   useEffect(() => {
@@ -128,6 +132,7 @@ function UrlRow({
 
   const changed = draft.trim() !== committed;
   const trimmed = draft.trim();
+  const resultMatches = testedUrl !== null && testedUrl === trimmed;
 
   return (
     <div className={ROW_CLASS}>
@@ -142,7 +147,8 @@ function UrlRow({
         onChange={(event) => {
           setDraft(event.target.value);
           // Drop any prior reachability result so a result for the old URL
-          // never sits beside a newly-typed, untested one.
+          // never sits beside a newly-typed, untested one. The result render is
+          // also gated on `resultMatches`, which covers a late-resolving request.
           test.reset();
         }}
         className={INPUT_CELL}
@@ -162,7 +168,10 @@ function UrlRow({
           variant="outline"
           aria-label={`Test ${field.service}`}
           isDisabled={trimmed === "" || test.isPending}
-          onPress={() => test.mutate({ service: field.service, url: trimmed })}
+          onPress={() => {
+            setTestedUrl(trimmed);
+            test.mutate({ service: field.service, url: trimmed });
+          }}
         >
           {test.isPending ? "Testing…" : "Test"}
         </Button>
@@ -170,7 +179,7 @@ function UrlRow({
       <div className={MESSAGE_CELL}>
         {/* aria-live so the reachability outcome is announced, not just shown. */}
         <span role="status" aria-live="polite" className="block break-words text-xs">
-          {test.isPending ? null : test.error ? (
+          {test.isPending || !resultMatches ? null : test.error ? (
             <span className="text-red-700">{errorMessage(test.error)}</span>
           ) : test.data ? (
             <span className={test.data.ok ? "font-medium text-green-700" : "text-red-700"}>{test.data.reason}</span>
