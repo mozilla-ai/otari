@@ -30,9 +30,11 @@ function isExternal(href: string | undefined): boolean {
 }
 
 // The guide opens with its own top-level title ("# Admin dashboard"), which
-// would duplicate the page header below. Drop that leading H1 so the page shows
-// a single title; the guide's intro paragraph then flows straight under it.
-const guideBody = dashboardGuide.replace(/^#[^\n]*\n+/, "");
+// would duplicate the page header below. Drop that leading ATX heading so the
+// page shows a single title; the guide's intro paragraph then flows straight
+// under it. Anchored to an ATX heading (`#` + space) so a first line that only
+// happens to start with `#` is left alone.
+const guideBody = dashboardGuide.replace(/^#{1,6}[ \t]+.*\r?\n+/, "");
 
 const markdownComponents: Components = {
   a: ({ href, children, ...props }: AnchorHTMLAttributes<HTMLAnchorElement>) => {
