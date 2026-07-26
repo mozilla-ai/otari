@@ -12,6 +12,9 @@
   --otari-line: #dbe5e8;
   --otari-surface: #ffffff;
   --otari-bg: #f6f9fa;
+  /* Foreground for code inside the dark code blocks in the bundled user guide
+     (DocsPage). A near-white that reads on the --otari-ink block background. */
+  --otari-code-ink: #e8eef0;
 }
 
 /* Shared DataTable styling (HeroUI's Table).
@@ -202,7 +205,7 @@
 }
 .otari-markdown pre code {
   background-color: transparent;
-  color: #e8eef0;
+  color: var(--otari-code-ink);
   padding: 0;
   border-radius: 0;
   font-size: 0.82rem;
