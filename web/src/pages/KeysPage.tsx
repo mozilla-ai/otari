@@ -9,7 +9,7 @@ import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { Field } from "@/components/Field";
 import { accessLabel, ModelScopeControl } from "@/components/ModelScopeControl";
 import { UserComboBox } from "@/components/UserComboBox";
-import { ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
+import { EmptyState, ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // ---------- helpers ----------
@@ -550,27 +550,6 @@ function AccessChip({ allowed }: { allowed: string[] | null }) {
   );
 }
 
-function OnboardingPanel({ onCreate }: { onCreate: () => void }) {
-  return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-6">
-        <div>
-          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">No API keys yet</h2>
-          <p className="mt-1 text-sm text-[var(--otari-muted)]">
-            An API key authenticates callers to this gateway. Create one to make your first request; the secret is shown
-            once, so keep it somewhere safe.
-          </p>
-        </div>
-        <div>
-          <Button variant="primary" onPress={onCreate}>
-            Create your first key
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
-  );
-}
-
 export function KeysPage() {
   const keys = useKeys();
   const updateKey = useUpdateKey();
@@ -765,8 +744,11 @@ export function KeysPage() {
       <ErrorBanner error={keys.error ?? updateKey.error ?? rotateKey.error ?? deleteKey.error} />
 
       {showOnboarding ? (
-        <OnboardingPanel
-          onCreate={() => {
+        <EmptyState
+          title="No API keys yet"
+          description="An API key authenticates callers to this gateway. Create one to make your first request; the secret is shown once, so keep it somewhere safe."
+          actionLabel="Create your first key"
+          onAction={() => {
             setEditing(null);
             setAddOpen(true);
           }}

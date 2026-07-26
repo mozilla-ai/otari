@@ -168,6 +168,37 @@ describe("AppShell responsive layout", () => {
     expect(main).toHaveAttribute("inert");
   });
 
+  it("moves focus to the main region via the skip link without changing the route", async () => {
+    mockMatchMedia(false);
+    const user = userEvent.setup();
+    const { container } = renderShell();
+
+    // The skip link is the first tab stop so keyboard users reach the page body
+    // without traversing the whole nav.
+    await user.tab();
+    const skip = screen.getByRole("button", { name: "Skip to main content" });
+    expect(skip).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+
+    const main = container.querySelector("main")!;
+    expect(main).toHaveFocus();
+    // Focus moved without navigating away: the index route is still rendered.
+    expect(screen.getByText("OVERVIEW PAGE")).toBeInTheDocument();
+  });
+
+  it("hides the decorative nav icons from assistive tech", () => {
+    mockMatchMedia(false);
+    const { container } = renderShell();
+
+    // Each nav link carries a visible text label, so its leading glyph is
+    // decorative and must not be announced twice. Every SVG in the shell is marked
+    // aria-hidden to match the rest of the codebase's convention.
+    const icons = container.querySelectorAll("svg");
+    expect(icons.length).toBeGreaterThan(0);
+    icons.forEach((icon) => expect(icon).toHaveAttribute("aria-hidden"));
+  });
+
   it("subscribes via the legacy matchMedia API when addEventListener is absent", () => {
     // Safari < 14 exposes only addListener/removeListener; the shell must still
     // react to breakpoint changes rather than throwing on a missing method.

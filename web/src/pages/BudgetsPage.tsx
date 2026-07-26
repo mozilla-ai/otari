@@ -15,7 +15,7 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { Field } from "@/components/Field";
-import { ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
+import { EmptyState, ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
 import { UserMultiSelect } from "@/components/UserMultiSelect";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
@@ -345,27 +345,6 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
 
 // ---------- onboarding ----------
 
-function OnboardingPanel({ onCreate }: { onCreate: () => void }) {
-  return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-6">
-        <div>
-          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">No budgets yet</h2>
-          <p className="mt-1 text-sm text-[var(--otari-muted)]">
-            A budget caps how much a user may spend and, optionally, resets that spend on a schedule. Create one, then
-            assign it to users to enforce a limit.
-          </p>
-        </div>
-        <div>
-          <Button variant="primary" onPress={onCreate}>
-            Create your first budget
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
-  );
-}
-
 // ---------- inline confirm (names the target, no modal) ----------
 
 function InlineDelete({ label, isPending, onConfirm }: { label: string; isPending: boolean; onConfirm: () => void }) {
@@ -587,8 +566,11 @@ export function BudgetsPage() {
       </InfoBanner>
 
       {showOnboarding ? (
-        <OnboardingPanel
-          onCreate={() => {
+        <EmptyState
+          title="No budgets yet"
+          description="A budget caps how much a user may spend and, optionally, resets that spend on a schedule. Create one, then assign it to users to enforce a limit."
+          actionLabel="Create your first budget"
+          onAction={() => {
             setEditing(null);
             setAssignmentError(null);
             setPendingAssignments(null);
