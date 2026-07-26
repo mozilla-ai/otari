@@ -242,6 +242,19 @@ def test_keyless_placeholder_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     assert keyless_placeholder_api_key(LLMProvider.ANTHROPIC, "http://x/v1", "sk-real") is None
 
 
+def test_env_var_fallback_honors_compound_key_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Some providers expose ``ENV_API_KEY_NAME`` as a ``/``-joined list of
+    # alternatives rather than one variable (gemini: "GEMINI_API_KEY/GOOGLE_API_KEY").
+    # A key set under any alternative must still suppress the placeholder, or it
+    # would shadow the operator's real env-var credential.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("GOOGLE_API_KEY", "goog-from-env")
+    assert keyless_placeholder_api_key(LLMProvider.GEMINI, "http://x/v1", None) is None
+    # With neither alternative set, a keyless custom endpoint still gets the placeholder.
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    assert keyless_placeholder_api_key(LLMProvider.GEMINI, "http://x/v1", None) == _KEYLESS_PLACEHOLDER_API_KEY
+
+
 # ---------------------------------------------------------------------------
 # normalize_pricing_key
 # ---------------------------------------------------------------------------

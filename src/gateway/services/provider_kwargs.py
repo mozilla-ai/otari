@@ -42,12 +42,19 @@ def _provider_env_key_present(provider: LLMProvider) -> bool:
     Read directly from the environment because these are any-llm's own SDK
     variables, not otari config: any-llm falls back to them before raising, so
     the placeholder must not shadow a key the operator supplied that way.
+
+    ``ENV_API_KEY_NAME`` is not always a single variable name: some providers use
+    a ``/``-joined label listing alternatives (e.g. gemini's
+    ``"GEMINI_API_KEY/GOOGLE_API_KEY"``), so treat it as candidates and count the
+    key present when any one of them is set.
     """
     try:
         env_name = AnyLLM.get_provider_class(provider).ENV_API_KEY_NAME
     except (ImportError, AttributeError):
         return False
-    return bool(env_name and os.getenv(env_name))
+    if not env_name:
+        return False
+    return any(os.getenv(candidate.strip()) for candidate in env_name.split("/") if candidate.strip())
 
 
 def keyless_placeholder_api_key(provider: LLMProvider, api_base: Any, api_key: Any) -> str | None:

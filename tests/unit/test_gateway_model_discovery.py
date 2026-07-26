@@ -674,7 +674,7 @@ class TestDiscoveryStallGuards:
         assert by_provider["bad"].error is not None  # surfaced as an error, not raised
 
 
-class TestKeylessProviderConnectionTest:
+class TestKeylessProviderConnection:
     """test_provider_credentials must honor the optional key for custom endpoints (otari#421)."""
 
     @pytest.mark.asyncio
