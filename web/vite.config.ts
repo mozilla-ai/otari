@@ -10,6 +10,13 @@ import { defineConfig } from "vitest/config";
 // build stage. See AGENTS.md ("Web dashboard").
 const outDir = fileURLToPath(new URL("../src/gateway/static/dashboard", import.meta.url));
 
+// The dashboard bundles the operator user guide (docs/dashboard.md) so the
+// running app ships the guide it matches, rather than pointing at a separate
+// docs site that may describe a different version. The guide lives at the repo
+// root, outside web/, so the dev server and Vitest need read access to it (the
+// production build resolves it through Rollup regardless).
+const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+
 // The gateway serves the dashboard and the API from one origin, so the app
 // fetches "/v1/..." and "/health" as same-origin paths. `npm run dev` serves
 // only the SPA, so proxy those to a running gateway. Override the target to
@@ -42,6 +49,9 @@ export default defineConfig({
     },
   },
   server: {
+    // Allow reading the bundled user guide (docs/dashboard.md) from the repo
+    // root; the default only permits web/ and its workspace.
+    fs: { allow: [repoRoot] },
     proxy: {
       "/v1": apiProxy,
       "/health": apiProxy,

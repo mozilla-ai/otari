@@ -15,6 +15,9 @@ const AliasesPage = lazy(async () => ({
 const BudgetsPage = lazy(async () => ({
   default: (await import("@/pages/BudgetsPage")).BudgetsPage,
 }));
+const DocsPage = lazy(async () => ({
+  default: (await import("@/pages/DocsPage")).DocsPage,
+}));
 const KeysPage = lazy(async () => ({
   default: (await import("@/pages/KeysPage")).KeysPage,
 }));
@@ -70,6 +73,7 @@ export default function App() {
           <Route path="aliases" element={withPageLoading(<AliasesPage />)} />
           <Route path="tools" element={withPageLoading(<ToolsGuardrailsPage />)} />
           <Route path="settings" element={withPageLoading(<SettingsPage />)} />
+          <Route path="docs" element={withPageLoading(<DocsPage />)} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

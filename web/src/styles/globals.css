@@ -118,6 +118,133 @@
   }
 }
 
+/* Rendered Markdown for the bundled user guide (DocsPage). There is no Tailwind
+   typography plugin in web/, so the guide's prose is styled here, scoped to
+   `.otari-markdown`, using the same --otari-* tokens as the rest of the shell.
+   Rules live after the @heroui/styles import so they win without !important. */
+.otari-markdown {
+  color: var(--otari-ink);
+  font-size: 0.875rem;
+  line-height: 1.65;
+}
+.otari-markdown > :first-child {
+  margin-top: 0;
+}
+.otari-markdown h1,
+.otari-markdown h2,
+.otari-markdown h3,
+.otari-markdown h4 {
+  color: var(--otari-ink);
+  font-weight: 600;
+  line-height: 1.3;
+}
+.otari-markdown h1 {
+  font-size: 1.5rem;
+  margin: 2rem 0 0.75rem;
+}
+.otari-markdown h2 {
+  font-size: 1.25rem;
+  margin: 2rem 0 0.5rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--otari-line);
+}
+.otari-markdown h3 {
+  font-size: 1.05rem;
+  margin: 1.5rem 0 0.5rem;
+}
+.otari-markdown h4 {
+  font-size: 0.95rem;
+  margin: 1.25rem 0 0.25rem;
+}
+.otari-markdown p {
+  margin: 0.75rem 0;
+}
+.otari-markdown a {
+  color: var(--otari-brand-dark);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.otari-markdown a:hover {
+  color: var(--otari-brand);
+}
+.otari-markdown ul,
+.otari-markdown ol {
+  margin: 0.75rem 0;
+  padding-left: 1.5rem;
+}
+.otari-markdown ul {
+  list-style: disc;
+}
+.otari-markdown ol {
+  list-style: decimal;
+}
+.otari-markdown li {
+  margin: 0.25rem 0;
+}
+.otari-markdown li > ul,
+.otari-markdown li > ol {
+  margin: 0.25rem 0;
+}
+.otari-markdown code {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background-color: var(--otari-brand-tint);
+  color: var(--otari-brand-dark);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.35rem;
+}
+.otari-markdown pre {
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  background-color: var(--otari-ink);
+  border-radius: 0.6rem;
+  overflow-x: auto;
+}
+.otari-markdown pre code {
+  background-color: transparent;
+  color: #e8eef0;
+  padding: 0;
+  border-radius: 0;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+.otari-markdown blockquote {
+  margin: 1rem 0;
+  padding: 0.25rem 0 0.25rem 1rem;
+  border-left: 3px solid var(--otari-brand);
+  color: var(--otari-muted);
+}
+.otari-markdown hr {
+  margin: 1.5rem 0;
+  border: 0;
+  border-top: 1px solid var(--otari-line);
+}
+.otari-markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 1rem 0;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.otari-markdown th,
+.otari-markdown td {
+  border: 1px solid var(--otari-line);
+  padding: 0.4rem 0.7rem;
+  text-align: left;
+  vertical-align: top;
+}
+.otari-markdown th {
+  background-color: var(--otari-brand-tint);
+  color: var(--otari-ink);
+  font-weight: 600;
+}
+.otari-markdown tbody tr:hover td,
+.otari-markdown tr:hover td {
+  background-color: var(--otari-bg);
+}
+
 html,
 body,
 #root {

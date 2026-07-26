@@ -502,26 +502,53 @@ export function AppShell() {
               );
             })}
           </nav>
-          {/* Subtle pointer to the hosted product; muted until hovered. */}
-          <a
-            href="https://otari.ai"
-            target="_blank"
-            rel="noreferrer"
-            title="otari.ai — the hosted Otari gateway"
-            className={clsx(
-              "mt-auto mb-3 flex items-center rounded-lg py-2 text-xs font-medium text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-brand-dark)]",
-              effectiveCollapsed ? "mx-2 justify-center px-0" : "mx-3 gap-2 px-3",
-            )}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
-              <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" strokeLinejoin="round" />
-            </svg>
-            {effectiveCollapsed ? null : (
-              <span className="flex-1">
-                otari.ai <span aria-hidden>↗</span>
-              </span>
-            )}
-          </a>
+          {/* Footer links, pinned to the bottom of the rail. The user guide is the
+              dashboard's own docs, bundled with the running gateway (see DocsPage);
+              otari.ai is a subtler pointer to the hosted product below it. */}
+          <div className="mt-auto flex flex-col gap-1 pb-3">
+            <NavLink
+              to="/docs"
+              // Tapping dismisses the mobile drawer, like the primary nav above.
+              onClick={() => setMobileNavOpen(false)}
+              aria-label={effectiveCollapsed ? "User guide" : undefined}
+              title={effectiveCollapsed ? "User guide" : undefined}
+              className={({ isActive }) =>
+                clsx(
+                  "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
+                  effectiveCollapsed ? "mx-2 justify-center px-0" : "mx-3 gap-3 px-3",
+                  isActive
+                    ? "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
+                    : "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]",
+                )
+              }
+            >
+              {/* An open book: the operator guide for this dashboard. */}
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+                <path d="M12 6.5C10.5 5 8 4.5 4 4.5V18c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2V4.5c-4 0-6.5.5-8 2z" strokeLinejoin="round" />
+                <path d="M12 6.5V20" strokeLinecap="round" />
+              </svg>
+              {effectiveCollapsed ? null : "User guide"}
+            </NavLink>
+            <a
+              href="https://otari.ai"
+              target="_blank"
+              rel="noreferrer"
+              title="otari.ai — the hosted Otari gateway"
+              className={clsx(
+                "flex items-center rounded-lg py-2 text-xs font-medium text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-brand-dark)]",
+                effectiveCollapsed ? "mx-2 justify-center px-0" : "mx-3 gap-2 px-3",
+              )}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" strokeLinejoin="round" />
+              </svg>
+              {effectiveCollapsed ? null : (
+                <span className="flex-1">
+                  otari.ai <span aria-hidden>↗</span>
+                </span>
+              )}
+            </a>
+          </div>
           {collapsed || isMobile ? null : (
             <div
               role="separator"

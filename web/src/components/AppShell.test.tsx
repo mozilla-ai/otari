@@ -168,6 +168,16 @@ describe("AppShell responsive layout", () => {
     expect(main).toHaveAttribute("inert");
   });
 
+  it("links to the bundled user guide from the sidebar footer", () => {
+    mockMatchMedia(false);
+    renderShell();
+
+    // A footer link points operators at the guide bundled with this dashboard,
+    // discoverable without hunting for a separate docs site.
+    const guideLink = screen.getByRole("link", { name: "User guide" });
+    expect(guideLink).toHaveAttribute("href", "/docs");
+  });
+
   it("subscribes via the legacy matchMedia API when addEventListener is absent", () => {
     // Safari < 14 exposes only addListener/removeListener; the shell must still
     // react to breakpoint changes rather than throwing on a missing method.
