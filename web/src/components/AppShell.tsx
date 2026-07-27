@@ -540,7 +540,7 @@ export function AppShell() {
                 effectiveCollapsed ? "mx-2 justify-center px-0" : "mx-3 gap-2 px-3",
               )}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
+              <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4 shrink-0">
                 <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" strokeLinejoin="round" />
               </svg>
               {effectiveCollapsed ? null : (
