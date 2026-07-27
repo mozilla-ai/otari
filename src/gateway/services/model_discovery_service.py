@@ -268,8 +268,9 @@ async def _discover_for_provider(
 
     # Opt-in SSRF gate (default allow-all). Raised before the declared-models
     # fallback below so a blocked endpoint fails outright rather than silently
-    # serving its declared listing.
-    if api_base is not None:
+    # serving its declared listing. Truthy check so an empty/absent api_base
+    # (the "use the SDK default endpoint" case) is not treated as a URL.
+    if api_base:
         await validate_provider_api_base(api_base)
 
     try:
@@ -406,8 +407,9 @@ async def test_provider_credentials(
         )
     # Opt-in SSRF gate (default allow-all): refuse an internal api_base before we
     # dial it, when the operator has turned the gate on. Reported like any other
-    # test failure so the key is never echoed.
-    if api_base is not None:
+    # test failure so the key is never echoed. Truthy check so an empty/absent
+    # api_base (the "use the SDK default endpoint" case) is not treated as a URL.
+    if api_base:
         try:
             await validate_provider_api_base(api_base)
         except UnsafeURLError as exc:

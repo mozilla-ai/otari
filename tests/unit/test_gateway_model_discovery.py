@@ -793,6 +793,27 @@ class TestProviderApiBaseSsrfGate:
         mock_alist.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_gate_on_does_not_affect_provider_without_api_base(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A standard provider (no api_base, SDK default endpoint) is dialed even when gated."""
+        monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+        config = self._make_config({"openai": {"api_key": "sk-test"}})
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                new_callable=AsyncMock,
+                return_value=[_make_model("gpt-4o")],
+            ) as mock_alist,
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_provider_models(config, "openai")
+
+        assert result.error is None
+        assert [m.id for m in result.models] == ["gpt-4o"]
+        mock_alist.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_discovery_block_skips_declared_fallback_when_gated(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A blocked api_base fails outright; it must not fall back to declared models."""
         monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
