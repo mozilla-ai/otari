@@ -206,8 +206,7 @@ describe("ProvidersPage", () => {
     const user = userEvent.setup();
     renderPage(<ProvidersPage />);
 
-    await screen.findByText(/No providers yet/);
-    await user.click(screen.getByRole("button", { name: "Add your first provider" }));
+    await user.click(await screen.findByRole("button", { name: "Add your first provider" }));
     await user.click(screen.getByRole("button", { name: "Custom endpoint" }));
     await user.type(screen.getByLabelText("Name"), "my-llm");
     await user.type(screen.getByLabelText("API base"), "http://box:8000/v1");
@@ -374,6 +373,11 @@ describe("ProvidersPage", () => {
 
     expect(await screen.findByText("Welcome to Otari")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add provider" })).not.toBeInTheDocument();
+    // Only the onboarding panel ("Welcome to Otari") shows: the table (and its own
+    // "no rows" fallback, whose "No providers yet" text is unique to it) is
+    // suppressed so the two empty states are not stacked.
+    expect(screen.queryByText(/No providers yet/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "Providers" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add your first provider" }));
 
     expect(screen.queryByText("Welcome to Otari")).not.toBeInTheDocument();

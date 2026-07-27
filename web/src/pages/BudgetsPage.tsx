@@ -631,17 +631,22 @@ export function BudgetsPage() {
         </BulkActionBar>
       ) : null}
 
-      <DataTable
-        ariaLabel="Budgets"
-        columns={columns}
-        rows={rows}
-        getRowKey={getBudgetRowKey}
-        isLoading={loading}
-        emptyContent="No budgets yet. Create one to cap spending."
-        selectionMode="multiple"
-        selectedKeys={selection.selectedKeys}
-        onSelectionChange={selection.onSelectionChange}
-      />
+      {/* Suppress the table (and its own empty message) while the onboarding
+          panel owns the empty state, so a fresh gateway shows one call to action,
+          not a panel stacked over a redundant "no rows" table. */}
+      {showOnboarding ? null : (
+        <DataTable
+          ariaLabel="Budgets"
+          columns={columns}
+          rows={rows}
+          getRowKey={getBudgetRowKey}
+          isLoading={loading}
+          emptyContent="No budgets yet. Create one to cap spending."
+          selectionMode="multiple"
+          selectedKeys={selection.selectedKeys}
+          onSelectionChange={selection.onSelectionChange}
+        />
+      )}
 
       {historyBudget ? (
         <Card>
