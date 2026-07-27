@@ -168,7 +168,11 @@
   text-underline-offset: 2px;
 }
 .otari-markdown a:hover {
-  color: var(--otari-brand);
+  /* Thicken the underline on hover rather than lightening the text: at this
+     size/weight WCAG 1.4.3 needs 4.5:1, and --otari-brand (#4e8295) is only
+     4.24:1 on the card, so keep the 6.2:1 --otari-brand-dark and signal hover
+     another way. */
+  text-decoration-thickness: 2px;
 }
 .otari-markdown ul,
 .otari-markdown ol {
@@ -222,12 +226,14 @@
   border: 0;
   border-top: 1px solid var(--otari-line);
 }
-.otari-markdown table {
-  display: block;
-  width: max-content;
+/* The horizontal scroll lives on a wrapper (see DocsPage's table override) so
+   the <table> keeps its native display and a11y semantics. */
+.otari-markdown-scroll {
+  margin: 1rem 0;
   max-width: 100%;
   overflow-x: auto;
-  margin: 1rem 0;
+}
+.otari-markdown table {
   border-collapse: collapse;
   font-size: 0.85rem;
 }

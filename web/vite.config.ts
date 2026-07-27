@@ -12,10 +12,14 @@ const outDir = fileURLToPath(new URL("../src/gateway/static/dashboard", import.m
 
 // The dashboard bundles the operator user guide (docs/dashboard.md) so the
 // running app ships the guide it matches, rather than pointing at a separate
-// docs site that may describe a different version. The guide lives at the repo
-// root, outside web/, so the dev server and Vitest need read access to it (the
-// production build resolves it through Rollup regardless).
-const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+// docs site that may describe a different version. The guide lives outside web/,
+// so the dev server and Vitest need read access to it (the production build
+// resolves it through Rollup regardless). Grant only web/ and docs/: an explicit
+// server.fs.allow replaces Vite's default, so widening it to the whole repo root
+// would serve gitignored secrets (config.yml, otari.db) at /@fs/... over the dev
+// server. web/ must be listed since the default is replaced.
+const webRoot = fileURLToPath(new URL("./", import.meta.url));
+const docsDir = fileURLToPath(new URL("../docs", import.meta.url));
 
 // The gateway serves the dashboard and the API from one origin, so the app
 // fetches "/v1/..." and "/health" as same-origin paths. `npm run dev` serves
@@ -49,9 +53,9 @@ export default defineConfig({
     },
   },
   server: {
-    // Allow reading the bundled user guide (docs/dashboard.md) from the repo
-    // root; the default only permits web/ and its workspace.
-    fs: { allow: [repoRoot] },
+    // Allow reading the bundled user guide (docs/dashboard.md) from docs/;
+    // web/ stays listed because an explicit allow list replaces the default.
+    fs: { allow: [webRoot, docsDir] },
     proxy: {
       "/v1": apiProxy,
       "/health": apiProxy,

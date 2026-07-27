@@ -25,12 +25,31 @@ describe("DocsPage", () => {
     expect(h1s[0]).toHaveTextContent("User guide");
   });
 
-  it("renders GFM tables from the guide", () => {
+  it("renders GFM tables from the guide, keeping table semantics inside a focusable scroll region", () => {
     render(<DocsPage />);
 
     // The two-key model is a Markdown table; rendering it as a real <table>
     // proves remark-gfm is wired up (plain Markdown would leave it as text).
-    expect(screen.getAllByRole("table").length).toBeGreaterThan(0);
+    const tables = screen.getAllByRole("table");
+    expect(tables.length).toBeGreaterThan(0);
+    // The horizontal scroll lives on a focusable wrapper so keyboard users can
+    // reach clipped columns, and the <table> keeps its native semantics rather
+    // than a display:block that would strip role=table in WebKit.
+    const region = screen.getAllByRole("region", { name: "Table" })[0];
+    expect(region).toHaveAttribute("tabindex", "0");
+    expect(region).toContainElement(tables[0]);
+  });
+
+  it("does not leak react-markdown's node prop onto rendered DOM elements", () => {
+    const { container } = render(<DocsPage />);
+
+    // react-markdown passes each hast node to custom components; if it is not
+    // destructured out of the DOM spread it renders as node="[object Object]".
+    const anchors = container.querySelectorAll("a");
+    expect(anchors.length).toBeGreaterThan(0);
+    for (const anchor of anchors) {
+      expect(anchor.hasAttribute("node")).toBe(false);
+    }
   });
 
   it("rewrites sibling doc links to the GitHub source and opens them in a new tab", () => {
