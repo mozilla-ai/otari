@@ -34,6 +34,7 @@ Running and managing a gateway.
 - [Access control](access-control.md): users, API keys, and budgets, with the management endpoints that drive them.
 - [Supported models](models.md): providers, model format, and capabilities.
 - [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
+- [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.
 
 ### For integrators
 
