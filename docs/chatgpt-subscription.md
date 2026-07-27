@@ -17,7 +17,7 @@ OpenAI-compatible endpoint. Otari then treats that endpoint like any other
 self-hosted OpenAI-compatible backend, and budgets, usage logging, and key
 management layer on top unchanged.
 
-```
+```text
 your app  ->  Otari  ->  Codex-OAuth proxy  ->  Codex OAuth (ChatGPT subscription)
 ```
 
@@ -51,15 +51,36 @@ two things you need out of that step:
 - whether it requires a **downstream key** (a token you set on the proxy and
   then present to it) or serves keyless.
 
-Confirm the proxy answers before wiring Otari to it:
+Confirm the proxy answers before wiring Otari to it. If the proxy uses a
+downstream key, send it; if it is keyless, omit the header entirely rather than
+sending a placeholder:
 
 ```bash
+# keyed proxy
 curl -sS http://localhost:8317/v1/models \
-  -H "Authorization: Bearer <downstream-key-if-any>"
+  -H "Authorization: Bearer $CHATGPT_PROXY_KEY"
+
+# keyless proxy
+curl -sS http://localhost:8317/v1/models
 ```
 
 You should get back a list of models the subscription exposes (Codex serves
 GPT-5 class models; the exact ids come from the proxy).
+
+Not every proxy implements `/v1/models`. If that request 404s, verify with a
+chat-completions call instead (drop the `-H` line when the proxy is keyless):
+
+```bash
+curl -sS http://localhost:8317/v1/chat/completions \
+  -H "Authorization: Bearer $CHATGPT_PROXY_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-5","messages":[{"role":"user","content":"ping"}]}'
+```
+
+A completion (rather than a connection or auth error) confirms the proxy is
+reaching your subscription. If the proxy has no `/v1/models`, declare the served
+model ids in the provider config (see step 2) so they still appear in Otari's
+listing.
 
 ## 2. Register the proxy as a provider in Otari
 
