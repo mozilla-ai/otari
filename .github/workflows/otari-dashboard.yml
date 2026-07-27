@@ -6,12 +6,18 @@ on:
     paths:
       - 'web/**'
       - 'src/gateway/static/dashboard/**'
+      # The dashboard bundles this guide (web/src/pages/DocsPage.tsx), so a change
+      # to it makes the committed bundle stale until web is rebuilt; run the check.
+      - 'docs/dashboard.md'
       - '.github/workflows/otari-dashboard.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'web/**'
       - 'src/gateway/static/dashboard/**'
+      # The dashboard bundles this guide (web/src/pages/DocsPage.tsx), so a change
+      # to it makes the committed bundle stale until web is rebuilt; run the check.
+      - 'docs/dashboard.md'
       - '.github/workflows/otari-dashboard.yml'
   workflow_dispatch:
 

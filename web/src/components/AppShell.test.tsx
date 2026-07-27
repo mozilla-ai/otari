@@ -187,6 +187,23 @@ describe("AppShell responsive layout", () => {
     expect(screen.getByText("OVERVIEW PAGE")).toBeInTheDocument();
   });
 
+  it("makes the skip link inert while the drawer is open, matching its target", async () => {
+    mockMatchMedia(true);
+    const user = userEvent.setup();
+    renderShell();
+
+    const skip = screen.getByRole("button", { name: "Skip to main content" });
+    // Live before the modal opens: it is the keyboard user's fast path to content.
+    expect(skip).not.toHaveAttribute("inert");
+
+    await user.click(screen.getByRole("button", { name: "Open navigation" }));
+
+    // With the drawer open, main is inert, so focusing it would no-op. The skip
+    // link goes inert too rather than sitting live in front of the modal as a
+    // dead control an AT cursor reaches first.
+    expect(skip).toHaveAttribute("inert");
+  });
+
   it("hides the decorative nav icons from assistive tech", () => {
     mockMatchMedia(false);
     const { container } = renderShell();
@@ -197,6 +214,16 @@ describe("AppShell responsive layout", () => {
     const icons = container.querySelectorAll("svg");
     expect(icons.length).toBeGreaterThan(0);
     icons.forEach((icon) => expect(icon).toHaveAttribute("aria-hidden"));
+  });
+
+  it("links to the bundled user guide from the sidebar footer", () => {
+    mockMatchMedia(false);
+    renderShell();
+
+    // A footer link points operators at the guide bundled with this dashboard,
+    // discoverable without hunting for a separate docs site.
+    const guideLink = screen.getByRole("link", { name: "User guide" });
+    expect(guideLink).toHaveAttribute("href", "/docs");
   });
 
   it("subscribes via the legacy matchMedia API when addEventListener is absent", () => {
