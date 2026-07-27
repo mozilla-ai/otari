@@ -523,17 +523,22 @@ export function UsersPage() {
         </BulkActionBar>
       ) : null}
 
-      <DataTable
-        ariaLabel="Users"
-        columns={columns}
-        rows={rows}
-        getRowKey={getUserRowKey}
-        isLoading={loading}
-        emptyContent="No users yet. Create one, or create an API key to auto-create one."
-        selectionMode="multiple"
-        selectedKeys={selection.selectedKeys}
-        onSelectionChange={selection.onSelectionChange}
-      />
+      {/* Suppress the table (and its own empty message) while the onboarding
+          panel owns the empty state, so a fresh gateway shows one call to action,
+          not a panel stacked over a redundant "no rows" table. */}
+      {showOnboarding ? null : (
+        <DataTable
+          ariaLabel="Users"
+          columns={columns}
+          rows={rows}
+          getRowKey={getUserRowKey}
+          isLoading={loading}
+          emptyContent="No users yet. Create one, or create an API key to auto-create one."
+          selectionMode="multiple"
+          selectedKeys={selection.selectedKeys}
+          onSelectionChange={selection.onSelectionChange}
+        />
+      )}
 
       <ConfirmDialog
         isOpen={bulkDeleteOpen}

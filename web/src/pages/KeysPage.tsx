@@ -804,17 +804,22 @@ export function KeysPage() {
         </BulkActionBar>
       ) : null}
 
-      <DataTable
-        ariaLabel="API keys"
-        columns={columns}
-        rows={rows}
-        getRowKey={getKeyRowKey}
-        isLoading={loading}
-        emptyContent="No API keys yet. Create one to authenticate a caller."
-        selectionMode="multiple"
-        selectedKeys={selection.selectedKeys}
-        onSelectionChange={selection.onSelectionChange}
-      />
+      {/* Suppress the table (and its own empty message) while the onboarding
+          panel owns the empty state, so a fresh gateway shows one call to action,
+          not a panel stacked over a redundant "no rows" table. */}
+      {showOnboarding ? null : (
+        <DataTable
+          ariaLabel="API keys"
+          columns={columns}
+          rows={rows}
+          getRowKey={getKeyRowKey}
+          isLoading={loading}
+          emptyContent="No API keys yet. Create one to authenticate a caller."
+          selectionMode="multiple"
+          selectedKeys={selection.selectedKeys}
+          onSelectionChange={selection.onSelectionChange}
+        />
+      )}
 
       <ConfirmDialog
         isOpen={bulkDeleteOpen}
