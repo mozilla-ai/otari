@@ -39,12 +39,41 @@ function isExternal(href: string | undefined): boolean {
   return !!href && (/^https?:\/\//i.test(href) || href.startsWith("//"));
 }
 
-// The guide opens with its own top-level title ("# Admin dashboard"), which
-// would duplicate the page header below. Drop that leading ATX heading so the
-// page shows a single title; the guide's intro paragraph then flows straight
-// under it. Anchored to an ATX heading (`#` + space) so a first line that only
-// happens to start with `#` is left alone.
-const guideBody = dashboardGuide.replace(/^#{1,6}[ \t]+.*\r?\n+/, "");
+// Drop a whole "## <title>" section (through to the next level-2 heading) from
+// the guide, skipping any "## " that appears inside a fenced code block.
+function dropSection(md: string, title: string): string {
+  const lines = md.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `## ${title}`);
+  if (start === -1) return md;
+  let end = lines.length;
+  let inFence = false;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^\s*```/.test(lines[i])) {
+      inFence = !inFence;
+    } else if (!inFence && /^## /.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  // Collapse the blank-line run left where the section was removed.
+  return [...lines.slice(0, start), ...lines.slice(end)].join("\n").replace(/\n{3,}/g, "\n\n");
+}
+
+// Two edits turn the general guide into an in-dashboard reference:
+//   1. The guide opens with its own top-level title ("# Admin dashboard"), which
+//      would duplicate the page header below. Drop that leading ATX heading so
+//      the page shows a single title; the intro paragraph then flows under it.
+//      Anchored to an ATX heading (`#` + space) so a first line that merely
+//      starts with `#` is left alone.
+//   2. The reader reached this page through a running, signed-in dashboard, so
+//      the first-run walkthrough (start the gateway, find the master key, sign
+//      in) is circular here. Drop it; it stays in docs/dashboard.md for readers
+//      on GitHub and the /welcome tutorial, and its post-sign-in substance is
+//      covered by the page-by-page reference below.
+const guideBody = dropSection(
+  dashboardGuide.replace(/^#{1,6}[ \t]+.*\r?\n+/, ""),
+  "First-run walkthrough",
+);
 
 // react-markdown passes each node's hast `node` to custom components; it must be
 // destructured out of the DOM spread or it renders as node="[object Object]" on
@@ -84,7 +113,7 @@ export function DocsPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="User guide"
-        description="The operator guide for this dashboard, bundled with and version-matched to the running gateway."
+        description="A reference for operating this dashboard, bundled with and version-matched to the running gateway. New here? The get-started walkthrough lives at /welcome."
       />
       <Card>
         <Card.Content className="p-5 sm:p-6">

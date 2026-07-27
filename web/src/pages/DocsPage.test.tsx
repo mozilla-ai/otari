@@ -15,6 +15,18 @@ describe("DocsPage", () => {
     expect(screen.getByRole("heading", { name: "The two-key model" })).toBeInTheDocument();
   });
 
+  it("omits the circular first-run walkthrough but keeps the reference sections", () => {
+    render(<DocsPage />);
+
+    // The reader is already past first run (running, signed-in dashboard), so
+    // the getting-started walkthrough is trimmed from the in-app view.
+    expect(screen.queryByRole("heading", { name: "First-run walkthrough" })).toBeNull();
+    expect(screen.queryByText(/Find your master key/)).toBeNull();
+    // Sections on both sides of the dropped one still render.
+    expect(screen.getByRole("heading", { name: "The two-key model" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Page-by-page reference" })).toBeInTheDocument();
+  });
+
   it("shows a single top-level heading, dropping the guide's duplicate title", () => {
     render(<DocsPage />);
 
