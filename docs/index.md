@@ -34,7 +34,6 @@ Running and managing a gateway.
 - [Access control](access-control.md): users, API keys, and budgets, with the management endpoints that drive them.
 - [Supported models](models.md): providers, model format, and capabilities.
 - [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
-- [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.
 
 ### For integrators
 
@@ -48,6 +47,7 @@ Calling the gateway from your own code.
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
 - [Use with Codex](use-with-codex.md): point the Codex CLI at Otari.
 - [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
+- [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.
 - [Importing external usage](external-usage.md): bring subscription-backed usage (Claude Code, Codex, any OTLP app) into your analytics.
 - [SDK compatibility](sdk-compatibility.md): how the language SDKs are released and which SDK version works with which Otari version.
 

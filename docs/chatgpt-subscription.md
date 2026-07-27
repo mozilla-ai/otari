@@ -85,8 +85,9 @@ listing.
 ## 2. Register the proxy as a provider in Otari
 
 Add the proxy as a named OpenAI-compatible instance under `providers:` in your
-`config.yml`. Give it a custom instance name and set `provider_type: openai`
-(the aliases `openai-compatible` and `openai_compatible` also work):
+`config.yml`. Give it a custom instance name and set
+`provider_type: openai-compatible` (this and `openai_compatible` are aliases for
+the underlying `openai` implementation, so `provider_type: openai` works too):
 
 ```yaml
 providers:
@@ -108,6 +109,12 @@ providers:
     api_base: "http://localhost:8317/v1"
     # no api_key: the proxy handles auth via its own Codex OAuth session
 ```
+
+> **The keyless path needs a build newer than v0.4.0.** The #423 fix landed after
+> the `v0.4.0` release, so on the `0.4.0` PyPI package or Docker image a keyless
+> instance still raises `MissingApiKeyError`. Until the next release, either run a
+> build from `main` or use the downstream-key form above (set any non-empty
+> `api_key`; a local proxy that ignores it still accepts the call).
 
 Models on this instance are addressed as `chatgpt:<model>`, so the selector
 carries the instance name rather than the raw `openai:` provider. If the proxy
@@ -147,6 +154,13 @@ Pricing is keyed on the instance name, so price `chatgpt:gpt-5`, not
 so the unpriced model is still served and logged with `cost: null`. See
 [Configuration](configuration.md) for both knobs.
 
+> **Counterfactual pricing is not analytics-only.** Configured pricing also
+> drives budget reservations and reconciliation, so a per-key budget depletes
+> against this imaginary cost and will eventually return HTTP 402 even though no
+> money was spent. If you price counterfactually, size budgets to match, or keep
+> `require_pricing: false` when you want the flat-fee reality and no budget
+> enforcement on these calls.
+
 ## 4. Route a request
 
 Use an Otari client key and the `chatgpt:<model>` selector:
@@ -162,8 +176,9 @@ resp = client.chat.completions.create(
 print(resp.choices[0].message.content)
 ```
 
-Budgets, per-key limits, and usage logging all apply exactly as they do for any
-other provider.
+Budgets, per-key limits, and usage logging apply as they do for any other
+provider (see the pricing note above for how counterfactual pricing interacts
+with budgets).
 
 ## Streaming and usage logging
 
@@ -175,16 +190,26 @@ log_writer_strategy: batch
 ```
 
 With the default inline (`single`) strategy, a streaming client can disconnect
-the moment it sees the SSE `[DONE]` marker, before Otari finishes writing the
-usage row, so some records go uncommitted. The background `batch` writer decouples
-the database write from the response stream and records usage reliably. See
-[Configuration](configuration.md) for the field.
+the moment it sees the SSE `[DONE]` marker, mid-write, so the usage row can go
+uncommitted and, because the cancellation lands before reconciliation runs, the
+budget reservation for that call is left unreconciled too. The background `batch`
+writer moves the database write off the response stream, which removes that
+disconnect race for both the usage row and budget reconciliation.
+
+`batch` is not a durability guarantee: it queues rows in memory and flushes on a
+one-second interval or in 100-row batches, so usage can be up to a second late
+and queued rows are still lost on a hard crash. It fixes the client-disconnect
+race, not process death. This behavior is provider-agnostic; see
+[Configuration](configuration.md) for the `log_writer_strategy` field.
 
 ## Caveats
 
 - **Unofficial backend.** This reaches the ChatGPT backend through Codex OAuth
   and a compatibility proxy, not the supported Platform API. The proxy can break
   when the backend changes.
+- **Account risk.** Reaching the subscription through a third-party OAuth proxy
+  may run against OpenAI's terms of service and could put the account itself at
+  risk. Weigh this before pointing anything you care about at it.
 - **Subscription caps apply.** Usage still counts against your ChatGPT
   subscription's limits; Otari's budgets sit on top and do not raise those caps.
 - **An API key is sturdier.** For anything you depend on, an OpenAI Platform API
