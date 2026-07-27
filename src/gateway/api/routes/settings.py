@@ -121,6 +121,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
             "web_search_allow_private_hosts",
             "mcp_allow_loopback",
             "mcp_allow_private_hosts",
+            "provider_allow_private_hosts",
         ),
     ),
     (

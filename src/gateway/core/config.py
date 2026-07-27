@@ -56,6 +56,7 @@ ENV_BRIDGED_FIELDS = (
     "web_search_allow_private_hosts",
     "mcp_allow_loopback",
     "mcp_allow_private_hosts",
+    "provider_allow_private_hosts",
 )
 
 
@@ -521,6 +522,16 @@ class GatewayConfig(BaseSettings):
         description=(
             "SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept "
             "hostnames that fail to resolve at validation time. Off by default."
+        ),
+    )
+    provider_allow_private_hosts: bool = Field(
+        default=True,
+        description=(
+            "SSRF gate: allow a provider api_base that resolves to private/loopback/reserved hosts. "
+            "On by default (the opposite of the other SSRF gates) because operator-supplied api_base "
+            "values are master-key gated and the home-lab / self-hosted use case depends on private "
+            "endpoints. Set to false to make provider connection tests and model discovery refuse an "
+            "internal api_base. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
         ),
     )
     mode: str | None = Field(

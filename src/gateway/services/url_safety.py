@@ -15,6 +15,14 @@ Two distinct call sites with overlapping but not identical threat models:
   ``OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`` for operators with unusual
   setups (private indexes etc.).
 
+* **Provider ``api_base``** (:func:`validate_provider_api_base`) — URL is
+  operator-supplied (master-key gated, standalone-only), the same trust level
+  as a config.yml provider endpoint. This one defaults to *allow-all*: the
+  home-lab / self-hosted use case depends on private-network endpoints
+  (``localhost``, RFC 1918), so the check is off unless an operator opts in via
+  ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false``, at which point it blocks the
+  same private/link-local/reserved ranges as the web-search path.
+
 These checks are intentionally conservative: DNS rebinding can defeat host-based
 allowlists. Production deployments should also enforce egress policy at the
 network layer.
@@ -178,4 +186,57 @@ async def validate_outbound_fetch_url(url: str) -> None:
             raise UnsafeURLError(
                 f"fetch host {host!r} resolves to {addr} which is {reason}; "
                 "rejecting to prevent SSRF. Set OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS=true to override."
+            )
+
+
+def _allow_provider_private_hosts() -> bool:
+    # Defaults to True (allow-all), the opposite of the MCP/web-search gates: an
+    # operator-supplied api_base is master-key gated and the home-lab use case
+    # depends on private endpoints, so the check is off until an operator opts in.
+    return otari_env("PROVIDER_ALLOW_PRIVATE_HOSTS", "true").lower() not in {"0", "false", "no"}
+
+
+async def validate_provider_api_base(url: str) -> None:
+    """Reject a provider ``api_base`` that resolves to an internal address.
+
+    Opt-in and default-allow: an operator-supplied ``api_base`` is master-key
+    gated and standalone-only, the same trust level as a config.yml provider
+    endpoint, and the home-lab / self-hosted use case depends on private-network
+    endpoints (``localhost``, RFC 1918). So this is a no-op unless an operator
+    sets ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false``, which turns on the same
+    private/link-local/reserved-range check the web-search path uses (loopback
+    blocked too).
+
+    Async to keep the event loop unblocked during DNS resolution — see
+    :func:`_resolve_all_async`. Raises :class:`UnsafeURLError` on rejection;
+    returns ``None`` on accept (including the default allow-all case).
+    """
+    if _allow_provider_private_hosts():
+        return
+
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise UnsafeURLError(f"provider api_base must use http or https, got {scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise UnsafeURLError("provider api_base must include a hostname")
+
+    try:
+        literal = ipaddress.ip_address(host)
+        addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [literal]
+    except ValueError:
+        addresses = await _resolve_all_async(host)
+        if not addresses:
+            raise UnsafeURLError(
+                f"provider api_base host {host!r} could not be resolved; rejecting to avoid "
+                "DNS-rebinding. Set OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=true to override."
+            ) from None
+
+    for addr in addresses:
+        reason = _blocked_reason(addr)
+        if reason is not None:
+            raise UnsafeURLError(
+                f"provider api_base host {host!r} resolves to {addr} which is {reason}; "
+                "rejecting to prevent SSRF. Set OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=true to override."
             )

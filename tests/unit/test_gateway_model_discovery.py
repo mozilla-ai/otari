@@ -709,3 +709,104 @@ class TestKeylessProviderConnection:
 
         assert mock_alist.await_args is not None
         assert mock_alist.await_args.kwargs["api_key"] == "sk-real"
+
+
+class TestProviderApiBaseSsrfGate:
+    """Opt-in SSRF gate for the operator-supplied provider api_base (otari#316).
+
+    Default is allow-all (home-lab keeps working); when an operator sets
+    OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false the internal api_base is refused
+    before the endpoint is dialed, on both the ad-hoc test path and runtime
+    discovery.
+    """
+
+    def _make_config(self, providers: dict[str, Any]) -> GatewayConfig:
+        return GatewayConfig(providers=providers, model_discovery=True, model_cache_ttl_seconds=300)
+
+    @pytest.mark.asyncio
+    async def test_credentials_test_allows_internal_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", raising=False)
+        mock_alist = AsyncMock(return_value=[_make_model("local-model")])
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", mock_alist),
+        ):
+            result = await run_credentials_test("openai", api_key="sk", api_base="http://127.0.0.1:8000/v1")
+
+        assert result.error is None
+        assert mock_alist.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_credentials_test_blocks_internal_when_gated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+        mock_alist = AsyncMock(return_value=[_make_model("local-model")])
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", mock_alist),
+        ):
+            result = await run_credentials_test("openai", api_key="sk", api_base="http://127.0.0.1:8000/v1")
+
+        # Blocked before the endpoint is dialed, surfaced as a test failure.
+        assert result.error is not None
+        assert "loopback" in result.error
+        mock_alist.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_discovery_allows_internal_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", raising=False)
+        config = self._make_config(
+            {"home_lab": {"provider_type": "openai", "api_base": "http://10.0.0.5/v1", "api_key": "ht"}}
+        )
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                new_callable=AsyncMock,
+                return_value=[_make_model("m1")],
+            ),
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_provider_models(config, "home_lab")
+
+        assert result.error is None
+        assert [m.id for m in result.models] == ["m1"]
+
+    @pytest.mark.asyncio
+    async def test_discovery_blocks_internal_when_gated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+        config = self._make_config(
+            {"home_lab": {"provider_type": "openai", "api_base": "http://10.0.0.5/v1", "api_key": "ht"}}
+        )
+        mock_alist = AsyncMock(return_value=[_make_model("m1")])
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", mock_alist),
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_provider_models(config, "home_lab")
+
+        assert result.models == []
+        assert result.error is not None
+        assert "private" in result.error
+        mock_alist.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_discovery_block_skips_declared_fallback_when_gated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A blocked api_base fails outright; it must not fall back to declared models."""
+        monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+        config = self._make_config(
+            {"edge": {"provider_type": "openai", "api_base": "http://10.0.0.5/v1", "models": ["declared-1"]}}
+        )
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", new_callable=AsyncMock) as mock_alist,
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_provider_models(config, "edge")
+
+        assert result.models == []
+        assert result.error is not None
+        mock_alist.assert_not_awaited()

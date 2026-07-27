@@ -29,6 +29,7 @@ from any_llm.types.model import Model
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.provider_kwargs import get_provider_kwargs, keyless_placeholder_api_key
+from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 # Fallback bound for ad-hoc credential tests when a caller does not pass one. The
 # route passes ``model_discovery_timeout_seconds`` so the saved and unsaved paths
@@ -265,6 +266,12 @@ async def _discover_for_provider(
     api_base = kwargs.pop("api_base", None)
     client_args = kwargs.pop("client_args", None)
 
+    # Opt-in SSRF gate (default allow-all). Raised before the declared-models
+    # fallback below so a blocked endpoint fails outright rather than silently
+    # serving its declared listing.
+    if api_base is not None:
+        await validate_provider_api_base(api_base)
+
     try:
         # Bound the live call so an unreachable or slow provider fails fast
         # instead of pinning discovery for the underlying client's default
@@ -397,6 +404,15 @@ async def test_provider_credentials(
             models=[],
             error=f"'{impl_name}' is not a known provider implementation.",
         )
+    # Opt-in SSRF gate (default allow-all): refuse an internal api_base before we
+    # dial it, when the operator has turned the gate on. Reported like any other
+    # test failure so the key is never echoed.
+    if api_base is not None:
+        try:
+            await validate_provider_api_base(api_base)
+        except UnsafeURLError as exc:
+            logger.info("Provider connection test blocked for '%s': api_base failed SSRF gate", impl_name)
+            return ProviderDiscovery(provider=impl_name, models=[], error=str(exc))
     # A keyless custom endpoint (api_base set, no key) would otherwise be rejected
     # by any-llm before the connection is even attempted; supply the same
     # placeholder the saved path uses so "Test connection" honors the optional key.
