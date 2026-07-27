@@ -43,6 +43,18 @@ describe("EmptyState", () => {
     render(<EmptyState title="No usage yet" description="Spend appears here once traffic flows." />);
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
+
+  it("disables the call to action and suppresses onAction when isActionDisabled is set", async () => {
+    const user = userEvent.setup();
+    const onAction = vi.fn();
+    render(
+      <EmptyState title="Welcome" actionLabel="Add your first provider" onAction={onAction} isActionDisabled />,
+    );
+    const button = screen.getByRole("button", { name: "Add your first provider" });
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(onAction).not.toHaveBeenCalled();
+  });
 });
 
 describe("PageLoading", () => {

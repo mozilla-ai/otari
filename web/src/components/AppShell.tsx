@@ -566,7 +566,7 @@ export function AppShell() {
               href="https://otari.ai"
               target="_blank"
               rel="noreferrer"
-              title="otari.ai — the hosted Otari gateway"
+              title="otari.ai: the hosted Otari gateway"
               className={clsx(
                 "flex items-center rounded-lg py-2 text-xs font-medium text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-brand-dark)]",
                 effectiveCollapsed ? "mx-2 justify-center px-0" : "mx-3 gap-2 px-3",
