@@ -461,12 +461,16 @@ export function ActivityPage() {
     );
   };
 
+  // Refetch every window-scoped query (see the UsagePage refresh note): the
+  // model typeahead summary would otherwise stay on cached data whenever the
+  // re-anchored window resolves to the same query key.
   const refresh = () => {
     setWin(resolveWindow(range, startParam, endParam));
     setExtentWin(resolveWindow(range, "", ""));
     void usage.refetch();
     void count.refetch();
     void contextSummary.refetch();
+    void modelSummary.refetch();
   };
 
   // A rolling preset clears any explicit bounds; a timeline selection sets them

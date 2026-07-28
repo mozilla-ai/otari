@@ -551,12 +551,20 @@ export function UsagePage() {
     setCustomEnd(endIso);
   };
 
+  // Refetch every window-scoped query, not just the headline summary: in custom
+  // mode the query keys do not change, so anything left out would silently stay
+  // on cached data after an explicit refresh. `previous` is guarded because
+  // refetch() ignores `enabled` and would fire a pointless request.
   const refresh = () => {
     if (!customMode) {
       setStartDate(isoAgo(preset.seconds ?? 0));
     }
     void summary.refetch();
     void contextSummary.refetch();
+    void modelSuggest.refetch();
+    if (previousFilters !== null) {
+      void previous.refetch();
+    }
   };
 
   // Drill from a breakdown row into the Activity log, pre-filtering on the picked
