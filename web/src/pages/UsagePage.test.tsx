@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -126,24 +126,19 @@ describe("UsagePage", () => {
     expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
   });
 
-  it("queries a custom from/to window when a custom range is set", async () => {
+  it("re-queries with an hourly bucket when a sub-day preset is chosen from the timeline", async () => {
     const user = userEvent.setup();
     const fetchMock = mockApi(summary());
     renderPage(<UsagePage />);
     await screen.findByText("$1,240.50");
-
-    await user.click(screen.getByRole("button", { name: "Custom…" }));
     fetchMock.mockClear();
-    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-07-01T00:00" } });
-    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-07-15T00:00" } });
+
+    await user.click(screen.getByRole("button", { name: "Last hour" }));
 
     await vi.waitFor(() => {
       const summaryCalls = fetchMock.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("/v1/usage/summary"));
-      // The current-window query carries both bounds (a separate call fetches the
-      // preceding window for deltas, so assert on the set, not just the last call).
-      expect(summaryCalls.some((u) => u.includes("start_date=2026-07-01") && u.includes("end_date=2026-07-15"))).toBe(
-        true,
-      );
+      // The sub-day extent buckets hourly (both the context histogram and the tiles).
+      expect(summaryCalls.some((u) => u.includes("bucket=hour"))).toBe(true);
     });
   });
 
@@ -330,10 +325,8 @@ describe("UsagePage", () => {
     );
     renderPage(<UsagePage />);
 
-    // Default window is 30d (a filter), so the empty state only reads as
-    // "never used" after clearing filters.
-    await screen.findByText("Spend by model");
-    await userEvent.setup().click(screen.getByRole("button", { name: "Clear filters" }));
+    // The default 30d window is the baseline (not a user-applied filter), so an
+    // empty gateway reads as onboarding rather than "no rows match".
     expect(await screen.findByText(/No usage yet/)).toBeInTheDocument();
   });
 
@@ -393,15 +386,16 @@ describe("UsagePage", () => {
     });
   });
 
-  it("collapses the filter controls behind a mobile toggle that expands them", async () => {
+  it("keeps the filter pickers behind an 'Add filter' toggle", async () => {
     mockApi(summary());
     const user = userEvent.setup();
     renderPage(<UsagePage />);
     await screen.findByText("$1,240.50");
 
-    const toggle = screen.getByRole("button", { name: "Filters" });
-    const region = document.getElementById("usage-filters")!;
-    // Collapsed on mobile by default (display:none there; md: reveals it).
+    const toggle = screen.getByRole("button", { name: "Add filter" });
+    const region = document.getElementById(toggle.getAttribute("aria-controls")!)!;
+    // jsdom does not apply Tailwind's `.hidden`, so assert on the class the toggle
+    // flips (display:none collapsed, flex expanded) rather than computed visibility.
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(region.className).toContain("hidden");
 
@@ -412,18 +406,20 @@ describe("UsagePage", () => {
     expect(region.className).not.toContain("hidden");
   });
 
-  it("labels the mobile filter toggle with the active filter count", async () => {
+  it("surfaces an active filter as a removable chip", async () => {
     mockApi(summary());
     const user = userEvent.setup();
     renderPage(<UsagePage />);
     await screen.findByText("$1,240.50");
 
-    // No collapsible filters active yet (only the default time range).
-    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+    // No entity filters yet, so no chips.
+    expect(screen.queryByRole("button", { name: /Remove .* filter/ })).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole("button", { name: "Add filter" }));
     await user.click(screen.getByPlaceholderText("All keys"));
     await user.click(await screen.findByRole("option", { name: "ci-bot" }));
 
-    expect(await screen.findByRole("button", { name: "Filters (1)" })).toBeInTheDocument();
+    // The picked key shows as a chip with a remove control.
+    expect(await screen.findByRole("button", { name: "Remove API key filter" })).toBeInTheDocument();
   });
 });

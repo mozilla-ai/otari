@@ -14,7 +14,7 @@ import {
 import type { UsageEntry } from "@/api/types";
 import { Sparkline } from "@/components/charts";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
-import { DeltaHint, ErrorBanner, PageHeader, StatCard } from "@/components/ui";
+import { DeltaHint, ErrorBanner, PageHeader, RefreshButton, StatCard } from "@/components/ui";
 import { deltaFraction, formatNumber, formatPct, formatRelative, formatUsd } from "@/lib/format";
 import { budgetHealth, errorRateHealth, providerHealthStatus, toStatStatus } from "@/lib/overview";
 
@@ -130,9 +130,35 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
   // renders its own inline banner, so including it here would double-report.
   const loadError = today.error ?? period.error ?? health.error ?? budgets.error ?? keys.error ?? users.error;
 
+  // Manual refresh for the whole page; the windows already advance across
+  // midnight on focus, but the numbers within a day are only as fresh as the
+  // last fetch, so give the operator a way to pull the latest.
+  const refresh = () => {
+    void today.refetch();
+    void period.refetch();
+    void previous.refetch();
+    void health.refetch();
+    void budgets.refetch();
+    void keys.refetch();
+    void users.refetch();
+    void recent.refetch();
+  };
+  const isRefreshing =
+    today.isFetching ||
+    period.isFetching ||
+    health.isFetching ||
+    budgets.isFetching ||
+    keys.isFetching ||
+    users.isFetching ||
+    recent.isFetching;
+
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="Overview" description="At-a-glance spend, traffic, and health across the gateway." />
+      <PageHeader
+        title="Overview"
+        description="At-a-glance spend, traffic, and health across the gateway."
+        action={<RefreshButton onRefresh={refresh} isFetching={isRefreshing} updatedAt={period.dataUpdatedAt} />}
+      />
 
       {showGettingStarted ? <GettingStartedPanel /> : null}
 

@@ -1,5 +1,4 @@
 import { Button, Spinner } from "@heroui/react";
-import clsx from "clsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -20,15 +19,18 @@ import type {
   UsageMutationSelection,
   UsageSeriesPoint,
 } from "@/api/types";
+import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { BarTrendChart, Sparkline } from "@/components/charts";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
+import { FilterChips, type FilterChip } from "@/components/FilterChips";
 import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
 import { TablePagination } from "@/components/TablePagination";
-import { DeltaHint, ErrorBanner, FilterComboBox, PageHeader, StatCard } from "@/components/ui";
+import { DeltaHint, ErrorBanner, FilterComboBox, PageHeader, RefreshButton, StatCard } from "@/components/ui";
 import { deltaFraction, formatPct, formatTokens, formatUsd } from "@/lib/format";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
+import { bucketForWindow, findPreset, isoAgo, type RangePreset, USAGE_DEFAULT_KEY, USAGE_PRESETS } from "@/lib/timeRange";
 
 // ---------- formatting ----------
 
@@ -46,34 +48,15 @@ function formatLatency(ms: number | null): string {
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
-// ---------- filter option sets (mirrors ActivityPage, plus 30d for spend) ----------
+// ---------- filter option sets ----------
+//
+// The time presets, window math, and the local-time custom picker live in
+// `@/lib/timeRange` and are shared with the Activity page (see TimeRangeControl).
 
-const HOUR_S = 3_600;
-const DAY_S = 86_400;
-
-interface Preset {
-  label: string;
-  seconds: number | null;
-  bucket: UsageBucket;
-}
-
-// Sub-day windows bucket hourly; longer ranges bucket daily. "All" has no lower
-// bound, so no previous period to compare against (deltas hide).
-const TIME_PRESETS: Preset[] = [
-  { label: "Last hour", seconds: HOUR_S, bucket: "hour" },
-  { label: "24h", seconds: DAY_S, bucket: "hour" },
-  { label: "7d", seconds: 7 * DAY_S, bucket: "day" },
-  { label: "30d", seconds: 30 * DAY_S, bucket: "day" },
-  { label: "All", seconds: null, bucket: "day" },
-];
-
-const DEFAULT_PRESET = TIME_PRESETS[3]; // 30d: a spend investigation is usually monthly.
+// 30d: a spend investigation is usually monthly.
+const DEFAULT_PRESET = findPreset(USAGE_PRESETS, USAGE_DEFAULT_KEY) as RangePreset;
 
 const TABLE_TOP_N = 15;
-
-function isoAgo(seconds: number): string {
-  return new Date(Date.now() - seconds * 1000).toISOString();
-}
 
 // ---------- breakdown table ----------
 
@@ -419,23 +402,31 @@ export function UsagePage() {
   const users = useUsers();
   const keys = useKeys();
 
-  const [preset, setPreset] = useState<Preset>(DEFAULT_PRESET);
-  const [startDate, setStartDate] = useState<string | undefined>(() =>
-    DEFAULT_PRESET.seconds === null ? undefined : isoAgo(DEFAULT_PRESET.seconds),
-  );
-  // Custom range: an explicit from/to window (like the Activity page), buckets
-  // daily. When active it overrides the preset window.
+  const [preset, setPreset] = useState<RangePreset>(DEFAULT_PRESET);
+  // Anchored start of the rolling preset window, snapshotted so a re-render does
+  // not recompute "now" and churn the query key. Re-anchored on preset change
+  // and on refresh. Usage presets are all bounded, so this is always set.
+  const [startDate, setStartDate] = useState<string>(() => isoAgo(DEFAULT_PRESET.seconds ?? 0));
+  // Custom range: an explicit calendar window (local time), resolved to absolute
+  // instants by the picker. When active it overrides the preset window. The
+  // calendar always yields both bounds, so there is no half-filled window.
   const [customMode, setCustomMode] = useState(false);
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
+  const [customStart, setCustomStart] = useState<string | undefined>();
+  const [customEnd, setCustomEnd] = useState<string | undefined>();
   const [modelFilter, setModelFilter] = useState("");
   const [userFilter, setUserFilter] = useState("");
   const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [metric, setMetric] = useState<ChartMetric>("cost");
 
-  const winStart = customMode ? customFrom || undefined : startDate;
-  const winEnd = customMode ? customTo || undefined : undefined;
-  const bucket: UsageBucket = customMode ? "day" : preset.bucket;
+  const winStart = customMode ? customStart : startDate;
+  const winEnd = customMode ? customEnd : undefined;
+  // Bucket by the window's length, not by whether it is custom, so a short
+  // custom range still buckets hourly instead of collapsing to a single point.
+  const bucket: UsageBucket = customMode
+    ? winStart
+      ? bucketForWindow(winStart, winEnd)
+      : "day"
+    : preset.bucket;
 
   const filters: UsageFilters = useMemo(
     () => ({
@@ -449,7 +440,7 @@ export function UsagePage() {
   );
 
   // The immediately-preceding window of equal length, for period-over-period
-  // deltas. Only meaningful for a bounded range.
+  // deltas. Every preset is now bounded, so a comparison always exists.
   const previousFilters: UsageFilters | null = useMemo(() => {
     if (customMode) {
       if (!winStart || !winEnd) return null;
@@ -457,7 +448,7 @@ export function UsagePage() {
       if (!(span > 0)) return null;
       return { ...filters, start_date: new Date(new Date(winStart).getTime() - span).toISOString(), end_date: winStart };
     }
-    if (preset.seconds === null || !startDate) return null;
+    if (!startDate || preset.seconds === null) return null;
     return {
       ...filters,
       start_date: new Date(new Date(startDate).getTime() - preset.seconds * 1000).toISOString(),
@@ -468,6 +459,25 @@ export function UsagePage() {
 
   const summary = useUsageSummary(filters, bucket);
   const previous = useUsageSummary(previousFilters ?? filters, bucket, previousFilters !== null);
+
+  // The timeline histogram spans the whole preset *extent* (independent of the
+  // brushed sub-window), so the brush always has context to zoom back out into.
+  // When the brush is full this is the same query as `summary` (deduped); a
+  // sub-window makes them diverge by one query.
+  const contextFilters: UsageFilters = useMemo(
+    () => ({
+      start_date: startDate,
+      model: modelFilter.trim() || undefined,
+      user_id: userFilter || undefined,
+      api_key_id: apiKeyFilter || undefined,
+    }),
+    [startDate, modelFilter, userFilter, apiKeyFilter],
+  );
+  const contextSummary = useUsageSummary(contextFilters, preset.bucket);
+  const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
+    bucketStart: p.bucket_start,
+    requests: p.requests,
+  }));
 
   const data = summary.data;
   const totals = data?.totals;
@@ -496,43 +506,66 @@ export function UsagePage() {
     modelFilter && !modelOptions.includes(modelFilter) ? [modelFilter, ...modelOptions] : modelOptions
   ).map((m) => ({ value: m, label: m }));
 
-  const timeFiltered = customMode ? Boolean(winStart || winEnd) : preset.seconds !== null;
+  // The default 30d window is the baseline (like the old "All" was), so it does
+  // not count as a user-applied time filter: clearing returns to it, and an
+  // empty gateway on the default view still reads as onboarding, not "no match".
+  const timeFiltered = customMode || preset.key !== USAGE_DEFAULT_KEY;
   const anyFilter = Boolean(modelFilter.trim() || userFilter || apiKeyFilter || timeFiltered);
-  // On mobile the user/model/key controls collapse behind a "Filters" toggle so
-  // the tiles and breakdowns sit near the top; desktop shows them inline.
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const activeFilterCount = [modelFilter.trim(), userFilter, apiKeyFilter].filter(Boolean).length;
-  // Distinguish "this gateway has never served a request" from "no rows match
-  // these filters": the first is an onboarding state, the second is a filter hint.
-  const isEmptyEver = Boolean(data && totals && totals.request_count === 0 && !anyFilter);
 
-  const pickPreset = (next: Preset) => {
-    setCustomMode(false);
-    setPreset(next);
-    setStartDate(next.seconds === null ? undefined : isoAgo(next.seconds));
-  };
-
-  const clearFilters = () => {
-    pickPreset(TIME_PRESETS[TIME_PRESETS.length - 1]); // All
-    setCustomFrom("");
-    setCustomTo("");
+  // Active entity filters as removable chips (time is driven by the timeline, so
+  // it is not a chip). Values show the human label where one exists.
+  const labelFor = (options: { value: string; label: string }[], value: string) =>
+    options.find((o) => o.value === value)?.label ?? value;
+  const clearEntityFilters = () => {
     setModelFilter("");
     setUserFilter("");
     setApiKeyFilter("");
   };
+  const filterChips: FilterChip[] = [
+    ...(userFilter ? [{ key: "user", label: "User", value: labelFor(userOptions, userFilter), onClear: () => setUserFilter("") }] : []),
+    ...(modelFilter.trim() ? [{ key: "model", label: "Model", value: modelFilter.trim(), onClear: () => setModelFilter("") }] : []),
+    ...(apiKeyFilter ? [{ key: "key", label: "API key", value: labelFor(keyOptions, apiKeyFilter), onClear: () => setApiKeyFilter("") }] : []),
+  ];
+
+  // Distinguish "this gateway has never served a request" from "no rows match
+  // these filters": the first is an onboarding state, the second is a filter hint.
+  const isEmptyEver = Boolean(data && totals && totals.request_count === 0 && !anyFilter);
+
+  // The window the server actually aggregated over, so the caption reflects any
+  // default or clamp. Falls back to the client-intended window before the first
+  // response lands.
+  const effectiveStart = data?.start_date ?? winStart;
+  const effectiveEnd = data?.end_date ?? winEnd;
+
+  const pickPreset = (next: RangePreset) => {
+    setCustomMode(false);
+    setPreset(next);
+    setStartDate(isoAgo(next.seconds ?? 0));
+    setCustomStart(undefined);
+    setCustomEnd(undefined);
+  };
+
+  const pickCustom = (startIso: string, endIso: string) => {
+    setCustomMode(true);
+    setCustomStart(startIso);
+    setCustomEnd(endIso);
+  };
 
   const refresh = () => {
-    if (preset.seconds !== null) {
-      setStartDate(isoAgo(preset.seconds));
+    if (!customMode) {
+      setStartDate(isoAgo(preset.seconds ?? 0));
     }
     void summary.refetch();
+    void contextSummary.refetch();
   };
 
   // Drill from a breakdown row into the Activity log, pre-filtering on the picked
-  // dimension plus the current time window.
+  // dimension plus the current time window. The bounds are absolute instants, so
+  // Activity reads the same window without any local/UTC reinterpretation.
   const drillTo = (params: Record<string, string | undefined>) => {
     const search = new URLSearchParams();
-    if (startDate) search.set("start_date", startDate);
+    if (winStart) search.set("start_date", winStart);
+    if (winEnd) search.set("end_date", winEnd);
     for (const [k, v] of Object.entries(params)) {
       if (v) search.set(k, v);
     }
@@ -552,95 +585,32 @@ export function UsagePage() {
       <PageHeader
         title="Usage & analytics"
         description="Aggregate spend, tokens, and request volume over time. Click a model or user to drill into the request log."
-        action={
-          <Button variant="outline" onPress={refresh} isDisabled={summary.isFetching}>
-            Refresh
-          </Button>
-        }
       />
 
       <ErrorBanner error={summary.error} />
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-wrap gap-2">
-          {TIME_PRESETS.map((option) => (
-            <Button
-              key={option.label}
-              size="sm"
-              variant={!customMode && preset.label === option.label ? "primary" : "outline"}
-              onPress={() => pickPreset(option)}
-            >
-              {option.label}
-            </Button>
-          ))}
-          <Button size="sm" variant={customMode ? "primary" : "outline"} onPress={() => setCustomMode(true)}>
-            Custom…
-          </Button>
-        </div>
-        {customMode ? (
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs font-medium text-[var(--otari-muted)]">
-              From
-              <input
-                type="datetime-local"
-                value={customFrom}
-                onChange={(event) => setCustomFrom(event.target.value)}
-                className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-[var(--otari-muted)]">
-              To
-              <input
-                type="datetime-local"
-                value={customTo}
-                onChange={(event) => setCustomTo(event.target.value)}
-                className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
-              />
-            </label>
-          </div>
-        ) : null}
-        <Button
-          size="sm"
-          variant="outline"
-          className="md:hidden"
-          onPress={() => setFiltersOpen((open) => !open)}
-          aria-expanded={filtersOpen}
-          aria-controls="usage-filters"
-        >
-          Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
-        </Button>
-        <div
-          id="usage-filters"
-          className={clsx("flex-wrap items-end gap-3 md:flex", filtersOpen ? "flex w-full md:w-auto" : "hidden")}
-        >
-          <FilterComboBox
-            label="User"
-            value={userFilter}
-            onChange={setUserFilter}
-            options={userOptions}
-            placeholder="All users"
-          />
-          <FilterComboBox
-            label="Model"
-            value={modelFilter}
-            onChange={setModelFilter}
-            options={modelOptionList}
-            placeholder="All models"
-          />
-          <FilterComboBox
-            label="API key"
-            value={apiKeyFilter}
-            onChange={setApiKeyFilter}
-            options={keyOptions}
-            placeholder="All keys"
-          />
-          {anyFilter ? (
-            <Button size="sm" variant="ghost" onPress={clearFilters}>
-              Clear filters
-            </Button>
-          ) : null}
-        </div>
+      {/* Filters: the timeline picks the window; chips carry entity filters. The
+          refresh control rides the timeline's preset row to save vertical space. */}
+      <div className="flex flex-col gap-3">
+        <ActivityTimeline
+          presets={USAGE_PRESETS}
+          extentKey={preset.key}
+          onPreset={pickPreset}
+          onSelectRange={pickCustom}
+          onSelectFull={() => pickPreset(preset)}
+          series={timelineSeries}
+          bucket={preset.bucket}
+          windowStart={effectiveStart}
+          windowEnd={effectiveEnd}
+          loading={contextSummary.isLoading}
+          ariaLabel="Usage request volume over the selected window"
+          action={<RefreshButton onRefresh={refresh} isFetching={summary.isFetching} updatedAt={summary.dataUpdatedAt} />}
+        />
+        <FilterChips chips={filterChips} onClearAll={clearEntityFilters}>
+          <FilterComboBox label="User" value={userFilter} onChange={setUserFilter} options={userOptions} placeholder="All users" />
+          <FilterComboBox label="Model" value={modelFilter} onChange={setModelFilter} options={modelOptionList} placeholder="All models" />
+          <FilterComboBox label="API key" value={apiKeyFilter} onChange={setApiKeyFilter} options={keyOptions} placeholder="All keys" />
+        </FilterChips>
       </div>
 
       {isEmptyEver ? (

@@ -1,0 +1,132 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+import { USAGE_PRESETS } from "@/lib/timeRange";
+import { ActivityTimeline, type TimelinePoint } from "./ActivityTimeline";
+
+const SERIES: TimelinePoint[] = [
+  { bucketStart: "2026-07-10T00:00:00Z", requests: 12 },
+  { bucketStart: "2026-07-11T00:00:00Z", requests: 40 },
+  { bucketStart: "2026-07-12T00:00:00Z", requests: 8 },
+];
+
+function renderTimeline(overrides: Partial<React.ComponentProps<typeof ActivityTimeline>> = {}) {
+  const onPreset = vi.fn();
+  const onSelectRange = vi.fn();
+  const onSelectFull = vi.fn();
+  render(
+    <ActivityTimeline
+      presets={USAGE_PRESETS}
+      extentKey="30d"
+      onPreset={onPreset}
+      onSelectRange={onSelectRange}
+      onSelectFull={onSelectFull}
+      series={SERIES}
+      bucket="day"
+      windowStart="2026-07-10T00:00:00.000Z"
+      windowEnd="2026-07-13T00:00:00.000Z"
+      {...overrides}
+    />,
+  );
+  return { onPreset, onSelectRange, onSelectFull };
+}
+
+describe("ActivityTimeline", () => {
+  it("renders presets and highlights the extent, reporting a picked preset", async () => {
+    const user = userEvent.setup();
+    const { onPreset } = renderTimeline();
+    await user.click(screen.getByRole("button", { name: "7d" }));
+    expect(onPreset).toHaveBeenCalledWith(expect.objectContaining({ key: "7d" }));
+  });
+
+  it("captions the active window (inclusive end, UTC)", () => {
+    renderTimeline();
+    const caption = screen.getByText(/Showing/);
+    expect(caption).toHaveTextContent("Jul 10");
+    expect(caption).toHaveTextContent("Jul 12"); // 2026-07-13 exclusive -> inclusive Jul 12
+    expect(caption).toHaveTextContent("UTC");
+  });
+
+  it("captions an unbounded window as All time", () => {
+    renderTimeline({ windowStart: undefined, windowEnd: undefined });
+    expect(screen.getByText(/Showing/)).toHaveTextContent("All time");
+  });
+
+  it("renders the bucket unit label", () => {
+    renderTimeline();
+    expect(screen.getByText("Requests / day")).toBeInTheDocument();
+  });
+
+  it("shows an empty state when there is no activity", () => {
+    renderTimeline({ series: [] });
+    expect(screen.getByText(/No activity in this range/)).toBeInTheDocument();
+  });
+
+  it("renders a dual-thumb range slider positioned on the active window", () => {
+    renderTimeline();
+    // Window covers the whole 3-bucket series: thumbs sit at the extremes of
+    // the fractional bucket scale [0, 3]. (Queried by DOM order: react-aria's
+    // group labelling overrides the per-thumb aria-label in name computation.)
+    const thumbs = screen.getAllByRole("slider");
+    expect(thumbs).toHaveLength(2);
+    expect(thumbs[0]).toHaveValue("0");
+    expect(thumbs[1]).toHaveValue("3");
+  });
+
+  it("positions the thumbs on a sub-window", () => {
+    renderTimeline({
+      // Jul 11 only (one bucket of the three).
+      windowStart: "2026-07-11T00:00:00.000Z",
+      windowEnd: "2026-07-12T00:00:00.000Z",
+    });
+    const thumbs = screen.getAllByRole("slider");
+    expect(thumbs[0]).toHaveValue("1");
+    expect(thumbs[1]).toHaveValue("2");
+  });
+
+  it("promotes to the next larger preset when zooming out at the full extent", async () => {
+    const user = userEvent.setup();
+    // Window covers the whole series, so the extent itself must widen: 30d -> 90d.
+    const { onPreset, onSelectRange } = renderTimeline();
+    await user.click(screen.getByRole("button", { name: "Zoom out" }));
+    expect(onPreset).toHaveBeenCalledWith(expect.objectContaining({ key: "90d" }));
+    expect(onSelectRange).not.toHaveBeenCalled();
+  });
+
+  it("doubles a sub-window around its center when zooming out", async () => {
+    const user = userEvent.setup();
+    const series = [
+      { bucketStart: "2026-07-10T00:00:00Z", requests: 1 },
+      { bucketStart: "2026-07-11T00:00:00Z", requests: 2 },
+      { bucketStart: "2026-07-12T00:00:00Z", requests: 3 },
+      { bucketStart: "2026-07-13T00:00:00Z", requests: 4 },
+      { bucketStart: "2026-07-14T00:00:00Z", requests: 5 },
+    ];
+    const { onSelectRange } = renderTimeline({
+      series,
+      // Jul 12 only (the middle bucket of five).
+      windowStart: "2026-07-12T00:00:00.000Z",
+      windowEnd: "2026-07-13T00:00:00.000Z",
+    });
+    await user.click(screen.getByRole("button", { name: "Zoom out" }));
+    // One bucket doubles to two, centered, then snaps outward to whole buckets:
+    // Jul 11 .. Jul 14 (exclusive).
+    expect(onSelectRange).toHaveBeenCalledWith("2026-07-11T00:00:00.000Z", "2026-07-14T00:00:00.000Z");
+  });
+
+  it("offers Reset only when zoomed, and it restores the full extent", async () => {
+    const user = userEvent.setup();
+    const { onSelectFull } = renderTimeline({
+      windowStart: "2026-07-11T00:00:00.000Z",
+      windowEnd: "2026-07-12T00:00:00.000Z",
+    });
+    await user.click(screen.getByRole("button", { name: "Reset" }));
+    expect(onSelectFull).toHaveBeenCalledOnce();
+  });
+
+  it("hides Reset at the full extent", () => {
+    renderTimeline();
+    expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
+  });
+});

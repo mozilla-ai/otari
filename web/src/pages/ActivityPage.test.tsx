@@ -253,7 +253,9 @@ describe("ActivityPage", () => {
     // The default 24h window bounds the query, so an empty result reads as filtered.
     expect(await screen.findByText("No requests match these filters.")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    // The truthful "All" preset drops the window entirely (unbounded), so an empty
+    // result now reads as "never used".
+    await user.click(screen.getByRole("button", { name: "All" }));
     expect(await screen.findByText("No requests recorded yet.")).toBeInTheDocument();
   });
 
@@ -381,16 +383,17 @@ describe("ActivityPage", () => {
     });
   });
 
-  it("collapses the filter controls behind a mobile toggle that expands them", async () => {
+  it("keeps the filter pickers behind an 'Add filter' toggle", async () => {
     mockApi({ rows: [entry()] });
     const user = userEvent.setup();
     renderPage(<ActivityPage />);
     await screen.findByText("gpt-4o");
 
-    const toggle = screen.getByRole("button", { name: "Filters" });
-    const region = document.getElementById("activity-filters")!;
-    // Collapsed by default on mobile (display:none there; the md: variant reveals
-    // it on desktop). Expanding flips the classes and the toggle's aria state.
+    // The picker row is collapsed until the operator opts to add a filter. jsdom
+    // does not apply Tailwind's `.hidden`, so assert on the toggled class rather
+    // than computed visibility.
+    const toggle = screen.getByRole("button", { name: "Add filter" });
+    const region = document.getElementById(toggle.getAttribute("aria-controls")!)!;
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(region.className).toContain("hidden");
 
@@ -401,12 +404,43 @@ describe("ActivityPage", () => {
     expect(region.className).not.toContain("hidden");
   });
 
-  it("labels the mobile filter toggle with the active filter count", async () => {
-    mockApi({ rows: [entry()] });
+  it("shows active filters as removable chips and clears one on ✕", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockApi({ rows: [entry()] });
     renderPage(<ActivityPage />, "/activity?model=gpt-4o&status=error");
     await screen.findByText("gpt-4o");
 
-    // Two collapsible filters active (model + status); the time range is excluded.
-    expect(screen.getByRole("button", { name: "Filters (2)" })).toBeInTheDocument();
+    // A chip per active entity filter (model + status); the time range is not a chip.
+    expect(screen.getByRole("button", { name: "Remove Model filter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove Status filter" })).toBeInTheDocument();
+
+    // Removing the model chip drops just that filter from the query.
+    await user.click(screen.getByRole("button", { name: "Remove Model filter" }));
+    await waitFor(() => expect(listCalls(calls).some((url) => !url.includes("model=gpt-4o"))).toBe(true));
+  });
+
+  it("queries an unbounded window for the truthful 'All' preset", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />);
+    await screen.findByText("gpt-4o");
+
+    await user.click(screen.getByRole("button", { name: "All" }));
+
+    // Activity's list endpoint applies no default lookback, so "All" really omits
+    // the start bound rather than silently scoping to a recent window.
+    await waitFor(() => expect(listCalls(calls).some((url) => !url.includes("start_date"))).toBe(true));
+  });
+
+  it("buckets the timeline histogram by the active preset's extent", async () => {
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />); // default 24h
+    await screen.findByText("gpt-4o");
+
+    // The 24h extent buckets hourly, so the timeline's context summary is fetched
+    // with bucket=hour (distinct from the day-bucketed model-suggestion summary).
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.includes("/v1/usage/summary") && c.url.includes("bucket=hour"))).toBe(true),
+    );
   });
 });

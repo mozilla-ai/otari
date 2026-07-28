@@ -1,5 +1,4 @@
 import { Button } from "@heroui/react";
-import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -13,13 +12,16 @@ import {
   useUsers,
 } from "@/api/hooks";
 import type { UsageEntry, UsageFilters, UsageMutationSelection } from "@/api/types";
+import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
+import { FilterChips, type FilterChip } from "@/components/FilterChips";
 import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
 import { PAGE_SIZE_OPTIONS, TablePagination } from "@/components/TablePagination";
-import { ErrorBanner, FilterComboBox, FilterSelect, PageHeader } from "@/components/ui";
+import { ErrorBanner, FilterComboBox, FilterSelect, PageHeader, RefreshButton } from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
+import { ACTIVITY_DEFAULT_KEY, ACTIVITY_PRESETS, CUSTOM_KEY, findPreset, isoAgo, type RangePreset } from "@/lib/timeRange";
 import { useUrlState } from "@/lib/urlState";
 
 // ---------- formatting ----------
@@ -70,19 +72,11 @@ const activityRowClassName = (e: UsageEntry): string | undefined =>
   e.status === "error" ? "bg-red-50" : undefined;
 
 // ---------- filter option sets ----------
-
-const HOUR_S = 3_600;
-const DAY_S = 86_400;
-
-const RANGE_PRESETS: { key: string; label: string; seconds: number | null }[] = [
-  { key: "1h", label: "1h", seconds: HOUR_S },
-  { key: "24h", label: "24h", seconds: DAY_S },
-  { key: "7d", label: "7d", seconds: 7 * DAY_S },
-  { key: "30d", label: "30d", seconds: 30 * DAY_S },
-  { key: "all", label: "All", seconds: null },
-];
-
-const DEFAULT_RANGE = "24h";
+//
+// The time presets and the local-time custom picker are shared with the Usage
+// page via `@/lib/timeRange` (see TimeRangeControl). Activity keeps a truthful
+// "All": its raw list endpoint applies no default and no clamp, so an omitted
+// start really is all-time.
 
 const STATUS_OPTIONS: { label: string; value: string }[] = [
   { label: "All", value: "" },
@@ -100,7 +94,7 @@ const DEFAULT_PAGE_SIZE = 50;
 
 // All filter + pagination state, with defaults, kept in the URL.
 const URL_DEFAULTS = {
-  range: DEFAULT_RANGE,
+  range: ACTIVITY_DEFAULT_KEY,
   start_date: "",
   end_date: "",
   status: "",
@@ -112,10 +106,6 @@ const URL_DEFAULTS = {
   size: String(DEFAULT_PAGE_SIZE),
 } as const;
 
-function isoAgo(seconds: number): string {
-  return new Date(Date.now() - seconds * 1000).toISOString();
-}
-
 // Resolve the query window. Explicit start_date/end_date bounds (a custom range,
 // or a drill-down from the Usage page) take precedence; otherwise a preset anchors
 // `start` to "now minus N", and "all" (or an empty custom range) leaves it open.
@@ -123,10 +113,10 @@ function resolveWindow(range: string, start: string, end: string): { start?: str
   if (start || end) {
     return { start: start || undefined, end: end || undefined };
   }
-  if (range === "custom") {
+  if (range === CUSTOM_KEY) {
     return {};
   }
-  const preset = RANGE_PRESETS.find((p) => p.key === range) ?? RANGE_PRESETS.find((p) => p.key === DEFAULT_RANGE);
+  const preset = findPreset(ACTIVITY_PRESETS, range) ?? findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY);
   const seconds = preset?.seconds ?? null;
   return { start: seconds == null ? undefined : isoAgo(seconds), end: undefined };
 }
@@ -264,9 +254,13 @@ export function ActivityPage() {
     setWin(resolveWindow(range, startParam, endParam));
   }, [range, startParam, endParam]);
 
-  // A custom range is active whenever explicit bounds are set (including a
-  // drill-down), otherwise the URL's preset drives the highlight.
-  const activeRange = startParam || endParam ? "custom" : range;
+  // The preset extent (ignoring any brushed bounds) that the timeline histogram
+  // spans. Snapshotted like `win`, re-anchored when the preset changes.
+  const [extentWin, setExtentWin] = useState(() => resolveWindow(range, "", ""));
+  useEffect(() => {
+    setExtentWin(resolveWindow(range, "", ""));
+  }, [range]);
+
   const hasWindow = Boolean(win.start || win.end);
 
   const priced = pricedFilter === "true" ? true : pricedFilter === "false" ? false : undefined;
@@ -318,19 +312,55 @@ export function ActivityPage() {
     modelSummary.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
   const keyOptions = (keys.data ?? []).map((k) => ({ value: k.id, label: k.key_name ?? `${k.id.slice(0, 8)}…` }));
 
+  // The timeline histogram spans the whole preset *extent* (the rolling preset
+  // window, independent of any brushed sub-window), so the brush always has
+  // context to zoom back out into. For the unbounded "All" the summary endpoint
+  // applies its 30-day default, so the bars show recent activity while the list
+  // stays all-time; the caption reflects the true list window, and the brush
+  // still narrows it. Entity filters carry over so the bars match what's shown.
+  const extentPreset = findPreset(ACTIVITY_PRESETS, range) ?? findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY);
+  const extentBucket = extentPreset?.bucket ?? "day";
+  const contextFilters: UsageFilters = useMemo(
+    () => ({
+      start_date: extentWin.start,
+      status: statusFilter || undefined,
+      model: modelFilter.trim() || undefined,
+      user_id: userFilter || undefined,
+      api_key_id: apiKeyFilter || undefined,
+      priced,
+    }),
+    [extentWin, statusFilter, modelFilter, userFilter, apiKeyFilter, priced],
+  );
+  const contextSummary = useUsageSummary(contextFilters, extentBucket);
+  const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
+    bucketStart: p.bucket_start,
+    requests: p.requests,
+  }));
+
   const rows = usage.data ?? [];
   const totalIsExact = count.isSuccess && !count.isPlaceholderData;
   const total = totalIsExact ? (count.data?.total ?? 0) : null;
   const anyFilter = Boolean(
     statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || pricedFilter || hasWindow,
   );
-  // On mobile the status/priced/key/user/model controls collapse behind a
-  // "Filters" toggle (labelled with the active count) so the request table sits
-  // near the top; desktop shows them inline.
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const activeFilterCount = [statusFilter, pricedFilter, apiKeyFilter, userFilter, modelFilter.trim()].filter(
-    Boolean,
-  ).length;
+
+  // Active entity filters as removable chips (time is driven by the timeline, so
+  // it is not a chip). Values show the human label where one exists.
+  const labelFrom = (options: { value: string; label: string }[], value: string) =>
+    options.find((o) => o.value === value)?.label ?? value;
+  const userOptionsList = (users.data ?? []).map((u) => ({
+    value: u.user_id,
+    label: u.alias ? `${u.alias} (${u.user_id})` : u.user_id,
+  }));
+  const clearEntityFilters = () =>
+    url.patch({ status: "", priced: "", model: "", user_id: "", api_key_id: "" });
+  const filterChips: FilterChip[] = [
+    ...(statusFilter ? [{ key: "status", label: "Status", value: labelFrom(STATUS_OPTIONS, statusFilter), onClear: () => url.patch({ status: "" }) }] : []),
+    ...(pricedFilter ? [{ key: "priced", label: "Priced", value: labelFrom(PRICED_OPTIONS, pricedFilter), onClear: () => url.patch({ priced: "" }) }] : []),
+    ...(userFilter ? [{ key: "user", label: "User", value: labelFrom(userOptionsList, userFilter), onClear: () => url.patch({ user_id: "" }) }] : []),
+    ...(modelFilter.trim() ? [{ key: "model", label: "Model", value: modelFilter.trim(), onClear: () => url.patch({ model: "" }) }] : []),
+    ...(apiKeyFilter ? [{ key: "key", label: "API key", value: labelFrom(keyOptions, apiKeyFilter), onClear: () => url.patch({ api_key_id: "" }) }] : []),
+  ];
 
   // Selection targets imported rows only; enforced gateway rows are disabled so
   // bulk delete / set-price can never reach them.
@@ -411,25 +441,18 @@ export function ActivityPage() {
     );
   };
 
-  const clearFilters = () => {
-    // "All" time plus no filters is the true-empty baseline.
-    url.patch({
-      range: "all",
-      start_date: "",
-      end_date: "",
-      status: "",
-      model: "",
-      user_id: "",
-      api_key_id: "",
-      priced: "",
-    });
-  };
-
   const refresh = () => {
     setWin(resolveWindow(range, startParam, endParam));
+    setExtentWin(resolveWindow(range, "", ""));
     void usage.refetch();
     void count.refetch();
+    void contextSummary.refetch();
   };
+
+  // A rolling preset clears any explicit bounds; a calendar pick sets them (the
+  // preset key is left as-is, the bounds' presence drives the "custom" highlight).
+  const pickPreset = (preset: RangePreset) => url.patch({ range: preset.key, start_date: "", end_date: "" });
+  const pickCustom = (startIso: string, endIso: string) => url.patch({ start_date: startIso, end_date: endIso });
 
   // Memoized on keyLabels (the only per-render input) so DataTable's per-row
   // cache holds: a fresh array every render would rebuild all rows per click.
@@ -461,89 +484,34 @@ export function ActivityPage() {
       <PageHeader
         title="Activity"
         description="A per-request log of what the gateway served: tokens, cost, latency, and failures. No request or response content is stored."
-        action={
-          <Button variant="outline" onPress={refresh} isDisabled={usage.isFetching}>
-            Refresh
-          </Button>
-        }
       />
 
       <ErrorBanner error={usage.error ?? count.error} />
 
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-wrap gap-2">
-          {RANGE_PRESETS.map((preset) => (
-            <Button
-              key={preset.key}
-              size="sm"
-              variant={activeRange === preset.key ? "primary" : "outline"}
-              onPress={() => url.patch({ range: preset.key, start_date: "", end_date: "" })}
-            >
-              {preset.label}
-            </Button>
-          ))}
-          <Button
-            size="sm"
-            variant={activeRange === "custom" ? "primary" : "outline"}
-            onPress={() => url.patch({ range: "custom" })}
-          >
-            Custom…
-          </Button>
-        </div>
-        {activeRange === "custom" ? (
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-xs font-medium text-[var(--otari-muted)]">
-              From
-              <input
-                type="datetime-local"
-                value={startParam}
-                onChange={(event) => url.patch({ start_date: event.target.value })}
-                className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-[var(--otari-muted)]">
-              To
-              <input
-                type="datetime-local"
-                value={endParam}
-                onChange={(event) => url.patch({ end_date: event.target.value })}
-                className="rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
-              />
-            </label>
-          </div>
-        ) : null}
-        <Button
-          size="sm"
-          variant="outline"
-          className="md:hidden"
-          onPress={() => setFiltersOpen((open) => !open)}
-          aria-expanded={filtersOpen}
-          aria-controls="activity-filters"
-        >
-          Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
-        </Button>
-        <div
-          id="activity-filters"
-          className={clsx("flex-wrap items-end gap-3 md:flex", filtersOpen ? "flex w-full md:w-auto" : "hidden")}
-        >
-          <FilterSelect
-            id="filter-status"
-            label="Status"
-            value={statusFilter}
-            onChange={(value) => url.patch({ status: value })}
-          >
+      <div className="flex flex-col gap-3">
+        <ActivityTimeline
+          presets={ACTIVITY_PRESETS}
+          extentKey={range}
+          onPreset={pickPreset}
+          onSelectRange={pickCustom}
+          onSelectFull={() => (extentPreset ? pickPreset(extentPreset) : undefined)}
+          series={timelineSeries}
+          bucket={extentBucket}
+          windowStart={win.start}
+          windowEnd={win.end}
+          loading={contextSummary.isLoading}
+          ariaLabel="Activity request volume over the selected window"
+          action={<RefreshButton onRefresh={refresh} isFetching={usage.isFetching} updatedAt={usage.dataUpdatedAt} />}
+        />
+        <FilterChips chips={filterChips} onClearAll={clearEntityFilters}>
+          <FilterSelect id="filter-status" label="Status" value={statusFilter} onChange={(value) => url.patch({ status: value })}>
             {STATUS_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
             ))}
           </FilterSelect>
-          <FilterSelect
-            id="filter-priced"
-            label="Priced?"
-            value={pricedFilter}
-            onChange={(value) => url.patch({ priced: value })}
-          >
+          <FilterSelect id="filter-priced" label="Priced?" value={pricedFilter} onChange={(value) => url.patch({ priced: value })}>
             {PRICED_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
@@ -562,10 +530,7 @@ export function ActivityPage() {
             value={userFilter}
             onChange={(value) => url.patch({ user_id: value })}
             placeholder="All users"
-            options={(users.data ?? []).map((u) => ({
-              value: u.user_id,
-              label: u.alias ? `${u.alias} (${u.user_id})` : u.user_id,
-            }))}
+            options={userOptionsList}
           />
           <FilterComboBox
             label="Model"
@@ -578,12 +543,7 @@ export function ActivityPage() {
               : modelOptions
             ).map((m) => ({ value: m, label: m }))}
           />
-          {anyFilter ? (
-            <Button size="sm" variant="ghost" onPress={clearFilters}>
-              Clear filters
-            </Button>
-          ) : null}
-        </div>
+        </FilterChips>
       </div>
 
       {hasSelection ? (

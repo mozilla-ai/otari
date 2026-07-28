@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
-import { formatPct } from "@/lib/format";
+import { formatPct, formatRelative } from "@/lib/format";
 
 // A tile's attention status. Colors mirror the banner precedent (ErrorBanner
 // red-*, InfoBanner amber-*) and add emerald for the healthy state. Color is
@@ -136,6 +136,77 @@ export function PageHeader({ title, description, action }: { title: string; desc
           natural size instead of stretching in this flex column. */}
       {action ? <div className="flex flex-wrap gap-2">{action}</div> : null}
     </div>
+  );
+}
+
+// A slowly ticking wall clock, only to keep a relative "updated Ns ago" label
+// current between renders. This is a display timer, not the prohibited data
+// polling (which belongs on a TanStack Query `refetchInterval`): it fetches
+// nothing. Paused while the tab is hidden so a backgrounded dashboard is idle.
+function useDisplayClock(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const start = () => {
+      if (timer === undefined) {
+        timer = setInterval(() => setNow(Date.now()), intervalMs);
+      }
+    };
+    const stop = () => {
+      if (timer !== undefined) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+    };
+    const sync = () => {
+      setNow(Date.now());
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [intervalMs]);
+  return now;
+}
+
+// A refresh control paired with a "last updated" timestamp, so an operator can
+// tell stale numbers from fresh ones. The icon spins while a refetch is in
+// flight. `updatedAt` is a TanStack Query `dataUpdatedAt` (ms epoch; 0 before
+// the first successful load, which reads as "never" and is hidden).
+export function RefreshButton({
+  onRefresh,
+  isFetching = false,
+  updatedAt,
+  label = "Refresh",
+}: {
+  onRefresh: () => void;
+  isFetching?: boolean;
+  updatedAt?: number;
+  label?: string;
+}) {
+  const now = useDisplayClock(15_000);
+  const freshness = updatedAt ? formatRelative(new Date(updatedAt).toISOString(), now) : null;
+  return (
+    <span className="inline-flex items-center gap-2">
+      {freshness ? <span className="text-xs text-[var(--otari-muted)]">Updated {freshness}</span> : null}
+      <Button variant="outline" size="sm" isIconOnly isDisabled={isFetching} onPress={onRefresh} aria-label={label}>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
+          aria-hidden="true"
+        >
+          <path d="M20 11a8 8 0 1 0-.5 4" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M20 4v5h-5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </Button>
+    </span>
   );
 }
 
