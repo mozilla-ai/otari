@@ -111,6 +111,11 @@ describe("UsersPage", () => {
 
     expect(await screen.findByText("No users yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create your first user" })).toBeInTheDocument();
+    // Only the onboarding panel shows: the table (and its own "no rows" fallback,
+    // whose "auto-create one" text is unique to it) is suppressed so the two empty
+    // states are not stacked.
+    expect(screen.queryByText(/auto-create one/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "Users" })).not.toBeInTheDocument();
   });
 
   it("lists a user with status, assigned budget name, spend, and access", async () => {

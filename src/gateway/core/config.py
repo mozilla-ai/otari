@@ -215,6 +215,16 @@ class GatewayConfig(BaseSettings):
     rate_limit_rpm: int | None = Field(
         default=None, ge=1, description="Maximum requests per minute per user (None disables rate limiting)"
     )
+    dashboard_login_rate_limit_per_minute: int | None = Field(
+        default=10,
+        ge=1,
+        description=(
+            "Maximum failed POST /v1/auth/session attempts per client IP per minute "
+            "(None disables this limit). Only failed attempts count, so a correct "
+            "master key is never throttled. Separate from rate_limit_rpm, which is "
+            "keyed to authenticated users and does not cover this pre-auth path."
+        ),
+    )
     cors_allow_origins: list[str] = Field(
         default_factory=list, description="Allowed CORS origins (empty list disables CORS)"
     )

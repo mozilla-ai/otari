@@ -14,7 +14,7 @@ import {
 import type { UsageEntry } from "@/api/types";
 import { Sparkline } from "@/components/charts";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
-import { DeltaHint, ErrorBanner, PageHeader, StatCard } from "@/components/ui";
+import { DeltaHint, ErrorBanner, PageHeader, PageLoading, StatCard } from "@/components/ui";
 import { deltaFraction, formatNumber, formatPct, formatRelative, formatUsd } from "@/lib/format";
 import { budgetHealth, errorRateHealth, providerHealthStatus, toStatStatus } from "@/lib/overview";
 
@@ -75,7 +75,9 @@ const BUDGET_WORDS = { ok: "On track", warn: "Near limit", alert: "Over budget" 
 export function OverviewIndex() {
   const providers = useProviders();
   if (providers.isLoading) {
-    return null;
+    // A visible wait beats a blank screen while the master-key-gated providers
+    // query resolves on first paint.
+    return <PageLoading />;
   }
   return <OverviewPage needsSetup={providers.isSuccess && providers.data.providers.length === 0} />;
 }

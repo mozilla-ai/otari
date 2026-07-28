@@ -70,7 +70,7 @@ pricing:
 | `enable_metrics` | bool | `false` | Enable Prometheus `/metrics` endpoint |
 | `enable_docs` | bool | `true` | Enable `/docs`, `/redoc`, `/openapi.json` |
 | `bootstrap_api_key` | bool | `true` | Create a first-use API key on startup when none exist |
-| `log_writer_strategy` | string | `"single"` | Usage log writing: `"single"` (inline) or `"batch"` (background) |
+| `log_writer_strategy` | string | `"single"` | Usage log writing: `"single"` (inline) or `"batch"` (background). Prefer `"batch"` for streaming clients: with `"single"`, a client that disconnects at the SSE `[DONE]` marker can leave the usage row uncommitted and the budget reservation unreconciled. `"batch"` queues in memory and flushes on a 1s interval or 100-row batch, so it removes that race but is not crash-durable. |
 | `budget_strategy` | string | `"for_update"` | Budget validation: `"for_update"`, `"cas"`, or `"disabled"` |
 | `require_pricing` | bool | `true` | Reject requests for models with no configured pricing (HTTP 402, fail-closed). When `false`, unpriced models are served and logged without cost. Audio and moderation endpoints are always exempt. |
 | `default_pricing` | bool | `false` | When a model has no pricing in the database, fall back to community-maintained defaults from the bundled genai-prices dataset. Off by default (opt-in). Database pricing always wins. See [Default pricing](#default-pricing). |

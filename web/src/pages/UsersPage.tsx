@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { Field } from "@/components/Field";
 import { accessLabel, ModelScopeControl } from "@/components/ModelScopeControl";
-import { ErrorBanner, FilterSelect, PageHeader } from "@/components/ui";
+import { EmptyState, ErrorBanner, FilterSelect, PageHeader } from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // ---------- formatting ----------
@@ -256,27 +256,6 @@ function AccessChip({ allowed }: { allowed: string[] | null }) {
 
 // ---------- onboarding ----------
 
-function OnboardingPanel({ onCreate }: { onCreate: () => void }) {
-  return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-6">
-        <div>
-          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">No users yet</h2>
-          <p className="mt-1 text-sm text-[var(--otari-muted)]">
-            A user owns API keys and carries the budget and default model access those keys inherit. Create a user here,
-            then issue its keys on the API keys page.
-          </p>
-        </div>
-        <div>
-          <Button variant="primary" onPress={onCreate}>
-            Create your first user
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
-  );
-}
-
 // Assign one budget to a set of selected users at once.
 function AssignBudgetDialog({
   isOpen,
@@ -503,8 +482,11 @@ export function UsersPage() {
       <ErrorBanner error={users.error ?? updateUser.error ?? deleteUser.error} />
 
       {showOnboarding ? (
-        <OnboardingPanel
-          onCreate={() => {
+        <EmptyState
+          title="No users yet"
+          description="A user owns API keys and carries the budget and default model access those keys inherit. Create a user here, then issue its keys on the API keys page."
+          actionLabel="Create your first user"
+          onAction={() => {
             setEditing(null);
             setAddOpen(true);
           }}
@@ -541,17 +523,22 @@ export function UsersPage() {
         </BulkActionBar>
       ) : null}
 
-      <DataTable
-        ariaLabel="Users"
-        columns={columns}
-        rows={rows}
-        getRowKey={getUserRowKey}
-        isLoading={loading}
-        emptyContent="No users yet. Create one, or create an API key to auto-create one."
-        selectionMode="multiple"
-        selectedKeys={selection.selectedKeys}
-        onSelectionChange={selection.onSelectionChange}
-      />
+      {/* Suppress the table (and its own empty message) while the onboarding
+          panel owns the empty state, so a fresh gateway shows one call to action,
+          not a panel stacked over a redundant "no rows" table. */}
+      {showOnboarding ? null : (
+        <DataTable
+          ariaLabel="Users"
+          columns={columns}
+          rows={rows}
+          getRowKey={getUserRowKey}
+          isLoading={loading}
+          emptyContent="No users yet. Create one, or create an API key to auto-create one."
+          selectionMode="multiple"
+          selectedKeys={selection.selectedKeys}
+          onSelectionChange={selection.onSelectionChange}
+        />
+      )}
 
       <ConfirmDialog
         isOpen={bulkDeleteOpen}

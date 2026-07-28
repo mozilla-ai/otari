@@ -225,7 +225,7 @@
               },
               "raw": "{\n  \"master_key\": \"string\"\n}"
             },
-            "description": "Verify the master key and set the HttpOnly session cookie.",
+            "description": "Verify the master key and set the HttpOnly session cookie.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. The issue this implements explicitly rules that out. The\nDB/hash lookup this exposes to repeated attempts only runs when no fixed\nmaster_key is configured (the auto-generated bootstrap-key path); with a\nconfigured master_key, verification is a constant-time string compare,\nnot a DB round trip.",
             "header": [
               {
                 "key": "Content-Type",

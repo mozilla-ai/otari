@@ -915,14 +915,19 @@ export function ProvidersPage() {
         <HealthSummary healthy={health.data.healthy} total={health.data.total} checkedAt={health.data.checked_at} />
       ) : null}
 
-      <DataTable
-        ariaLabel="Providers"
-        columns={columns}
-        rows={rows}
-        getRowKey={(row) => row.instance}
-        isLoading={loading}
-        emptyContent="No providers yet. Add your first provider to start serving models."
-      />
+      {/* Suppress the table (and its own empty message) while the onboarding
+          panel owns the empty state, so a fresh gateway shows one call to action,
+          not a panel stacked over a redundant "no rows" table. */}
+      {showOnboarding ? null : (
+        <DataTable
+          ariaLabel="Providers"
+          columns={columns}
+          rows={rows}
+          getRowKey={(row) => row.instance}
+          isLoading={loading}
+          emptyContent="No providers yet. Add your first provider to start serving models."
+        />
+      )}
     </div>
   );
 }
