@@ -313,6 +313,11 @@ def create_app(config: GatewayConfig) -> FastAPI:
     else:
         app.state.rate_limiter = None
 
+    if config.dashboard_login_rate_limit_per_minute is not None:
+        app.state.login_rate_limiter = RateLimiter(config.dashboard_login_rate_limit_per_minute)
+    else:
+        app.state.login_rate_limiter = None
+
     app.state.config = config
     app.state.gateway_mode = config.effective_mode
 

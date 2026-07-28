@@ -56,6 +56,7 @@ ENV_BRIDGED_FIELDS = (
     "web_search_allow_private_hosts",
     "mcp_allow_loopback",
     "mcp_allow_private_hosts",
+    "provider_allow_private_hosts",
 )
 
 
@@ -214,6 +215,16 @@ class GatewayConfig(BaseSettings):
     )
     rate_limit_rpm: int | None = Field(
         default=None, ge=1, description="Maximum requests per minute per user (None disables rate limiting)"
+    )
+    dashboard_login_rate_limit_per_minute: int | None = Field(
+        default=10,
+        ge=1,
+        description=(
+            "Maximum failed POST /v1/auth/session attempts per client IP per minute "
+            "(None disables this limit). Only failed attempts count, so a correct "
+            "master key is never throttled. Separate from rate_limit_rpm, which is "
+            "keyed to authenticated users and does not cover this pre-auth path."
+        ),
     )
     cors_allow_origins: list[str] = Field(
         default_factory=list, description="Allowed CORS origins (empty list disables CORS)"
@@ -521,6 +532,18 @@ class GatewayConfig(BaseSettings):
         description=(
             "SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept "
             "hostnames that fail to resolve at validation time. Off by default."
+        ),
+    )
+    provider_allow_private_hosts: bool = Field(
+        default=True,
+        description=(
+            "SSRF gate: allow a provider api_base that resolves to private/loopback/reserved hosts. "
+            "On by default (the opposite of the other SSRF gates) because operator-supplied api_base "
+            "values are master-key gated and the home-lab / self-hosted use case depends on private "
+            "endpoints. Set to false to make provider connection tests and model discovery refuse an "
+            "internal api_base. Scoped to those report paths only: chat dispatch (which dials the "
+            "endpoint) and the credential write path (which persists it) are not gated, so this is not "
+            "a general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
         ),
     )
     mode: str | None = Field(
@@ -864,7 +887,13 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     return config
 
 
-def _parse_bool_env(value: str) -> bool:
+def parse_bool_env(value: str) -> bool:
+    """Parse a boolean environment-variable string, raising on an unknown spelling.
+
+    Shared so the config layer and the ``url_safety`` SSRF gates agree on the
+    accepted truthy/falsey spellings (notably ``on``/``off``): a gate that parsed
+    booleans differently could silently fall open on a spelling one side rejects.
+    """
     normalized = value.strip().lower()
     if normalized in {"1", "true", "yes", "on"}:
         return True
@@ -886,7 +915,7 @@ def _coerce_scalar_env(value: str, annotation: Any) -> Any:
     if origin is not None:
         raise _NonScalarField  # parameterized generics (list[...], dict[...]) are not scalars
     if annotation is bool:
-        return _parse_bool_env(value)
+        return parse_bool_env(value)
     if annotation is int:
         return int(value)
     if annotation is float:

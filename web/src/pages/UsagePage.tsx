@@ -27,7 +27,7 @@ import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { FilterChips, type FilterChip } from "@/components/FilterChips";
 import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
 import { TablePagination } from "@/components/TablePagination";
-import { DeltaHint, ErrorBanner, FilterComboBox, PageHeader, RefreshButton, StatCard } from "@/components/ui";
+import { DeltaHint, EmptyState, ErrorBanner, FilterComboBox, PageHeader, RefreshButton, StatCard } from "@/components/ui";
 import { deltaFraction, formatPct, formatTokens, formatUsd } from "@/lib/format";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 import { bucketForWindow, findPreset, isoAgo, type RangePreset, USAGE_DEFAULT_KEY, USAGE_PRESETS } from "@/lib/timeRange";
@@ -614,9 +614,10 @@ export function UsagePage() {
       </div>
 
       {isEmptyEver ? (
-        <div className="rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)] px-4 py-10 text-center text-sm text-[var(--otari-muted)]">
-          No usage yet. Once the gateway serves requests, spend and volume appear here.
-        </div>
+        <EmptyState
+          title="No usage yet"
+          description="Once the gateway serves requests, spend and volume appear here."
+        />
       ) : (
         <>
           {/* Tiles. A responsive grid, matching OverviewPage: StatCard is

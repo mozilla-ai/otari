@@ -220,7 +220,13 @@ def test_settings_includes_full_config_view(tmp_path: Path) -> None:
         assert by_key[name]["settable"] is True, name
 
     # The outbound network-safety gates stay read-only on purpose.
-    for name in ("mcp_allow_private_hosts", "web_search_allow_private_hosts", "sandbox_url", "guardrails_url"):
+    for name in (
+        "mcp_allow_private_hosts",
+        "web_search_allow_private_hosts",
+        "provider_allow_private_hosts",
+        "sandbox_url",
+        "guardrails_url",
+    ):
         assert by_key[name]["settable"] is False, name
 
     # Fields carry a group, description, and a display type.

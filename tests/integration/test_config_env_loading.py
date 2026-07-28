@@ -9,7 +9,12 @@ import pytest
 import gateway.core.config as config_module
 from gateway.core.config import load_config
 from gateway.core.env import otari_env
-from gateway.services.url_safety import UnsafeURLError, validate_mcp_url, validate_outbound_fetch_url
+from gateway.services.url_safety import (
+    UnsafeURLError,
+    validate_mcp_url,
+    validate_outbound_fetch_url,
+    validate_provider_api_base,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -312,6 +317,29 @@ async def test_yaml_ssrf_gates_round_trip_through_env_bridge(
     # Outside the bridged environment the gates are closed again.
     with pytest.raises(UnsafeURLError, match="private"):
         await validate_outbound_fetch_url("https://10.0.0.5/page")
+
+
+@pytest.mark.asyncio
+async def test_yaml_provider_ssrf_gate_round_trip_through_env_bridge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The provider gate's polarity is inverted from the other two: `false`
+    # *enables* the gate. The bridge must serialize that value with the spelling
+    # the parser accepts, so a YAML-set `provider_allow_private_hosts: false`
+    # actually makes validate_provider_api_base reject an internal api_base.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("provider_allow_private_hosts: false\n", encoding="utf-8")
+    monkeypatch.delenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", raising=False)
+
+    with mock.patch.dict(os.environ):
+        load_config(str(config_file))
+
+        assert otari_env("PROVIDER_ALLOW_PRIVATE_HOSTS") == "false"
+        with pytest.raises(UnsafeURLError, match="private"):
+            await validate_provider_api_base("https://10.0.0.5/v1")
+
+    # Outside the bridged environment the gate is back to its allow-all default.
+    await validate_provider_api_base("https://10.0.0.5/v1")
 
 
 def test_load_config_otari_env_overrides_yaml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

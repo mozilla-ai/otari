@@ -12,7 +12,7 @@ import {
   useUpdateSettings,
 } from "@/api/hooks";
 import type { ConfigField, PricingRefreshPreview, UpdateSettingsRequest } from "@/api/types";
-import { ErrorBanner, FilterSelect, InfoBanner, PageHeader } from "@/components/ui";
+import { ErrorBanner, FilterSelect, InfoBanner, PageHeader, PageLoading } from "@/components/ui";
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
@@ -731,6 +731,8 @@ export function SettingsPage() {
       {data && filtered.length === 0 ? (
         <p className="text-sm text-[var(--otari-muted)]">No settings match your search.</p>
       ) : null}
+
+      {settings.isLoading ? <PageLoading /> : null}
 
       {groups.map((group) => (
         <section key={group.name} className="flex flex-col gap-2">

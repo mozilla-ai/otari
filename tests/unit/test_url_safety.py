@@ -6,6 +6,7 @@ from gateway.services.url_safety import (
     UnsafeURLError,
     validate_mcp_url,
     validate_outbound_fetch_url,
+    validate_provider_api_base,
 )
 
 
@@ -124,3 +125,79 @@ async def test_unresolvable_host_allowed_with_private_override(monkeypatch: pyte
     monkeypatch.setenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", "true")
     monkeypatch.setattr(url_safety, "_resolve_all_async", _empty)
     await validate_mcp_url("https://does-not-exist.invalid/mcp", has_authorization_token=False)
+
+
+# --------------------------------------------------------------------------- #
+# validate_provider_api_base: opt-in, default allow-all
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_allows_private_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default is allow-all so the home-lab / self-hosted use case keeps working."""
+    monkeypatch.delenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", raising=False)
+    for url in ("http://localhost:11434/v1", "http://127.0.0.1:8000/v1", "https://10.0.0.5/v1"):
+        await validate_provider_api_base(url)
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_public_allowed_when_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    await validate_provider_api_base("https://api.openai.com/v1")
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_rfc1918_rejected_when_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    for ip in ("10.0.0.5", "172.16.5.5", "192.168.1.1"):
+        with pytest.raises(UnsafeURLError, match="private"):
+            await validate_provider_api_base(f"https://{ip}/v1")
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_loopback_rejected_when_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    with pytest.raises(UnsafeURLError, match="loopback"):
+        await validate_provider_api_base("http://127.0.0.1:11434/v1")
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_link_local_rejected_when_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    with pytest.raises(UnsafeURLError, match="link-local"):
+        await validate_provider_api_base("http://169.254.169.254/latest/")
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_unresolvable_rejected_when_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    from gateway.services import url_safety
+
+    async def _empty(_host: str) -> list[object]:
+        return []
+
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    monkeypatch.setattr(url_safety, "_resolve_all_async", _empty)
+    with pytest.raises(UnsafeURLError, match="could not be resolved"):
+        await validate_provider_api_base("https://does-not-exist.invalid/v1")
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_non_http_rejected_when_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    with pytest.raises(UnsafeURLError, match="http or https"):
+        await validate_provider_api_base("ftp://10.0.0.5/v1")
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_off_enables_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `off` is a common boolean spelling; it must disable allow-all (enable the
+    # gate) rather than silently fall open, so it agrees with the config parser.
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "off")
+    with pytest.raises(UnsafeURLError, match="private"):
+        await validate_provider_api_base("https://10.0.0.5/v1")
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_on_keeps_allow_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "on")
+    await validate_provider_api_base("https://10.0.0.5/v1")
