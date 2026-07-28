@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useTestService, useToolSettings, useUpdateToolSettings } from "@/api/hooks";
 import type { ToolServiceName, ToolSettingField, UpdateToolSettingsRequest } from "@/api/types";
-import { ErrorBanner, FilterSelect, PageHeader, errorMessage } from "@/components/ui";
+import { ErrorBanner, FilterSelect, PageHeader, PageLoading, errorMessage } from "@/components/ui";
 
 // One settable field maps onto one key of the update request; cast at this one
 // boundary (the keys come from the backend's field list).
@@ -401,6 +401,8 @@ export function ToolsGuardrailsPage() {
       />
 
       <ErrorBanner error={query.error} />
+
+      {query.isLoading ? <PageLoading /> : null}
 
       {SERVICES.map((service) => {
         const ordered = service.order

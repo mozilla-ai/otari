@@ -96,7 +96,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "Rate limiting & CORS",
-        ("rate_limit_rpm", "cors_allow_origins"),
+        ("rate_limit_rpm", "dashboard_login_rate_limit_per_minute", "cors_allow_origins"),
     ),
     (
         "Files",

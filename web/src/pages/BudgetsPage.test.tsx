@@ -123,6 +123,11 @@ describe("BudgetsPage", () => {
     expect(await screen.findByText("No budgets yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create your first budget" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create budget" })).not.toBeInTheDocument();
+    // Only the onboarding panel shows: the table (and its own "no rows" fallback,
+    // whose "cap spending" text is unique to it) is suppressed so the two empty
+    // states are not stacked.
+    expect(screen.queryByText(/cap spending/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "Budgets" })).not.toBeInTheDocument();
   });
 
   it("lists a budget with its limit and humanized reset period", async () => {

@@ -124,6 +124,19 @@ describe("KeysPage", () => {
     vi.restoreAllMocks();
   });
 
+  it("shows a single empty state (onboarding panel, not also the table fallback)", async () => {
+    mockApi({ keys: [] });
+    renderPage(<KeysPage />);
+
+    // The onboarding panel owns the empty state.
+    expect(await screen.findByRole("heading", { name: "No API keys yet" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create your first key" })).toBeInTheDocument();
+    // The table (and its own "no rows" fallback) is suppressed, so the two empty
+    // states are not stacked. "authenticate a caller" is unique to that fallback.
+    expect(screen.queryByText(/authenticate a caller/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("grid", { name: "API keys" })).not.toBeInTheDocument();
+  });
+
   it("lists keys with status and prefix, never the full secret", async () => {
     mockApi({
       keys: [
