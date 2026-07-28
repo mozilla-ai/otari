@@ -1,6 +1,6 @@
 """URL safety checks for outbound HTTP fetches the gateway makes on behalf of a request.
 
-Two distinct call sites with overlapping but not identical threat models:
+Three call sites with overlapping but not identical threat models:
 
 * **MCP server endpoints** (:func:`validate_mcp_url`) — URL comes from the
   request body. We block private/link-local/reserved IPs to prevent SSRF.
@@ -35,6 +35,7 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
+from gateway.core.config import parse_bool_env
 from gateway.core.env import otari_env
 
 
@@ -169,6 +170,20 @@ async def validate_outbound_fetch_url(url: str) -> None:
     if _allow_web_search_private_hosts():
         return
 
+    await _reject_internal_host(host, host_label="fetch", override_var="OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS")
+
+
+async def _reject_internal_host(host: str, *, host_label: str, override_var: str) -> None:
+    """Reject a host that is (or resolves to) a private/link-local/reserved address.
+
+    The shared literal-or-resolve + :func:`_blocked_reason` loop behind the
+    web-search and provider-``api_base`` gates. Callers do their own scheme/host
+    validation and allow-flag short-circuit first, then hand the bare hostname
+    here. An unresolvable host is rejected (DNS-rebinding TOCTOU). ``host_label``
+    names the host in error messages; ``override_var`` is the OTARI_ env var
+    quoted in the rejection hint. Note ``validate_mcp_url`` does not use this: its
+    loop has extra loopback-allowance semantics.
+    """
     try:
         literal = ipaddress.ip_address(host)
         addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [literal]
@@ -176,16 +191,16 @@ async def validate_outbound_fetch_url(url: str) -> None:
         addresses = await _resolve_all_async(host)
         if not addresses:
             raise UnsafeURLError(
-                f"fetch host {host!r} could not be resolved; rejecting to avoid "
-                "DNS-rebinding. Set OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS=true to override."
+                f"{host_label} host {host!r} could not be resolved; rejecting to avoid "
+                f"DNS-rebinding. Set {override_var}=true to override."
             ) from None
 
     for addr in addresses:
         reason = _blocked_reason(addr)
         if reason is not None:
             raise UnsafeURLError(
-                f"fetch host {host!r} resolves to {addr} which is {reason}; "
-                "rejecting to prevent SSRF. Set OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS=true to override."
+                f"{host_label} host {host!r} resolves to {addr} which is {reason}; "
+                f"rejecting to prevent SSRF. Set {override_var}=true to override."
             )
 
 
@@ -193,7 +208,9 @@ def _allow_provider_private_hosts() -> bool:
     # Defaults to True (allow-all), the opposite of the MCP/web-search gates: an
     # operator-supplied api_base is master-key gated and the home-lab use case
     # depends on private endpoints, so the check is off until an operator opts in.
-    return otari_env("PROVIDER_ALLOW_PRIVATE_HOSTS", "true").lower() not in {"0", "false", "no"}
+    # Uses the shared config bool parser so a spelling like `off` disables
+    # allow-all (enables the gate) instead of silently falling open.
+    return parse_bool_env(otari_env("PROVIDER_ALLOW_PRIVATE_HOSTS", "true"))
 
 
 async def validate_provider_api_base(url: str) -> None:
@@ -206,6 +223,17 @@ async def validate_provider_api_base(url: str) -> None:
     sets ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false``, which turns on the same
     private/link-local/reserved-range check the web-search path uses (loopback
     blocked too).
+
+    The allow-flag short-circuit runs *before* scheme/host validation, inverting
+    the order :func:`validate_mcp_url` and :func:`validate_outbound_fetch_url`
+    use. That is deliberate: in the default allow-all state this must not impose
+    any shape on the operator's ``api_base`` (any-llm validates it), so the whole
+    check is skipped; scheme/host validation applies only once the gate is on.
+
+    Scope: this gate covers the paths that *report* on an ``api_base`` (the
+    connection-test endpoints and model discovery). It does not gate the chat
+    dispatch that dials the endpoint for real, nor the credential write path that
+    persists it, so it is not a general egress control.
 
     Async to keep the event loop unblocked during DNS resolution — see
     :func:`_resolve_all_async`. Raises :class:`UnsafeURLError` on rejection;
@@ -222,21 +250,4 @@ async def validate_provider_api_base(url: str) -> None:
     if not host:
         raise UnsafeURLError("provider api_base must include a hostname")
 
-    try:
-        literal = ipaddress.ip_address(host)
-        addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = [literal]
-    except ValueError:
-        addresses = await _resolve_all_async(host)
-        if not addresses:
-            raise UnsafeURLError(
-                f"provider api_base host {host!r} could not be resolved; rejecting to avoid "
-                "DNS-rebinding. Set OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=true to override."
-            ) from None
-
-    for addr in addresses:
-        reason = _blocked_reason(addr)
-        if reason is not None:
-            raise UnsafeURLError(
-                f"provider api_base host {host!r} resolves to {addr} which is {reason}; "
-                "rejecting to prevent SSRF. Set OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=true to override."
-            )
+    await _reject_internal_host(host, host_label="provider api_base", override_var="OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS")

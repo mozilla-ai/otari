@@ -186,3 +186,18 @@ async def test_provider_api_base_non_http_rejected_when_gated(monkeypatch: pytes
     monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
     with pytest.raises(UnsafeURLError, match="http or https"):
         await validate_provider_api_base("ftp://10.0.0.5/v1")
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_off_enables_gate(monkeypatch: pytest.MonkeyPatch) -> None:
+    # `off` is a common boolean spelling; it must disable allow-all (enable the
+    # gate) rather than silently fall open, so it agrees with the config parser.
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "off")
+    with pytest.raises(UnsafeURLError, match="private"):
+        await validate_provider_api_base("https://10.0.0.5/v1")
+
+
+@pytest.mark.asyncio
+async def test_provider_api_base_on_keeps_allow_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "on")
+    await validate_provider_api_base("https://10.0.0.5/v1")

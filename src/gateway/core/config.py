@@ -531,7 +531,9 @@ class GatewayConfig(BaseSettings):
             "On by default (the opposite of the other SSRF gates) because operator-supplied api_base "
             "values are master-key gated and the home-lab / self-hosted use case depends on private "
             "endpoints. Set to false to make provider connection tests and model discovery refuse an "
-            "internal api_base. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
+            "internal api_base. Scoped to those report paths only: chat dispatch (which dials the "
+            "endpoint) and the credential write path (which persists it) are not gated, so this is not "
+            "a general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
         ),
     )
     mode: str | None = Field(
@@ -875,7 +877,13 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     return config
 
 
-def _parse_bool_env(value: str) -> bool:
+def parse_bool_env(value: str) -> bool:
+    """Parse a boolean environment-variable string, raising on an unknown spelling.
+
+    Shared so the config layer and the ``url_safety`` SSRF gates agree on the
+    accepted truthy/falsey spellings (notably ``on``/``off``): a gate that parsed
+    booleans differently could silently fall open on a spelling one side rejects.
+    """
     normalized = value.strip().lower()
     if normalized in {"1", "true", "yes", "on"}:
         return True
@@ -897,7 +905,7 @@ def _coerce_scalar_env(value: str, annotation: Any) -> Any:
     if origin is not None:
         raise _NonScalarField  # parameterized generics (list[...], dict[...]) are not scalars
     if annotation is bool:
-        return _parse_bool_env(value)
+        return parse_bool_env(value)
     if annotation is int:
         return int(value)
     if annotation is float:
