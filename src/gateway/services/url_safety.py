@@ -15,7 +15,7 @@ Three call sites with overlapping but not identical threat models:
   ``OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`` for operators with unusual
   setups (private indexes etc.).
 
-* **Provider ``api_base``** (:func:`validate_provider_api_base`) — URL is
+* **Provider ``api_base``** (:func:`validate_provider_api_base`): the URL is
   operator-supplied (master-key gated, standalone-only), the same trust level
   as a config.yml provider endpoint. This one defaults to *allow-all*: the
   home-lab / self-hosted use case depends on private-network endpoints
@@ -235,8 +235,8 @@ async def validate_provider_api_base(url: str) -> None:
     dispatch that dials the endpoint for real, nor the credential write path that
     persists it, so it is not a general egress control.
 
-    Async to keep the event loop unblocked during DNS resolution — see
-    :func:`_resolve_all_async`. Raises :class:`UnsafeURLError` on rejection;
+    Async to keep the event loop unblocked during DNS resolution (see
+    :func:`_resolve_all_async`). Raises :class:`UnsafeURLError` on rejection;
     returns ``None`` on accept (including the default allow-all case).
     """
     if _allow_provider_private_hosts():

@@ -128,7 +128,7 @@ async def test_unresolvable_host_allowed_with_private_override(monkeypatch: pyte
 
 
 # --------------------------------------------------------------------------- #
-# validate_provider_api_base — opt-in, default allow-all
+# validate_provider_api_base: opt-in, default allow-all
 # --------------------------------------------------------------------------- #
 
 
