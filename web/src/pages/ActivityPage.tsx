@@ -21,7 +21,15 @@ import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
 import { PAGE_SIZE_OPTIONS, TablePagination } from "@/components/TablePagination";
 import { ErrorBanner, FilterComboBox, FilterSelect, PageHeader, RefreshButton } from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
-import { ACTIVITY_DEFAULT_KEY, ACTIVITY_PRESETS, CUSTOM_KEY, findPreset, isoAgo, type RangePreset } from "@/lib/timeRange";
+import {
+  ACTIVITY_DEFAULT_KEY,
+  ACTIVITY_PRESETS,
+  bucketForWindow,
+  CUSTOM_KEY,
+  findPreset,
+  isoAgo,
+  type RangePreset,
+} from "@/lib/timeRange";
 import { useUrlState } from "@/lib/urlState";
 
 // ---------- formatting ----------
@@ -73,10 +81,10 @@ const activityRowClassName = (e: UsageEntry): string | undefined =>
 
 // ---------- filter option sets ----------
 //
-// The time presets and the local-time custom picker are shared with the Usage
-// page via `@/lib/timeRange` (see TimeRangeControl). Activity keeps a truthful
-// "All": its raw list endpoint applies no default and no clamp, so an omitted
-// start really is all-time.
+// The time presets and window math are shared with the Usage page via
+// `@/lib/timeRange` (see the ActivityTimeline selector). Activity keeps a
+// truthful "All": its raw list endpoint applies no default and no clamp, so an
+// omitted start really is all-time.
 
 const STATUS_OPTIONS: { label: string; value: string }[] = [
   { label: "All", value: "" },
@@ -319,17 +327,29 @@ export function ActivityPage() {
   // stays all-time; the caption reflects the true list window, and the brush
   // still narrows it. Entity filters carry over so the bars match what's shown.
   const extentPreset = findPreset(ACTIVITY_PRESETS, range) ?? findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY);
-  const extentBucket = extentPreset?.bucket ?? "day";
+  // A window reaching outside the preset extent (a drill-down from the Usage
+  // page carries its own bounds while the URL's `range` still holds a default)
+  // cannot be framed by that extent: the histogram would show unrelated bars
+  // and the preset would read as active. Frame the window itself instead, with
+  // no preset highlighted; zoom-out falls back to the smallest broader preset.
+  const winOutsideExtent = Boolean(
+    win.start && extentWin.start && new Date(win.start).getTime() < new Date(extentWin.start).getTime(),
+  );
+  const extentKey = winOutsideExtent ? CUSTOM_KEY : range;
+  const extentBucket = winOutsideExtent
+    ? bucketForWindow(win.start as string, win.end)
+    : (extentPreset?.bucket ?? "day");
   const contextFilters: UsageFilters = useMemo(
     () => ({
-      start_date: extentWin.start,
+      start_date: winOutsideExtent ? win.start : extentWin.start,
+      end_date: winOutsideExtent ? win.end : undefined,
       status: statusFilter || undefined,
       model: modelFilter.trim() || undefined,
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
       priced,
     }),
-    [extentWin, statusFilter, modelFilter, userFilter, apiKeyFilter, priced],
+    [winOutsideExtent, win, extentWin, statusFilter, modelFilter, userFilter, apiKeyFilter, priced],
   );
   const contextSummary = useUsageSummary(contextFilters, extentBucket);
   const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
@@ -449,8 +469,8 @@ export function ActivityPage() {
     void contextSummary.refetch();
   };
 
-  // A rolling preset clears any explicit bounds; a calendar pick sets them (the
-  // preset key is left as-is, the bounds' presence drives the "custom" highlight).
+  // A rolling preset clears any explicit bounds; a timeline selection sets them
+  // (the preset key is left as-is, since it still names the extent).
   const pickPreset = (preset: RangePreset) => url.patch({ range: preset.key, start_date: "", end_date: "" });
   const pickCustom = (startIso: string, endIso: string) => url.patch({ start_date: startIso, end_date: endIso });
 
@@ -491,7 +511,7 @@ export function ActivityPage() {
       <div className="flex flex-col gap-3">
         <ActivityTimeline
           presets={ACTIVITY_PRESETS}
-          extentKey={range}
+          extentKey={extentKey}
           onPreset={pickPreset}
           onSelectRange={pickCustom}
           onSelectFull={() => (extentPreset ? pickPreset(extentPreset) : undefined)}

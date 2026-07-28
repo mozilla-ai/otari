@@ -50,8 +50,8 @@ function formatLatency(ms: number | null): string {
 
 // ---------- filter option sets ----------
 //
-// The time presets, window math, and the local-time custom picker live in
-// `@/lib/timeRange` and are shared with the Activity page (see TimeRangeControl).
+// The time presets and window math live in `@/lib/timeRange` and are shared
+// with the Activity page via the ActivityTimeline selector.
 
 // 30d: a spend investigation is usually monthly.
 const DEFAULT_PRESET = findPreset(USAGE_PRESETS, USAGE_DEFAULT_KEY) as RangePreset;
@@ -407,9 +407,9 @@ export function UsagePage() {
   // not recompute "now" and churn the query key. Re-anchored on preset change
   // and on refresh. Usage presets are all bounded, so this is always set.
   const [startDate, setStartDate] = useState<string>(() => isoAgo(DEFAULT_PRESET.seconds ?? 0));
-  // Custom range: an explicit calendar window (local time), resolved to absolute
-  // instants by the picker. When active it overrides the preset window. The
-  // calendar always yields both bounds, so there is no half-filled window.
+  // Custom range: an explicit UTC-bucket window selected on the timeline
+  // (handles, pan, or step zoom). When active it overrides the preset window.
+  // The selection always yields both bounds, so there is no half-filled window.
   const [customMode, setCustomMode] = useState(false);
   const [customStart, setCustomStart] = useState<string | undefined>();
   const [customEnd, setCustomEnd] = useState<string | undefined>();

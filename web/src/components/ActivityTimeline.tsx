@@ -5,7 +5,7 @@ import { Slider as RacSlider, SliderThumb as RacSliderThumb, SliderTrack as RacS
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 
 import type { UsageBucket } from "@/api/types";
-import { bucketIndexRange, formatWindowLabel, rangeFromBuckets, type RangePreset } from "@/lib/timeRange";
+import { bucketDurationMs, bucketIndexRange, formatWindowLabel, rangeFromBuckets, type RangePreset } from "@/lib/timeRange";
 
 // A request-volume histogram that doubles as the time-range selector for the
 // Usage and Activity pages (the pattern CloudWatch Logs Insights, Kibana, and
@@ -94,9 +94,13 @@ function TimelineTooltip({
 // chart.
 const THUMB_CLASS = "group top-1/2 h-full w-3 cursor-ew-resize outline-none";
 
-function EdgeHandle({ index, label }: { index: number; label: string }) {
+// The thumbs' accessible names double as the routing key for the wrapper's
+// arrow-key intercept below.
+const THUMB_LABELS = ["Window start", "Window end"] as const;
+
+function EdgeHandle({ index }: { index: 0 | 1 }) {
   return (
-    <RacSliderThumb index={index} aria-label={label} className={`${THUMB_CLASS} pointer-events-auto`}>
+    <RacSliderThumb index={index} aria-label={THUMB_LABELS[index]} className={`${THUMB_CLASS} pointer-events-auto`}>
       <span aria-hidden className="absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 bg-[var(--otari-brand)]" />
       <span
         aria-hidden
@@ -133,7 +137,15 @@ export function ActivityTimeline({
     const { startIndex, endIndex } = bucketIndexRange(starts, windowStart, windowEnd);
     return [startIndex, endIndex + 1];
   };
-  const [sel, setSel] = useState<[number, number]>(windowToRange);
+  const [sel, setSelState] = useState<[number, number]>(windowToRange);
+  // Mirror of `sel` for pointer handlers: a pointerup can fire before the last
+  // pointermove's setState has re-rendered, and committing from the (stale)
+  // closure value could snap to a different bucket than the one on screen.
+  const selRef = useRef(sel);
+  const setSel = (next: [number, number]) => {
+    selRef.current = next;
+    setSelState(next);
+  };
   const dragging = useRef(false);
   useEffect(() => {
     if (!dragging.current) setSel(windowToRange());
@@ -160,9 +172,15 @@ export function ActivityTimeline({
 
   // Step zoom. Out doubles the window around its center; at the full extent it
   // promotes to the next larger preset, so "the default window is too narrow"
-  // is always one tap from a wider view. In halves it (min one bucket).
+  // is always one tap from a wider view. In halves it (min one bucket). When the
+  // extent is not one of the presets (a drill-down window from another page),
+  // fall back to the smallest preset that broadens it, so zoom-out never dead-ends.
   const extentIndex = presets.findIndex((p) => p.key === extentKey);
-  const largerPreset = extentIndex >= 0 ? presets[extentIndex + 1] : undefined;
+  const extentSeconds = extentIndex >= 0 ? presets[extentIndex].seconds : (n * bucketDurationMs(bucket)) / 1000;
+  const largerPreset =
+    extentIndex >= 0
+      ? presets[extentIndex + 1]
+      : presets.find((p) => p.seconds === null || (extentSeconds !== null && p.seconds > extentSeconds));
   const [lo, hi] = sel;
   const atFullExtent = lo <= 0.01 && hi >= n - 0.01;
 
@@ -192,6 +210,37 @@ export function ActivityTimeline({
     applySpan((hi - lo) * 2);
   };
   const zoomIn = () => applySpan((hi - lo) / 2);
+
+  // Arrow keys on a handle move that edge by one whole bucket. Intercepted in
+  // the capture phase on the wrapper below (before react-aria's own handler,
+  // which is unconditional): the slider's built-in arrow step is the fine
+  // pointer step (0.1 bucket), which the bucket-snapping commit would undo,
+  // making arrows a silent no-op. PageUp/Down, Home, and End stay react-aria's.
+  const stepEdge = (index: number, deltaBuckets: number) => {
+    const [slo, shi] = selRef.current;
+    const next: [number, number] =
+      index === 0
+        ? [Math.max(0, Math.min(shi - 1, Math.round(slo) + deltaBuckets)), shi]
+        : [slo, Math.min(n, Math.max(slo + 1, Math.round(shi) + deltaBuckets))];
+    setSel(next);
+    commit(next);
+  };
+
+  const onSliderKeyDownCapture = (event: React.KeyboardEvent) => {
+    const delta =
+      event.key === "ArrowRight" || event.key === "ArrowUp"
+        ? 1
+        : event.key === "ArrowLeft" || event.key === "ArrowDown"
+          ? -1
+          : 0;
+    if (delta === 0) return;
+    const which = (event.target as HTMLElement).getAttribute?.("aria-label");
+    const index = THUMB_LABELS.indexOf(which as (typeof THUMB_LABELS)[number]);
+    if (index < 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    stepEdge(index, delta);
+  };
 
   // Pan: dragging the axis strip slides the whole window. Plain pointer capture;
   // commits on release like the handles do.
@@ -330,37 +379,41 @@ export function ActivityTimeline({
               onPointerUp={(event) => {
                 event.currentTarget.releasePointerCapture(event.pointerId);
                 pan.current = null;
-                commit(sel);
+                commit(selRef.current);
               }}
               onPointerCancel={() => {
                 pan.current = null;
-                commit(sel);
+                commit(selRef.current);
               }}
             />
 
             {/* The selection handles, overlaid on the chart. The slider itself is
                 pointer-transparent (so bars stay hoverable and a stray click
-                cannot jump a handle); only the handles take the pointer. */}
-            <RacSlider
-              aria-label="Selected time range"
-              minValue={0}
-              maxValue={n}
-              step={1 / STEPS_PER_BUCKET}
-              value={sel}
-              onChange={(value) => {
-                dragging.current = true;
-                if (Array.isArray(value) && value.length === 2) setSel([value[0], value[1]]);
-              }}
-              onChangeEnd={(value) => {
-                if (Array.isArray(value) && value.length === 2) commit([value[0], value[1]]);
-              }}
-              className="pointer-events-none absolute inset-0 z-[2]"
-            >
-              <RacSliderTrack className="pointer-events-none relative h-full w-full">
-                <EdgeHandle index={0} label="Window start" />
-                <EdgeHandle index={1} label="Window end" />
-              </RacSliderTrack>
-            </RacSlider>
+                cannot jump a handle); only the handles take the pointer. The
+                wrapper's capture-phase keydown reroutes arrow keys to whole-
+                bucket steps before react-aria's fine-step handler sees them. */}
+            <div className="pointer-events-none absolute inset-0 z-[2]" onKeyDownCapture={onSliderKeyDownCapture}>
+              <RacSlider
+                aria-label="Selected time range"
+                minValue={0}
+                maxValue={n}
+                step={1 / STEPS_PER_BUCKET}
+                value={sel}
+                onChange={(value) => {
+                  dragging.current = true;
+                  if (Array.isArray(value) && value.length === 2) setSel([value[0], value[1]]);
+                }}
+                onChangeEnd={(value) => {
+                  if (Array.isArray(value) && value.length === 2) commit([value[0], value[1]]);
+                }}
+                className="pointer-events-none h-full w-full"
+              >
+                <RacSliderTrack className="pointer-events-none relative h-full w-full">
+                  <EdgeHandle index={0} />
+                  <EdgeHandle index={1} />
+                </RacSliderTrack>
+              </RacSlider>
+            </div>
           </div>
         )}
       </div>

@@ -129,4 +129,24 @@ describe("ActivityTimeline", () => {
     renderTimeline();
     expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
   });
+
+  it("falls back to the smallest broader preset when the extent is not a preset", async () => {
+    const user = userEvent.setup();
+    // A drill-down window: extentKey is the custom sentinel, series spans 3 days.
+    const { onPreset } = renderTimeline({ extentKey: "custom" });
+    await user.click(screen.getByRole("button", { name: "Zoom out" }));
+    // Smallest USAGE preset broader than 3 days is 7d.
+    expect(onPreset).toHaveBeenCalledWith(expect.objectContaining({ key: "7d" }));
+  });
+
+  it("moves an edge by one whole bucket per arrow key", async () => {
+    const user = userEvent.setup();
+    const { onSelectRange } = renderTimeline();
+    // Focus the end thumb and nudge it left: the full 3-bucket window narrows to
+    // the first two buckets (arrows are rerouted to whole-bucket steps; the
+    // slider's own 0.1-bucket step would be snapped back by the commit).
+    screen.getAllByRole("slider")[1].focus();
+    await user.keyboard("{ArrowLeft}");
+    expect(onSelectRange).toHaveBeenCalledWith("2026-07-10T00:00:00.000Z", "2026-07-12T00:00:00.000Z");
+  });
 });

@@ -432,6 +432,30 @@ describe("ActivityPage", () => {
     await waitFor(() => expect(listCalls(calls).some((url) => !url.includes("start_date"))).toBe(true));
   });
 
+  it("frames a drill-down window that reaches outside the preset extent", async () => {
+    const { calls } = mockApi({ rows: [entry()] });
+    // A Usage-page drill-down: explicit multi-week bounds while `range` stays the
+    // 24h default. The timeline must frame the drilled window (daily buckets over
+    // its bounds), not the unrelated 24h extent.
+    renderPage(<ActivityPage />, "/activity?start_date=2020-07-01T00:00:00.000Z&end_date=2020-07-15T00:00:00.000Z");
+    await screen.findByText("gpt-4o");
+
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) =>
+            c.url.includes("/v1/usage/summary") &&
+            c.url.includes("bucket=day") &&
+            c.url.includes("start_date=2020-07-01") &&
+            c.url.includes("end_date=2020-07-15"),
+        ),
+      ).toBe(true),
+    );
+    // The caption reflects the drilled window (end shown inclusively).
+    expect(screen.getByText(/Showing/)).toHaveTextContent("Jul 1");
+    expect(screen.getByText(/Showing/)).toHaveTextContent("Jul 14");
+  });
+
   it("buckets the timeline histogram by the active preset's extent", async () => {
     const { calls } = mockApi({ rows: [entry()] });
     renderPage(<ActivityPage />); // default 24h
