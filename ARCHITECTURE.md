@@ -27,7 +27,7 @@ Otari separates a **data plane** from a **control plane**.
 
 On the request hot path the two meet through the **resolve protocol**. Before a provider call, the data plane asks the control plane which provider and credentials to use, and gets back an ordered list of attempts:
 
-```
+```http
 POST /gateway/provider-keys/resolve  ->  attempts[]
 ```
 
@@ -168,7 +168,7 @@ Two gates decide whether a piece of behavior runs. They **compose but never merg
 
 Otari's core provides both gates as mechanisms; a surface composes them. Because the core entitles every base capability, a check written in the core usually just tests a flag. The composed check is one an overlay surface writes, since it gates a capability that is not universally entitled. An overlay surface for smart model selection, for example, checks both, in this order:
 
-```
+```text
 entitled("routing") AND flag("smart-model-selection-v2")
 ```
 
