@@ -163,6 +163,22 @@ describe("ActivityPage", () => {
     expect(listCalls(calls).some((url) => url.includes("api_key_id=key-1"))).toBe(true);
   });
 
+  it("honors a source drill-down and shows it as a clearable chip", async () => {
+    // The pricing alarm links here scoped to gateway traffic. The param has no
+    // select of its own, so if the page ignored it the banner's count and this
+    // list would disagree, and the scoping would be invisible.
+    const { calls } = mockApi({ rows: [entry({ status: "error" })] });
+    renderPage(<ActivityPage />, "/activity?status=error&range=1h&source=gateway");
+
+    await screen.findByText("gpt-4o");
+    expect(listCalls(calls).some((url) => url.includes("source=gateway"))).toBe(true);
+
+    const user = userEvent.setup();
+    const chip = screen.getByRole("button", { name: /Source/ });
+    await user.click(chip);
+    await waitFor(() => expect(listCalls(calls).at(-1)).not.toContain("source="));
+  });
+
   it("renders latency over a second as seconds and null latency as an em-dash", async () => {
     mockApi({
       rows: [

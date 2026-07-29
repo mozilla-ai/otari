@@ -25,11 +25,12 @@ export function PricingWarning() {
   const needsPricing = settings.data?.require_pricing === true && settings.data.default_pricing === false;
   const showing = needsPricing && !dismissed;
 
-  // Every failure class is counted (402 no pricing, 403 budget or model access,
-  // 502 provider), not only the pricing rejections: the operator's question in
-  // this state is "is traffic getting through", and over-reporting a failure is
-  // safer than a banner reading "0" while requests are being dropped. Only polled
-  // while the alarm is up.
+  // Every failure class the gateway served is counted (402 no pricing, 403 budget
+  // or model access, 502 provider), not only the pricing rejections: the operator's
+  // question in this state is "is traffic getting through", and over-reporting a
+  // failure is safer than a banner reading "0" while requests are being dropped.
+  // Imported usage is excluded, so the link's filtered view matches this count.
+  // Only polled while the alarm is up.
   const failures = useFailureCount(HOUR_S, showing);
   const failureCount = failures.data?.total ?? 0;
 
@@ -50,7 +51,7 @@ export function PricingWarning() {
                 <strong className="font-semibold">
                   {failureCount.toLocaleString()} {failureCount === 1 ? "request" : "requests"} failed in the last hour.
                 </strong>{" "}
-                <NavLink to="/activity?status=error&range=1h" className="underline underline-offset-2">
+                <NavLink to="/activity?status=error&range=1h&source=gateway" className="underline underline-offset-2">
                   View failed requests
                 </NavLink>
               </>

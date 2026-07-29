@@ -693,11 +693,19 @@ const FAILURE_COUNT_POLL_MS = 60_000;
 // the key stays stable (a "now"-derived key would mint a new cache entry on every
 // render), and every refetch re-anchors, so a tab left open keeps reporting the
 // last hour rather than quietly widening to the last hour and a half.
+//
+// Scoped to `source: "gateway"`: imported usage can carry status=error too (the
+// external-events API accepts it), and an imported session's failures are not this
+// gateway dropping traffic. Counting them would make the signal cry wolf.
 export function useFailureCount(windowSeconds: number, enabled = true) {
   return useQuery({
     queryKey: [USAGE, "count", "failures", windowSeconds],
     queryFn: () => {
-      const filters: UsageFilters = { status: "error", start_date: isoAgo(windowSeconds) };
+      const filters: UsageFilters = {
+        status: "error",
+        source: "gateway",
+        start_date: isoAgo(windowSeconds),
+      };
       return apiFetch<UsageCount>(`/v1/usage/count?${usageParams(filters).toString()}`);
     },
     enabled,

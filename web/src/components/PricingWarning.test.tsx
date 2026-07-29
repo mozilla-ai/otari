@@ -92,14 +92,19 @@ describe("PricingWarning", () => {
     renderPage(<PricingWarning />);
 
     expect(await screen.findByText("12 requests failed in the last hour.")).toBeInTheDocument();
+    // The link carries the same scope as the count, so the filtered view it lands
+    // on reports the same number the banner just claimed.
     expect(screen.getByRole("link", { name: "View failed requests" })).toHaveAttribute(
       "href",
-      "/activity?status=error&range=1h",
+      "/activity?status=error&range=1h&source=gateway",
     );
 
     // Counted from the error rows of the last hour, not from all usage.
     const countUrl = String(fetchMock.mock.calls.find(([u]) => String(u).includes("/v1/usage/count"))?.[0]);
     expect(new URLSearchParams(countUrl.split("?")[1]).get("status")).toBe("error");
+    // Imported usage can carry status=error too; an imported session's failures
+    // are not this gateway dropping traffic, so they must not raise the alarm.
+    expect(new URLSearchParams(countUrl.split("?")[1]).get("source")).toBe("gateway");
     const since = new Date(countWindows(fetchMock)[0]).getTime();
     expect(Date.now() - since).toBeGreaterThan(0);
     expect(Date.now() - since).toBeLessThanOrEqual(3_600_000 + 5_000);

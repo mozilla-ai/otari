@@ -110,6 +110,7 @@ const URL_DEFAULTS = {
   user_id: "",
   api_key_id: "",
   priced: "",
+  source: "",
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
 } as const;
@@ -247,6 +248,9 @@ export function ActivityPage() {
   const userFilter = url.get("user_id");
   const apiKeyFilter = url.get("api_key_id");
   const pricedFilter = url.get("priced");
+  // Provenance. No select of its own: it arrives from a drill-down (the pricing
+  // alarm links here scoped to gateway traffic) and is visible/clearable as a chip.
+  const sourceFilter = url.get("source");
   const page = Math.max(0, url.getNumber("page"));
   // Snap URL-supplied sizes to the nearest offered option: selection latency
   // grows linearly with rows on the page, so an old bookmark with size=500
@@ -284,9 +288,10 @@ export function ActivityPage() {
       model: modelFilter.trim() || undefined,
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
+      source: sourceFilter || undefined,
       priced,
     }),
-    [win, statusFilter, modelFilter, userFilter, apiKeyFilter, priced],
+    [win, statusFilter, modelFilter, userFilter, apiKeyFilter, sourceFilter, priced],
   );
 
   const selection = useTableSelection();
@@ -315,8 +320,9 @@ export function ActivityPage() {
       status: statusFilter || undefined,
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
+      source: sourceFilter || undefined,
     }),
-    [win, statusFilter, userFilter, apiKeyFilter],
+    [win, statusFilter, userFilter, apiKeyFilter, sourceFilter],
   );
   const modelSummary = useUsageSummary(modelSuggestFilters, "day");
   const modelOptions =
@@ -350,9 +356,10 @@ export function ActivityPage() {
       model: modelFilter.trim() || undefined,
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
+      source: sourceFilter || undefined,
       priced,
     }),
-    [winOutsideExtent, win, extentWin, statusFilter, modelFilter, userFilter, apiKeyFilter, priced],
+    [winOutsideExtent, win, extentWin, statusFilter, modelFilter, userFilter, apiKeyFilter, sourceFilter, priced],
   );
   const contextSummary = useUsageSummary(contextFilters, extentBucket);
   const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
@@ -364,7 +371,7 @@ export function ActivityPage() {
   const totalIsExact = count.isSuccess && !count.isPlaceholderData;
   const total = totalIsExact ? (count.data?.total ?? 0) : null;
   const anyFilter = Boolean(
-    statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || pricedFilter || hasWindow,
+    statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || pricedFilter || sourceFilter || hasWindow,
   );
 
   // Active entity filters as removable chips (time is driven by the timeline, so
@@ -376,13 +383,14 @@ export function ActivityPage() {
     label: u.alias ? `${u.alias} (${u.user_id})` : u.user_id,
   }));
   const clearEntityFilters = () =>
-    url.patch({ status: "", priced: "", model: "", user_id: "", api_key_id: "" });
+    url.patch({ status: "", priced: "", model: "", user_id: "", api_key_id: "", source: "" });
   const filterChips: FilterChip[] = [
     ...(statusFilter ? [{ key: "status", label: "Status", value: labelFrom(STATUS_OPTIONS, statusFilter), onClear: () => url.patch({ status: "" }) }] : []),
     ...(pricedFilter ? [{ key: "priced", label: "Priced", value: labelFrom(PRICED_OPTIONS, pricedFilter), onClear: () => url.patch({ priced: "" }) }] : []),
     ...(userFilter ? [{ key: "user", label: "User", value: labelFrom(userOptionsList, userFilter), onClear: () => url.patch({ user_id: "" }) }] : []),
     ...(modelFilter.trim() ? [{ key: "model", label: "Model", value: modelFilter.trim(), onClear: () => url.patch({ model: "" }) }] : []),
     ...(apiKeyFilter ? [{ key: "key", label: "API key", value: labelFrom(keyOptions, apiKeyFilter), onClear: () => url.patch({ api_key_id: "" }) }] : []),
+    ...(sourceFilter ? [{ key: "source", label: "Source", value: sourceLabel(sourceFilter), onClear: () => url.patch({ source: "" }) }] : []),
   ];
 
   // Selection targets imported rows only; enforced gateway rows are disabled so
