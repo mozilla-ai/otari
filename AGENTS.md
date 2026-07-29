@@ -28,6 +28,8 @@ The `.claude/skills` directory symlinks to `.github/skills`, so the same skills 
 ## Architecture (Big Picture)
 Read these together before changing request behavior, the flow spans several files.
 
+For the open-core OSS/enterprise seam (ports, adapters, the capability lines, and the rules for keeping the boundary), see [ARCHITECTURE.md](ARCHITECTURE.md). It is a north-star document describing the intended architecture, so ground current-state work in `src/gateway/`.
+
 ### Two runtime modes
 - Mode is derived when `OTARI_MODE` is unset, and honored when set: `GatewayConfig.is_hybrid_mode` / `effective_mode` (`src/gateway/core/config.py`) return `hybrid` when the config field `mode` is `hybrid` (legacy `platform`) or, when `mode` is unset, when the platform token (`OTARI_AI_TOKEN`) is set; otherwise `standalone`. Startup validation (`validate_mode_selection`) rejects the two conflicting combinations: `OTARI_MODE=hybrid` (legacy value `platform`) without a token, and `OTARI_MODE=standalone` with a token set (the token would otherwise silently select hybrid). The token is resolved once at config-load time (cached on the config), not re-read from `os.getenv` on every access.
 - **Standalone**: provider credentials come from the `providers:` block in `config.yml`; users/keys/budgets/usage live in the local DB. All routers are registered.
@@ -198,6 +200,7 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - OpenAPI generator: `scripts/generate_openapi.py`
 - Admin dashboard source: `web/` (built bundle committed at `src/gateway/static/dashboard/`)
 - Dashboard bundle locator: `src/gateway/dashboard.py`
+- Open-core architecture seam (north-star): `ARCHITECTURE.md`
 
 ## Change Validation Checklist
 - If you touched API routes or schemas, run relevant integration tests first.
