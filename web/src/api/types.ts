@@ -60,10 +60,14 @@ export interface DiscoverableModelsResponse {
 
 // A model alias. "config" aliases come from config.yml and are read-only here;
 // "stored" ones live in the database and can be created and deleted.
+// `user_id` is the scope: null means global (every caller resolves it), which
+// config aliases always are. A user-scoped alias resolves only for that user and
+// shadows a global one of the same name, so (name, user_id) is the row identity.
 export interface AliasResponse {
   name: string;
   target: string;
   source: "config" | "stored";
+  user_id: string | null;
   created_at: string | null;
   updated_at: string | null;
 }
@@ -71,6 +75,7 @@ export interface AliasResponse {
 export interface CreateAliasRequest {
   name: string;
   target: string;
+  user_id?: string | null;
 }
 
 // Curated capability flags for a provider, from the bundled any-llm metadata.

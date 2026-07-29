@@ -156,7 +156,10 @@ gateway.
 - **Models**: browse the model catalogue and set per-model pricing, with specs
   and modality metadata where available (from models.dev).
 - **Aliases**: friendly names that resolve to a real provider model. Callers
-  use the alias; the underlying model stays private to the gateway.
+  use the alias; the underlying model stays private to the gateway. "Applies to"
+  is the scope: an alias for every caller, or one scoped to a single user, which
+  lets the same name resolve to a different model per person and takes precedence
+  over a global alias of that name. See [Model aliases](models.md#model-aliases).
 
 ### Access
 

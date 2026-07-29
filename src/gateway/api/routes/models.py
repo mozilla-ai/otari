@@ -331,6 +331,10 @@ async def list_models(
     pricing data from the model_pricing table when available. Models that only
     exist in the pricing table are also included for backward compatibility.
     """
+    # Aliases are scoped, so the catalog is too: a caller sees the global and
+    # configured ones plus their own, never another user's. A master-key caller
+    # has no user, so it sees the unscoped layers only.
+    caller_user_id = auth[0].user_id if auth[0] is not None else None
     pricing_map = await _get_pricing_map(db, provider_filter=provider)
     # Snapshot before phase 1 mutates ``pricing_map`` (it pops matched keys), so
     # alias pricing can still be looked up by the target's canonical key. Keys are
@@ -341,7 +345,7 @@ async def list_models(
     pricing_lookup = _normalized_pricing_lookup(config, pricing_map)
     # Read once: phase 2 withholds these targets and phase 3 lists the names, and
     # the two must agree even if a write lands between them.
-    aliases = effective_aliases(config)
+    aliases = effective_aliases(config, caller_user_id)
     # Alias targets are withheld from every phase that could surface the real
     # model, discovery (phase 1) as well as pricing-only (phase 2): publishing the
     # target under either would expose the provider:model name the alias exists to
@@ -492,13 +496,15 @@ async def get_model(
     auth: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
 ) -> ModelObject:
     """Get details for a specific model."""
-    aliases = effective_aliases(config)
+    api_key, is_master_key = auth
+    # Same scoping as the listing: the caller's own aliases, plus the global and
+    # configured ones. None for a master-key caller.
+    aliases = effective_aliases(config, api_key.user_id if api_key is not None else None)
 
     # Model access control: a denied model returns 404, indistinguishable from a
     # missing one, so this endpoint cannot be used to probe which models exist
     # behind an allow-list. Uses the same matcher/canonical key as the listing and
     # inference. Master key bypasses.
-    api_key, is_master_key = auth
     key_allowlist = None if is_master_key else await resolve_request_allowlist(db, api_key)
     if key_allowlist is not None:
         target = aliases.get(model_id, model_id)

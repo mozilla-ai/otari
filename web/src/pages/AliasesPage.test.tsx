@@ -8,9 +8,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AliasResponse } from "@/api/types";
 import { AliasesPage } from "@/pages/AliasesPage";
 
+const stored = (name: string, target: string, user_id: string | null = null): AliasResponse => ({
+  name,
+  target,
+  source: "stored",
+  user_id,
+  created_at: null,
+  updated_at: null,
+});
+
 const ALIASES: AliasResponse[] = [
-  { name: "fast-model", target: "openai:gpt-4o-mini", source: "config", created_at: null, updated_at: null },
-  { name: "smart", target: "anthropic:claude-opus-4", source: "stored", created_at: null, updated_at: null },
+  { name: "fast-model", target: "openai:gpt-4o-mini", source: "config", user_id: null, created_at: null, updated_at: null },
+  stored("smart", "anthropic:claude-opus-4"),
+];
+
+const USERS = [
+  { user_id: "alice", alias: "alice", spend: 0, is_blocked: false },
+  { user_id: "bob", alias: "bob", spend: 0, is_blocked: false },
 ];
 
 function jsonResponse(body: unknown): Response {
@@ -22,17 +36,24 @@ function mockApi(aliases: AliasResponse[] = ALIASES) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
+    if (url.includes("/v1/users")) {
+      return jsonResponse(USERS);
+    }
     if (url.includes("/v1/aliases")) {
       if (method === "POST") {
-        const body = JSON.parse(String(init?.body)) as { name: string; target: string };
-        const existing = list.findIndex((alias) => alias.name === body.name);
-        const row: AliasResponse = { ...body, source: "stored", created_at: null, updated_at: null };
+        const body = JSON.parse(String(init?.body)) as { name: string; target: string; user_id?: string | null };
+        const userId = body.user_id ?? null;
+        // Scope is part of the identity, matching the backend upsert.
+        const existing = list.findIndex((alias) => alias.name === body.name && alias.user_id === userId);
+        const row = stored(body.name, body.target, userId);
         list = existing >= 0 ? list.map((alias, i) => (i === existing ? row : alias)) : [...list, row];
         return jsonResponse(row);
       }
       if (method === "DELETE") {
-        const name = decodeURIComponent(url.split("/").pop() ?? "");
-        list = list.filter((alias) => alias.name !== name);
+        const [path, query] = url.split("?");
+        const name = decodeURIComponent(path.split("/").pop() ?? "");
+        const userId = new URLSearchParams(query ?? "").get("user_id");
+        list = list.filter((alias) => !(alias.name === name && alias.user_id === userId));
         return new Response(null, { status: 204 });
       }
       return jsonResponse(list);
@@ -84,13 +105,16 @@ describe("AliasesPage", () => {
     const post = fetchMock.mock.calls.find(
       ([u, init]) => String(u).includes("/v1/aliases") && (init?.method ?? "") === "POST",
     );
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: "smart", target: "anthropic:claude-opus-4" });
+    // user_id null: "Every caller" is the default scope, same as before scoping existed.
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      name: "smart",
+      target: "anthropic:claude-opus-4",
+      user_id: null,
+    });
   });
 
   it("deletes a stored alias", async () => {
-    const fetchMock = mockApi([
-      { name: "smart", target: "anthropic:claude-opus-4", source: "stored", created_at: null, updated_at: null },
-    ]);
+    const fetchMock = mockApi([stored("smart", "anthropic:claude-opus-4")]);
     const user = userEvent.setup();
     renderPage(<AliasesPage />);
 
@@ -103,9 +127,7 @@ describe("AliasesPage", () => {
   });
 
   it("edits a stored alias target", async () => {
-    const fetchMock = mockApi([
-      { name: "smart", target: "anthropic:claude-opus-4", source: "stored", created_at: null, updated_at: null },
-    ]);
+    const fetchMock = mockApi([stored("smart", "anthropic:claude-opus-4")]);
     const user = userEvent.setup();
     renderPage(<AliasesPage />);
 
@@ -121,12 +143,12 @@ describe("AliasesPage", () => {
     const post = fetchMock.mock.calls.find(
       ([u, init]) => String(u).includes("/v1/aliases") && (init?.method ?? "") === "POST",
     );
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: "smart", target: "openai:gpt-4o" });
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ name: "smart", target: "openai:gpt-4o", user_id: null });
   });
 
   it("opening the edit form closes the create form", async () => {
     mockApi([
-      { name: "smart", target: "anthropic:claude-opus-4", source: "stored", created_at: null, updated_at: null },
+      stored("smart", "anthropic:claude-opus-4"),
     ]);
     const user = userEvent.setup();
     renderPage(<AliasesPage />);
@@ -151,6 +173,97 @@ describe("AliasesPage", () => {
 
     expect(screen.getByText(/cannot contain/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create alias/i })).toBeDisabled();
+  });
+
+  it("shows who each alias applies to", async () => {
+    mockApi([stored("smart", "anthropic:claude-opus-4"), stored("smart", "openai:gpt-4o", "alice")]);
+    renderPage(<AliasesPage />);
+
+    // Both rows survive: the name alone is not the identity, so a per-user
+    // override must not replace the global row in the table.
+    const rows = (await screen.findAllByText("smart")).map((cell) => cell.closest("tr")!);
+    expect(rows).toHaveLength(2);
+    const scopes = rows.map((row) => (within(row).queryByText("alice") ? "alice" : "Every caller"));
+    expect(scopes.sort()).toEqual(["Every caller", "alice"]);
+  });
+
+  it("creates a user-scoped alias", async () => {
+    const fetchMock = mockApi([]);
+    const user = userEvent.setup();
+    renderPage(<AliasesPage />);
+
+    await user.click(screen.getByRole("button", { name: "New alias" }));
+    await user.type(screen.getByRole("textbox", { name: /alias name/i }), "smart");
+    await user.type(screen.getByRole("combobox", { name: /target/i }), "anthropic:claude-opus-4");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "One user" }));
+    await user.type(screen.getByRole("combobox", { name: /^user$/i }), "alice");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /create alias/i }));
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) => String(u).includes("/v1/aliases") && (init?.method ?? "") === "POST",
+    );
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      name: "smart",
+      target: "anthropic:claude-opus-4",
+      user_id: "alice",
+    });
+  });
+
+  it("will not submit a user-scoped alias with no user picked", async () => {
+    mockApi([]);
+    const user = userEvent.setup();
+    renderPage(<AliasesPage />);
+
+    await user.click(screen.getByRole("button", { name: "New alias" }));
+    await user.type(screen.getByRole("textbox", { name: /alias name/i }), "smart");
+    await user.type(screen.getByRole("combobox", { name: /target/i }), "anthropic:claude-opus-4");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "One user" }));
+
+    // An empty user must be an incomplete form, never a silent global alias.
+    expect(screen.getByRole("button", { name: /create alias/i })).toBeDisabled();
+  });
+
+  it("deletes only the scope that was asked for", async () => {
+    const fetchMock = mockApi([stored("smart", "anthropic:claude-opus-4"), stored("smart", "openai:gpt-4o", "alice")]);
+    const user = userEvent.setup();
+    renderPage(<AliasesPage />);
+
+    const scopedRow = (await screen.findByText("alice")).closest("tr")!;
+    await user.click(within(scopedRow).getByRole("button", { name: "Delete" }));
+    await user.click(within(scopedRow).getByRole("button", { name: "Delete" }));
+
+    const del = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "DELETE");
+    expect(String(del?.[0])).toContain("user_id=alice");
+    // The global row is untouched.
+    await vi.waitFor(() => {
+      expect(screen.queryByText("alice")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("smart")).toBeInTheDocument();
+  });
+
+  it("bulk-deletes the right row when a user id is not delimiter-free", async () => {
+    // Row keys pack scope and name together and a user_id has no format
+    // restriction, so this pins the delete down to the row that was selected
+    // however that key is built.
+    const fetchMock = mockApi([stored("smart", "openai:gpt-4o", "team alpha")]);
+    const user = userEvent.setup();
+    renderPage(<AliasesPage />);
+
+    const row = (await screen.findByText("smart")).closest("tr")!;
+    await user.click(within(row).getByRole("checkbox"));
+    const bar = (await screen.findByText("1 selected")).closest("div")!;
+    await user.click(within(bar).getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await vi.waitFor(() => {
+      const del = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "").toUpperCase() === "DELETE");
+      expect(del).toBeTruthy();
+      expect(new URL(String(del![0]), "http://x").searchParams.get("user_id")).toBe("team alpha");
+    });
   });
 
   it("only lets stored aliases be selected, and bulk-deletes them", async () => {

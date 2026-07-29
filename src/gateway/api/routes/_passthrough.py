@@ -190,13 +190,13 @@ async def run_passthrough(
         # The reservation is already held, so refund it before mapping an
         # unresolvable selector to 400; otherwise the estimate leaks.
         try:
-            resolved = resolve_provider_selector(config, model)
+            resolved = resolve_provider_selector(config, model, user_id)
         except (ValueError, AnyLLMError) as exc:
             await refund_reservation(db, reservation)
             _raise_for_unresolvable_model(model, exc)
     else:
         try:
-            resolved = resolve_provider_selector(config, model)
+            resolved = resolve_provider_selector(config, model, user_id)
         except (ValueError, AnyLLMError) as exc:
             _raise_for_unresolvable_model(model, exc)
         if lookup_pricing:

@@ -8,6 +8,7 @@ import pytest
 from gateway.core.config import GatewayConfig
 from gateway.services import alias_service
 from gateway.services.alias_service import (
+    all_alias_names,
     cache_is_stale,
     cached_aliases,
     effective_aliases,
@@ -28,7 +29,7 @@ def _clean_cache() -> Iterator[None]:
     reset_alias_cache()
 
 
-def _prime(aliases: dict[str, str]) -> None:
+def _prime(aliases: dict[str, str], per_user: dict[str, dict[str, str]] | None = None) -> None:
     """Stand in for a database load without needing a session.
 
     Stamped with monotonic(), which is process uptime rather than an epoch: a
@@ -36,6 +37,8 @@ def _prime(aliases: dict[str, str]) -> None:
     """
     alias_service._cache.clear()
     alias_service._cache.update(aliases)
+    alias_service._user_cache.clear()
+    alias_service._user_cache.update(per_user or {})
     alias_service._cached_at = time.monotonic()
 
 
@@ -93,3 +96,61 @@ def test_cached_aliases_is_a_copy() -> None:
     _prime({"fast": "anthropic:claude-haiku-4"})
     cached_aliases()["fast"] = "tampered"
     assert resolve_effective_alias(CONFIG, "fast") == "anthropic:claude-haiku-4"
+
+
+# ---------------------------------------------------------------------------
+# Scoping
+# ---------------------------------------------------------------------------
+
+
+def test_a_user_scoped_alias_resolves_only_for_that_user() -> None:
+    _prime({}, {"alice": {"fast": "home_lab:qwen3"}})
+    assert resolve_effective_alias(CONFIG, "fast", "alice") == "home_lab:qwen3"
+    assert resolve_effective_alias(CONFIG, "fast", "bob") is None
+    # A caller with no user (the master key) is not an implicit member of anyone.
+    assert resolve_effective_alias(CONFIG, "fast") is None
+
+
+def test_a_user_scoped_alias_beats_the_global_one() -> None:
+    _prime({"fast": "anthropic:claude-haiku-4"}, {"alice": {"fast": "home_lab:qwen3"}})
+    assert resolve_effective_alias(CONFIG, "fast", "alice") == "home_lab:qwen3"
+    assert resolve_effective_alias(CONFIG, "fast", "bob") == "anthropic:claude-haiku-4"
+
+
+def test_a_user_scoped_alias_beats_a_config_alias() -> None:
+    # Most-specific-wins. The reverse holds for a *global* stored alias (see
+    # above), which is why the API refuses to create one shadowing config.
+    _prime({}, {"alice": {"configalias": "home_lab:qwen3"}})
+    assert resolve_effective_alias(CONFIG, "configalias", "alice") == "home_lab:qwen3"
+    assert resolve_effective_alias(CONFIG, "configalias", "bob") == "anthropic:claude-opus-4"
+
+
+def test_effective_aliases_layers_all_three_scopes() -> None:
+    _prime({"fast": "anthropic:claude-haiku-4"}, {"alice": {"mine": "home_lab:qwen3"}})
+    assert effective_aliases(CONFIG, "alice") == {
+        "fast": "anthropic:claude-haiku-4",
+        "configalias": "anthropic:claude-opus-4",
+        "mine": "home_lab:qwen3",
+    }
+    assert "mine" not in effective_aliases(CONFIG, "bob")
+
+
+def test_cached_aliases_returns_one_scope_at_a_time() -> None:
+    _prime({"fast": "anthropic:claude-haiku-4"}, {"alice": {"mine": "home_lab:qwen3"}})
+    assert cached_aliases() == {"fast": "anthropic:claude-haiku-4"}
+    assert cached_aliases("alice") == {"mine": "home_lab:qwen3"}
+    assert cached_aliases("bob") == {}
+
+
+def test_all_alias_names_spans_every_scope() -> None:
+    # Scope-blind, for the writes that must never store an alias name as a model
+    # key (pricing rows, allow-list entries).
+    _prime({"fast": "anthropic:claude-haiku-4"}, {"alice": {"mine": "home_lab:qwen3"}})
+    assert all_alias_names(CONFIG) == {"fast", "configalias", "mine"}
+
+
+def test_reset_clears_the_user_layer_too() -> None:
+    _prime({}, {"alice": {"mine": "home_lab:qwen3"}})
+    reset_alias_cache()
+    assert cached_aliases("alice") == {}
+    assert resolve_effective_alias(CONFIG, "mine", "alice") is None

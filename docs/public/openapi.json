@@ -13,6 +13,18 @@
             "description": "Selector the alias resolves to, as 'provider:model' or 'instance:model'.",
             "title": "Target",
             "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User this alias belongs to. Omit for a global alias every caller sees. A user-scoped alias resolves only for that user and shadows a global one of the same name.",
+            "title": "User Id"
           }
         },
         "required": [
@@ -58,6 +70,17 @@
               }
             ],
             "title": "Updated At"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
           }
         },
         "required": [
@@ -6063,7 +6086,7 @@
     },
     "/v1/aliases": {
       "get": {
-        "description": "List every alias in force, from config.yml and from storage.",
+        "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
         "operationId": "list_aliases_v1_aliases_get",
         "responses": {
           "200": {
@@ -6095,7 +6118,7 @@
         ]
       },
       "post": {
-        "description": "Create or update a stored alias.",
+        "description": "Create or update a stored alias, global or scoped to one user.",
         "operationId": "set_alias_v1_aliases_post",
         "requestBody": {
           "content": {
@@ -6145,7 +6168,7 @@
     },
     "/v1/aliases/{name}": {
       "delete": {
-        "description": "Delete a stored alias.",
+        "description": "Delete a stored alias in one scope.\n\nScoped by ``user_id`` for the same reason the upsert is: deleting the global\nalias must not take a user's override with it, and deleting an override must\nleave the global one serving everyone else.",
         "operationId": "delete_alias_v1_aliases__name__delete",
         "parameters": [
           {
@@ -6155,6 +6178,24 @@
             "schema": {
               "title": "Name",
               "type": "string"
+            }
+          },
+          {
+            "description": "Delete the alias scoped to this user. Omit to delete the global alias of that name.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the alias scoped to this user. Omit to delete the global alias of that name.",
+              "title": "User Id"
             }
           }
         ],

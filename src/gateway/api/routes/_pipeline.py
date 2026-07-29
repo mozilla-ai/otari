@@ -498,7 +498,7 @@ def resolve_dispatch_provider(ctx: RequestContext, config: GatewayConfig, model_
     if ctx.resolved_provider is not None:
         return ctx.resolved_provider
     try:
-        return resolve_provider_selector(config, model_selector)
+        return resolve_provider_selector(config, model_selector, ctx.user_id)
     except (ValueError, AnyLLMError) as exc:
         _raise_for_unresolvable_model(model_selector, exc)
 
@@ -660,7 +660,7 @@ async def resolve_request_context(
         gate_instance: str | None
         gate_impl: LLMProvider | None
         try:
-            resolved = resolve_provider_selector(config, model)
+            resolved = resolve_provider_selector(config, model, user_id)
             gate_instance, gate_impl, gate_model = resolved.instance, resolved.provider, resolved.model
             # Reused by the route handler for dispatch (see `RequestContext.resolved_provider`)
             # instead of calling `resolve_provider_selector` a second time.

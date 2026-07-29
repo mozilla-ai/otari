@@ -295,7 +295,12 @@ export function useCreateAlias() {
 export function useDeleteAlias() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => apiFetch<void>(`/v1/aliases/${encodeURIComponent(name)}`, { method: "DELETE" }),
+    // Scoped: the same name can exist globally and per user, so deleting one
+    // must name which. Omitting userId targets the global alias.
+    mutationFn: ({ name, userId }: { name: string; userId?: string | null }) => {
+      const scope = userId ? `?user_id=${encodeURIComponent(userId)}` : "";
+      return apiFetch<void>(`/v1/aliases/${encodeURIComponent(name)}${scope}`, { method: "DELETE" });
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ALIASES] });
       void queryClient.invalidateQueries({ queryKey: [MODELS] });

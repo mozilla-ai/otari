@@ -218,6 +218,61 @@ Like named instances, aliases are a standalone-mode feature. In hybrid mode mode
 resolution and routing are owned by the otari.ai platform, so the local `aliases`
 map does not apply.
 
+### Runtime aliases, and scoping one to a user
+
+Aliases can also be created without a restart, through `/v1/aliases` (master key
+only) or the dashboard's Aliases page. A runtime alias means the same thing to a
+request as a configured one; it is stored in the database rather than in
+`config.yml`, and the listing tells you which is which (`source: config` or
+`source: stored`).
+
+A runtime alias applies to every caller by default. Give it a `user_id` and it
+applies to that user alone:
+
+```bash
+# Global: everyone resolves "fast" to gpt-5-mini.
+curl -X POST http://localhost:8000/v1/aliases \
+  -H "Authorization: Bearer <master-key>" \
+  -d '{"name": "fast", "target": "openai:gpt-5-mini"}'
+
+# Scoped: alice alone resolves "fast" to a local model instead.
+curl -X POST http://localhost:8000/v1/aliases \
+  -H "Authorization: Bearer <master-key>" \
+  -d '{"name": "fast", "target": "home_lab:qwen3", "user_id": "alice"}'
+```
+
+Scoping is what lets one stable model name mean different things to different
+callers: point a team at a cheaper model, pin one user to a specific version, or
+migrate people onto a new target a few at a time, all without any caller changing
+the `model` they send.
+
+The rules that follow from it:
+
+- Resolution is most-specific-first: a user's own alias wins over a `config.yml`
+  alias, which wins over a global stored one. So a user-scoped alias may override
+  a configured name (that is a working override), while a *global* stored alias
+  may not (config would win, and the stored one would silently never be used, so
+  the API refuses it with a 400).
+- A name plus a scope is the identity. Creating `fast` for `alice` leaves the
+  global `fast` alone, and deleting either leaves the other in place. Deletes take
+  the scope as a query parameter: `DELETE /v1/aliases/fast?user_id=alice`, or omit
+  it for the global one.
+- `GET /v1/models` is scoped the same way, so a caller sees the global and
+  configured aliases plus their own, never another user's. `GET /v1/aliases` is
+  the master-key management view and lists every scope at once.
+- Target-hiding follows the scope. A global alias hides its target from
+  everyone's listing; a user-scoped one hides it from that user's listing only, so
+  another caller may still see the real model (subject to their own model access).
+  If you are using aliases to curate one catalogue for everybody, keep those
+  aliases global.
+- `user_id` must name an existing user (an unknown id is a 404).
+- Pricing still keys on the resolved target, so a scoped alias inherits its own
+  target's price. And `POST /v1/pricing` rejects any name that is an alias to
+  anyone, scoped or not: such a row could never be read.
+
+Scoping is per user, not per API key. A key inherits its user's aliases, so
+several keys belonging to one user resolve the same names.
+
 ## Listing available models
 
 Query Otari to see which models are available:

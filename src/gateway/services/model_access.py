@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, User
-from gateway.services.alias_service import resolve_effective_alias
+from gateway.services.alias_service import all_alias_names
 from gateway.services.provider_kwargs import split_selector
 
 # Wire code used in 403 bodies so clients can branch on it programmatically.
@@ -145,7 +145,7 @@ def _validate_entry(config: GatewayConfig, entry: str) -> str:
         raise ValueError("an allowed_models entry cannot be empty")
     # An alias name is not a canonical key; storing it would match nothing at
     # dispatch (a fail-open-feeling footgun), so reject it explicitly.
-    if resolve_effective_alias(config, entry) is not None:
+    if entry in all_alias_names(config):
         raise ValueError(f"'{entry}' is an alias name; use its canonical instance:model target")
     split = split_selector(entry)
     if split is None:

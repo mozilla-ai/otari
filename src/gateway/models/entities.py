@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Text, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -166,12 +166,37 @@ class ModelAlias(Base):
     The runtime counterpart of the ``aliases:`` block in config.yml: same
     meaning, but writable through the API. Pricing, budgets, and usage all key
     on the resolved target, so nothing here is billed against ``name``.
+
+    ``user_id`` is the scope. ``NULL`` means the alias is global (every caller
+    sees it), which is what every row predating this column is. A non-null
+    ``user_id`` scopes the alias to that user, so two users can point the same
+    display name at different models, and a user-scoped row shadows a global one
+    of the same name for that user only.
+
+    Uniqueness needs two constraints rather than one because SQLite and
+    PostgreSQL both treat NULLs as distinct in a unique index: the composite
+    constraint keeps one row per (name, user), and the partial index keeps one
+    global row per name (which the composite one cannot, its ``user_id`` being
+    NULL). The surrogate ``id`` exists only because the natural key contains a
+    nullable column, which a primary key cannot.
     """
 
     __tablename__ = "model_aliases"
+    __table_args__ = (
+        UniqueConstraint("name", "user_id", name="uq_model_aliases_name_user"),
+        Index(
+            "uq_model_aliases_global_name",
+            "name",
+            unique=True,
+            sqlite_where=text("user_id IS NULL"),
+            postgresql_where=text("user_id IS NULL"),
+        ),
+    )
 
-    name: Mapped[str] = mapped_column(primary_key=True)
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(index=True)
     target: Mapped[str] = mapped_column()
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -183,6 +208,7 @@ class ModelAlias(Base):
         return {
             "name": self.name,
             "target": self.target,
+            "user_id": self.user_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -150,7 +150,7 @@ const METADATA: ModelMetadataResponse = {
 };
 
 const ALIASES: AliasResponse[] = [
-  { name: "fast-model", target: "openai:gpt-4o-mini", source: "config", created_at: null, updated_at: null },
+  { name: "fast-model", target: "openai:gpt-4o-mini", source: "config", user_id: null, created_at: null, updated_at: null },
 ];
 
 function table(): HTMLElement {
