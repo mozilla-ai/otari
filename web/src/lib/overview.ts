@@ -34,11 +34,13 @@ export function errorRateHealth(totals: UsageTotals | undefined): ErrorRateHealt
 
 // ---------- provider health ----------
 
-// any-unreachable => amber; all-unreachable => red; none configured/known => neutral.
+// any-unreachable => amber; nothing usable => red; none configured/known => neutral.
+// A provider counted as `degraded` (reachable-but-no-model-discovery, issue #447)
+// is a warning, not an outage, so it never on its own turns the tile red.
 export function providerHealthStatus(health: ProviderHealthResponse | undefined): Health {
   if (!health || health.total === 0) return "neutral";
   if (health.healthy >= health.total) return "ok";
-  if (health.healthy === 0) return "alert";
+  if (health.healthy + health.degraded === 0) return "alert";
   return "warn";
 }
 

@@ -251,7 +251,7 @@ def test_test_connection_before_save_maps_result(
         headers=master_key_header,
     )
     assert resp.status_code == 200
-    assert resp.json() == {"ok": True, "model_count": 0, "error": None}
+    assert resp.json() == {"ok": True, "model_count": 0, "error": None, "discovery_unsupported": False}
 
 
 def test_test_connection_requires_a_target(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -328,7 +328,7 @@ def test_test_endpoint_maps_discovery_result(
     monkeypatch.setattr(providers_route, "discover_provider_models", _ok)
     ok = client.post("/v1/provider-credentials/openai/test", headers=master_key_header)
     assert ok.status_code == 200
-    assert ok.json() == {"ok": True, "model_count": 0, "error": None}
+    assert ok.json() == {"ok": True, "model_count": 0, "error": None, "discovery_unsupported": False}
 
     async def _fail(_config: object, instance: str) -> ProviderDiscovery:
         return ProviderDiscovery(provider=instance, models=[], error="401 Unauthorized")
@@ -336,4 +336,25 @@ def test_test_endpoint_maps_discovery_result(
     monkeypatch.setattr(providers_route, "discover_provider_models", _fail)
     failed = client.post("/v1/provider-credentials/openai/test", headers=master_key_header)
     assert failed.status_code == 200
-    assert failed.json() == {"ok": False, "model_count": 0, "error": "401 Unauthorized"}
+    assert failed.json() == {
+        "ok": False,
+        "model_count": 0,
+        "error": "401 Unauthorized",
+        "discovery_unsupported": False,
+    }
+
+    # A backend with no /v1/models is reported as unverifiable, not as a bad key,
+    # so the dashboard can warn instead of calling the provider unreachable (#447).
+    async def _no_listing(_config: object, instance: str) -> ProviderDiscovery:
+        return ProviderDiscovery(
+            provider=instance,
+            models=[],
+            error="Error code: 404",
+            discovery_unsupported=True,
+        )
+
+    monkeypatch.setattr(providers_route, "discover_provider_models", _no_listing)
+    degraded = client.post("/v1/provider-credentials/openai/test", headers=master_key_header)
+    assert degraded.status_code == 200
+    assert degraded.json()["ok"] is False
+    assert degraded.json()["discovery_unsupported"] is True

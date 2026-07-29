@@ -45,6 +45,11 @@ class ProviderDiscovery:
     provider: str
     models: list[Model]
     error: str | None = None
+    # True when the failure is "this backend has no model-listing endpoint"
+    # rather than "this provider could not be reached or authenticated". Such a
+    # provider still serves completions, so the dashboard warns that discovery is
+    # unavailable instead of calling the provider unreachable (issue #447).
+    discovery_unsupported: bool = False
 
 
 def _copy_discovery(discovery: ProviderDiscovery) -> ProviderDiscovery:
@@ -54,7 +59,12 @@ def _copy_discovery(discovery: ProviderDiscovery) -> ProviderDiscovery:
     copy so a caller mutating ``.models`` or ``.error`` cannot corrupt the cached
     entry (or the view another concurrent awaiter holds).
     """
-    return ProviderDiscovery(provider=discovery.provider, models=list(discovery.models), error=discovery.error)
+    return ProviderDiscovery(
+        provider=discovery.provider,
+        models=list(discovery.models),
+        error=discovery.error,
+        discovery_unsupported=discovery.discovery_unsupported,
+    )
 
 
 @dataclass
@@ -326,6 +336,37 @@ def _short_error(exc: BaseException, provider: str | None = None) -> str:
     return message
 
 
+# Statuses that mean the backend serves no model-listing endpoint at this URL,
+# as opposed to refusing the credentials (401/403) or not answering at all. An
+# OpenAI-compatible deployment that has not implemented /v1/models answers 404
+# here while still serving completions perfectly well.
+_MISSING_ENDPOINT_STATUSES = frozenset({404, 405, 501})
+
+
+def _status_code(exc: BaseException) -> int | None:
+    """HTTP status carried by a provider SDK exception, if it exposes one.
+
+    Covers the two shapes the provider SDKs use: an OpenAI-style ``status_code``
+    on the exception itself, and an httpx-style ``response.status_code``. any-llm
+    wrappers keep the SDK exception on ``original_exception``, so that is checked
+    too.
+    """
+    for candidate in (exc, getattr(exc, "original_exception", None)):
+        if candidate is None:
+            continue
+        code = getattr(candidate, "status_code", None)
+        if code is None:
+            code = getattr(getattr(candidate, "response", None), "status_code", None)
+        if isinstance(code, int):
+            return code
+    return None
+
+
+def _is_missing_models_endpoint(exc: BaseException) -> bool:
+    """Whether ``exc`` says the provider has no model-listing endpoint."""
+    return _status_code(exc) in _MISSING_ENDPOINT_STATUSES
+
+
 async def _discover_uncached(config: GatewayConfig, instance: str) -> ProviderDiscovery:
     """Resolve one instance's models, reporting failure rather than raising.
 
@@ -344,6 +385,7 @@ async def _discover_uncached(config: GatewayConfig, instance: str) -> ProviderDi
                 f"Provider '{impl}' cannot list models. Declare the model ids this instance "
                 "serves under its 'models:' key in config.yml."
             ),
+            discovery_unsupported=True,
         )
 
     try:
@@ -353,7 +395,12 @@ async def _discover_uncached(config: GatewayConfig, instance: str) -> ProviderDi
         # or endpoint in the message. The capped text still reaches the
         # master-key caller in the response, where it is a useful diagnostic.
         logger.info("Model discovery failed for instance '%s' (%s)", instance, type(exc).__name__)
-        return ProviderDiscovery(provider=instance, models=[], error=_short_error(exc, provider=impl))
+        return ProviderDiscovery(
+            provider=instance,
+            models=[],
+            error=_short_error(exc, provider=impl),
+            discovery_unsupported=_is_missing_models_endpoint(exc),
+        )
 
     return ProviderDiscovery(provider=instance, models=models)
 
@@ -396,6 +443,7 @@ async def test_provider_credentials(
             provider=impl_name,
             models=[],
             error=f"Provider '{impl_name}' cannot list models, so a connection cannot be verified this way.",
+            discovery_unsupported=True,
         )
     try:
         provider_enum = LLMProvider(impl_name)
@@ -435,7 +483,12 @@ async def test_provider_credentials(
         # Class only in the log (see _discover_uncached); the capped
         # message still goes back to the master-key caller who owns the key.
         logger.info("Provider connection test failed for '%s' (%s)", impl_name, type(exc).__name__)
-        return ProviderDiscovery(provider=impl_name, models=[], error=_short_error(exc, provider=impl_name))
+        return ProviderDiscovery(
+            provider=impl_name,
+            models=[],
+            error=_short_error(exc, provider=impl_name),
+            discovery_unsupported=_is_missing_models_endpoint(exc),
+        )
     return ProviderDiscovery(provider=impl_name, models=list(models))
 
 

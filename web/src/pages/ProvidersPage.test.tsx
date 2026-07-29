@@ -81,6 +81,7 @@ function healthResponse(providers: ProviderHealth[]): ProviderHealthResponse {
   return {
     providers,
     healthy: providers.filter((p) => p.ok).length,
+    degraded: providers.filter((p) => !p.ok && p.discovery_unsupported).length,
     total: providers.length,
     checked_at: checkedAts.length > 0 ? checkedAts.sort().at(-1)! : null,
   };
@@ -108,11 +109,18 @@ function mockApi(opts: MockOpts = {}) {
   let storedList = [...(opts.stored ?? [])];
   let settings = { ...(opts.settings ?? SETTINGS) };
   const meta = opts.meta ?? [];
-  const testResult = opts.testResult ?? { ok: true, model_count: 3, error: null };
+  const testResult = opts.testResult ?? { ok: true, model_count: 3, error: null, discovery_unsupported: false };
   const catalog = opts.catalog ?? [];
   const health =
     opts.health ??
-    meta.map((info) => ({ instance: info.instance, ok: true, model_count: 3, error: null, checked_at: null }));
+    meta.map((info) => ({
+      instance: info.instance,
+      ok: true,
+      model_count: 3,
+      error: null,
+      checked_at: null,
+      discovery_unsupported: false,
+    }));
   const healthRefresh = opts.healthRefresh ?? health;
 
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -463,7 +471,7 @@ describe("ProvidersPage", () => {
   });
 
   it("reports a successful connection test", async () => {
-    mockApi({ stored: [storedProvider("openai", "1234")], testResult: { ok: true, model_count: 5, error: null } });
+    mockApi({ stored: [storedProvider("openai", "1234")], testResult: { ok: true, model_count: 5, error: null, discovery_unsupported: false } });
     const user = userEvent.setup();
     renderPage(<ProvidersPage />);
 
@@ -480,13 +488,21 @@ describe("ProvidersPage", () => {
     mockApi({
       meta: [providerInfo("openai"), providerInfo("anthropic")],
       health: [
-        { instance: "openai", ok: true, model_count: 12, error: null, checked_at: "2026-07-21T00:00:00+00:00" },
+        {
+          instance: "openai",
+          ok: true,
+          model_count: 12,
+          error: null,
+          checked_at: "2026-07-21T00:00:00+00:00",
+          discovery_unsupported: false,
+        },
         {
           instance: "anthropic",
           ok: false,
           model_count: 0,
           error: "authentication failed: invalid key",
           checked_at: "2026-07-21T00:00:00+00:00",
+          discovery_unsupported: false,
         },
       ],
     });
@@ -507,13 +523,65 @@ describe("ProvidersPage", () => {
     mockApi({
       meta: [providerInfo("openai"), providerInfo("anthropic")],
       health: [
-        { instance: "openai", ok: true, model_count: 3, error: null, checked_at: null },
-        { instance: "anthropic", ok: false, model_count: 0, error: "down", checked_at: null },
+        { instance: "openai", ok: true, model_count: 3, error: null, checked_at: null, discovery_unsupported: false },
+        {
+          instance: "anthropic",
+          ok: false,
+          model_count: 0,
+          error: "down",
+          checked_at: null,
+          discovery_unsupported: false,
+        },
       ],
     });
     renderPage(<ProvidersPage />);
 
     expect(await screen.findByText("1 of 2 providers reachable")).toBeInTheDocument();
+  });
+
+  it("warns instead of condemning a provider whose backend has no /models endpoint", async () => {
+    // otari#447: a provider that answers no model listing may still serve
+    // requests, so it must not read as "Unreachable" like a bad key does.
+    mockApi({
+      meta: [providerInfo("openai"), providerInfo("otari")],
+      health: [
+        { instance: "openai", ok: true, model_count: 3, error: null, checked_at: null, discovery_unsupported: false },
+        {
+          instance: "otari",
+          ok: false,
+          model_count: 0,
+          error: "Error code: 404 - {'detail': 'Not Found'}",
+          checked_at: null,
+          discovery_unsupported: true,
+        },
+      ],
+    });
+    renderPage(<ProvidersPage />);
+
+    const pill = await screen.findByText("No model discovery");
+    expect(within(pill.closest("tr")!).getAllByText("otari").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Unreachable")).not.toBeInTheDocument();
+    // The provider error stays available, alongside why it is not fatal.
+    expect(pill).toHaveAttribute("title", expect.stringContaining("404"));
+    expect(pill).toHaveAttribute("title", expect.stringContaining("may still work"));
+    // The summary calls it out separately from the reachable count.
+    expect(await screen.findByText("1 of 2 providers reachable")).toBeInTheDocument();
+    expect(screen.getByText("1 without model discovery")).toBeInTheDocument();
+  });
+
+  it("reports a test against a provider with no model listing as unverified, not failed", async () => {
+    mockApi({
+      stored: [storedProvider("otari", "1234")],
+      testResult: { ok: false, model_count: 0, error: "Error code: 404", discovery_unsupported: true },
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1234");
+    await user.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(await screen.findByText(/could not be verified/)).toBeInTheDocument();
+    expect(screen.queryByText(/Error code: 404/)).not.toBeInTheDocument();
   });
 
   it("does not automatically re-check all providers within an hour", async () => {
@@ -525,9 +593,13 @@ describe("ProvidersPage", () => {
     expect(healthRequestCount(fetchMock)).toBe(1);
 
     first.unmount();
-    client.setQueryData(["provider-health"], healthResponse([{ instance: "openai", ok: true, model_count: 3, error: null, checked_at: null }]), {
-      updatedAt: Date.now() - (PROVIDER_HEALTH_REFRESH_MS - 5_000),
-    });
+    client.setQueryData(
+      ["provider-health"],
+      healthResponse([
+        { instance: "openai", ok: true, model_count: 3, error: null, checked_at: null, discovery_unsupported: false },
+      ]),
+      { updatedAt: Date.now() - (PROVIDER_HEALTH_REFRESH_MS - 5_000) },
+    );
     renderPage(<ProvidersPage />, client);
 
     await screen.findByText("1 of 1 provider reachable");
@@ -538,8 +610,19 @@ describe("ProvidersPage", () => {
     const user = userEvent.setup();
     mockApi({
       meta: [providerInfo("openai")],
-      health: [{ instance: "openai", ok: true, model_count: 3, error: null, checked_at: null }],
-      healthRefresh: [{ instance: "openai", ok: false, model_count: 0, error: "provider down", checked_at: null }],
+      health: [
+        { instance: "openai", ok: true, model_count: 3, error: null, checked_at: null, discovery_unsupported: false },
+      ],
+      healthRefresh: [
+        {
+          instance: "openai",
+          ok: false,
+          model_count: 0,
+          error: "provider down",
+          checked_at: null,
+          discovery_unsupported: false,
+        },
+      ],
     });
     renderPage(<ProvidersPage />);
 

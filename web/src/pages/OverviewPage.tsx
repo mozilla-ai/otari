@@ -169,6 +169,7 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
       <SystemStatusStrip
         providerHealth={providerHealth}
         healthy={health.data?.healthy ?? 0}
+        degraded={health.data?.degraded ?? 0}
         total={health.data?.total ?? 0}
         budget={budget}
         errStatus={err.status}
@@ -273,6 +274,7 @@ function NeutralStrip({ text }: { text: string }) {
 function SystemStatusStrip({
   providerHealth,
   healthy,
+  degraded,
   total,
   budget,
   errStatus,
@@ -282,6 +284,7 @@ function SystemStatusStrip({
 }: {
   providerHealth: "ok" | "warn" | "alert" | "neutral";
   healthy: number;
+  degraded: number;
   total: number;
   budget: ReturnType<typeof budgetHealth>;
   errStatus: "ok" | "warn" | "alert" | "neutral";
@@ -300,8 +303,18 @@ function SystemStatusStrip({
 
   const problems: { text: string; to: string }[] = [];
   if ((providerHealth === "warn" || providerHealth === "alert") && total > 0) {
-    const down = total - healthy;
-    problems.push({ text: `${down} provider${down === 1 ? "" : "s"} unreachable`, to: "/providers" });
+    // A degraded provider answers no model listing but is not down, so it is
+    // reported separately rather than folded into "unreachable" (issue #447).
+    const down = total - healthy - degraded;
+    if (down > 0) {
+      problems.push({ text: `${down} provider${down === 1 ? "" : "s"} unreachable`, to: "/providers" });
+    }
+    if (degraded > 0) {
+      problems.push({
+        text: `${degraded} provider${degraded === 1 ? "" : "s"} without model discovery`,
+        to: "/providers",
+      });
+    }
   }
   if (budget.overCount > 0) {
     problems.push({ text: `${budget.overCount} budget${budget.overCount === 1 ? "" : "s"} over limit`, to: "/budgets" });

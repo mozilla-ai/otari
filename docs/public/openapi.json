@@ -1429,6 +1429,12 @@
       "DiscoverableProvider": {
         "description": "One provider instance's discovery result.",
         "properties": {
+          "discovery_unsupported": {
+            "default": false,
+            "description": "True when discovery failed only because this backend serves no model-listing endpoint. The provider may still handle requests for models declared in config.",
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
           "error": {
             "anyOf": [
               {
@@ -3251,6 +3257,12 @@
             "description": "ISO 8601 time of the most recent per-provider check (null if none yet).",
             "title": "Checked At"
           },
+          "degraded": {
+            "default": 0,
+            "description": "How many providers are not counted as reachable only because model discovery is unavailable for them. These may still serve requests.",
+            "title": "Degraded",
+            "type": "integer"
+          },
           "healthy": {
             "description": "How many providers are currently reachable.",
             "title": "Healthy",
@@ -3291,6 +3303,12 @@
             ],
             "description": "ISO 8601 wall-clock time the provider's reachability was last checked (null if never).",
             "title": "Checked At"
+          },
+          "discovery_unsupported": {
+            "default": false,
+            "description": "True when the check failed only because this backend serves no model-listing endpoint. The provider may still handle requests; only model discovery is unavailable.",
+            "title": "Discovery Unsupported",
+            "type": "boolean"
           },
           "error": {
             "anyOf": [
@@ -4200,6 +4218,12 @@
       "TestProviderResponse": {
         "description": "Result of a live provider connection test.",
         "properties": {
+          "discovery_unsupported": {
+            "default": false,
+            "description": "True when the test failed only because this backend serves no model-listing endpoint, so the credentials could not be verified this way but may still work for requests.",
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
           "error": {
             "anyOf": [
               {
@@ -8997,7 +9021,7 @@
     },
     "/v1/providers/health": {
       "get": {
-        "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.",
+        "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
         "operationId": "provider_health_v1_providers_health_get",
         "parameters": [
           {

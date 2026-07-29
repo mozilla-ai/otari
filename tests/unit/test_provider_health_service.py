@@ -61,6 +61,28 @@ async def test_unreachable_provider_is_unhealthy_and_keeps_error() -> None:
     assert health.ok is False
     assert health.model_count == 0
     assert health.error == "authentication failed"
+    assert health.discovery_unsupported is False
+
+
+@pytest.mark.asyncio
+async def test_provider_without_a_models_endpoint_is_flagged_not_just_unhealthy() -> None:
+    """A missing /v1/models is carried through so the dashboard can warn (otari#447)."""
+    get_model_cache().clear()
+    config = _config({"otari": {"api_key": "x"}})
+
+    async def discover(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+        return ProviderDiscovery(
+            provider=instance,
+            models=[],
+            error="Error code: 404",
+            discovery_unsupported=True,
+        )
+
+    with patch.object(phs, "discover_provider_models", side_effect=discover):
+        health = await phs.check_provider_health(config, "otari")
+
+    assert health.ok is False
+    assert health.discovery_unsupported is True
 
 
 @contextmanager

@@ -977,14 +977,34 @@ function ModelTable({
   );
 }
 
-function DiscoveredErrors({ providers }: { providers: { provider: string; error: string | null }[] }) {
+// A provider whose backend has no model-listing endpoint is not misconfigured, so
+// it gets its own line: pointing the operator at their credentials would send them
+// after a problem that isn't there (issue #447).
+function DiscoveredErrors({
+  providers,
+}: {
+  providers: { provider: string; error: string | null; discovery_unsupported: boolean }[];
+}) {
   if (providers.length === 0) {
     return null;
   }
+  const unreachable = providers.filter((provider) => !provider.discovery_unsupported);
+  const noDiscovery = providers.filter((provider) => provider.discovery_unsupported);
   return (
     <InfoBanner tone="warning">
-      Could not list {providers.map((provider) => provider.provider).join(", ")}. Check that provider's credentials in
-      config.yml; its models are missing from the list below.
+      {unreachable.length > 0 ? (
+        <span className="block">
+          Could not list {unreachable.map((provider) => provider.provider).join(", ")}. Check that provider's
+          credentials in config.yml; its models are missing from the list below.
+        </span>
+      ) : null}
+      {noDiscovery.length > 0 ? (
+        <span className="block">
+          {noDiscovery.map((provider) => provider.provider).join(", ")} does not offer model discovery, so its models
+          are missing from the list below. The provider may still serve requests; declare the model ids it serves under
+          its <code>models:</code> key in config.yml to list them here.
+        </span>
+      ) : null}
     </InfoBanner>
   );
 }

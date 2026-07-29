@@ -2,6 +2,7 @@
 
 import asyncio
 import time
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -13,6 +14,7 @@ from gateway.services.model_discovery_service import (
     _ERROR_MAX_CHARS,
     ModelCache,
     ProviderDiscovery,
+    _is_missing_models_endpoint,
     _short_error,
     _supports_list_models,
     discover_all_models,
@@ -831,3 +833,119 @@ class TestProviderApiBaseSsrfGate:
         assert result.models == []
         assert result.error is not None
         mock_alist.assert_not_awaited()
+
+
+class TestMissingModelsEndpoint:
+    """A backend with no /v1/models is a discovery gap, not an unusable provider.
+
+    otari.ai shipped without a model-listing endpoint, which made the dashboard
+    report a perfectly good key as unreachable (otari#447). Discovery now
+    distinguishes "this deployment serves no listing" from "these credentials do
+    not work", so the dashboard can warn instead of condemning the provider.
+    """
+
+    def _make_config(self, providers: dict[str, Any]) -> GatewayConfig:
+        return GatewayConfig(providers=providers, model_discovery=True, model_cache_ttl_seconds=300)
+
+    @staticmethod
+    def _status_error(status: int, message: str = "Not Found") -> Exception:
+        """An OpenAI-SDK-shaped error: the status lives on the exception."""
+        exc = RuntimeError(message)
+        exc.status_code = status  # type: ignore[attr-defined]
+        return exc
+
+    async def _discover(self, exc: Exception) -> ProviderDiscovery:
+        config = self._make_config({"otari": {"provider_type": "openai", "api_key": "sk-test"}})
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", side_effect=exc),
+            patch("gateway.services.model_discovery_service.get_provider_kwargs", return_value={"api_key": "sk-test"}),
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            return await discover_provider_models(config, "otari")
+
+    @pytest.mark.asyncio
+    async def test_404_marks_discovery_unsupported_not_unreachable(self) -> None:
+        result = await self._discover(self._status_error(404))
+
+        assert result.models == []
+        assert result.error is not None
+        assert result.discovery_unsupported is True
+
+    @pytest.mark.asyncio
+    async def test_httpx_shaped_404_is_recognized(self) -> None:
+        # httpx-style clients carry the status on the response, not the exception.
+        exc = RuntimeError("Not Found")
+        exc.response = SimpleNamespace(status_code=404)  # type: ignore[attr-defined]
+
+        assert (await self._discover(exc)).discovery_unsupported is True
+
+    @pytest.mark.asyncio
+    async def test_any_llm_wrapped_404_is_recognized(self) -> None:
+        # any-llm keeps the SDK exception on original_exception.
+        wrapper = RuntimeError("[openai] Not Found")
+        wrapper.original_exception = self._status_error(404)  # type: ignore[attr-defined]
+
+        assert (await self._discover(wrapper)).discovery_unsupported is True
+
+    @pytest.mark.asyncio
+    async def test_bad_credentials_stay_unreachable(self) -> None:
+        result = await self._discover(self._status_error(401, "invalid api key"))
+
+        assert result.error is not None
+        assert result.discovery_unsupported is False
+
+    @pytest.mark.asyncio
+    async def test_connection_failure_stays_unreachable(self) -> None:
+        # No status at all: nothing answered, so the provider really is unreachable.
+        result = await self._discover(ConnectionError("upstream unreachable"))
+
+        assert result.error is not None
+        assert result.discovery_unsupported is False
+
+    @pytest.mark.asyncio
+    async def test_provider_that_cannot_list_models_is_discovery_unsupported(self) -> None:
+        config = self._make_config({"sagemaker": {"region": "us-east-1"}})
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache") as mock_cache_fn,
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=False),
+        ):
+            mock_cache_fn.return_value = ModelCache()
+            result = await discover_provider_models(config, "sagemaker")
+
+        assert result.error is not None
+        assert result.discovery_unsupported is True
+
+    @pytest.mark.asyncio
+    async def test_credentials_test_reports_missing_endpoint(self) -> None:
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", side_effect=self._status_error(404)),
+        ):
+            result = await run_credentials_test("openai", api_key="sk", api_base="https://api.otari.ai/v1")
+
+        assert result.error is not None
+        assert result.discovery_unsupported is True
+
+    @pytest.mark.asyncio
+    async def test_credentials_test_keeps_auth_failure_unreachable(self) -> None:
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                side_effect=self._status_error(401, "invalid api key"),
+            ),
+        ):
+            result = await run_credentials_test("openai", api_key="sk")
+
+        assert result.error is not None
+        assert result.discovery_unsupported is False
+
+    def test_only_missing_endpoint_statuses_classify(self) -> None:
+        # A server error is the provider failing, not the endpoint being absent.
+        assert _is_missing_models_endpoint(self._status_error(404)) is True
+        assert _is_missing_models_endpoint(self._status_error(405)) is True
+        assert _is_missing_models_endpoint(self._status_error(501)) is True
+        assert _is_missing_models_endpoint(self._status_error(500)) is False
+        assert _is_missing_models_endpoint(ValueError("no status here")) is False

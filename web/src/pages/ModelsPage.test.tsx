@@ -82,6 +82,7 @@ const DISCOVERABLE: DiscoverableModelsResponse = {
       provider: "openai",
       ok: true,
       error: null,
+      discovery_unsupported: false,
       models: [
         { id: "gpt-4o", key: "openai:gpt-4o" },
         { id: "gpt-4o-mini", key: "openai:gpt-4o-mini" },
@@ -91,6 +92,7 @@ const DISCOVERABLE: DiscoverableModelsResponse = {
       provider: "anthropic",
       ok: true,
       error: null,
+      discovery_unsupported: false,
       models: [{ id: "claude-sonnet-4", key: "anthropic:claude-sonnet-4" }],
     },
   ],
@@ -522,7 +524,7 @@ describe("ModelsPage", () => {
     mockApi({
       catalog: { object: "list", data: [] },
       pricing: [],
-      discoverable: { providers: [{ provider: "openai", ok: true, error: null, models }] },
+      discoverable: { providers: [{ provider: "openai", ok: true, error: null, discovery_unsupported: false, models }] },
       metadata: { source: "models.dev", available: true, models: {} },
     });
     const user = userEvent.setup();
@@ -547,8 +549,20 @@ describe("ModelsPage", () => {
     mockApi({
       discoverable: {
         providers: [
-          { provider: "openai", ok: true, error: null, models: [{ id: "gpt-4o", key: "openai:gpt-4o" }] },
-          { provider: "anthropic", ok: false, error: "401 authentication_error", models: [] },
+          {
+            provider: "openai",
+            ok: true,
+            error: null,
+            discovery_unsupported: false,
+            models: [{ id: "gpt-4o", key: "openai:gpt-4o" }],
+          },
+          {
+            provider: "anthropic",
+            ok: false,
+            error: "401 authentication_error",
+            discovery_unsupported: false,
+            models: [],
+          },
         ],
       },
     });
@@ -556,6 +570,29 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />);
 
     expect(await screen.findByText(/Could not list anthropic/)).toBeInTheDocument();
+  });
+
+  it("says a provider offers no model discovery rather than blaming its credentials", async () => {
+    // otari#447: pointing the operator at config.yml credentials would send them
+    // after a problem that isn't there.
+    mockApi({
+      discoverable: {
+        providers: [
+          {
+            provider: "otari",
+            ok: false,
+            error: "Error code: 404 - {'detail': 'Not Found'}",
+            discovery_unsupported: true,
+            models: [],
+          },
+        ],
+      },
+    });
+
+    renderWithClient(<ModelsPage />);
+
+    expect(await screen.findByText(/otari does not offer model discovery/)).toBeInTheDocument();
+    expect(screen.queryByText(/Could not list/)).not.toBeInTheDocument();
   });
 
   // -- inline pricing (in the detail panel) --------------------------------
