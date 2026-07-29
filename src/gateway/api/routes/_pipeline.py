@@ -710,9 +710,28 @@ async def resolve_request_context(
         # cost=null when unpriced.
         if not budget_exempt and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
             await refund_reservation(db, reservation)
+            no_pricing_detail = no_pricing_error_detail(model)
+            # Record the rejection before raising. Gateway-side rejections used to
+            # leave no trace, so an operator who flipped require_pricing on had no
+            # way to see that live traffic was being dropped (only a user complaint
+            # would tell them). The row carries cost=null: nothing was spent, so it
+            # never affects spend or the budget, it just makes the drop visible in
+            # the activity log and countable as an error.
+            await log_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=model,
+                provider=gate_instance,
+                endpoint=adapter.endpoint,
+                user_id=user_id,
+                error=no_pricing_detail,
+                latency_ms=_elapsed_ms(started_at),
+                counts_toward_budget=not budget_exempt,
+            )
             raise adapter.error(
                 402,
-                no_pricing_error_detail(model),
+                no_pricing_detail,
                 ErrorKind.INVALID_REQUEST,
             )
 

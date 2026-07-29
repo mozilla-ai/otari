@@ -85,6 +85,50 @@ def test_unpriced_model_rejected_with_402(strict_pricing_client: TestClient) -> 
     assert _chat(strict_pricing_client, model="openai:gpt-4o", user="priced-user") == 402
 
 
+def test_missing_pricing_rejection_is_recorded_in_the_usage_log(strict_pricing_client: TestClient) -> None:
+    """A 402 rejection is logged as an error row so an operator can see dropped traffic.
+
+    Regression for #317: the gate refunded the reservation and raised without
+    writing anything, so requests dropped for missing pricing were invisible to
+    every admin view (the activity log, the error rate, the pricing alarm's
+    count). Cost stays null: nothing was spent.
+    """
+    c = strict_pricing_client
+    c.post("/v1/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    assert _chat(c, model="openai:gpt-4o", user="priced-user") == 402
+
+    rows = c.get("/v1/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
+    assert len(rows) == 1
+    assert rows[0]["model"] == "openai:gpt-4o"
+    assert rows[0]["endpoint"] == "/v1/chat/completions"
+    assert rows[0]["user_id"] == "priced-user"
+    assert rows[0]["status"] == "error"
+    assert rows[0]["cost"] is None
+    assert "pricing" in rows[0]["error_message"].lower()
+
+    # The dashboard's live "N failed in the last hour" signal reads this count.
+    count = c.get("/v1/usage/count", params={"status": "error"}, headers=_MASTER_HEADER).json()
+    assert count["total"] == 1
+
+
+def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_client: TestClient) -> None:
+    """The pass-through gate (embeddings, images, rerank) records its 402 as well,
+    so the failure count covers every rejected request, not only chat."""
+    c = strict_pricing_client
+    c.post("/v1/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)
+    resp = c.post(
+        "/v1/embeddings",
+        json={"model": "openai:text-embedding-3-small", "input": "hi", "user": "priced-user"},
+        headers=_MASTER_HEADER,
+    )
+    assert resp.status_code == 402
+
+    rows = c.get("/v1/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
+    assert len(rows) == 1
+    assert rows[0]["endpoint"] == "/v1/embeddings"
+    assert rows[0]["cost"] is None
+
+
 def test_priced_model_passes_the_gate(strict_pricing_client: TestClient) -> None:
     """A priced model clears the pricing gate (no 402); any later failure is a provider error."""
     strict_pricing_client.post("/v1/users", json={"user_id": "priced-user"}, headers=_MASTER_HEADER)

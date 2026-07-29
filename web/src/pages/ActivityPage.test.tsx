@@ -187,7 +187,9 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("error")).toBeInTheDocument();
 
     await user.click(row);
-    expect(screen.getByText("The provider returned an error. Inspect gateway logs for details.")).toBeInTheDocument();
+    // Source-neutral: gateway-side rejections land in this list too, so the
+    // summary must not blame the provider for every failure.
+    expect(screen.getByText("This request failed. Inspect gateway logs for details.")).toBeInTheDocument();
     expect(screen.queryByText("provider exploded: quota exceeded")).not.toBeInTheDocument();
   });
 

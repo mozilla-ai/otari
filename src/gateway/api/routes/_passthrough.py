@@ -219,9 +219,28 @@ async def run_passthrough(
             and pricing_required_but_missing(pricing, require_pricing=config.require_pricing)
         ):
             await refund_reservation(db, reservation)
+            no_pricing_detail = no_pricing_error_detail(model)
+            # Record the rejection so dropped traffic is visible in the activity
+            # log and countable as an error, rather than only reaching the
+            # operator as a user complaint. cost stays null: nothing was spent.
+            await log_writer.put(
+                UsageLog(
+                    id=str(uuid.uuid4()),
+                    api_key_id=api_key_id,
+                    user_id=user_id,
+                    timestamp=datetime.now(UTC),
+                    model=resolved.model,
+                    provider=resolved.instance,
+                    endpoint=endpoint,
+                    status="error",
+                    error_message=no_pricing_detail,
+                    latency_ms=_elapsed_ms(started_at),
+                    counts_toward_budget=not budget_exempt,
+                )
+            )
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                detail=no_pricing_error_detail(model),
+                detail=no_pricing_detail,
             )
 
     # Model access control (per-key). The reservation is already taken above (the

@@ -175,7 +175,10 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
 }
 
 // The detail panel for one request: a safe error summary plus the metadata that
-// does not fit the row. Provider diagnostics stay server-side.
+// does not fit the row. Provider diagnostics stay server-side. The summary is
+// deliberately source-neutral: failures here include requests the gateway itself
+// refused (e.g. a model with no pricing under `require_pricing`), so it must not
+// attribute every one of them to the provider.
 function RequestDetail({ entry }: { entry: UsageEntry }) {
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
@@ -183,7 +186,7 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
         <div className="flex flex-col gap-1.5">
           <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">Error</span>
           <pre className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-red-50 p-3 text-xs whitespace-pre-wrap break-all text-red-700">
-            The provider returned an error. Inspect gateway logs for details.
+            This request failed. Inspect gateway logs for details.
           </pre>
         </div>
       ) : null}
