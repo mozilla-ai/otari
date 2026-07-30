@@ -273,7 +273,12 @@ export function ActivityTimeline({
   };
 
   const onPanKeyDown = (event: React.KeyboardEvent) => {
-    const span = Math.max(1, Math.round(hi - lo));
+    if (atFullExtent) return;
+    // Read the span from the live ref, the same source `panBy` reads its start
+    // from: holding Page Up/Down repeats before the re-render lands, so deriving
+    // the page size from render-state `hi - lo` would pan by a stale span.
+    const [slo, shi] = selRef.current;
+    const span = Math.max(1, Math.round(shi - slo));
     const delta =
       event.key === "ArrowRight" || event.key === "ArrowUp"
         ? 1
@@ -296,6 +301,12 @@ export function ActivityTimeline({
   const loPct = n ? (Math.min(lo, hi) / n) * 100 : 0;
   const hiPct = n ? (Math.max(lo, hi) / n) * 100 : 100;
   const zoomed = !atFullExtent;
+
+  // Pan-strip ARIA. Its value is the window's *left edge*, which can only travel
+  // up to `n - span`, so the reachable max is that, not `n`.
+  const panSpan = Math.max(1, Math.round(hi - lo));
+  const panMax = Math.max(0, n - panSpan);
+  const panNow = Math.min(Math.max(0, Math.round(Math.min(lo, hi))), panMax);
 
   return (
     <div className="flex flex-col gap-2">
@@ -402,16 +413,18 @@ export function ActivityTimeline({
             {/* Pan strip along the axis band: slides the window without resizing
                 it. Sits below the bars, so plot-area tooltips are unaffected. It
                 is a single-value slider (the window's left edge, in buckets) so a
-                keyboard user gets a real pan control; only focusable while zoomed,
-                since a full-extent window has nothing to pan. */}
+                keyboard user gets a real pan control; it stays in the tab order at
+                the full extent but is announced disabled there, since a full-extent
+                window has nothing to pan. */}
             <div
               role="slider"
               aria-label="Pan the selected window"
               aria-valuemin={0}
-              aria-valuemax={n}
-              aria-valuenow={Math.round(Math.min(lo, hi))}
-              aria-valuetext={`Window starting at ${formatTick(starts[Math.min(Math.round(Math.min(lo, hi)), n - 1)] ?? starts[0], bucket)}`}
-              tabIndex={zoomed ? 0 : -1}
+              aria-valuemax={panMax}
+              aria-valuenow={panNow}
+              aria-valuetext={`Window starting at ${formatTick(starts[Math.min(panNow, n - 1)] ?? starts[0], bucket)}`}
+              aria-disabled={!zoomed}
+              tabIndex={0}
               className="absolute bottom-0 z-[1] cursor-grab touch-none rounded bg-[var(--otari-brand)]/10 outline-none hover:bg-[var(--otari-brand)]/20 focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)] active:cursor-grabbing"
               style={{ left: `${loPct}%`, width: `${Math.max(0, hiPct - loPct)}%`, height: PAN_STRIP_PX }}
               onKeyDown={onPanKeyDown}

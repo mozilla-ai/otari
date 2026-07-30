@@ -174,4 +174,46 @@ describe("ActivityTimeline", () => {
     await user.keyboard("{ArrowRight}");
     expect(onSelectRange).toHaveBeenCalledWith("2026-07-12T00:00:00.000Z", "2026-07-14T00:00:00.000Z");
   });
+
+  it("pages the window by its own width", async () => {
+    const user = userEvent.setup();
+    const series = [
+      { bucketStart: "2026-07-10T00:00:00Z", requests: 1 },
+      { bucketStart: "2026-07-11T00:00:00Z", requests: 2 },
+      { bucketStart: "2026-07-12T00:00:00Z", requests: 3 },
+      { bucketStart: "2026-07-13T00:00:00Z", requests: 4 },
+      { bucketStart: "2026-07-14T00:00:00Z", requests: 5 },
+    ];
+    // A two-bucket window at the left edge; Page Up pages right by one full span.
+    const { onSelectRange } = renderTimeline({
+      series,
+      windowStart: "2026-07-10T00:00:00.000Z",
+      windowEnd: "2026-07-12T00:00:00.000Z",
+    });
+    screen.getByRole("slider", { name: "Pan the selected window" }).focus();
+    await user.keyboard("{PageUp}");
+    expect(onSelectRange).toHaveBeenCalledWith("2026-07-12T00:00:00.000Z", "2026-07-14T00:00:00.000Z");
+  });
+
+  it("reports the reachable pan range on the strip, not the full extent", () => {
+    // A one-bucket window in the three-bucket series: the left edge can only travel
+    // 0..(n - span) = 0..2, and currently sits at bucket 1.
+    renderTimeline({
+      windowStart: "2026-07-11T00:00:00.000Z",
+      windowEnd: "2026-07-12T00:00:00.000Z",
+    });
+    const pan = screen.getByRole("slider", { name: "Pan the selected window" });
+    expect(pan).toHaveAttribute("aria-valuemin", "0");
+    expect(pan).toHaveAttribute("aria-valuemax", "2");
+    expect(pan).toHaveAttribute("aria-valuenow", "1");
+    expect(pan).toHaveAttribute("aria-disabled", "false");
+  });
+
+  it("announces the pan strip disabled at the full extent", () => {
+    // Full-window default: nothing to pan, but the control stays in the tab order.
+    renderTimeline();
+    const pan = screen.getByRole("slider", { name: "Pan the selected window" });
+    expect(pan).toHaveAttribute("aria-disabled", "true");
+    expect(pan).toHaveAttribute("tabindex", "0");
+  });
 });

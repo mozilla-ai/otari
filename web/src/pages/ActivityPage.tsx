@@ -131,15 +131,16 @@ function resolveWindow(range: string, start: string, end: string): { start?: str
 }
 
 // The histogram extent (what the bars span), which is *not* always the list
-// window. For bounded presets it matches `resolveWindow`. For the unbounded "All"
-// the list genuinely omits its start, but the summary endpoint would then apply a
-// hidden 30-day default: the bars would silently show a rolling month while the
-// caption reads "All time". So the histogram gets an explicit year-long start,
-// giving a deterministic, draggable span (the axis shows exactly what it covers)
-// while the list stays all-time.
+// window. For bounded presets it matches `resolveWindow`. Any range with no
+// rolling start of its own (the unbounded "All", or the `custom` sentinel) gets an
+// explicit year-long start instead: the list genuinely omits its start there, but
+// the summary endpoint would then apply a hidden 30-day default, so the bars would
+// silently show a rolling month while the caption reads "All time". The explicit
+// start gives a deterministic, draggable span (the axis shows exactly what it
+// covers) while the list stays all-time.
 function resolveExtentWindow(range: string): { start?: string; end?: string } {
   const win = resolveWindow(range, "", "");
-  if (win.start || range === CUSTOM_KEY) return win;
+  if (win.start) return win;
   const preset = findPreset(ACTIVITY_PRESETS, range);
   if (preset?.seconds == null) return { start: isoAgo(YEAR_SPAN_S) };
   return win;
@@ -375,10 +376,14 @@ export function ActivityPage() {
   const rows = usage.data ?? [];
   const totalIsExact = count.isSuccess && !count.isPlaceholderData;
   const total = totalIsExact ? (count.data?.total ?? 0) : null;
-  // The default preset is not itself a filter (mirroring UsagePage): only an
-  // explicit sub-window or a non-default preset counts as a time filter, so a
-  // brand-new gateway on its 24h default reads "never used", not "filtered empty".
-  const timeFiltered = Boolean(startParam || endParam) || range !== ACTIVITY_DEFAULT_KEY;
+  // Neither the default preset nor the unbounded "All" is itself a filter: only an
+  // explicit sub-window or a bounded non-default preset narrows the window, so a
+  // brand-new gateway reads "never used" on both its 24h default and on "All",
+  // and only a real narrowing reads "filtered empty". (UsagePage can mirror this
+  // with a bare `!== default` because it has no unbounded preset; Activity does.)
+  const rangePreset = findPreset(ACTIVITY_PRESETS, range);
+  const timeFiltered =
+    Boolean(startParam || endParam) || (range !== ACTIVITY_DEFAULT_KEY && rangePreset?.seconds != null);
   const anyFilter = Boolean(
     statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || pricedFilter || timeFiltered,
   );

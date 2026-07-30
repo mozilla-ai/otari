@@ -254,8 +254,13 @@ describe("ActivityPage", () => {
     // empty result on a brand-new gateway reads as "never used", not "filtered".
     expect(await screen.findByText("No requests recorded yet.")).toBeInTheDocument();
 
-    // Narrowing to a non-default preset is a real time filter, so an empty result
-    // then reads as filtered-to-empty.
+    // The unbounded "All" applies no window either, so it stays "never used"
+    // rather than flipping to filtered-empty.
+    await user.click(screen.getByRole("button", { name: "All" }));
+    expect(await screen.findByText("No requests recorded yet.")).toBeInTheDocument();
+
+    // Narrowing to a bounded non-default preset is a real time filter, so an empty
+    // result then reads as filtered-to-empty.
     await user.click(screen.getByRole("button", { name: "7d" }));
     expect(await screen.findByText("No requests match these filters.")).toBeInTheDocument();
   });
@@ -438,6 +443,20 @@ describe("ActivityPage", () => {
     expect(
       calls.some((c) => c.url.includes("/v1/usage/summary") && c.url.includes("start_date=")),
     ).toBe(true);
+  });
+
+  it("gives the histogram an explicit start for the custom-range sentinel", async () => {
+    const { calls } = mockApi({ rows: [entry()] });
+    // `?range=custom` has no rolling window of its own, so without an explicit
+    // extent the summary would fall back to the server's hidden 30-day default.
+    renderPage(<ActivityPage />, "/activity?range=custom");
+    await screen.findByText("gpt-4o");
+
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.url.includes("/v1/usage/summary") && c.url.includes("start_date=")),
+      ).toBe(true),
+    );
   });
 
   it("frames a drill-down window that reaches outside the preset extent", async () => {
