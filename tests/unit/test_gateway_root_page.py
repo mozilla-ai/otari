@@ -75,6 +75,54 @@ def test_dashboard_assets_are_mounted_and_cacheable(tmp_path: Path) -> None:
     assert "no-store" not in asset_response.headers.get("cache-control", "")
 
 
+@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built (run: npm --prefix web run build)")
+def test_pwa_manifest_and_icons_are_served(tmp_path: Path) -> None:
+    """Installing the dashboard to a phone home screen needs these to be reachable."""
+    app = create_app(_config(tmp_path, "gateway-pwa-test.db"))
+
+    with TestClient(app) as client:
+        index = client.get("/").text
+        manifest = client.get("/pwa/manifest.webmanifest")
+        assert manifest.status_code == 200
+        payload = manifest.json()
+        # Every icon the manifest advertises must resolve, or the launcher falls
+        # back to a screenshot of the page instead of the Otari mark.
+        icon_responses = {entry["src"]: client.get(entry["src"]) for entry in payload["icons"]}
+        apple_icon = client.get("/pwa/apple-touch-icon.png")
+
+    assert '<link rel="manifest" href="/pwa/manifest.webmanifest" />' in index
+    assert '<link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />' in index
+
+    assert payload["name"] == "Otari Dashboard"
+    assert payload["short_name"] == "Otari"
+    assert payload["display"] == "standalone"
+    # Android offers an install only with both a 192 and a 512 icon; the maskable
+    # one keeps the mark from being cropped by the launcher's icon shape.
+    assert {(entry["sizes"], entry["purpose"]) for entry in payload["icons"]} == {
+        ("192x192", "any"),
+        ("512x512", "any"),
+        ("512x512", "maskable"),
+    }
+    for src, response in icon_responses.items():
+        assert response.status_code == 200, src
+        assert response.headers["content-type"] == "image/png", src
+        assert "no-store" not in response.headers.get("cache-control", ""), src
+
+    assert apple_icon.status_code == 200
+    assert apple_icon.headers["content-type"] == "image/png"
+
+
+def test_pwa_assets_are_absent_without_dashboard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only the standalone dashboard is installable, so nothing mounts /pwa without it."""
+    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: None)
+    app = create_app(_config(tmp_path, "gateway-no-pwa-test.db"))
+
+    with TestClient(app) as client:
+        response = client.get("/pwa/manifest.webmanifest")
+
+    assert response.status_code == 404
+
+
 def test_create_app_rejects_invalid_secret_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_SECRET_KEY", "not-a-valid-fernet-key")
     with pytest.raises(SecretBoxUnavailableError) as excinfo:
