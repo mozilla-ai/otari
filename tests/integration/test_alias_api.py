@@ -43,12 +43,11 @@ def alias_config(postgres_url: str) -> GatewayConfig:
     )
 
 
-@pytest.fixture
-def client(alias_config: GatewayConfig) -> Generator[TestClient]:
-    _run_alembic_migrations(alias_config.database_url)
-    engine = create_engine(alias_config.database_url, pool_pre_ping=True)
-    app = create_app(alias_config)
-    override_get_db, dispose_override = build_async_session_override(alias_config.database_url)
+def _build_client(config: GatewayConfig) -> Generator[TestClient]:
+    _run_alembic_migrations(config.database_url)
+    engine = create_engine(config.database_url, pool_pre_ping=True)
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(config.database_url)
     app.dependency_overrides[get_db] = override_get_db
     try:
         with TestClient(app) as test_client:
@@ -60,6 +59,25 @@ def client(alias_config: GatewayConfig) -> Generator[TestClient]:
             conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
             conn.commit()
         engine.dispose()
+
+
+@pytest.fixture
+def client(alias_config: GatewayConfig) -> Generator[TestClient]:
+    yield from _build_client(alias_config)
+
+
+@pytest.fixture
+def lenient_client(alias_config: GatewayConfig) -> Generator[TestClient]:
+    """A gateway that tolerates a ``user`` field naming someone else.
+
+    The strict default rejects the mismatch outright, which would mask whether
+    alias resolution itself is bound to the authenticated key. Leniency is the
+    configuration where a naive implementation would leak: the client-supplied
+    name is accepted (as a provider-side tag) and could be mistaken for the
+    identity to resolve aliases against.
+    """
+    alias_config.reject_user_mismatch = False
+    yield from _build_client(alias_config)
 
 
 def _create(client: TestClient, name: str, target: str, user_id: str | None = None) -> None:
@@ -425,6 +443,35 @@ def test_alias_for_an_unknown_user_is_rejected(client: TestClient) -> None:
     )
     assert resp.status_code == 404
     assert "nobody" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_tenant_key_cannot_borrow_another_users_alias(lenient_client: TestClient) -> None:
+    """Alias scope keys on the authenticated user, not on the ``user`` field.
+
+    Under lenient mismatch handling a key may send someone else's name and have
+    it ignored rather than rejected. Spend still binds to the key's own user, and
+    alias resolution has to bind the same way: if it read the request field
+    instead, any key could route through another user's alias just by naming
+    them, which is both a routing bypass and an oracle for what that user's
+    aliases point at.
+    """
+    _create_user(lenient_client, "u1")
+    _create_user(lenient_client, "u2")
+    _create(lenient_client, "mine", "anthropic:claude-haiku-4", user_id="u1")
+    u2_key = lenient_client.post("/v1/keys", json={"key_name": "u2", "user_id": "u2"}, headers=HEADERS).json()["key"]
+
+    dispatch = AsyncMock()
+    with patch("gateway.api.routes.chat.acompletion", new=dispatch):
+        resp = lenient_client.post(
+            "/v1/chat/completions",
+            # u2's key, naming u1: tolerated as a tag, never as an identity.
+            json={"model": "mine", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
+            headers={API_KEY_HEADER: f"Bearer {u2_key}"},
+        )
+
+    assert resp.status_code == 400
+    dispatch.assert_not_awaited()
 
 
 def test_alias_for_a_deleted_user_is_rejected(client: TestClient) -> None:

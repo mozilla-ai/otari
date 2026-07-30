@@ -15,12 +15,13 @@ import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // Stable row-key getter so DataTable's per-row cache holds across re-renders.
 // Scope is part of the key: the same name can exist globally and per user, and
-// keying on the name alone would collapse those rows into one. The separator is
-// an escaped NUL because neither half is delimiter-free (a user id has no format
-// restriction, and an alias name only bans ":" and "/"), so any printable choice
-// could appear inside a value. The key is opaque: nothing splits it back apart,
-// and code needing a row's scope looks the row up by key instead.
-const getAliasRowKey = (a: AliasResponse): string => `${a.user_id ?? ""}\u0000${a.name}`;
+// keying on the name alone would collapse those rows into one. JSON encodes the
+// pair rather than joining on a separator, because neither half is
+// delimiter-free (a user id has no format restriction, and an alias name only
+// bans ":" and "/"), and because DataTable puts this key in a `data-key` DOM
+// attribute, which is no place for a control character. The key stays opaque:
+// nothing splits it apart, and code needing a row's scope looks the row up.
+const getAliasRowKey = (a: AliasResponse): string => JSON.stringify([a.user_id, a.name]);
 
 // Who an alias applies to. Global is the default and the pre-existing behavior;
 // scoping to a user lets one display name mean a different model per person, and

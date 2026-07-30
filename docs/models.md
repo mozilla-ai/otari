@@ -265,7 +265,8 @@ The rules that follow from it:
   another caller may still see the real model (subject to their own model access).
   If you are using aliases to curate one catalogue for everybody, keep those
   aliases global.
-- `user_id` must name an existing user (an unknown id is a 404).
+- `user_id` must name a live user. An unknown id is a 404, and so is a deleted
+  one: a deleted user cannot authenticate, so the alias would never resolve.
 - Pricing still keys on the resolved target, so a scoped alias inherits its own
   target's price. And `POST /v1/pricing` rejects any name that is an alias to
   anyone, scoped or not: such a row could never be read.
