@@ -146,8 +146,9 @@ gateway.
 - **Activity**: the per-request log of what the gateway served, with filters.
   Use it to inspect individual requests, their models, and their outcomes.
   Requests the gateway refused are logged too, so filtering to the `error`
-  status shows what is being dropped and why (for example a model with no
-  pricing under `require_pricing`).
+  status shows what is being dropped, including requests rejected for having no
+  pricing under `require_pricing`. Diagnostic detail stays in the gateway logs
+  rather than the browser.
 - **Usage**: aggregate usage and analytics, showing spend and volume over time,
   broken down by model and by user.
 
