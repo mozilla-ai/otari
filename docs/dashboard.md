@@ -190,10 +190,11 @@ It launches without browser chrome, under the Otari icon and the name "Otari".
 On iOS the installed app keeps its own cookie storage, so you sign in to it once,
 separately from Safari; an Android install shares Chrome's session.
 
-Installing requires a secure context, meaning HTTPS or `http://localhost`. A
-gateway reached over plain HTTP at a LAN address gets a plain bookmark shortcut
-rather than an installed app, which is one more reason to put it behind HTTPS as
-the security notes below describe.
+Installing needs HTTPS, or `http://localhost` / `http://127.0.0.1` for local
+access. Those loopback addresses are the only HTTP origins browsers treat as
+secure, so a gateway reached over plain HTTP at a LAN address or hostname gets a
+plain bookmark shortcut rather than an installed app. That is one more reason to
+put it behind HTTPS, as the security notes below describe.
 
 ## Security notes
 

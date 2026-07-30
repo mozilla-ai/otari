@@ -4,6 +4,11 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  /* Changing --otari-brand or --otari-bg means changing two copies of the same
+     hex that cannot read a custom property: the `theme-color` meta tag in
+     web/index.html, and `theme_color`/`background_color` in
+     web/public/pwa/manifest.webmanifest (which colour the browser and installed
+     app chrome). Nothing fails the build if they drift, so update them here. */
   --otari-brand: #4e8295;
   --otari-brand-dark: #3c6678;
   --otari-brand-tint: #eaf1f3;

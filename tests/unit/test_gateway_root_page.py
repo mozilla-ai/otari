@@ -16,6 +16,11 @@ def _config(tmp_path: Path, name: str) -> GatewayConfig:
     return GatewayConfig(database_url=f"sqlite:///{database_path}")
 
 
+# What the security middleware gives the PWA assets: public, but a day rather
+# than the immutable year the content-hashed /assets bundles get.
+_PWA_CACHE_CONTROL = "public, max-age=86400"
+
+
 def test_welcome_tutorial_page_is_available(tmp_path: Path) -> None:
     app = create_app(_config(tmp_path, "gateway-welcome-test.db"))
 
@@ -84,6 +89,7 @@ def test_pwa_manifest_and_icons_are_served(tmp_path: Path) -> None:
         index = client.get("/").text
         manifest = client.get("/pwa/manifest.webmanifest")
         assert manifest.status_code == 200
+        assert manifest.headers["cache-control"] == _PWA_CACHE_CONTROL
         payload = manifest.json()
         # Every icon the manifest advertises must resolve, or the launcher falls
         # back to a screenshot of the page instead of the Otari mark.
@@ -106,10 +112,14 @@ def test_pwa_manifest_and_icons_are_served(tmp_path: Path) -> None:
     for src, response in icon_responses.items():
         assert response.status_code == 200, src
         assert response.headers["content-type"] == "image/png", src
-        assert "no-store" not in response.headers.get("cache-control", ""), src
+        # Pin the policy, not just "cacheable": these filenames are not
+        # content-hashed, so a drift to no-cache or a different max-age changes
+        # what an installed app re-fetches.
+        assert response.headers["cache-control"] == _PWA_CACHE_CONTROL, src
 
     assert apple_icon.status_code == 200
     assert apple_icon.headers["content-type"] == "image/png"
+    assert apple_icon.headers["cache-control"] == _PWA_CACHE_CONTROL
 
 
 def test_pwa_assets_are_absent_without_dashboard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,6 +131,32 @@ def test_pwa_assets_are_absent_without_dashboard(tmp_path: Path, monkeypatch: py
         response = client.get("/pwa/manifest.webmanifest")
 
     assert response.status_code == 404
+
+
+def test_dashboard_without_pwa_dir_still_starts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bundle built before the PWA assets existed must not break startup.
+
+    The guard this covers is not the one above: there the dashboard is absent
+    entirely, while here ``assets/`` is present and only ``pwa/`` is missing, as
+    in an older wheel or a stale Docker layer. Mounting ``StaticFiles`` on a
+    directory that does not exist raises at construction, so without the
+    ``is_dir()`` check the gateway would fail to boot rather than degrade.
+    """
+    stale_bundle = tmp_path / "dashboard"
+    (stale_bundle / "assets").mkdir(parents=True)
+    (stale_bundle / "index.html").write_text('<html><link rel="manifest" href="/pwa/manifest.webmanifest" /></html>')
+    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: stale_bundle)
+
+    app = create_app(_config(tmp_path, "gateway-stale-bundle-test.db"))
+
+    with TestClient(app) as client:
+        index = client.get("/")
+        manifest = client.get("/pwa/manifest.webmanifest")
+
+    assert index.status_code == 200
+    # The stale index.html still links a manifest; it 404s rather than taking
+    # the gateway down with it, and the page itself keeps working.
+    assert manifest.status_code == 404
 
 
 def test_create_app_rejects_invalid_secret_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
