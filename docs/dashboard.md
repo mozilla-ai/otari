@@ -177,6 +177,24 @@ For how users, keys, and budgets fit together and the management endpoints behin
   pricing updates, and rotate the generated master key. Rotating the master key
   issues a fresh `otari-mk-…` value and keeps your current session signed in.
 
+## Install it on your phone
+
+The dashboard ships a web app manifest and app icons, so you can keep it on a
+phone home screen instead of hunting for a tab.
+
+- **Android (Chrome)**: open the dashboard, then **⋮** → **Add to Home screen**
+  or **Install app**.
+- **iOS (Safari)**: open the dashboard, then **Share** → **Add to Home Screen**.
+
+It launches without browser chrome, under the Otari icon and the name "Otari".
+On iOS the installed app keeps its own cookie storage, so you sign in to it once,
+separately from Safari; an Android install shares Chrome's session.
+
+Installing requires a secure context, meaning HTTPS or `http://localhost`. A
+gateway reached over plain HTTP at a LAN address gets a plain bookmark shortcut
+rather than an installed app, which is one more reason to put it behind HTTPS as
+the security notes below describe.
+
 ## Security notes
 
 - **The master key is an admin credential.** Anyone who has it can read and
