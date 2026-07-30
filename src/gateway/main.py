@@ -55,6 +55,10 @@ _CACHEABLE_PATHS = ("/favicon.svg",)
 # immutable; the middleware marks these public and cacheable for a year, since
 # StaticFiles does not set Cache-Control on its own.
 _CACHEABLE_PREFIXES = ("/assets/",)
+# The install manifest and home-screen icons, public like the page that links
+# them. Their names are stable rather than content-hashed, so they get a day of
+# caching like the favicon, not the immutable year /assets gets.
+_SHORT_CACHE_PREFIXES = ("/pwa/",)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -76,7 +80,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             return response
         if path.startswith(_CACHEABLE_PREFIXES):
             response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
-        elif path in _CACHEABLE_PATHS:
+        elif path in _CACHEABLE_PATHS or path.startswith(_SHORT_CACHE_PREFIXES):
             response.headers.setdefault("Cache-Control", "public, max-age=86400")
         else:
             response.headers["Cache-Control"] = "private, no-store, no-cache"
@@ -267,6 +271,13 @@ def create_app(config: GatewayConfig) -> FastAPI:
             StaticFiles(directory=dashboard_dir / "assets"),
             name="dashboard-assets",
         )
+        # Installing the dashboard to a phone home screen needs the manifest and
+        # the PNG icons it points at (index.html links them from /pwa/). Only the
+        # standalone dashboard is an app worth installing, so this rides along
+        # with it rather than being served in hybrid mode next to the tutorial.
+        pwa_dir = dashboard_dir / "pwa"
+        if pwa_dir.is_dir():
+            app.mount("/pwa", StaticFiles(directory=pwa_dir), name="dashboard-pwa")
 
         @app.get("/", include_in_schema=False)
         async def dashboard_index() -> FileResponse:

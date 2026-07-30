@@ -5,8 +5,21 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Otari admin dashboard: browse and price models, manage aliases, and toggle runtime settings." />
+    <!-- Installing the dashboard to a phone home screen: the manifest supplies
+         the Android icon, name, and standalone display; iOS ignores it and reads
+         the apple-touch-icon plus the apple-mobile-web-app-* meta tags instead. -->
+    <link rel="manifest" href="/pwa/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/pwa/apple-touch-icon.png" />
+    <meta name="theme-color" content="#4e8295" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Otari" />
+    <!-- "default" keeps the content below the status bar; "black-translucent"
+         would run the app shell underneath it, and the shell has no safe-area
+         insets to sit out of the way. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Otari Dashboard</title>
-    <script type="module" crossorigin src="/assets/index-BqPLLxFQ.js"></script>
+    <script type="module" crossorigin src="/assets/index-D_NAAvJT.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/react-dgEcD0HR.js">
     <link rel="modulepreload" crossorigin href="/assets/tanstack-query-1t81HyiD.js">
     <link rel="modulepreload" crossorigin href="/assets/heroui-BI50yK5B.js">
