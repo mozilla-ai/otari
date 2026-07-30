@@ -53,7 +53,7 @@ export function FilterChips({
               type="button"
               onClick={chip.onClear}
               aria-label={`Remove ${chip.label} filter`}
-              className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--otari-muted)] hover:bg-[var(--otari-line)] hover:text-[var(--otari-ink)]"
+              className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--otari-muted)] outline-none hover:bg-[var(--otari-line)] hover:text-[var(--otari-ink)] focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)]"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-3 w-3" aria-hidden="true">
                 <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />

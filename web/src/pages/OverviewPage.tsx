@@ -148,6 +148,7 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
   const isRefreshing =
     today.isFetching ||
     period.isFetching ||
+    previous.isFetching ||
     health.isFetching ||
     budgets.isFetching ||
     keys.isFetching ||

@@ -29,6 +29,7 @@ import {
   findPreset,
   isoAgo,
   type RangePreset,
+  YEAR_SPAN_S,
 } from "@/lib/timeRange";
 import { useUrlState } from "@/lib/urlState";
 
@@ -127,6 +128,21 @@ function resolveWindow(range: string, start: string, end: string): { start?: str
   const preset = findPreset(ACTIVITY_PRESETS, range) ?? findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY);
   const seconds = preset?.seconds ?? null;
   return { start: seconds == null ? undefined : isoAgo(seconds), end: undefined };
+}
+
+// The histogram extent (what the bars span), which is *not* always the list
+// window. For bounded presets it matches `resolveWindow`. For the unbounded "All"
+// the list genuinely omits its start, but the summary endpoint would then apply a
+// hidden 30-day default: the bars would silently show a rolling month while the
+// caption reads "All time". So the histogram gets an explicit year-long start,
+// giving a deterministic, draggable span (the axis shows exactly what it covers)
+// while the list stays all-time.
+function resolveExtentWindow(range: string): { start?: string; end?: string } {
+  const win = resolveWindow(range, "", "");
+  if (win.start || range === CUSTOM_KEY) return win;
+  const preset = findPreset(ACTIVITY_PRESETS, range);
+  if (preset?.seconds == null) return { start: isoAgo(YEAR_SPAN_S) };
+  return win;
 }
 
 // ---------- small presentational pieces ----------
@@ -264,12 +280,10 @@ export function ActivityPage() {
 
   // The preset extent (ignoring any brushed bounds) that the timeline histogram
   // spans. Snapshotted like `win`, re-anchored when the preset changes.
-  const [extentWin, setExtentWin] = useState(() => resolveWindow(range, "", ""));
+  const [extentWin, setExtentWin] = useState(() => resolveExtentWindow(range));
   useEffect(() => {
-    setExtentWin(resolveWindow(range, "", ""));
+    setExtentWin(resolveExtentWindow(range));
   }, [range]);
-
-  const hasWindow = Boolean(win.start || win.end);
 
   const priced = pricedFilter === "true" ? true : pricedFilter === "false" ? false : undefined;
 
@@ -322,10 +336,11 @@ export function ActivityPage() {
 
   // The timeline histogram spans the whole preset *extent* (the rolling preset
   // window, independent of any brushed sub-window), so the brush always has
-  // context to zoom back out into. For the unbounded "All" the summary endpoint
-  // applies its 30-day default, so the bars show recent activity while the list
-  // stays all-time; the caption reflects the true list window, and the brush
-  // still narrows it. Entity filters carry over so the bars match what's shown.
+  // context to zoom back out into. For the unbounded "All", `extentWin` carries an
+  // explicit year-long start (see `resolveExtentWindow`) so the bars span a
+  // deterministic window instead of the summary endpoint's hidden 30-day default;
+  // the list stays all-time and the caption reflects the true list window, and the
+  // brush still narrows it. Entity filters carry over so the bars match what's shown.
   const extentPreset = findPreset(ACTIVITY_PRESETS, range) ?? findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY);
   // A window reaching outside the preset extent (a drill-down from the Usage
   // page carries its own bounds while the URL's `range` still holds a default)
@@ -360,8 +375,12 @@ export function ActivityPage() {
   const rows = usage.data ?? [];
   const totalIsExact = count.isSuccess && !count.isPlaceholderData;
   const total = totalIsExact ? (count.data?.total ?? 0) : null;
+  // The default preset is not itself a filter (mirroring UsagePage): only an
+  // explicit sub-window or a non-default preset counts as a time filter, so a
+  // brand-new gateway on its 24h default reads "never used", not "filtered empty".
+  const timeFiltered = Boolean(startParam || endParam) || range !== ACTIVITY_DEFAULT_KEY;
   const anyFilter = Boolean(
-    statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || pricedFilter || hasWindow,
+    statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || pricedFilter || timeFiltered,
   );
 
   // Active entity filters as removable chips (time is driven by the timeline, so
@@ -466,7 +485,7 @@ export function ActivityPage() {
   // re-anchored window resolves to the same query key.
   const refresh = () => {
     setWin(resolveWindow(range, startParam, endParam));
-    setExtentWin(resolveWindow(range, "", ""));
+    setExtentWin(resolveExtentWindow(range));
     void usage.refetch();
     void count.refetch();
     void contextSummary.refetch();

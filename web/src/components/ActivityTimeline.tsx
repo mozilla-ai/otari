@@ -150,9 +150,12 @@ export function ActivityTimeline({
   useEffect(() => {
     if (!dragging.current) setSel(windowToRange());
     // starts is derived from series each render; resync on the window bounds and
-    // the extent length, not the fresh array identity.
+    // on the extent itself (length plus its first/last bucket), not the fresh
+    // array identity. The endpoints catch a series that rolls forward while the
+    // bound strings and length stay identical, which would otherwise strand the
+    // thumbs on stale positions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [windowStart, windowEnd, n]);
+  }, [windowStart, windowEnd, n, starts[0], starts[n - 1]]);
 
   const commit = ([lo, hi]: [number, number]) => {
     dragging.current = false;
@@ -254,6 +257,40 @@ export function ActivityTimeline({
     const span = pan.current.sel[1] - pan.current.sel[0];
     const plo = Math.max(0, Math.min(n - span, pan.current.sel[0] + dx));
     setSel([plo, plo + span]);
+  };
+
+  // Keyboard pan: slide the whole window by whole buckets without resizing it, so
+  // a keyboard user can reach a mid-extent window with one control instead of
+  // stepping both edges in turn. Commits like the pointer pan does; a clamped
+  // pan (already against an edge) is a silent no-op. Mirrors the axis strip below.
+  const panBy = (deltaBuckets: number) => {
+    const [slo, shi] = selRef.current;
+    const span = shi - slo;
+    const plo = Math.max(0, Math.min(n - span, Math.round(slo) + deltaBuckets));
+    const next: [number, number] = [plo, plo + span];
+    setSel(next);
+    commit(next);
+  };
+
+  const onPanKeyDown = (event: React.KeyboardEvent) => {
+    const span = Math.max(1, Math.round(hi - lo));
+    const delta =
+      event.key === "ArrowRight" || event.key === "ArrowUp"
+        ? 1
+        : event.key === "ArrowLeft" || event.key === "ArrowDown"
+          ? -1
+          : event.key === "PageUp"
+            ? span
+            : event.key === "PageDown"
+              ? -span
+              : event.key === "Home"
+                ? -n
+                : event.key === "End"
+                  ? n
+                  : 0;
+    if (delta === 0) return;
+    event.preventDefault();
+    panBy(delta);
   };
 
   const loPct = n ? (Math.min(lo, hi) / n) * 100 : 0;
@@ -363,11 +400,21 @@ export function ActivityTimeline({
             ) : null}
 
             {/* Pan strip along the axis band: slides the window without resizing
-                it. Sits below the bars, so plot-area tooltips are unaffected. */}
+                it. Sits below the bars, so plot-area tooltips are unaffected. It
+                is a single-value slider (the window's left edge, in buckets) so a
+                keyboard user gets a real pan control; only focusable while zoomed,
+                since a full-extent window has nothing to pan. */}
             <div
-              aria-hidden
-              className="absolute bottom-0 z-[1] cursor-grab touch-none rounded bg-[var(--otari-brand)]/10 hover:bg-[var(--otari-brand)]/20 active:cursor-grabbing"
+              role="slider"
+              aria-label="Pan the selected window"
+              aria-valuemin={0}
+              aria-valuemax={n}
+              aria-valuenow={Math.round(Math.min(lo, hi))}
+              aria-valuetext={`Window starting at ${formatTick(starts[Math.min(Math.round(Math.min(lo, hi)), n - 1)] ?? starts[0], bucket)}`}
+              tabIndex={zoomed ? 0 : -1}
+              className="absolute bottom-0 z-[1] cursor-grab touch-none rounded bg-[var(--otari-brand)]/10 outline-none hover:bg-[var(--otari-brand)]/20 focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)] active:cursor-grabbing"
               style={{ left: `${loPct}%`, width: `${Math.max(0, hiPct - loPct)}%`, height: PAN_STRIP_PX }}
+              onKeyDown={onPanKeyDown}
               onPointerDown={(event) => {
                 event.stopPropagation();
                 event.preventDefault();
@@ -381,7 +428,10 @@ export function ActivityTimeline({
                 pan.current = null;
                 commit(selRef.current);
               }}
-              onPointerCancel={() => {
+              onPointerCancel={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
                 pan.current = null;
                 commit(selRef.current);
               }}

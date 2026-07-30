@@ -250,13 +250,14 @@ describe("ActivityPage", () => {
     mockApi({ rows: [], total: 0 });
     renderPage(<ActivityPage />);
 
-    // The default 24h window bounds the query, so an empty result reads as filtered.
-    expect(await screen.findByText("No requests match these filters.")).toBeInTheDocument();
-
-    // The truthful "All" preset drops the window entirely (unbounded), so an empty
-    // result now reads as "never used".
-    await user.click(screen.getByRole("button", { name: "All" }));
+    // The default 24h preset is not itself a filter (mirroring UsagePage), so an
+    // empty result on a brand-new gateway reads as "never used", not "filtered".
     expect(await screen.findByText("No requests recorded yet.")).toBeInTheDocument();
+
+    // Narrowing to a non-default preset is a real time filter, so an empty result
+    // then reads as filtered-to-empty.
+    await user.click(screen.getByRole("button", { name: "7d" }));
+    expect(await screen.findByText("No requests match these filters.")).toBeInTheDocument();
   });
 
   it("keeps Next reachable when the count request fails", async () => {
@@ -430,6 +431,13 @@ describe("ActivityPage", () => {
     // Activity's list endpoint applies no default lookback, so "All" really omits
     // the start bound rather than silently scoping to a recent window.
     await waitFor(() => expect(listCalls(calls).some((url) => !url.includes("start_date"))).toBe(true));
+
+    // The histogram, however, sends an explicit start bound: without one the
+    // summary endpoint would apply a hidden 30-day default, so the bars would show
+    // a rolling month while the caption reads "All time". The list stays all-time.
+    expect(
+      calls.some((c) => c.url.includes("/v1/usage/summary") && c.url.includes("start_date=")),
+    ).toBe(true);
   });
 
   it("frames a drill-down window that reaches outside the preset extent", async () => {
@@ -451,9 +459,13 @@ describe("ActivityPage", () => {
         ),
       ).toBe(true),
     );
-    // The caption reflects the drilled window (end shown inclusively).
-    expect(screen.getByText(/Showing/)).toHaveTextContent("Jul 1");
-    expect(screen.getByText(/Showing/)).toHaveTextContent("Jul 14");
+    // The caption reflects the drilled window (end shown inclusively). Assert on
+    // day numbers and the UTC marker, not a month abbreviation, since the caption
+    // formats with the runtime locale ("Jul" would fail outside en-US).
+    const caption = (screen.getByText(/Showing/).textContent ?? "").replace(/\s+/g, " ");
+    expect(caption).toMatch(/\b1\b/);
+    expect(caption).toMatch(/\b14\b/);
+    expect(caption).toContain("UTC");
   });
 
   it("buckets the timeline histogram by the active preset's extent", async () => {
