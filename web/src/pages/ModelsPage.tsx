@@ -977,14 +977,38 @@ function ModelTable({
   );
 }
 
-function DiscoveredErrors({ providers }: { providers: { provider: string; error: string | null }[] }) {
+// A provider whose backend has no model-listing endpoint is not misconfigured, so
+// it gets its own line: pointing the operator at their credentials would send them
+// after a problem that isn't there (issue #447).
+function DiscoveredErrors({
+  providers,
+}: {
+  providers: { provider: string; error: string | null; discovery_unsupported: boolean }[];
+}) {
   if (providers.length === 0) {
     return null;
   }
+  const unreachable = providers.filter((provider) => !provider.discovery_unsupported);
+  const noDiscovery = providers.filter((provider) => provider.discovery_unsupported);
+  const names = (list: typeof providers) => list.map((provider) => provider.provider).join(", ");
+  const one = (list: typeof providers) => list.length === 1;
   return (
     <InfoBanner tone="warning">
-      Could not list {providers.map((provider) => provider.provider).join(", ")}. Check that provider's credentials in
-      config.yml; its models are missing from the list below.
+      {unreachable.length > 0 ? (
+        <span className="block">
+          Could not list {names(unreachable)}. Check {one(unreachable) ? "that provider's" : "those providers'"}{" "}
+          credentials in config.yml; {one(unreachable) ? "its" : "their"} models are missing from the list below.
+        </span>
+      ) : null}
+      {noDiscovery.length > 0 ? (
+        <span className="block">
+          {names(noDiscovery)} {one(noDiscovery) ? "does" : "do"} not offer model discovery, so{" "}
+          {one(noDiscovery) ? "its" : "their"} models are missing from the list below.{" "}
+          {one(noDiscovery) ? "The provider" : "They"} may still serve requests; declare the model ids{" "}
+          {one(noDiscovery) ? "it serves" : "they serve"} under the <code>models:</code> key in config.yml to list them
+          here.
+        </span>
+      ) : null}
     </InfoBanner>
   );
 }

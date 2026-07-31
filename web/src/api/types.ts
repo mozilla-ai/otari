@@ -51,6 +51,9 @@ export interface DiscoverableProvider {
   provider: string;
   ok: boolean;
   error: string | null;
+  // True when discovery failed only because the backend serves no model-listing
+  // endpoint, so the provider may still handle requests (issue #447).
+  discovery_unsupported: boolean;
   models: DiscoverableModel[];
 }
 
@@ -148,6 +151,9 @@ export interface TestProviderResult {
   ok: boolean;
   model_count: number;
   error: string | null;
+  // True when the test could not verify the credentials only because the backend
+  // has no model-listing endpoint; the key may still work for requests.
+  discovery_unsupported: boolean;
 }
 
 // Result of re-encrypting stored provider keys with the primary OTARI_SECRET_KEY.
@@ -160,20 +166,25 @@ export interface ReencryptProviderCredentialsResult {
 // per-provider "test connection" uses. `ok` false means unreachable; `error`
 // carries the sanitized provider error. `checked_at` is the wall-clock time the
 // provider was last dialed (null if never), so a cached status shows honest age.
+// `discovery_unsupported` narrows an `ok` false to "no model-listing endpoint",
+// which is a discovery gap rather than an unusable provider (issue #447).
 export interface ProviderHealth {
   instance: string;
   ok: boolean;
   model_count: number;
   error: string | null;
   checked_at: string | null;
+  discovery_unsupported: boolean;
 }
 
-// Provider connectivity across the gateway. The `healthy` / `total` counts and
-// most-recent `checked_at` are precomputed so a summary tile (the overview page,
-// issue #302) can reuse them without re-deriving.
+// Provider connectivity across the gateway. The `healthy` / `degraded` / `total`
+// counts and most-recent `checked_at` are precomputed so a summary tile (the
+// overview page, issue #302) can reuse them without re-deriving. `degraded`
+// counts the non-healthy providers whose only problem is missing discovery.
 export interface ProviderHealthResponse {
   providers: ProviderHealth[];
   healthy: number;
+  degraded: number;
   total: number;
   checked_at: string | null;
 }

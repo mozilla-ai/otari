@@ -110,6 +110,13 @@ class DiscoverableProvider(BaseModel):
         default=None,
         description="Why discovery failed. Null when `ok` is true.",
     )
+    discovery_unsupported: bool = Field(
+        default=False,
+        description=(
+            "True when discovery failed only because this backend serves no model-listing endpoint. "
+            "The provider may still handle requests for models declared in config."
+        ),
+    )
     models: list[DiscoverableModel]
 
 
@@ -453,6 +460,7 @@ async def list_discoverable_models(
             provider=discovery.provider,
             ok=discovery.error is None,
             error=discovery.error,
+            discovery_unsupported=discovery.discovery_unsupported,
             models=sorted(
                 (
                     DiscoverableModel(id=model.id, key=f"{discovery.provider}:{model.id}")

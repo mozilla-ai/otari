@@ -1854,7 +1854,7 @@
         {
           "name": "Provider Health",
           "request": {
-            "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.",
+            "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
             "header": [],
             "method": "GET",
             "url": {

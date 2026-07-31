@@ -123,6 +123,14 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
   - `make openapi-check` (or `uv run python scripts/generate_openapi.py --check`)
 - Default output path:
   - `docs/public/openapi.json`
+- The Postman collection is generated **from** that spec, so it goes stale
+  whenever the spec does, including for a change that only edits a route's
+  docstring (descriptions are carried into the collection). Regenerate both, and
+  commit both:
+  - `make postman` (or `uv run python scripts/generate_postman.py`)
+  - `make postman-check` verifies it, and the same `openapi-spec` CI job runs
+    both checks, so missing this fails CI even when `openapi-check` passes.
+  - Output path: `docs/public/otari.postman_collection.json`
 ## Repository Conventions
 ### Imports
 - Use grouped imports in this order:
@@ -209,7 +217,10 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - If you touched config loading, run config/env tests in `tests/integration`.
 - If you touched CLI behavior, run `tests/unit/test_gateway_cli.py`.
 - If you touched auth headers or key handling, run key-management and auth-related tests.
-- If OpenAPI-affecting code changed, run `make openapi-check` (or `uv run python scripts/generate_openapi.py --check`).
+- If OpenAPI-affecting code changed, regenerate and commit **both** generated
+  artifacts, then verify with `make openapi-check` **and** `make postman-check`.
+  A route docstring counts as OpenAPI-affecting: its text lands in the spec and
+  in the Postman collection.
 
 ## Writing style
 

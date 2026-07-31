@@ -47,9 +47,10 @@ describe("errorRateHealth", () => {
 });
 
 describe("providerHealthStatus", () => {
-  const h = (healthy: number, total: number): ProviderHealthResponse => ({
+  const h = (healthy: number, total: number, degraded = 0): ProviderHealthResponse => ({
     providers: [],
     healthy,
+    degraded,
     total,
     checked_at: null,
   });
@@ -61,6 +62,13 @@ describe("providerHealthStatus", () => {
     expect(providerHealthStatus(h(3, 3))).toBe("ok");
     expect(providerHealthStatus(h(2, 3))).toBe("warn");
     expect(providerHealthStatus(h(0, 3))).toBe("alert");
+  });
+  it("treats a missing model listing as a warning, not an outage", () => {
+    // otari#447: those providers can still serve requests, so red is wrong.
+    expect(providerHealthStatus(h(0, 3, 3))).toBe("warn");
+    expect(providerHealthStatus(h(1, 3, 1))).toBe("warn");
+    // A genuine outage alongside a discovery gap is still an outage.
+    expect(providerHealthStatus(h(0, 3, 0))).toBe("alert");
   });
 });
 

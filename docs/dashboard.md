@@ -121,6 +121,13 @@ On the Providers page, use **Test the connection** for the provider you just
 added. Otari makes a live call to confirm the credential works before you route
 real traffic through it.
 
+The check lists the provider's models, so a backend that does not implement a
+`/v1/models` endpoint cannot be verified this way. That case is reported as
+"No model discovery" rather than "Unreachable": the key may be perfectly good,
+and the provider can still serve requests. Declare the model ids it serves under
+that provider's `models:` key in `config.yml` to have them appear in the
+catalogue.
+
 ### 7. Send your first request
 
 The Providers page includes a "Send your first request" snippet you can copy.

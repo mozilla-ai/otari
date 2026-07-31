@@ -182,6 +182,19 @@ function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProvider
             <span className="text-xs font-medium text-green-700">
               Connected. {test.data.model_count} model{test.data.model_count === 1 ? "" : "s"} available.
             </span>
+          ) : test.data.discovery_unsupported ? (
+            // No /v1/models on this backend: the test cannot confirm the key, but
+            // it is not evidence the key is wrong either (issue #447). The error is
+            // kept because this is the form where the operator just typed api_base,
+            // and a wrong one 404s exactly like an absent listing endpoint.
+            <span className="block max-w-md break-words text-xs text-amber-800">
+              This provider does not list models, so the key could not be verified here. Save it and use the provider;
+              declare its model ids under <code>models:</code> to have them show up in the catalogue. If you did not
+              expect this, check the provider's reply below.
+              {test.data.error ? (
+                <span className="mt-0.5 block text-[var(--otari-muted)]">{test.data.error}</span>
+              ) : null}
+            </span>
           ) : (
             <span className="block max-w-md break-words text-xs text-red-700">
               {test.data.error ?? "Connection failed."}
@@ -568,6 +581,19 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
       </span>
     );
   }
+  // A backend with no model-listing endpoint cannot be verified this way, but the
+  // key is not therefore wrong: say so instead of reporting a failed connection.
+  // The provider error stays visible underneath, because a 404 is also what a
+  // wrong api_base returns, and that is a misconfiguration to fix, not to reassure
+  // away.
+  if (state.discovery_unsupported) {
+    return (
+      <span className="block max-w-xs break-words text-xs text-amber-800">
+        Could not list models, so the key could not be verified. It may still work for requests.
+        {state.error ? <span className="mt-0.5 block text-[var(--otari-muted)]">{state.error}</span> : null}
+      </span>
+    );
+  }
   return (
     <span className="block max-w-xs break-words text-xs text-red-700">
       {state.error ?? "Connection failed."}
@@ -578,41 +604,65 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
 // A provider's reachability, from the shared model-discovery health path. Config
 // providers (no per-row Test button) get a status here too, not just stored ones.
 // Semantic status surface: raw Tailwind palette classes, matching TestOutcome and
-// ErrorBanner rather than the --otari-* chrome.
+// ErrorBanner rather than the --otari-* chrome. A provider that answers no model
+// listing (its backend never implemented /v1/models) is not unreachable: only
+// discovery is broken, and it may still serve requests, so it gets the amber
+// warning state rather than the red one (issue #447).
 function HealthPill({ health }: { health: ProviderHealth | undefined }) {
   if (!health) {
     return <span className="text-xs text-[var(--otari-muted)]">—</span>;
   }
+  const degraded = !health.ok && health.discovery_unsupported;
   const styles = health.ok
     ? "border-green-200 bg-green-50 text-green-700"
-    : "border-red-200 bg-red-50 text-red-700";
+    : degraded
+      ? "border-amber-200 bg-amber-50 text-amber-800"
+      : "border-red-200 bg-red-50 text-red-700";
+  const dot = health.ok ? "bg-green-500" : degraded ? "bg-amber-500" : "bg-red-500";
   // The last-checked time lives in the top summary banner; the row just shows the
   // status. The error (and time) stay available on hover as the pill's tooltip.
   const checked = health.checked_at ? `Last checked ${formatRelative(health.checked_at)}` : "Not checked yet";
-  const title = health.ok ? checked : `${health.error ?? "Unreachable"} · ${checked}`;
+  const reason = degraded
+    ? `${health.error ?? "This provider does not list models."} Requests to it may still work.`
+    : (health.error ?? "Unreachable");
+  const title = health.ok ? checked : `${reason} · ${checked}`;
   return (
     <span
       title={title}
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${styles}`}
     >
-      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${health.ok ? "bg-green-500" : "bg-red-500"}`} />
-      {health.ok ? "Reachable" : "Unreachable"}
+      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      {health.ok ? "Reachable" : degraded ? "No model discovery" : "Unreachable"}
     </span>
   );
 }
 
 // A one-line "N of M providers reachable" summary with a live re-check, above the
-// table. The healthy/total counts come precomputed from the gateway, and the
-// same counts feed the overview page's summary tile (issue #302).
-function HealthSummary({ healthy, total, checkedAt }: { healthy: number; total: number; checkedAt: string | null }) {
+// table. The healthy/degraded/total counts come precomputed from the gateway, and
+// the same counts feed the overview page's summary tile (issue #302). `degraded`
+// providers are not reachable-by-discovery but are not failures either, so they
+// are called out separately and keep the dot amber rather than red.
+function HealthSummary({
+  healthy,
+  degraded,
+  total,
+  checkedAt,
+}: {
+  healthy: number;
+  degraded: number;
+  total: number;
+  checkedAt: string | null;
+}) {
   const allHealthy = healthy === total;
+  const dot = allHealthy ? "bg-green-500" : healthy + degraded === total ? "bg-amber-500" : "bg-red-500";
   const recheck = useRecheckProviderHealth();
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)] px-4 py-2.5 text-sm">
-      <span aria-hidden className={`h-2 w-2 rounded-full ${allHealthy ? "bg-green-500" : "bg-red-500"}`} />
+      <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
       <span className="font-medium text-[var(--otari-ink)]">
         {healthy} of {total} provider{total === 1 ? "" : "s"} reachable
       </span>
+      {degraded > 0 ? <span className="text-amber-800">{degraded} without model discovery</span> : null}
       {checkedAt ? (
         <span className="text-[var(--otari-muted)]">Last checked {formatRelative(checkedAt)}</span>
       ) : null}
@@ -744,7 +794,13 @@ export function ProvidersPage() {
       onError: (error) =>
         setTests((prev) => ({
           ...prev,
-          [instance]: { status: "done", ok: false, model_count: 0, error: errorMessage(error) },
+          [instance]: {
+            status: "done",
+            ok: false,
+            model_count: 0,
+            error: errorMessage(error),
+            discovery_unsupported: false,
+          },
         })),
     });
   };
@@ -912,7 +968,12 @@ export function ProvidersPage() {
       {editingProvider ? <EditProviderForm provider={editingProvider} onClose={() => setEditing(null)} /> : null}
 
       {!loading && rows.length > 0 && health.data && health.data.total > 0 ? (
-        <HealthSummary healthy={health.data.healthy} total={health.data.total} checkedAt={health.data.checked_at} />
+        <HealthSummary
+          healthy={health.data.healthy}
+          degraded={health.data.degraded}
+          total={health.data.total}
+          checkedAt={health.data.checked_at}
+        />
       ) : null}
 
       {/* Suppress the table (and its own empty message) while the onboarding
