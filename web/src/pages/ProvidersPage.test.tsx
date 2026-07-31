@@ -137,6 +137,20 @@ function mockApi(opts: MockOpts = {}) {
         storedList = [...storedList, row];
         return jsonResponse(row, 201);
       }
+      if (method === "PATCH") {
+        const instance = decodeURIComponent(url.split("/").pop() ?? "");
+        const body = JSON.parse(String(init?.body)) as { api_base?: string | null; api_key?: string | null };
+        const existing = storedList.find((p) => p.instance === instance);
+        if (!existing) return jsonResponse({ detail: `Unknown provider: ${instance}` }, 404);
+        const row: StoredProvider = {
+          ...existing,
+          api_base: body.api_base ?? existing.api_base,
+          last4: body.api_key ? body.api_key.slice(-4) : existing.last4,
+          updated_at: "2026-01-02T00:00:00+00:00",
+        };
+        storedList = storedList.map((p) => (p.instance === instance ? row : p));
+        return jsonResponse(row);
+      }
       if (method === "DELETE") {
         const instance = decodeURIComponent(url.split("/").pop() ?? "");
         storedList = storedList.filter((p) => p.instance !== instance);
@@ -584,6 +598,58 @@ describe("ProvidersPage", () => {
     // The provider error stays on screen: a 404 is also what a wrong api_base
     // returns, so hiding it would mask a misconfiguration behind reassurance.
     expect(screen.getByText("Error code: 404")).toBeInTheDocument();
+  });
+
+  it("drops a connection-test verdict once the provider is edited", async () => {
+    // otari#464: the verdict describes the credentials the test ran against, so
+    // leaving it under the row after a save contradicts the status pill above it
+    // and sends the operator hunting for a backend bug.
+    mockApi({
+      stored: [storedProvider("otari", "1234")],
+      testResult: { ok: false, model_count: 0, error: "authentication failed: invalid key", discovery_unsupported: false },
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1234");
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByText("authentication failed: invalid key")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.clear(screen.getByLabelText("API base"));
+    await user.type(screen.getByLabelText("API base"), "https://api.otari.ai/v1");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("authentication failed: invalid key")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("does not carry a verdict over to a provider re-added under the same name", async () => {
+    mockApi({
+      stored: [storedProvider("otari", "1234")],
+      testResult: { ok: false, model_count: 0, error: "authentication failed: invalid key", discovery_unsupported: false },
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1234");
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByText("authentication failed: invalid key")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await screen.findByText("Welcome to Otari");
+
+    await user.click(screen.getByRole("button", { name: "Add your first provider" }));
+    await user.click(screen.getByRole("button", { name: "Custom endpoint" }));
+    await user.type(screen.getByLabelText("Name"), "otari");
+    await user.type(screen.getByLabelText("API base"), "https://api.otari.ai/v1");
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+
+    // The rebuilt row is a different provider: it must start with no verdict.
+    await screen.findByRole("button", { name: "Test" });
+    expect(screen.queryByText("authentication failed: invalid key")).not.toBeInTheDocument();
   });
 
   it("does not automatically re-check all providers within an hour", async () => {

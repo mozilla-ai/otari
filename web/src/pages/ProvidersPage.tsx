@@ -468,7 +468,17 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-function EditProviderForm({ provider, onClose }: { provider: StoredProvider; onClose: () => void }) {
+function EditProviderForm({
+  provider,
+  onClose,
+  onSaved,
+}: {
+  provider: StoredProvider;
+  onClose: () => void;
+  // Called only after the credentials actually changed on the server, so the
+  // page can retire anything that described the old ones.
+  onSaved: () => void;
+}) {
   const update = useUpdateStoredProvider();
   const [providerType, setProviderType] = useState(provider.provider_type ?? "");
   const [apiBase, setApiBase] = useState(provider.api_base ?? "");
@@ -486,7 +496,15 @@ function EditProviderForm({ provider, onClose }: { provider: StoredProvider; onC
     if (replacingKey && apiKey.trim()) {
       body.api_key = apiKey.trim();
     }
-    update.mutate({ instance: provider.instance, body }, { onSuccess: onClose });
+    update.mutate(
+      { instance: provider.instance, body },
+      {
+        onSuccess: () => {
+          onSaved();
+          onClose();
+        },
+      },
+    );
   };
 
   return (
@@ -787,6 +805,18 @@ export function ProvidersPage() {
     : !settings.isError;
   const showOnboarding = !loading && rows.length === 0 && !addOpen;
 
+  // A test verdict describes the credentials as they were when it ran, so drop
+  // it once the provider changes underneath it: otherwise the row keeps showing
+  // a failure from the previous configuration, contradicting the status pill
+  // right above it (issue #464).
+  const clearTest = (instance: string) =>
+    setTests((prev) => {
+      if (!(instance in prev)) return prev;
+      const next = { ...prev };
+      delete next[instance];
+      return next;
+    });
+
   const runTest = (instance: string) => {
     setTests((prev) => ({ ...prev, [instance]: { status: "pending" } }));
     testProvider.mutate(instance, {
@@ -894,7 +924,9 @@ export function ProvidersPage() {
               <ConfirmButton
                 confirmLabel="Delete"
                 isPending={deleteProvider.isPending}
-                onConfirm={() => deleteProvider.mutate(row.instance)}
+                // Clear the verdict too: a provider re-added under the same name
+                // is a different provider, and would otherwise inherit it.
+                onConfirm={() => deleteProvider.mutate(row.instance, { onSuccess: () => clearTest(row.instance) })}
               >
                 Delete
               </ConfirmButton>
@@ -965,7 +997,13 @@ export function ProvidersPage() {
           out to be unavailable, retract it so its submit can never reach the create
           mutation. The banner above explains why. */}
       {addOpen && secretKeyConfigured ? <AddProviderForm onClose={() => setAddOpen(false)} /> : null}
-      {editingProvider ? <EditProviderForm provider={editingProvider} onClose={() => setEditing(null)} /> : null}
+      {editingProvider ? (
+        <EditProviderForm
+          provider={editingProvider}
+          onClose={() => setEditing(null)}
+          onSaved={() => clearTest(editingProvider.instance)}
+        />
+      ) : null}
 
       {!loading && rows.length > 0 && health.data && health.data.total > 0 ? (
         <HealthSummary
