@@ -817,21 +817,26 @@ export function ProvidersPage() {
       return next;
     });
 
+  // Only record a result while this run's "pending" marker is still there. A test
+  // against an unreachable endpoint settles slowly, which is when the operator is
+  // most likely to go fix the credentials mid-flight; without this guard the save
+  // would clear the verdict and the timed-out test would then write it straight
+  // back, restoring the very staleness clearTest exists to remove.
+  const settleTest = (instance: string, state: TestState) =>
+    setTests((prev) => (prev[instance]?.status === "pending" ? { ...prev, [instance]: state } : prev));
+
   const runTest = (instance: string) => {
     setTests((prev) => ({ ...prev, [instance]: { status: "pending" } }));
     testProvider.mutate(instance, {
-      onSuccess: (result) => setTests((prev) => ({ ...prev, [instance]: { status: "done", ...result } })),
+      onSuccess: (result) => settleTest(instance, { status: "done", ...result }),
       onError: (error) =>
-        setTests((prev) => ({
-          ...prev,
-          [instance]: {
-            status: "done",
-            ok: false,
-            model_count: 0,
-            error: errorMessage(error),
-            discovery_unsupported: false,
-          },
-        })),
+        settleTest(instance, {
+          status: "done",
+          ok: false,
+          model_count: 0,
+          error: errorMessage(error),
+          discovery_unsupported: false,
+        }),
     });
   };
 

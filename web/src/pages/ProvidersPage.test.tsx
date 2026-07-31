@@ -103,6 +103,9 @@ interface MockOpts {
   settingsGate?: Promise<unknown>;
   // Force GET /v1/settings to fail, so the fail-closed gate can be exercised.
   settingsError?: boolean;
+  // When set, POST .../test blocks on this promise, so a test can hold a
+  // connection test in flight while the page is used.
+  testGate?: Promise<unknown>;
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -129,6 +132,7 @@ function mockApi(opts: MockOpts = {}) {
 
     if (url.includes("/v1/provider-credentials")) {
       if (url.endsWith("/test") && method === "POST") {
+        if (opts.testGate) await opts.testGate;
         return jsonResponse(testResult);
       }
       if (method === "POST") {
@@ -139,13 +143,20 @@ function mockApi(opts: MockOpts = {}) {
       }
       if (method === "PATCH") {
         const instance = decodeURIComponent(url.split("/").pop() ?? "");
-        const body = JSON.parse(String(init?.body)) as { api_base?: string | null; api_key?: string | null };
+        const body = JSON.parse(String(init?.body)) as {
+          provider_type?: string | null;
+          api_base?: string | null;
+          api_key?: string | null;
+        };
         const existing = storedList.find((p) => p.instance === instance);
         if (!existing) return jsonResponse({ detail: `Unknown provider: ${instance}` }, 404);
+        // Mirror the backend, which keys off model_fields_set: an omitted field is
+        // kept, a field sent as null is cleared (see routes/providers.py, UNSET).
         const row: StoredProvider = {
           ...existing,
-          api_base: body.api_base ?? existing.api_base,
-          last4: body.api_key ? body.api_key.slice(-4) : existing.last4,
+          provider_type: "provider_type" in body ? (body.provider_type ?? null) : existing.provider_type,
+          api_base: "api_base" in body ? (body.api_base ?? null) : existing.api_base,
+          last4: "api_key" in body ? (body.api_key ? body.api_key.slice(-4) : null) : existing.last4,
           updated_at: "2026-01-02T00:00:00+00:00",
         };
         storedList = storedList.map((p) => (p.instance === instance ? row : p));
@@ -623,6 +634,38 @@ describe("ProvidersPage", () => {
     await waitFor(() =>
       expect(screen.queryByText("authentication failed: invalid key")).not.toBeInTheDocument(),
     );
+  });
+
+  it("does not let a test still in flight write its verdict back after a save", async () => {
+    // A test against a wrong api_base settles only when it times out, which is
+    // when the operator is most likely to go and fix the credentials. The save
+    // retires the verdict; the late result must not restore it.
+    let releaseTest: () => void = () => {};
+    const testGate = new Promise<void>((resolve) => {
+      releaseTest = resolve;
+    });
+    mockApi({
+      stored: [storedProvider("otari", "1234")],
+      testResult: { ok: false, model_count: 0, error: "authentication failed: invalid key", discovery_unsupported: false },
+      testGate,
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1234");
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByText("Testing…")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.clear(screen.getByLabelText("API base"));
+    await user.type(screen.getByLabelText("API base"), "https://api.otari.ai/v1");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.queryByText("Testing…")).not.toBeInTheDocument());
+
+    releaseTest();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Test" })).toBeEnabled());
+    expect(screen.queryByText("authentication failed: invalid key")).not.toBeInTheDocument();
   });
 
   it("does not carry a verdict over to a provider re-added under the same name", async () => {
