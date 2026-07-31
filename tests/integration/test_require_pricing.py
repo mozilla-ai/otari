@@ -9,6 +9,7 @@ i.e. budget is reserved before the pricing gate is enforced.
 
 import asyncio
 from collections.abc import AsyncGenerator, Generator
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -105,10 +106,20 @@ def test_missing_pricing_rejection_is_recorded_in_the_usage_log(strict_pricing_c
     assert rows[0]["status"] == "error"
     assert rows[0]["cost"] is None
     assert "pricing" in rows[0]["error_message"].lower()
+    # Always an enforced row, never an imported-looking one: the dashboard treats
+    # counts_toward_budget=False as imported and offers those to bulk delete and
+    # set-price, which must never reach a row the gateway wrote itself.
+    assert rows[0]["counts_toward_budget"] is True
 
     # The dashboard's live "N failed in the last hour" signal reads this count.
     count = c.get("/v1/usage/count", params={"status": "error"}, headers=_MASTER_HEADER).json()
     assert count["total"] == 1
+    # And it reads it scoped to gateway traffic, which these rows must satisfy or
+    # the alarm would undercount its own rejections.
+    scoped = c.get(
+        "/v1/usage/count", params={"status": "error", "source": "gateway"}, headers=_MASTER_HEADER
+    ).json()
+    assert scoped["total"] == 1
 
 
 def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_client: TestClient) -> None:
@@ -127,6 +138,59 @@ def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_cl
     assert len(rows) == 1
     assert rows[0]["endpoint"] == "/v1/embeddings"
     assert rows[0]["cost"] is None
+    assert rows[0]["counts_toward_budget"] is True
+    # The pass-through routes log the bare model with the instance in `provider`,
+    # where the chat pipeline logs the full `instance:model` selector. Pinned
+    # because the two forms render differently in the Activity log's Model column
+    # and the model filter matches one or the other, so the split should change
+    # deliberately rather than drift.
+    assert rows[0]["model"] == "text-embedding-3-small"
+    assert rows[0]["provider"] == "openai"
+
+
+def test_budget_exempt_key_writes_no_pricing_rejection_row(strict_pricing_client: TestClient) -> None:
+    """A budget-exempt key skips the gate, so no missing-pricing row is written.
+
+    The gate is guarded by ``not budget_exempt``, which is what keeps every
+    pricing-rejection row at counts_toward_budget=True. If a refactor let the gate
+    fire for an exempt key, it would start writing counts_toward_budget=False
+    rows, which the dashboard classifies as imported and offers up to bulk delete
+    and set-price. Nothing else pins that, so pin it here.
+
+    Structured as an A/B against an enforced key rather than as a bare "no row
+    appeared": this fixture configures no providers, so an exempt request fails
+    before any provider call and logs nothing either way. Without the control, the
+    negative would pass even if the gate had stopped writing rows entirely.
+    """
+    c = strict_pricing_client
+    c.post("/v1/users", json={"user_id": "gate-user"}, headers=_MASTER_HEADER)
+
+    def issue_key(name: str, *, exempt: bool) -> str:
+        body = {"key_name": name, "user_id": "gate-user", "exclude_from_budget": exempt}
+        return str(c.post("/v1/keys", json=body, headers=_MASTER_HEADER).json()["key"])
+
+    def chat(key: str) -> int:
+        resp = c.post(
+            "/v1/chat/completions",
+            json={"model": "openai:gpt-4o", "messages": _MESSAGES},
+            headers={API_KEY_HEADER: f"Bearer {key}"},
+        )
+        return int(resp.status_code)
+
+    def pricing_rejections() -> list[dict[str, Any]]:
+        rows = c.get("/v1/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
+        return [r for r in rows if "No pricing is configured" in (r["error_message"] or "")]
+
+    # Control: an enforced key hits the gate and leaves exactly one row, carrying
+    # the enforced flag. This is what makes the negative below meaningful.
+    assert chat(issue_key("enforced", exempt=False)) == 402
+    control = pricing_rejections()
+    assert len(control) == 1
+    assert control[0]["counts_toward_budget"] is True
+
+    # The exempt key skips the gate, so it adds no rejection row of its own.
+    assert chat(issue_key("exempt", exempt=True)) != 402
+    assert len(pricing_rejections()) == 1
 
 
 def test_priced_model_passes_the_gate(strict_pricing_client: TestClient) -> None:
