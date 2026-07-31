@@ -150,9 +150,12 @@ export function ActivityTimeline({
   useEffect(() => {
     if (!dragging.current) setSel(windowToRange());
     // starts is derived from series each render; resync on the window bounds and
-    // the extent length, not the fresh array identity.
+    // on the extent itself (length plus its first/last bucket), not the fresh
+    // array identity. The endpoints catch a series that rolls forward while the
+    // bound strings and length stay identical, which would otherwise strand the
+    // thumbs on stale positions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [windowStart, windowEnd, n]);
+  }, [windowStart, windowEnd, n, starts[0], starts[n - 1]]);
 
   const commit = ([lo, hi]: [number, number]) => {
     dragging.current = false;
@@ -256,9 +259,54 @@ export function ActivityTimeline({
     setSel([plo, plo + span]);
   };
 
+  // Keyboard pan: slide the whole window by whole buckets without resizing it, so
+  // a keyboard user can reach a mid-extent window with one control instead of
+  // stepping both edges in turn. Commits like the pointer pan does; a clamped
+  // pan (already against an edge) is a silent no-op. Mirrors the axis strip below.
+  const panBy = (deltaBuckets: number) => {
+    const [slo, shi] = selRef.current;
+    const span = shi - slo;
+    const plo = Math.max(0, Math.min(n - span, Math.round(slo) + deltaBuckets));
+    const next: [number, number] = [plo, plo + span];
+    setSel(next);
+    commit(next);
+  };
+
+  const onPanKeyDown = (event: React.KeyboardEvent) => {
+    if (atFullExtent) return;
+    // Read the span from the live ref, the same source `panBy` reads its start
+    // from: holding Page Up/Down repeats before the re-render lands, so deriving
+    // the page size from render-state `hi - lo` would pan by a stale span.
+    const [slo, shi] = selRef.current;
+    const span = Math.max(1, Math.round(shi - slo));
+    const delta =
+      event.key === "ArrowRight" || event.key === "ArrowUp"
+        ? 1
+        : event.key === "ArrowLeft" || event.key === "ArrowDown"
+          ? -1
+          : event.key === "PageUp"
+            ? span
+            : event.key === "PageDown"
+              ? -span
+              : event.key === "Home"
+                ? -n
+                : event.key === "End"
+                  ? n
+                  : 0;
+    if (delta === 0) return;
+    event.preventDefault();
+    panBy(delta);
+  };
+
   const loPct = n ? (Math.min(lo, hi) / n) * 100 : 0;
   const hiPct = n ? (Math.max(lo, hi) / n) * 100 : 100;
   const zoomed = !atFullExtent;
+
+  // Pan-strip ARIA. Its value is the window's *left edge*, which can only travel
+  // up to `n - span`, so the reachable max is that, not `n`.
+  const panSpan = Math.max(1, Math.round(hi - lo));
+  const panMax = Math.max(0, n - panSpan);
+  const panNow = Math.min(Math.max(0, Math.round(Math.min(lo, hi))), panMax);
 
   return (
     <div className="flex flex-col gap-2">
@@ -363,11 +411,23 @@ export function ActivityTimeline({
             ) : null}
 
             {/* Pan strip along the axis band: slides the window without resizing
-                it. Sits below the bars, so plot-area tooltips are unaffected. */}
+                it. Sits below the bars, so plot-area tooltips are unaffected. It
+                is a single-value slider (the window's left edge, in buckets) so a
+                keyboard user gets a real pan control; it stays in the tab order at
+                the full extent but is announced disabled there, since a full-extent
+                window has nothing to pan. */}
             <div
-              aria-hidden
-              className="absolute bottom-0 z-[1] cursor-grab touch-none rounded bg-[var(--otari-brand)]/10 hover:bg-[var(--otari-brand)]/20 active:cursor-grabbing"
+              role="slider"
+              aria-label="Pan the selected window"
+              aria-valuemin={0}
+              aria-valuemax={panMax}
+              aria-valuenow={panNow}
+              aria-valuetext={`Window starting at ${formatTick(starts[Math.min(panNow, n - 1)] ?? starts[0], bucket)}`}
+              aria-disabled={!zoomed}
+              tabIndex={0}
+              className="absolute bottom-0 z-[1] cursor-grab touch-none rounded bg-[var(--otari-brand)]/10 outline-none hover:bg-[var(--otari-brand)]/20 focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)] active:cursor-grabbing"
               style={{ left: `${loPct}%`, width: `${Math.max(0, hiPct - loPct)}%`, height: PAN_STRIP_PX }}
+              onKeyDown={onPanKeyDown}
               onPointerDown={(event) => {
                 event.stopPropagation();
                 event.preventDefault();
@@ -381,7 +441,10 @@ export function ActivityTimeline({
                 pan.current = null;
                 commit(selRef.current);
               }}
-              onPointerCancel={() => {
+              onPointerCancel={(event) => {
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }
                 pan.current = null;
                 commit(selRef.current);
               }}
