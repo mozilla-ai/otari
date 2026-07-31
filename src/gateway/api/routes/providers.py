@@ -207,6 +207,13 @@ class ProviderHealthSchema(BaseModel):
         default=None,
         description="ISO 8601 wall-clock time the provider's reachability was last checked (null if never).",
     )
+    discovery_unsupported: bool = Field(
+        default=False,
+        description=(
+            "True when the check failed only because this backend serves no model-listing endpoint. "
+            "The provider may still handle requests; only model discovery is unavailable."
+        ),
+    )
 
 
 class ProviderHealthResponse(BaseModel):
@@ -219,6 +226,13 @@ class ProviderHealthResponse(BaseModel):
 
     providers: list[ProviderHealthSchema]
     healthy: int = Field(description="How many providers are currently reachable.")
+    degraded: int = Field(
+        default=0,
+        description=(
+            "How many providers are not counted as reachable only because model discovery is "
+            "unavailable for them. These may still serve requests."
+        ),
+    )
     total: int = Field(description="How many providers are configured.")
     checked_at: str | None = Field(
         default=None,
@@ -233,6 +247,7 @@ def _to_health_schema(health: ProviderHealth) -> ProviderHealthSchema:
         model_count=health.model_count,
         error=health.error,
         checked_at=health.checked_at.isoformat() if health.checked_at else None,
+        discovery_unsupported=health.discovery_unsupported,
     )
 
 
@@ -248,12 +263,18 @@ async def provider_health(
     cache (cheap enough to poll), so ``checked_at`` reflects when each provider
     was actually dialed. Pass ``refresh=true`` to force a live re-dial of every
     provider. Master-key gated because it describes the gateway's own providers.
+
+    A provider whose backend serves no model-listing endpoint cannot be verified
+    this way, but it is not unreachable either: it is reported with
+    ``discovery_unsupported`` and counted under ``degraded`` rather than as a
+    reachability failure.
     """
     results = await check_all_provider_health(config, refresh=refresh)
     checked_ats = [health.checked_at for health in results if health.checked_at is not None]
     return ProviderHealthResponse(
         providers=[_to_health_schema(health) for health in sorted(results, key=lambda item: item.instance)],
         healthy=sum(1 for health in results if health.ok),
+        degraded=sum(1 for health in results if not health.ok and health.discovery_unsupported),
         total=len(results),
         checked_at=max(checked_ats).isoformat() if checked_ats else None,
     )
@@ -327,6 +348,13 @@ class TestProviderResponse(BaseModel):
     ok: bool
     model_count: int
     error: str | None = None
+    discovery_unsupported: bool = Field(
+        default=False,
+        description=(
+            "True when the test failed only because this backend serves no model-listing endpoint, "
+            "so the credentials could not be verified this way but may still work for requests."
+        ),
+    )
 
 
 class ReencryptProviderCredentialsResponse(BaseModel):
@@ -431,7 +459,12 @@ async def test_provider_connection(
         client_args=request.client_args,
         timeout=config.model_discovery_timeout_seconds,
     )
-    return TestProviderResponse(ok=result.error is None, model_count=len(result.models), error=result.error)
+    return TestProviderResponse(
+        ok=result.error is None,
+        model_count=len(result.models),
+        error=result.error,
+        discovery_unsupported=result.discovery_unsupported,
+    )
 
 
 @router.post("/provider-credentials/reencrypt", dependencies=[Depends(verify_master_key)])
@@ -589,4 +622,9 @@ async def test_stored_provider(
     # rather than trusting a cached listing from before a key change.
     await _apply_write(db, config, instance)
     result = await discover_provider_models(config, instance)
-    return TestProviderResponse(ok=result.error is None, model_count=len(result.models), error=result.error)
+    return TestProviderResponse(
+        ok=result.error is None,
+        model_count=len(result.models),
+        error=result.error,
+        discovery_unsupported=result.discovery_unsupported,
+    )

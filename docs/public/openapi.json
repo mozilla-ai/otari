@@ -13,6 +13,18 @@
             "description": "Selector the alias resolves to, as 'provider:model' or 'instance:model'.",
             "title": "Target",
             "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User this alias belongs to. Omit for a global alias every caller sees. A user-scoped alias resolves only for that user and shadows a global one of the same name.",
+            "title": "User Id"
           }
         },
         "required": [
@@ -58,6 +70,17 @@
               }
             ],
             "title": "Updated At"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
           }
         },
         "required": [
@@ -1429,6 +1452,12 @@
       "DiscoverableProvider": {
         "description": "One provider instance's discovery result.",
         "properties": {
+          "discovery_unsupported": {
+            "default": false,
+            "description": "True when discovery failed only because this backend serves no model-listing endpoint. The provider may still handle requests for models declared in config.",
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
           "error": {
             "anyOf": [
               {
@@ -3251,6 +3280,12 @@
             "description": "ISO 8601 time of the most recent per-provider check (null if none yet).",
             "title": "Checked At"
           },
+          "degraded": {
+            "default": 0,
+            "description": "How many providers are not counted as reachable only because model discovery is unavailable for them. These may still serve requests.",
+            "title": "Degraded",
+            "type": "integer"
+          },
           "healthy": {
             "description": "How many providers are currently reachable.",
             "title": "Healthy",
@@ -3291,6 +3326,12 @@
             ],
             "description": "ISO 8601 wall-clock time the provider's reachability was last checked (null if never).",
             "title": "Checked At"
+          },
+          "discovery_unsupported": {
+            "default": false,
+            "description": "True when the check failed only because this backend serves no model-listing endpoint. The provider may still handle requests; only model discovery is unavailable.",
+            "title": "Discovery Unsupported",
+            "type": "boolean"
           },
           "error": {
             "anyOf": [
@@ -4200,6 +4241,12 @@
       "TestProviderResponse": {
         "description": "Result of a live provider connection test.",
         "properties": {
+          "discovery_unsupported": {
+            "default": false,
+            "description": "True when the test failed only because this backend serves no model-listing endpoint, so the credentials could not be verified this way but may still work for requests.",
+            "title": "Discovery Unsupported",
+            "type": "boolean"
+          },
           "error": {
             "anyOf": [
               {
@@ -6063,7 +6110,7 @@
     },
     "/v1/aliases": {
       "get": {
-        "description": "List every alias in force, from config.yml and from storage.",
+        "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
         "operationId": "list_aliases_v1_aliases_get",
         "responses": {
           "200": {
@@ -6095,7 +6142,7 @@
         ]
       },
       "post": {
-        "description": "Create or update a stored alias.",
+        "description": "Create or update a stored alias, global or scoped to one user.",
         "operationId": "set_alias_v1_aliases_post",
         "requestBody": {
           "content": {
@@ -6145,7 +6192,7 @@
     },
     "/v1/aliases/{name}": {
       "delete": {
-        "description": "Delete a stored alias.",
+        "description": "Delete a stored alias in one scope.\n\nScoped by ``user_id`` for the same reason the upsert is: deleting the global\nalias must not take a user's override with it, and deleting an override must\nleave the global one serving everyone else.",
         "operationId": "delete_alias_v1_aliases__name__delete",
         "parameters": [
           {
@@ -6155,6 +6202,24 @@
             "schema": {
               "title": "Name",
               "type": "string"
+            }
+          },
+          {
+            "description": "Delete the alias scoped to this user. Omit to delete the global alias of that name.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the alias scoped to this user. Omit to delete the global alias of that name.",
+              "title": "User Id"
             }
           }
         ],
@@ -8997,7 +9062,7 @@
     },
     "/v1/providers/health": {
       "get": {
-        "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.",
+        "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
         "operationId": "provider_health_v1_providers_health_get",
         "parameters": [
           {

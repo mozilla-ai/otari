@@ -43,6 +43,10 @@ class ProviderHealth:
     error: str | None = None
     # Wall-clock time reachability was last evaluated (None if never checked yet).
     checked_at: datetime | None = None
+    # True when the check failed only because the backend has no model-listing
+    # endpoint: discovery is unavailable, but the provider may still serve
+    # requests, so this is a warning rather than "unreachable" (issue #447).
+    discovery_unsupported: bool = False
 
 
 def _refresh_should_redial(instance: str) -> bool:
@@ -83,6 +87,7 @@ async def check_provider_health(
         model_count=len(discovery.models),
         error=discovery.error,
         checked_at=get_model_cache().checked_at(instance),
+        discovery_unsupported=discovery.discovery_unsupported,
     )
 
 

@@ -263,7 +263,7 @@ async def create_batch(
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
     try:
-        resolved = resolve_provider_selector(config, request.model)
+        resolved = resolve_provider_selector(config, request.model, user_id)
     except (ValueError, AnyLLMError) as exc:
         _raise_for_unresolvable_model(request.model, exc)
     provider, model = resolved.provider, resolved.model

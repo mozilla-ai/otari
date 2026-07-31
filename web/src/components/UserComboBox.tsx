@@ -19,11 +19,21 @@ export function UserComboBox({
   onChange,
   users,
   description,
+  label = "Owner",
+  placeholder = "Pick a user, or type a new id…",
+  unknownHint,
 }: {
   value: string;
   onChange: (userId: string) => void;
   users: User[];
   description?: ReactNode;
+  label?: ReactNode;
+  placeholder?: string;
+  // What to say when the typed id is not an existing user. Defaults to the
+  // keys-page truth (that endpoint creates the user); callers whose endpoint
+  // rejects an unknown id must override it rather than promise a creation that
+  // will 404.
+  unknownHint?: ReactNode;
 }) {
   const options: Option[] = users
     .filter((u) => !u.user_id.startsWith("apikey-"))
@@ -50,9 +60,11 @@ export function UserComboBox({
   const known = options.some((o) => o.id === selectedId);
   const creatingHint =
     selectedId !== "" && !known ? (
-      <span>
-        Creates a new user <code>{selectedId}</code>.
-      </span>
+      (unknownHint ?? (
+        <span>
+          Creates a new user <code>{selectedId}</code>.
+        </span>
+      ))
     ) : (
       (description ?? "Spend and budgets track against this user.")
     );
@@ -78,12 +90,12 @@ export function UserComboBox({
       // reach instead of stretching across a wide form.
       className="flex max-w-md flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">Owner</Label>
+      <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>
       <ComboBox.InputGroup>
         {/* Not a credential field: keep password managers out, and select on focus
             so typing replaces the current value rather than appending. */}
         <Input
-          placeholder="Pick a user, or type a new id…"
+          placeholder={placeholder}
           autoComplete="off"
           data-1p-ignore
           data-lpignore="true"

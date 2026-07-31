@@ -296,7 +296,14 @@ export function useCreateAlias() {
 export function useDeleteAlias() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => apiFetch<void>(`/v1/aliases/${encodeURIComponent(name)}`, { method: "DELETE" }),
+    // Scoped: the same name can exist globally and per user, so deleting one
+    // must name which. Only a null/absent userId means global; the check is
+    // explicit rather than truthy because "" is a legal user id, and treating it
+    // as global would delete the wrong row.
+    mutationFn: ({ name, userId }: { name: string; userId?: string | null }) => {
+      const scope = userId == null ? "" : `?user_id=${encodeURIComponent(userId)}`;
+      return apiFetch<void>(`/v1/aliases/${encodeURIComponent(name)}${scope}`, { method: "DELETE" });
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ALIASES] });
       void queryClient.invalidateQueries({ queryKey: [MODELS] });

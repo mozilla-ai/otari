@@ -167,7 +167,9 @@ def split_selector(model_selector: str) -> tuple[str, str] | None:
     return prefix, remainder
 
 
-def resolve_provider_selector(config: GatewayConfig, model_selector: str) -> ResolvedProvider:
+def resolve_provider_selector(
+    config: GatewayConfig, model_selector: str, user_id: str | None = None
+) -> ResolvedProvider:
     """Resolve a request model selector into instance, implementation, and kwargs.
 
     A selector whose prefix names a configured instance resolves to that
@@ -180,11 +182,17 @@ def resolve_provider_selector(config: GatewayConfig, model_selector: str) -> Res
     resolved as usual; the resulting ``ResolvedProvider`` carries ``alias`` so
     response ``model`` fields can be relabeled.
 
+    ``user_id`` is the billed user, so a user-scoped alias resolves to that
+    user's target. Omit it only for a selector that is not caller input (the
+    operator-configured vision describe model), which is global by definition;
+    omitting it for a request selector would silently ignore the caller's own
+    aliases and resolve the global one instead.
+
     Raises ``ValueError`` / ``AnyLLMError`` (from any-llm) for a selector that
     names neither a configured instance nor a known provider, mirroring the
     prior ``AnyLLM.split_model_provider`` behavior.
     """
-    alias = resolve_effective_alias(config, model_selector)
+    alias = resolve_effective_alias(config, model_selector, user_id)
     selector = alias if alias is not None else model_selector
 
     split = split_selector(selector)

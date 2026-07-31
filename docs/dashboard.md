@@ -21,7 +21,7 @@ straight.
 | **Purpose** | Signs in to the dashboard and authorizes every management API call | Encrypts provider API keys stored through the dashboard (encryption at rest) |
 | **Set via** | `OTARI_MASTER_KEY` (or `master_key` in `config.yml`); generated on first run if unset | `OTARI_SECRET_KEY` only; never generated for you |
 | **Format** | Any string you choose, or a generated `otari-mk-…` value | A Fernet key (generate with `otari gen-secret-key`) |
-| **Where it lives** | Only its SHA-256 hash is stored; in the browser it is held in the tab's session storage | Supplied out of band at runtime; never written to the database |
+| **Where it lives** | Only its SHA-256 hash is stored; the browser never keeps the key itself, just the session cookie it is exchanged for | Supplied out of band at runtime; never written to the database |
 | **If you lose it** | Rotate or reset it; nothing else is affected | Every provider key stored in the dashboard becomes undecryptable |
 
 A few consequences worth internalizing:
@@ -95,11 +95,16 @@ can skip this step if all your providers live in `config.yml`.
 ### 4. Open the dashboard and sign in
 
 Browse to the gateway root, for example `http://localhost:8000/`. You land on a
-sign-in screen. Paste your master key and select **Sign in**. The key is held
-only in this browser tab's session storage and sent directly to this gateway; it
-is never persisted to disk by the browser and is cleared when you sign out. If
-you are on a fresh install and are not sure where your key is, the "First run?
-Where to find your key" hint on the sign-in screen points you back at the logs.
+sign-in screen. Paste your master key and select **Sign in**. The key is sent
+once to this gateway and exchanged for a session cookie; the browser never stores
+the key itself, so it cannot be read back out of the page. The sign-in lasts
+`dashboard_session_ttl_hours` (a week by default) and survives closing the tab,
+so you normally sign in once and not again. It survives restarting the gateway
+too, as long as the gateway's database does: sessions are rows in it, so a
+container running the default SQLite file with no mounted volume starts every run
+signed out. If you are on a fresh install and are not sure where your key is, the
+"First run? Where to find your key" hint on the sign-in screen points you back at
+the logs.
 
 ### 5. Add a provider
 
@@ -115,6 +120,13 @@ and can be edited, tested, and deleted.
 On the Providers page, use **Test the connection** for the provider you just
 added. Otari makes a live call to confirm the credential works before you route
 real traffic through it.
+
+The check lists the provider's models, so a backend that does not implement a
+`/v1/models` endpoint cannot be verified this way. That case is reported as
+"No model discovery" rather than "Unreachable": the key may be perfectly good,
+and the provider can still serve requests. Declare the model ids it serves under
+that provider's `models:` key in `config.yml` to have them appear in the
+catalogue.
 
 ### 7. Send your first request
 
@@ -160,7 +172,10 @@ gateway.
 - **Models**: browse the model catalogue and set per-model pricing, with specs
   and modality metadata where available (from models.dev).
 - **Aliases**: friendly names that resolve to a real provider model. Callers
-  use the alias; the underlying model stays private to the gateway.
+  use the alias; the underlying model stays private to the gateway. "Applies to"
+  is the scope: an alias for every caller, or one scoped to a single user, which
+  lets the same name resolve to a different model per person and takes precedence
+  over a global alias of that name. See [Model aliases](models.md#model-aliases).
 
 ### Access
 
@@ -181,6 +196,25 @@ For how users, keys, and budgets fit together and the management endpoints behin
   pricing updates, and rotate the generated master key. Rotating the master key
   issues a fresh `otari-mk-…` value and keeps your current session signed in.
 
+## Install it on your phone
+
+The dashboard ships a web app manifest and app icons, so you can keep it on a
+phone home screen instead of hunting for a tab.
+
+- **Android (Chrome)**: open the dashboard, then **⋮** → **Add to Home screen**
+  or **Install app**.
+- **iOS (Safari)**: open the dashboard, then **Share** → **Add to Home Screen**.
+
+It launches without browser chrome, under the Otari icon and the name "Otari".
+On iOS the installed app keeps its own cookie storage, so you sign in to it once,
+separately from Safari; an Android install shares Chrome's session.
+
+Installing needs HTTPS, or `http://localhost` / `http://127.0.0.1` for local
+access. Those loopback addresses are the only HTTP origins browsers treat as
+secure, so a gateway reached over plain HTTP at a LAN address or hostname gets a
+plain bookmark shortcut rather than an installed app. That is one more reason to
+put it behind HTTPS, as the security notes below describe.
+
 ## Security notes
 
 - **The master key is an admin credential.** Anyone who has it can read and
@@ -191,10 +225,18 @@ For how users, keys, and budgets fit together and the management endpoints behin
   authorizes every management request and must never travel over cleartext HTTP,
   so put the gateway behind HTTPS or a trusted reverse proxy before signing in
   from another host.
-- **Session storage, not local storage.** The dashboard keeps the master key in
-  the browser tab's session storage, so it does not persist across tabs or
-  survive closing the tab, and signing out clears it along with any cached admin
-  data.
+- **A session cookie, not a stored key.** The dashboard trades your master key
+  for an HttpOnly cookie (`SameSite=Strict`, and `Secure` whenever the request
+  arrives over HTTPS), so the key itself is never kept in the browser and script
+  on the page cannot read the cookie. Signing out revokes the session on the
+  server, expires the cookie, and clears any cached admin data. Rotating the
+  master key revokes every session and re-mints the one you are using, so other
+  signed-in browsers are logged out.
+- **Sign out on a machine you share.** A session runs for its full
+  `dashboard_session_ttl_hours` with no idle timeout, so an unattended browser
+  stays signed in until the cookie expires. Use **Sign out** when you are done on
+  a shared or public machine, or shorten `dashboard_session_ttl_hours`. Rotating
+  the master key is the way to revoke a session you can no longer reach.
 - **Provider keys are write-only over the API.** Once stored, the plaintext is
   never returned; the UI shows only the last four characters. Losing
   `OTARI_SECRET_KEY` makes stored keys undecryptable, so back it up separately

@@ -31,6 +31,10 @@ def _make_app() -> FastAPI:
     def favicon() -> str:
         return "<svg/>"
 
+    @app.get("/pwa/icon-512.png")
+    def pwa_icon() -> str:
+        return "png-bytes"
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "healthy"}
@@ -74,6 +78,14 @@ def test_favicon_gets_public_cache_when_route_sets_none() -> None:
     with TestClient(_make_app()) as client:
         response = client.get("/favicon.svg")
         assert response.headers["Cache-Control"] == "public, max-age=86400"
+
+
+def test_pwa_assets_get_public_cache() -> None:
+    """The install manifest and home-screen icons are public, not per-user, responses."""
+    with TestClient(_make_app()) as client:
+        response = client.get("/pwa/icon-512.png")
+        assert response.headers["Cache-Control"] == "public, max-age=86400"
+        assert "Authorization" not in response.headers.get("Vary", "")
 
 
 def test_health_endpoint_no_cache_headers() -> None:

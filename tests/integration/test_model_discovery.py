@@ -682,6 +682,80 @@ def test_provider_health_reports_each_provider(
     assert providers["anthropic"]["ok"] is False
     assert providers["anthropic"]["model_count"] == 0
     assert "authentication failed" in providers["anthropic"]["error"]
+    # A real credential failure is not a discovery gap, so it stays out of `degraded`.
+    assert providers["anthropic"]["discovery_unsupported"] is False
+    assert body["degraded"] == 0
+
+
+def _alist_models_missing_endpoint(**kwargs: Any) -> list[Any]:
+    """Serve openai; answer 404 for anthropic, as a backend with no /v1/models does."""
+    from any_llm.types.model import Model
+
+    provider = kwargs["provider"]
+    if provider.value == "openai":
+        return [Model(**_make_openai_model("gpt-4o"))]
+    error = RuntimeError("Error code: 404 - {'detail': 'Not Found'}")
+    error.status_code = 404  # type: ignore[attr-defined]
+    raise error
+
+
+def test_provider_health_flags_a_missing_models_endpoint_instead_of_unreachable(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """A backend without /v1/models is degraded, not unreachable (otari#447).
+
+    The credentials may well be fine; only discovery is unavailable, so the
+    dashboard needs to tell the two apart.
+    """
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            side_effect=_alist_models_missing_endpoint,
+        ),
+    ):
+        resp = two_provider_client.get("/v1/providers/health", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["healthy"] == 1
+    assert body["degraded"] == 1
+    assert body["total"] == 2
+
+    providers = {p["instance"]: p for p in body["providers"]}
+    assert providers["anthropic"]["ok"] is False
+    assert providers["anthropic"]["discovery_unsupported"] is True
+    assert providers["openai"]["discovery_unsupported"] is False
+
+
+def test_discoverable_flags_a_missing_models_endpoint(
+    two_provider_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """The operator model picker distinguishes the same two failures (otari#447)."""
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            side_effect=_alist_models_missing_endpoint,
+        ),
+    ):
+        resp = two_provider_client.get("/v1/models/discoverable", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    providers = {p["provider"]: p for p in resp.json()["providers"]}
+    assert providers["anthropic"]["ok"] is False
+    assert providers["anthropic"]["discovery_unsupported"] is True
+    assert providers["openai"]["discovery_unsupported"] is False
 
 
 def test_provider_health_refresh_forces_a_live_recheck(

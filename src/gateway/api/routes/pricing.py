@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
-from gateway.services.alias_service import resolve_effective_alias
+from gateway.services.alias_service import all_alias_names, resolve_effective_alias
 from gateway.services.pricing_refresh_service import (
     PricingRefreshError,
     confirm_price_refresh,
@@ -294,15 +294,20 @@ async def set_pricing(
     # Checked against the raw key: an alias name can never contain a selector
     # delimiter (see ``validate_alias``), so normalization would leave it
     # unchanged anyway, and this reads as the same lookup request dispatch does.
-    alias_target = resolve_effective_alias(config, request.model_key)
-    if alias_target is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
+    # Scope-blind: a name that is an alias for even one user is still not a model
+    # key, so a pricing row stored under it would never be read.
+    if request.model_key in all_alias_names(config):
+        alias_target = resolve_effective_alias(config, request.model_key)
+        detail = (
+            f"'{request.model_key}' is an alias, not a model. Pricing keys on the resolved target, "
+            "so set the price for that instead."
+        )
+        if alias_target is not None:
+            detail = (
                 f"'{request.model_key}' is an alias for '{alias_target}', not a model. "
                 f"Pricing keys on the resolved target, so set the price for '{alias_target}' instead."
-            ),
-        )
+            )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
     normalized_key = normalize_pricing_key(config, request.model_key)
     effective_at = normalize_effective_at(request.effective_at)

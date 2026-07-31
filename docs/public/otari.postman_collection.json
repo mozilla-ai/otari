@@ -78,7 +78,7 @@
         {
           "name": "List Aliases",
           "request": {
-            "description": "List every alias in force, from config.yml and from storage.",
+            "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
             "header": [],
             "method": "GET",
             "url": {
@@ -105,7 +105,7 @@
               },
               "raw": "{\n  \"name\": \"string\",\n  \"target\": \"string\"\n}"
             },
-            "description": "Create or update a stored alias.",
+            "description": "Create or update a stored alias, global or scoped to one user.",
             "header": [
               {
                 "key": "Content-Type",
@@ -128,7 +128,7 @@
         {
           "name": "Delete Alias",
           "request": {
-            "description": "Delete a stored alias.",
+            "description": "Delete a stored alias in one scope.\n\nScoped by ``user_id`` for the same reason the upsert is: deleting the global\nalias must not take a user's override with it, and deleting an override must\nleave the global one serving everyone else.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -140,7 +140,15 @@
                 "aliases",
                 ":name"
               ],
-              "raw": "{{baseUrl}}/v1/aliases/:name",
+              "query": [
+                {
+                  "description": "Delete the alias scoped to this user. Omit to delete the global alias of that name.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/aliases/:name?user_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -1846,7 +1854,7 @@
         {
           "name": "Provider Health",
           "request": {
-            "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.",
+            "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
             "header": [],
             "method": "GET",
             "url": {

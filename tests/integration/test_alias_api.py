@@ -43,12 +43,11 @@ def alias_config(postgres_url: str) -> GatewayConfig:
     )
 
 
-@pytest.fixture
-def client(alias_config: GatewayConfig) -> Generator[TestClient]:
-    _run_alembic_migrations(alias_config.database_url)
-    engine = create_engine(alias_config.database_url, pool_pre_ping=True)
-    app = create_app(alias_config)
-    override_get_db, dispose_override = build_async_session_override(alias_config.database_url)
+def _build_client(config: GatewayConfig) -> Generator[TestClient]:
+    _run_alembic_migrations(config.database_url)
+    engine = create_engine(config.database_url, pool_pre_ping=True)
+    app = create_app(config)
+    override_get_db, dispose_override = build_async_session_override(config.database_url)
     app.dependency_overrides[get_db] = override_get_db
     try:
         with TestClient(app) as test_client:
@@ -62,16 +61,40 @@ def client(alias_config: GatewayConfig) -> Generator[TestClient]:
         engine.dispose()
 
 
-def _create(client: TestClient, name: str, target: str) -> None:
-    resp = client.post(ALIASES, json={"name": name, "target": target}, headers=HEADERS)
+@pytest.fixture
+def client(alias_config: GatewayConfig) -> Generator[TestClient]:
+    yield from _build_client(alias_config)
+
+
+@pytest.fixture
+def lenient_client(alias_config: GatewayConfig) -> Generator[TestClient]:
+    """A gateway that tolerates a ``user`` field naming someone else.
+
+    The strict default rejects the mismatch outright, which would mask whether
+    alias resolution itself is bound to the authenticated key. Leniency is the
+    configuration where a naive implementation would leak: the client-supplied
+    name is accepted (as a provider-side tag) and could be mistaken for the
+    identity to resolve aliases against.
+    """
+    alias_config.reject_user_mismatch = False
+    yield from _build_client(alias_config)
+
+
+def _create(client: TestClient, name: str, target: str, user_id: str | None = None) -> None:
+    body: dict[str, object] = {"name": name, "target": target}
+    if user_id is not None:
+        body["user_id"] = user_id
+    resp = client.post(ALIASES, json=body, headers=HEADERS)
     assert resp.status_code == 200, resp.text
 
 
-def _create_user(client: TestClient) -> None:
-    assert client.post("/v1/users", json={"user_id": "u1", "alias": "u1"}, headers=HEADERS).status_code == 200
+def _create_user(client: TestClient, user_id: str = "u1") -> None:
+    assert (
+        client.post("/v1/users", json={"user_id": user_id, "alias": user_id}, headers=HEADERS).status_code == 200
+    )
 
 
-def _post_chat_capture(client: TestClient, model: str) -> dict[str, object]:
+def _post_chat_capture(client: TestClient, model: str, user: str = "u1") -> dict[str, object]:
     captured: dict[str, object] = {}
 
     async def fake_acompletion(**kwargs: object) -> None:
@@ -81,7 +104,7 @@ def _post_chat_capture(client: TestClient, model: str) -> dict[str, object]:
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=fake_acompletion)):
         client.post(
             "/v1/chat/completions",
-            json={"model": model, "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
+            json={"model": model, "messages": [{"role": "user", "content": "Hi"}], "user": user},
             headers=HEADERS,
         )
     assert captured, f"acompletion was never called for {model!r}"
@@ -141,6 +164,7 @@ def test_create_and_list(client: TestClient) -> None:
         "name": "fast",
         "target": "anthropic:claude-haiku-4",
         "source": "stored",
+        "user_id": None,
         "created_at": by_name["fast"]["created_at"],
         "updated_at": by_name["fast"]["updated_at"],
     }
@@ -301,6 +325,199 @@ def test_stored_alias_inherits_its_targets_price(client: TestClient) -> None:
         "cache_write_1h_price_per_million": None,
         "pricing_tiers": [],
     }
+
+
+# ---------------------------------------------------------------------------
+# User-scoped aliases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_user_scoped_alias_routes_only_for_its_own_user(client: TestClient) -> None:
+    """The point of the feature: one display name, a different model per user.
+
+    Without scoping, "fast" could only ever mean one thing gateway-wide.
+    """
+    _create_user(client, "u1")
+    _create_user(client, "u2")
+    _create(client, "fast", "anthropic:claude-haiku-4", user_id="u1")
+    _create(client, "fast", "home_lab:qwen3", user_id="u2")
+
+    assert _post_chat_capture(client, "fast", user="u1")["model"] == "anthropic:claude-haiku-4"
+    assert _post_chat_capture(client, "fast", user="u2")["model"] == "openai:qwen3"
+
+
+@pytest.mark.asyncio
+async def test_a_users_alias_does_not_leak_to_another_user(client: TestClient) -> None:
+    _create_user(client, "u1")
+    _create_user(client, "u2")
+    _create(client, "mine", "anthropic:claude-haiku-4", user_id="u1")
+
+    dispatch = AsyncMock()
+    with patch("gateway.api.routes.chat.acompletion", new=dispatch):
+        resp = client.post(
+            "/v1/chat/completions",
+            json={"model": "mine", "messages": [{"role": "user", "content": "Hi"}], "user": "u2"},
+            headers=HEADERS,
+        )
+
+    # "mine" is not a selector and not u2's alias, so it must not resolve at all
+    # rather than quietly falling back to u1's target.
+    assert resp.status_code == 400
+    dispatch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_user_scoped_alias_shadows_the_global_one(client: TestClient) -> None:
+    _create_user(client, "u1")
+    _create_user(client, "u2")
+    _create(client, "fast", "anthropic:claude-haiku-4")
+    _create(client, "fast", "home_lab:qwen3", user_id="u1")
+
+    # The override wins for u1; everyone else keeps the global target.
+    assert _post_chat_capture(client, "fast", user="u1")["model"] == "openai:qwen3"
+    assert _post_chat_capture(client, "fast", user="u2")["model"] == "anthropic:claude-haiku-4"
+
+
+@pytest.mark.asyncio
+async def test_a_user_scoped_alias_may_override_a_config_alias(client: TestClient) -> None:
+    """Most-specific-wins, so unlike a global alias this one is not refused.
+
+    A global stored alias of this name would never resolve (config beats it), but
+    a user-scoped one outranks config, so it is a working override.
+    """
+    _create_user(client, "u1")
+    _create_user(client, "u2")
+    _create(client, "configalias", "home_lab:qwen3", user_id="u1")
+
+    assert _post_chat_capture(client, "configalias", user="u1")["model"] == "openai:qwen3"
+    assert _post_chat_capture(client, "configalias", user="u2")["model"] == "anthropic:claude-opus-4"
+
+
+def test_scope_is_part_of_the_identity_on_upsert(client: TestClient) -> None:
+    _create_user(client, "u1")
+    _create(client, "fast", "anthropic:claude-haiku-4")
+    _create(client, "fast", "home_lab:qwen3", user_id="u1")
+
+    rows = sorted(
+        (row for row in client.get(ALIASES, headers=HEADERS).json() if row["name"] == "fast"),
+        key=lambda row: row["user_id"] or "",
+    )
+    # Two independent rows, not one row retargeted: writing the scoped alias must
+    # not silently reassign the global one.
+    assert [(row["user_id"], row["target"]) for row in rows] == [
+        (None, "anthropic:claude-haiku-4"),
+        ("u1", "home_lab:qwen3"),
+    ]
+
+
+def test_delete_is_scoped(client: TestClient) -> None:
+    _create_user(client, "u1")
+    _create(client, "fast", "anthropic:claude-haiku-4")
+    _create(client, "fast", "home_lab:qwen3", user_id="u1")
+
+    assert client.delete(f"{ALIASES}/fast", params={"user_id": "u1"}, headers=HEADERS).status_code == 204
+    remaining = [row for row in client.get(ALIASES, headers=HEADERS).json() if row["name"] == "fast"]
+    assert [(row["user_id"], row["target"]) for row in remaining] == [(None, "anthropic:claude-haiku-4")]
+
+    # And the reverse: deleting the global one leaves an override alone.
+    _create(client, "fast", "home_lab:qwen3", user_id="u1")
+    assert client.delete(f"{ALIASES}/fast", headers=HEADERS).status_code == 204
+    remaining = [row for row in client.get(ALIASES, headers=HEADERS).json() if row["name"] == "fast"]
+    assert [(row["user_id"], row["target"]) for row in remaining] == [("u1", "home_lab:qwen3")]
+
+
+def test_delete_of_a_missing_scope_says_which_scope(client: TestClient) -> None:
+    _create_user(client, "u1")
+    _create(client, "fast", "anthropic:claude-haiku-4")
+
+    resp = client.delete(f"{ALIASES}/fast", params={"user_id": "u1"}, headers=HEADERS)
+    assert resp.status_code == 404
+    assert "u1" in resp.json()["detail"]
+
+
+def test_alias_for_an_unknown_user_is_rejected(client: TestClient) -> None:
+    # user_id is a foreign key; without this the commit would surface as a 500.
+    resp = client.post(
+        ALIASES, json={"name": "fast", "target": "anthropic:claude-haiku-4", "user_id": "nobody"}, headers=HEADERS
+    )
+    assert resp.status_code == 404
+    assert "nobody" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_a_tenant_key_cannot_borrow_another_users_alias(lenient_client: TestClient) -> None:
+    """Alias scope keys on the authenticated user, not on the ``user`` field.
+
+    Under lenient mismatch handling a key may send someone else's name and have
+    it ignored rather than rejected. Spend still binds to the key's own user, and
+    alias resolution has to bind the same way: if it read the request field
+    instead, any key could route through another user's alias just by naming
+    them, which is both a routing bypass and an oracle for what that user's
+    aliases point at.
+    """
+    _create_user(lenient_client, "u1")
+    _create_user(lenient_client, "u2")
+    _create(lenient_client, "mine", "anthropic:claude-haiku-4", user_id="u1")
+    u2_key = lenient_client.post("/v1/keys", json={"key_name": "u2", "user_id": "u2"}, headers=HEADERS).json()["key"]
+
+    dispatch = AsyncMock()
+    with patch("gateway.api.routes.chat.acompletion", new=dispatch):
+        resp = lenient_client.post(
+            "/v1/chat/completions",
+            # u2's key, naming u1: tolerated as a tag, never as an identity.
+            json={"model": "mine", "messages": [{"role": "user", "content": "Hi"}], "user": "u1"},
+            headers={API_KEY_HEADER: f"Bearer {u2_key}"},
+        )
+
+    assert resp.status_code == 400
+    dispatch.assert_not_awaited()
+
+
+def test_alias_for_a_deleted_user_is_rejected(client: TestClient) -> None:
+    # A soft-deleted user cannot authenticate, so the alias would never resolve.
+    _create_user(client, "u1")
+    assert client.delete("/v1/users/u1", headers=HEADERS).status_code in (200, 204)
+
+    resp = client.post(
+        ALIASES, json={"name": "fast", "target": "anthropic:claude-haiku-4", "user_id": "u1"}, headers=HEADERS
+    )
+    assert resp.status_code == 404
+
+
+def test_a_user_scoped_alias_is_not_in_another_users_model_listing(client: TestClient) -> None:
+    _create_user(client, "u1")
+    _create_user(client, "u2")
+    _create(client, "mine", "anthropic:claude-haiku-4", user_id="u1")
+    keys = {
+        user: client.post("/v1/keys", json={"key_name": user, "user_id": user}, headers=HEADERS).json()["key"]
+        for user in ("u1", "u2")
+    }
+
+    def listed(user: str) -> set[str]:
+        resp = client.get("/v1/models", headers={API_KEY_HEADER: f"Bearer {keys[user]}"})
+        assert resp.status_code == 200, resp.text
+        return {model["id"] for model in resp.json()["data"]}
+
+    assert "mine" in listed("u1")
+    assert "mine" not in listed("u2")
+    # The target stays hidden from its own owner too, same as for a global alias.
+    assert "anthropic:claude-haiku-4" not in listed("u1")
+
+
+def test_pricing_a_user_scoped_alias_name_is_rejected(client: TestClient) -> None:
+    # Scope-blind on purpose: the row would key on a name that is an alias to
+    # somebody, so it could never be read.
+    _create_user(client, "u1")
+    _create(client, "fast", "anthropic:claude-haiku-4", user_id="u1")
+
+    resp = client.post(
+        "/v1/pricing",
+        json={"model_key": "fast", "input_price_per_million": 99.0, "output_price_per_million": 99.0},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 400
+    assert "is an alias" in resp.json()["detail"]
 
 
 def test_pricing_a_stored_alias_is_rejected(client: TestClient) -> None:

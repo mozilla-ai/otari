@@ -42,10 +42,14 @@ describe("ActivityTimeline", () => {
 
   it("captions the active window (inclusive end, UTC)", () => {
     renderTimeline();
-    const caption = screen.getByText(/Showing/);
-    expect(caption).toHaveTextContent("Jul 10");
-    expect(caption).toHaveTextContent("Jul 12"); // 2026-07-13 exclusive -> inclusive Jul 12
-    expect(caption).toHaveTextContent("UTC");
+    // Assert on day numbers, the range separator, and the UTC marker rather than a
+    // month abbreviation: the caption formats with the runtime locale, so "Jul"
+    // would make this suite fail outside en-US.
+    const caption = (screen.getByText(/Showing/).textContent ?? "").replace(/\s+/g, " ");
+    expect(caption).toMatch(/\b10\b/);
+    expect(caption).toMatch(/\b12\b/); // 2026-07-13 exclusive -> inclusive day 12
+    expect(caption).toContain("–"); // start – end range
+    expect(caption).toContain("UTC");
   });
 
   it("captions an unbounded window as All time", () => {
@@ -65,10 +69,10 @@ describe("ActivityTimeline", () => {
 
   it("renders a dual-thumb range slider positioned on the active window", () => {
     renderTimeline();
-    // Window covers the whole 3-bucket series: thumbs sit at the extremes of
-    // the fractional bucket scale [0, 3]. (Queried by DOM order: react-aria's
-    // group labelling overrides the per-thumb aria-label in name computation.)
-    const thumbs = screen.getAllByRole("slider");
+    // Window covers the whole 3-bucket series: thumbs sit at the extremes of the
+    // fractional bucket scale [0, 3]. Queried by their edge labels so the pan
+    // strip (also role="slider") is excluded; DOM order is start then end.
+    const thumbs = screen.getAllByRole("slider", { name: /^Window/ });
     expect(thumbs).toHaveLength(2);
     expect(thumbs[0]).toHaveValue("0");
     expect(thumbs[1]).toHaveValue("3");
@@ -80,7 +84,7 @@ describe("ActivityTimeline", () => {
       windowStart: "2026-07-11T00:00:00.000Z",
       windowEnd: "2026-07-12T00:00:00.000Z",
     });
-    const thumbs = screen.getAllByRole("slider");
+    const thumbs = screen.getAllByRole("slider", { name: /^Window/ });
     expect(thumbs[0]).toHaveValue("1");
     expect(thumbs[1]).toHaveValue("2");
   });
@@ -145,8 +149,71 @@ describe("ActivityTimeline", () => {
     // Focus the end thumb and nudge it left: the full 3-bucket window narrows to
     // the first two buckets (arrows are rerouted to whole-bucket steps; the
     // slider's own 0.1-bucket step would be snapped back by the commit).
-    screen.getAllByRole("slider")[1].focus();
+    screen.getByRole("slider", { name: /Window end/ }).focus();
     await user.keyboard("{ArrowLeft}");
     expect(onSelectRange).toHaveBeenCalledWith("2026-07-10T00:00:00.000Z", "2026-07-12T00:00:00.000Z");
+  });
+
+  it("pans the window by whole buckets from the keyboard", async () => {
+    const user = userEvent.setup();
+    const series = [
+      { bucketStart: "2026-07-10T00:00:00Z", requests: 1 },
+      { bucketStart: "2026-07-11T00:00:00Z", requests: 2 },
+      { bucketStart: "2026-07-12T00:00:00Z", requests: 3 },
+      { bucketStart: "2026-07-13T00:00:00Z", requests: 4 },
+      { bucketStart: "2026-07-14T00:00:00Z", requests: 5 },
+    ];
+    // A two-bucket window (Jul 11 .. Jul 12); the pan strip slides it right by one
+    // bucket without resizing it, so the keyboard reaches a mid-extent window.
+    const { onSelectRange } = renderTimeline({
+      series,
+      windowStart: "2026-07-11T00:00:00.000Z",
+      windowEnd: "2026-07-13T00:00:00.000Z",
+    });
+    screen.getByRole("slider", { name: "Pan the selected window" }).focus();
+    await user.keyboard("{ArrowRight}");
+    expect(onSelectRange).toHaveBeenCalledWith("2026-07-12T00:00:00.000Z", "2026-07-14T00:00:00.000Z");
+  });
+
+  it("pages the window by its own width", async () => {
+    const user = userEvent.setup();
+    const series = [
+      { bucketStart: "2026-07-10T00:00:00Z", requests: 1 },
+      { bucketStart: "2026-07-11T00:00:00Z", requests: 2 },
+      { bucketStart: "2026-07-12T00:00:00Z", requests: 3 },
+      { bucketStart: "2026-07-13T00:00:00Z", requests: 4 },
+      { bucketStart: "2026-07-14T00:00:00Z", requests: 5 },
+    ];
+    // A two-bucket window at the left edge; Page Up pages right by one full span.
+    const { onSelectRange } = renderTimeline({
+      series,
+      windowStart: "2026-07-10T00:00:00.000Z",
+      windowEnd: "2026-07-12T00:00:00.000Z",
+    });
+    screen.getByRole("slider", { name: "Pan the selected window" }).focus();
+    await user.keyboard("{PageUp}");
+    expect(onSelectRange).toHaveBeenCalledWith("2026-07-12T00:00:00.000Z", "2026-07-14T00:00:00.000Z");
+  });
+
+  it("reports the reachable pan range on the strip, not the full extent", () => {
+    // A one-bucket window in the three-bucket series: the left edge can only travel
+    // 0..(n - span) = 0..2, and currently sits at bucket 1.
+    renderTimeline({
+      windowStart: "2026-07-11T00:00:00.000Z",
+      windowEnd: "2026-07-12T00:00:00.000Z",
+    });
+    const pan = screen.getByRole("slider", { name: "Pan the selected window" });
+    expect(pan).toHaveAttribute("aria-valuemin", "0");
+    expect(pan).toHaveAttribute("aria-valuemax", "2");
+    expect(pan).toHaveAttribute("aria-valuenow", "1");
+    expect(pan).toHaveAttribute("aria-disabled", "false");
+  });
+
+  it("announces the pan strip disabled at the full extent", () => {
+    // Full-window default: nothing to pan, but the control stays in the tab order.
+    renderTimeline();
+    const pan = screen.getByRole("slider", { name: "Pan the selected window" });
+    expect(pan).toHaveAttribute("aria-disabled", "true");
+    expect(pan).toHaveAttribute("tabindex", "0");
   });
 });

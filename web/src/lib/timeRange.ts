@@ -13,9 +13,14 @@ import type { UsageBucket } from "@/api/types";
 export const HOUR_S = 3_600;
 export const DAY_S = 86_400;
 
-// The server caps a single summary window at 366 days (`_MAX_SUMMARY_SPAN`);
-// mirror it so a client-driven zoom-out can't outrun what the server will serve.
-export const MAX_SPAN_DAYS = 366;
+// The widest window we actually *request* (the 12-month preset and the unbounded
+// "All" histogram). The server caps a single summary window at 366 days
+// (`_MAX_SUMMARY_SPAN`), and we stop a day short of it on purpose: the client
+// anchors `start` while the server resolves `end` at request time, so a full-366
+// request always exceeds the cap by the round-trip delta (and shrinks further
+// behind a slow client clock) and is silently pulled forward. 365 days leaves
+// headroom and never trips the clamp, so the preset spans what it claims to.
+export const YEAR_SPAN_S = 365 * DAY_S;
 
 export interface RangePreset {
   key: string;
@@ -39,7 +44,7 @@ export const USAGE_PRESETS: RangePreset[] = [
   { key: "7d", label: "7d", seconds: 7 * DAY_S, bucket: "day" },
   { key: "30d", label: "30d", seconds: 30 * DAY_S, bucket: "day" },
   { key: "90d", label: "90d", seconds: 90 * DAY_S, bucket: "day" },
-  { key: "12mo", label: "12mo", seconds: MAX_SPAN_DAYS * DAY_S, bucket: "day" },
+  { key: "12mo", label: "12mo", seconds: YEAR_SPAN_S, bucket: "day" },
 ];
 
 // A spend investigation is usually monthly.
