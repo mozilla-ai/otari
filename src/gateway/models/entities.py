@@ -194,7 +194,11 @@ class ModelAlias(Base):
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
-    name: Mapped[str] = mapped_column(index=True)
+    # No index of its own: uq_model_aliases_name_user already leads with `name`,
+    # and uq_model_aliases_global_name indexes it again for the global rows. A
+    # third copy would be paid for on every write to serve reads that mostly do
+    # not happen, since resolution goes through the process-wide alias cache.
+    name: Mapped[str] = mapped_column()
     target: Mapped[str] = mapped_column()
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

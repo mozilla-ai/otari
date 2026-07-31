@@ -266,6 +266,21 @@ describe("AliasesPage", () => {
     });
   });
 
+  it("treats an empty-string user id as a scope, not as global", async () => {
+    // "" is a legal user id, so a truthiness check on the scope would drop the
+    // query param and delete the global alias instead of this one.
+    const fetchMock = mockApi([stored("shared", "openai:gpt-4o"), stored("shared", "openai:gpt-4o-mini", "")]);
+    const user = userEvent.setup();
+    renderPage(<AliasesPage />);
+
+    const scopedRow = (await screen.findByText("openai:gpt-4o-mini")).closest("tr")!;
+    await user.click(within(scopedRow).getByRole("button", { name: "Delete" }));
+    await user.click(within(scopedRow).getByRole("button", { name: "Delete" }));
+
+    const del = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "").toUpperCase() === "DELETE");
+    expect(String(del?.[0])).toContain("user_id=");
+  });
+
   it("only lets stored aliases be selected, and bulk-deletes them", async () => {
     const fetchMock = mockApi();
     const user = userEvent.setup();

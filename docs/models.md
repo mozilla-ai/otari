@@ -265,6 +265,21 @@ The rules that follow from it:
   another caller may still see the real model (subject to their own model access).
   If you are using aliases to curate one catalogue for everybody, keep those
   aliases global.
+- That rule inverts when a user-scoped alias overrides a **`config.yml`** name.
+  The override replaces the configured entry for that user, so the configured
+  target is no longer among the names being withheld and it reappears in that
+  user's catalogue. Overriding `myopusmodel` for one user therefore un-hides
+  whatever `myopusmodel` pointed at, for that user only, and still subject to
+  their model access. It takes a master key to arrange, so it is not a leak, but
+  it is the opposite of what the previous bullet leads you to expect.
+- Listing and dispatch scope on different things for a master-key caller.
+  `GET /v1/models` scopes on the API key's user, while a request scopes on the
+  billed user. For any ordinary key those are the same. For the master key they
+  are not: a chat request with `"user": "alice"` resolves alice's scoped aliases,
+  but `GET /v1/models` with the master key shows none of them, because the master
+  key has no user of its own. That is the exact sequence for checking a scoped
+  alias after creating it, so verify it with the user's own key, or by sending a
+  request, rather than by reading the master-key listing.
 - `user_id` must name a live user. An unknown id is a 404, and so is a deleted
   one: a deleted user cannot authenticate, so the alias would never resolve.
 - Pricing still keys on the resolved target, so a scoped alias inherits its own

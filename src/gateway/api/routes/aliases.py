@@ -24,7 +24,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ModelAlias
 from gateway.repositories.users_repository import get_active_user
-from gateway.services.alias_service import cached_aliases, refresh_alias_cache
+from gateway.services.alias_service import all_alias_names, refresh_alias_cache
 
 router = APIRouter(prefix="/v1/aliases", tags=["aliases"])
 
@@ -88,12 +88,13 @@ def _validate(config: GatewayConfig, name: str, target: str, user_id: str | None
                 "Rename it, scope it to a user, or edit config.yml."
             ),
         )
-    # The chaining check has to see every layer that could resolve for this
-    # alias's audience: an alias pointing at a stored alias is just as broken as
-    # one pointing at a configured alias.
-    alias_names = set(cached_aliases()) | set(config.aliases) | {name}
-    if user_id is not None:
-        alias_names |= set(cached_aliases(user_id))
+    # The chaining check spans every scope, matching the pricing and allow-list
+    # checks: an alias pointing at a stored alias is just as broken as one
+    # pointing at a configured alias. Another user's names cannot actually be
+    # reached from here (resolution is single-pass, and validate_alias inspects
+    # the target's prefix, so such a target fails as an unknown provider anyway),
+    # so this is for consistency rather than to close a hole.
+    alias_names = all_alias_names(config) | {name}
     try:
         config.validate_alias(name, target, alias_names=alias_names)
     except ValueError as exc:

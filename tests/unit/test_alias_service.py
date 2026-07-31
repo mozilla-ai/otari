@@ -142,6 +142,19 @@ def test_cached_aliases_returns_one_scope_at_a_time() -> None:
     assert cached_aliases("bob") == {}
 
 
+def test_overriding_a_config_alias_drops_its_target_from_that_users_map() -> None:
+    """The catalogue withholds alias *targets*, so an override un-hides one.
+
+    /v1/models hides every value in this map. When a user's alias replaces a
+    config name, the configured target is no longer a value here, so it stops
+    being withheld and reappears in that user's listing. Subtle enough to be
+    worth pinning, and it inverts the usual "an alias hides its target" rule.
+    """
+    _prime({}, {"alice": {"configalias": "home_lab:qwen3"}})
+    assert "anthropic:claude-opus-4" in set(effective_aliases(CONFIG, "bob").values())
+    assert "anthropic:claude-opus-4" not in set(effective_aliases(CONFIG, "alice").values())
+
+
 def test_all_alias_names_spans_every_scope() -> None:
     # Scope-blind, for the writes that must never store an alias name as a model
     # key (pricing rows, allow-list entries).
