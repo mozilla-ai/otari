@@ -242,12 +242,17 @@ def test_create_rejects_internal_api_base_when_gate_on(
 def test_create_allows_public_api_base_when_gate_on(
     client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The gate only blocks internal hosts; a public api_base still saves."""
+    """The gate only blocks internal hosts; a public api_base still saves.
+
+    Uses a public IP literal rather than a hostname so the gate's address check
+    runs without depending on external DNS (the resolve path is covered by the
+    url_safety unit tests).
+    """
     _with_key(monkeypatch)
     monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
     resp = client.post(
         "/v1/provider-credentials",
-        json={"instance": "openai", "api_key": "sk-1234", "api_base": "https://api.openai.com/v1"},
+        json={"instance": "openai", "api_key": "sk-1234", "api_base": "https://8.8.8.8/v1"},
         headers=master_key_header,
     )
     assert resp.status_code == 201, resp.text
