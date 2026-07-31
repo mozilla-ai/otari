@@ -581,7 +581,9 @@ describe("ProvidersPage", () => {
     await user.click(screen.getByRole("button", { name: "Test" }));
 
     expect(await screen.findByText(/could not be verified/)).toBeInTheDocument();
-    expect(screen.queryByText(/Error code: 404/)).not.toBeInTheDocument();
+    // The provider error stays on screen: a 404 is also what a wrong api_base
+    // returns, so hiding it would mask a misconfiguration behind reassurance.
+    expect(screen.getByText("Error code: 404")).toBeInTheDocument();
   });
 
   it("does not automatically re-check all providers within an hour", async () => {

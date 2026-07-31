@@ -990,19 +990,23 @@ function DiscoveredErrors({
   }
   const unreachable = providers.filter((provider) => !provider.discovery_unsupported);
   const noDiscovery = providers.filter((provider) => provider.discovery_unsupported);
+  const names = (list: typeof providers) => list.map((provider) => provider.provider).join(", ");
+  const one = (list: typeof providers) => list.length === 1;
   return (
     <InfoBanner tone="warning">
       {unreachable.length > 0 ? (
         <span className="block">
-          Could not list {unreachable.map((provider) => provider.provider).join(", ")}. Check that provider's
-          credentials in config.yml; its models are missing from the list below.
+          Could not list {names(unreachable)}. Check {one(unreachable) ? "that provider's" : "those providers'"}{" "}
+          credentials in config.yml; {one(unreachable) ? "its" : "their"} models are missing from the list below.
         </span>
       ) : null}
       {noDiscovery.length > 0 ? (
         <span className="block">
-          {noDiscovery.map((provider) => provider.provider).join(", ")} does not offer model discovery, so its models
-          are missing from the list below. The provider may still serve requests; declare the model ids it serves under
-          its <code>models:</code> key in config.yml to list them here.
+          {names(noDiscovery)} {one(noDiscovery) ? "does" : "do"} not offer model discovery, so{" "}
+          {one(noDiscovery) ? "its" : "their"} models are missing from the list below.{" "}
+          {one(noDiscovery) ? "The provider" : "They"} may still serve requests; declare the model ids{" "}
+          {one(noDiscovery) ? "it serves" : "they serve"} under the <code>models:</code> key in config.yml to list them
+          here.
         </span>
       ) : null}
     </InfoBanner>

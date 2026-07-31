@@ -343,22 +343,39 @@ def _short_error(exc: BaseException, provider: str | None = None) -> str:
 _MISSING_ENDPOINT_STATUSES = frozenset({404, 405, 501})
 
 
+_MAX_EXCEPTION_CHAIN = 5
+
+
 def _status_code(exc: BaseException) -> int | None:
     """HTTP status carried by a provider SDK exception, if it exposes one.
 
     Covers the two shapes the provider SDKs use: an OpenAI-style ``status_code``
-    on the exception itself, and an httpx-style ``response.status_code``. any-llm
-    wrappers keep the SDK exception on ``original_exception``, so that is checked
-    too.
+    on the exception itself, and an httpx-style ``response.status_code``.
+
+    The status is not always on the outermost exception. With
+    ``ANY_LLM_UNIFIED_EXCEPTIONS`` set, any-llm replaces the SDK error with one of
+    its own (``ModelNotFoundError`` for a 404), which carries no status and keeps
+    the original on ``original_exception`` and as ``__cause__``. That mode is
+    slated to become the default, so the chain is walked rather than only its
+    first link, bounded by ``_MAX_EXCEPTION_CHAIN`` and cycle-guarded.
     """
-    for candidate in (exc, getattr(exc, "original_exception", None)):
-        if candidate is None:
+    queue: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while queue and len(seen) < _MAX_EXCEPTION_CHAIN:
+        candidate = queue.pop(0)
+        if id(candidate) in seen:
             continue
+        seen.add(id(candidate))
         code = getattr(candidate, "status_code", None)
         if code is None:
             code = getattr(getattr(candidate, "response", None), "status_code", None)
         if isinstance(code, int):
             return code
+        queue.extend(
+            wrapped
+            for wrapped in (getattr(candidate, "original_exception", None), candidate.__cause__)
+            if isinstance(wrapped, BaseException)
+        )
     return None
 
 

@@ -595,6 +595,22 @@ describe("ModelsPage", () => {
     expect(screen.queryByText(/Could not list/)).not.toBeInTheDocument();
   });
 
+  it("agrees in number when several providers offer no discovery", async () => {
+    mockApi({
+      discoverable: {
+        providers: [
+          { provider: "otari", ok: false, error: "404", discovery_unsupported: true, models: [] },
+          { provider: "vllm", ok: false, error: "404", discovery_unsupported: true, models: [] },
+        ],
+      },
+    });
+
+    renderWithClient(<ModelsPage />);
+
+    expect(await screen.findByText(/otari, vllm do not offer model discovery/)).toBeInTheDocument();
+    expect(screen.getByText(/their models are missing/)).toBeInTheDocument();
+  });
+
   // -- inline pricing (in the detail panel) --------------------------------
 
   it("edits a configured price from the detail panel", async () => {

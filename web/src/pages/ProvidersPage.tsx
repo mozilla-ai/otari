@@ -184,10 +184,16 @@ function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProvider
             </span>
           ) : test.data.discovery_unsupported ? (
             // No /v1/models on this backend: the test cannot confirm the key, but
-            // it is not evidence the key is wrong either (issue #447).
+            // it is not evidence the key is wrong either (issue #447). The error is
+            // kept because this is the form where the operator just typed api_base,
+            // and a wrong one 404s exactly like an absent listing endpoint.
             <span className="block max-w-md break-words text-xs text-amber-800">
               This provider does not list models, so the key could not be verified here. Save it and use the provider;
-              declare its model ids under <code>models:</code> to have them show up in the catalogue.
+              declare its model ids under <code>models:</code> to have them show up in the catalogue. If you did not
+              expect this, check the provider's reply below.
+              {test.data.error ? (
+                <span className="mt-0.5 block text-[var(--otari-muted)]">{test.data.error}</span>
+              ) : null}
             </span>
           ) : (
             <span className="block max-w-md break-words text-xs text-red-700">
@@ -577,10 +583,14 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
   }
   // A backend with no model-listing endpoint cannot be verified this way, but the
   // key is not therefore wrong: say so instead of reporting a failed connection.
+  // The provider error stays visible underneath, because a 404 is also what a
+  // wrong api_base returns, and that is a misconfiguration to fix, not to reassure
+  // away.
   if (state.discovery_unsupported) {
     return (
       <span className="block max-w-xs break-words text-xs text-amber-800">
         Could not list models, so the key could not be verified. It may still work for requests.
+        {state.error ? <span className="mt-0.5 block text-[var(--otari-muted)]">{state.error}</span> : null}
       </span>
     );
   }

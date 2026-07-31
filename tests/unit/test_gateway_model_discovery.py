@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from any_llm.exceptions import ModelNotFoundError
 from any_llm.types.model import Model
 
 from gateway.core.config import GatewayConfig
@@ -888,6 +889,43 @@ class TestMissingModelsEndpoint:
         wrapper.original_exception = self._status_error(404)  # type: ignore[attr-defined]
 
         assert (await self._discover(wrapper)).discovery_unsupported is True
+
+    def test_unified_any_llm_exception_shape_is_recognized(self) -> None:
+        """Pin the shape any-llm produces under ANY_LLM_UNIFIED_EXCEPTIONS.
+
+        That flag replaces the SDK error with ``ModelNotFoundError``, which carries
+        no ``status_code`` of its own and keeps the original on
+        ``original_exception`` (and as ``__cause__``). It is slated to become the
+        default, so losing this hop would silently turn every missing-listing
+        provider back into "unreachable".
+        """
+        original = self._status_error(404)
+        unified = ModelNotFoundError("Model not found", original_exception=original, provider_name="openai")
+
+        assert getattr(unified, "status_code", None) is None
+        assert _is_missing_models_endpoint(unified) is True
+
+    def test_doubly_wrapped_status_is_still_found(self) -> None:
+        # A wrapper around a wrapper, and a chain built with `raise ... from`,
+        # both still resolve rather than falling through to "unreachable".
+        inner = self._status_error(404)
+        middle = RuntimeError("wrapped once")
+        middle.original_exception = inner  # type: ignore[attr-defined]
+        outer = RuntimeError("wrapped twice")
+        outer.original_exception = middle  # type: ignore[attr-defined]
+        assert _is_missing_models_endpoint(outer) is True
+
+        chained = RuntimeError("raised from")
+        chained.__cause__ = self._status_error(501)
+        assert _is_missing_models_endpoint(chained) is True
+
+    def test_status_lookup_terminates_on_a_cyclic_chain(self) -> None:
+        # A self-referential chain must not hang the discovery path.
+        a = RuntimeError("a")
+        b = RuntimeError("b")
+        a.__cause__ = b
+        b.__cause__ = a
+        assert _is_missing_models_endpoint(a) is False
 
     @pytest.mark.asyncio
     async def test_bad_credentials_stay_unreachable(self) -> None:
