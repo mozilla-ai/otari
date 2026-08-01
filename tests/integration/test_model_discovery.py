@@ -189,6 +189,53 @@ def test_list_models_excludes_env_only_provider(
     assert "anthropic:claude-3-5-sonnet" not in ids
 
 
+def test_list_models_includes_keyless_local_provider(
+    postgres_url: str,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """A keyless local backend configured with a valueless entry IS listed.
+
+    Regression for mozilla-ai/otari#389. Ollama, llama.cpp, and llamafile take no
+    credential, so ``ollama:`` with no body under ``providers`` is the whole
+    config. That entry used to fail to load (YAML gives ``None``), leaving a
+    running local server callable but permanently absent from GET /v1/models.
+    """
+    from any_llm.types.model import Model
+
+    config = GatewayConfig(
+        database_url=postgres_url,
+        master_key="test-master-key",
+        host="127.0.0.1",
+        port=8000,
+        auto_migrate=False,
+        model_discovery=True,
+        model_cache_ttl_seconds=300,
+        providers={"ollama": None},  # type: ignore[dict-item]
+    )
+    assert config.providers == {"ollama": {}}
+
+    async def fake_alist(provider: Any, **kwargs: Any) -> list[Model]:
+        if provider.value == "ollama":
+            return [Model(**_make_openai_model("llama3", owned_by="ollama"))]
+        return []
+
+    get_model_cache().clear()
+    client_gen = _make_client(config)
+    client = next(client_gen)
+    try:
+        with (
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch("gateway.services.model_discovery_service.alist_models", side_effect=fake_alist),
+        ):
+            resp = client.get("/v1/models", headers=discovery_master_header)
+    finally:
+        client_gen.close()
+
+    assert resp.status_code == 200
+    ids = [m["id"] for m in resp.json()["data"]]
+    assert "ollama:llama3" in ids
+
+
 def test_list_models_discovery_disabled(
     no_discovery_client: TestClient,
     discovery_master_header: dict[str, str],

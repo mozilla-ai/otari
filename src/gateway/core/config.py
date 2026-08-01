@@ -732,6 +732,27 @@ class GatewayConfig(BaseSettings):
                 msg = f"providers.{instance}.models must be a list of model id strings."
                 raise ValueError(msg)
 
+    @field_validator("providers", mode="before")
+    @classmethod
+    def _coerce_valueless_provider_entries(cls, providers: Any) -> Any:
+        """Treat a provider entry with no body as an empty config block.
+
+        A keyless local backend (ollama, llamacpp, llamafile) has no credential to
+        declare, so the natural way to configure one is a bare key::
+
+            providers:
+              ollama:
+
+        YAML parses that as ``None``, which the ``dict[str, dict[str, Any]]``
+        annotation would otherwise reject with a type error. Normalize it to
+        ``{}``, which means "this instance is configured, with no settings": the
+        instance is then routable and, since discovery is scoped to the configured
+        instances, also discoverable in ``GET /v1/models`` (issue #389).
+        """
+        if not isinstance(providers, dict):
+            return providers
+        return {instance: ({} if entry is None else entry) for instance, entry in providers.items()}
+
     @field_validator("stream_missing_usage_policy")
     @classmethod
     def _validate_stream_missing_usage_policy(cls, value: str) -> str:

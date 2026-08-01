@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 from any_llm import LLMProvider
 from any_llm.exceptions import AnyLLMError
 
@@ -77,6 +78,23 @@ def test_validate_allows_instance_without_provider_type() -> None:
     # Backward compatible: keys that are real providers need no provider_type and
     # are not hard-validated here.
     GatewayConfig(providers={"openai": {"api_key": "sk"}}).validate_provider_instances()
+
+
+def test_valueless_entry_loads_as_empty_config() -> None:
+    # Regression (mozilla-ai/otari#389): a keyless local backend has no credential
+    # to declare, so `ollama:` with no body is the natural config. YAML parses that
+    # as None, which the dict[str, dict] annotation rejected outright.
+    config = GatewayConfig(providers={"ollama": None})  # type: ignore[dict-item]
+    assert config.providers == {"ollama": {}}
+    config.validate_provider_instances()  # no raise
+
+
+def test_valueless_entry_from_yaml_is_a_configured_instance() -> None:
+    # The whole point of the entry is opting the local backend into discovery,
+    # which is scoped to config.providers, so the key must survive the load.
+    config = GatewayConfig(**yaml.safe_load("providers:\n  ollama:\n"))
+    assert "ollama" in config.providers
+    assert config.provider_instance_type("ollama") == "ollama"
 
 
 def test_validate_rejects_instance_name_with_separator() -> None:

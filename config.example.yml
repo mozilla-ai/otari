@@ -84,6 +84,12 @@ providers:
   #   models:
   #     - deepseek-v4-flash
 
+  # Keyless local backends (ollama, llamacpp, llamafile) take no credential, so a
+  # bare key is the whole entry. Routing works without it; the entry is what puts
+  # the local server's models in /v1/models. Add `api_base` for a non-default
+  # address.
+  # ollama:
+
   # Add more providers as needed...
 
 # Model pricing configuration (optional but necessary for price tracking)
