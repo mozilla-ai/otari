@@ -347,7 +347,7 @@ async def chat_completions(
         # Standalone path: single attempt, no fallback (no `route.attempts`).
         # Resolve the instance to its implementation; dispatch any-llm against
         # ``implementation:model`` while billing/logging key on the instance.
-        resolved = resolve_dispatch_provider(ctx, config, request.model)
+        resolved = await resolve_dispatch_provider(ctx, config, request.model, adapter=_ADAPTER)
         call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
@@ -384,7 +384,7 @@ async def chat_completions(
             session_label=request.session_label,
         )
 
-    resolved = resolve_dispatch_provider(ctx, config, request.model)
+    resolved = await resolve_dispatch_provider(ctx, config, request.model, adapter=_ADAPTER)
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     return await run_standalone_non_stream(
         adapter=_ADAPTER,

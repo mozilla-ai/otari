@@ -375,7 +375,7 @@ async def create_response(
         for attempt in route.attempts:
             _ensure_provider_supports_responses(LLMProvider(attempt.provider))
     else:
-        resolved = resolve_dispatch_provider(ctx, config, request_body.model)
+        resolved = await resolve_dispatch_provider(ctx, config, request_body.model, adapter=_ADAPTER)
         # ``provider`` is the underlying implementation handed to any-llm;
         # ``billing_instance`` is the otari routing key pricing/usage key on.
         provider, model = resolved.provider, resolved.model

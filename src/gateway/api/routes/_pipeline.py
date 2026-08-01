@@ -24,6 +24,10 @@ Settlement invariants owned here:
   unreachable backend surfaces as an HTTP 502 before the 200 OK header; the
   MCP pool opens lazily inside the stream generator (single-attempt paths) or
   eagerly on an ``AsyncExitStack`` shared across attempts (platform fallback).
+* Every gateway-side rejection that reaches a known user records an error row
+  via :func:`log_gateway_rejection`, so refused traffic is visible in the
+  activity log and countable by the dashboard's failure count instead of
+  vanishing. That function documents which rejections deliberately do not log.
 """
 
 from __future__ import annotations
@@ -466,6 +470,14 @@ class RequestContext:
         self.resolved_provider = resolved_provider
 
 
+def unresolvable_model_detail(model_selector: str) -> str:
+    """Human-readable 400 detail for a selector the gateway cannot resolve."""
+    return (
+        f"Unknown or unsupported model {model_selector!r}. "
+        "Use the format 'provider:model' with a configured provider."
+    )
+
+
 def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoReturn:
     """Convert a selector-parse failure into an HTTP 400 with a helpful detail.
 
@@ -476,14 +488,17 @@ def _raise_for_unresolvable_model(model_selector: str, exc: Exception) -> NoRetu
     """
     raise HTTPException(
         status_code=status.HTTP_400_BAD_REQUEST,
-        detail=(
-            f"Unknown or unsupported model {model_selector!r}. "
-            "Use the format 'provider:model' with a configured provider."
-        ),
+        detail=unresolvable_model_detail(model_selector),
     ) from exc
 
 
-def resolve_dispatch_provider(ctx: RequestContext, config: GatewayConfig, model_selector: str) -> ResolvedProvider:
+async def resolve_dispatch_provider(
+    ctx: RequestContext,
+    config: GatewayConfig,
+    model_selector: str,
+    *,
+    adapter: FormatAdapter[Any, Any],
+) -> ResolvedProvider:
     """Get the ``ResolvedProvider`` for dispatch, reusing the one computed for
     the pricing/budget gate (``ctx.resolved_provider``) instead of resolving
     the selector a second time. Standalone-mode route handlers should call
@@ -500,6 +515,22 @@ def resolve_dispatch_provider(ctx: RequestContext, config: GatewayConfig, model_
     try:
         return resolve_provider_selector(config, model_selector, ctx.user_id)
     except (ValueError, AnyLLMError) as exc:
+        # The preamble deliberately tolerated this selector, so a reservation is
+        # already held: refund it, then record the drop. The estimate is always
+        # 0.0 here (a selector we cannot resolve has no pricing), so the refund
+        # moves nothing, but keeping it makes the site correct on its own terms.
+        await release_reservation(ctx)
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=model_selector,
+            provider=None,
+            endpoint=adapter.endpoint,
+            detail=unresolvable_model_detail(model_selector),
+            started_at=ctx.started_at,
+        )
         _raise_for_unresolvable_model(model_selector, exc)
 
 
@@ -640,16 +671,38 @@ async def resolve_request_context(
             raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
         api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
         api_key_id = api_key.id if api_key else None
-        user_id = resolve_user_id(
-            user_id_from_request=user_id_from_request,
-            api_key=api_key,
-            is_master_key=is_master_key,
-            master_key_error=adapter.error(400, master_key_user_required_detail, ErrorKind.INVALID_REQUEST),
-            no_api_key_error=adapter.error(500, API_KEY_VALIDATION_FAILED_DETAIL, ErrorKind.API),
-            no_user_error=adapter.error(500, API_KEY_NO_USER_DETAIL, ErrorKind.API),
-            forbidden_user_error=adapter.error(403, user_forbidden_detail, ErrorKind.PERMISSION),
-            reject_mismatch=config.reject_user_mismatch,
-        )
+        try:
+            user_id = resolve_user_id(
+                user_id_from_request=user_id_from_request,
+                api_key=api_key,
+                is_master_key=is_master_key,
+                master_key_error=adapter.error(400, master_key_user_required_detail, ErrorKind.INVALID_REQUEST),
+                no_api_key_error=adapter.error(500, API_KEY_VALIDATION_FAILED_DETAIL, ErrorKind.API),
+                no_user_error=adapter.error(500, API_KEY_NO_USER_DETAIL, ErrorKind.API),
+                forbidden_user_error=adapter.error(403, user_forbidden_detail, ErrorKind.PERMISSION),
+                reject_mismatch=config.reject_user_mismatch,
+            )
+        except HTTPException as exc:
+            # Only the user/key mismatch (403) is recorded: spend always binds to
+            # the key's own user, so that rejection has a user to attribute the
+            # drop to. resolve_user_id's other refusals (a master key with no
+            # `user` field, a key with no user) name no existing user, and
+            # usage_logs.user_id is a foreign key, so they stay unlogged. The
+            # selector is only resolved below (aliases are user-scoped, so
+            # resolution needs the billed user), hence no provider on this row.
+            if exc.status_code == status.HTTP_403_FORBIDDEN and api_key is not None:
+                await log_gateway_rejection(
+                    db=db,
+                    log_writer=log_writer,
+                    api_key_id=api_key_id,
+                    user_id=api_key.user_id,
+                    model=model,
+                    provider=None,
+                    endpoint=adapter.endpoint,
+                    detail=user_forbidden_detail,
+                    started_at=started_at,
+                )
+            raise
         rate_limit_info = check_rate_limit(raw_request, user_id)
 
         # Tolerate an unparseable / unknown-provider selector here: the budget
@@ -677,7 +730,21 @@ async def resolve_request_context(
         if key_allowlist is not None and not (
             gate_instance is not None and is_model_allowed(key_allowlist, f"{gate_instance}:{gate_model}")
         ):
-            raise adapter.error(403, model_not_allowed_detail(model), ErrorKind.PERMISSION)
+            not_allowed_detail = model_not_allowed_detail(model)
+            # Nothing is reserved yet (the reservation is taken below), so there
+            # is no refund to do before recording the drop.
+            await log_gateway_rejection(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                user_id=user_id,
+                model=gate_model,
+                provider=gate_instance,
+                endpoint=adapter.endpoint,
+                detail=not_allowed_detail,
+                started_at=started_at,
+            )
+            raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
 
         gate_pricing = await find_model_pricing(db, gate_instance, gate_model)
         estimate = estimate_cost(
@@ -696,14 +763,34 @@ async def resolve_request_context(
         # Reserve first so user/blocked/budget rejections (404/403) take
         # precedence over the missing-pricing rejection (402); refund if we
         # then reject for missing pricing.
-        reservation = await reserve_budget(
-            db,
-            user_id,
-            estimate,
-            model=model,
-            strategy=config.budget_strategy,
-            counts_toward_budget=not budget_exempt,
-        )
+        try:
+            reservation = await reserve_budget(
+                db,
+                user_id,
+                estimate,
+                model=model,
+                strategy=config.budget_strategy,
+                counts_toward_budget=not budget_exempt,
+            )
+        except HTTPException as exc:
+            # A blocked or over-budget user is refused inside reserve_budget,
+            # which reserves nothing on the paths that raise, so there is no
+            # refund to do before recording the drop. The 404 for an unknown user
+            # is skipped: usage_logs.user_id is a foreign key to users, so a row
+            # naming a user that does not exist could not be inserted.
+            if exc.status_code != status.HTTP_404_NOT_FOUND:
+                await log_gateway_rejection(
+                    db=db,
+                    log_writer=log_writer,
+                    api_key_id=api_key_id,
+                    user_id=user_id,
+                    model=gate_model,
+                    provider=gate_instance,
+                    endpoint=adapter.endpoint,
+                    detail=str(exc.detail),
+                    started_at=started_at,
+                )
+            raise
         # require_pricing is a budget-enforcement safety gate: it refuses a request
         # we cannot price because we then cannot debit it. A budget-exempt key is
         # never debited, so the gate does not apply: the call proceeds and logs
@@ -711,23 +798,18 @@ async def resolve_request_context(
         if not budget_exempt and pricing_required_but_missing(gate_pricing, require_pricing=config.require_pricing):
             await refund_reservation(db, reservation)
             no_pricing_detail = no_pricing_error_detail(model)
-            # Record the rejection before raising. Gateway-side rejections used to
-            # leave no trace, so an operator who flipped require_pricing on had no
-            # way to see that live traffic was being dropped (only a user complaint
-            # would tell them). The row carries cost=null: nothing was spent, so it
-            # never affects spend or the budget, it just makes the drop visible in
-            # the activity log and countable as an error.
-            await log_usage(
+            # Record the rejection after the refund, so an operator who flipped
+            # require_pricing on can see that live traffic is being dropped.
+            await log_gateway_rejection(
                 db=db,
                 log_writer=log_writer,
                 api_key_id=api_key_id,
-                model=model,
+                user_id=user_id,
+                model=gate_model,
                 provider=gate_instance,
                 endpoint=adapter.endpoint,
-                user_id=user_id,
-                error=no_pricing_detail,
-                latency_ms=_elapsed_ms(started_at),
-                counts_toward_budget=not budget_exempt,
+                detail=no_pricing_detail,
+                started_at=started_at,
             )
             raise adapter.error(
                 402,
@@ -1197,6 +1279,60 @@ async def release_reservation(ctx: RequestContext) -> None:
     """
     if ctx.db is not None and ctx.reservation is not None:
         await refund_reservation(ctx.db, ctx.reservation)
+
+
+async def log_gateway_rejection(
+    *,
+    db: AsyncSession | None,
+    log_writer: LogWriter,
+    api_key_id: str | None,
+    user_id: str | None,
+    model: str,
+    provider: str | None,
+    endpoint: str,
+    detail: str,
+    started_at: float | None,
+) -> None:
+    """Record a request the gateway itself refused before any provider was called.
+
+    Gateway-side rejections used to raise without writing anything, so an
+    operator had no way to see that live traffic was being dropped: the activity
+    log showed nothing and the dashboard's failure count read 0 for the duration
+    of the incident. The row carries ``status="error"`` (what the count and its
+    drill-down read) and no cost, so it makes the drop visible and countable
+    without ever moving spend or the budget.
+
+    Callers own the reservation: refund it before calling this, exactly as the
+    pre-existing rejection sites do. Nothing here touches the budget.
+
+    ``counts_toward_budget`` is always True. The dashboard classifies
+    ``counts_toward_budget=False`` rows as imported usage and offers them for
+    bulk delete and set-price, which must never happen to a row the gateway
+    wrote itself. There is no cost on these rows for the flag to gate, so
+    pinning it True is safe even for a key flagged ``exclude_from_budget``.
+
+    Two rejection classes deliberately stay unlogged. Authentication failures
+    (401) are refused before any user is known, and ``usage_logs.user_id`` is a
+    foreign key to ``users``, so a row for an unknown (or absent) user could not
+    be inserted anyway; ``user_id=None`` is therefore a no-op here rather than a
+    NULL-user row. Rate-limit rejections (429) are an expected, self-limiting
+    throttle rather than an incident, and logging them would let a hot-looping
+    client amplify itself into the usage table.
+    """
+    if db is None or user_id is None:
+        return
+    await log_usage(
+        db=db,
+        log_writer=log_writer,
+        api_key_id=api_key_id,
+        model=model,
+        provider=provider,
+        endpoint=endpoint,
+        user_id=user_id,
+        error=detail,
+        latency_ms=_elapsed_ms(started_at),
+        counts_toward_budget=True,
+    )
 
 
 async def _log_failure_and_refund(

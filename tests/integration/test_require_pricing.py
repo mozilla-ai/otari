@@ -100,7 +100,13 @@ def test_missing_pricing_rejection_is_recorded_in_the_usage_log(strict_pricing_c
 
     rows = c.get("/v1/usage", params={"status": "error"}, headers=_MASTER_HEADER).json()
     assert len(rows) == 1
-    assert rows[0]["model"] == "openai:gpt-4o"
+    # The resolved target, not the request selector: the same form every success
+    # row on this pipeline uses, so a model's failures and successes group
+    # together under one key in the activity log, the model filter (an exact
+    # match on this column), and usage-by-model. #449 logged the full selector
+    # here, which split them; #465 unified it.
+    assert rows[0]["model"] == "gpt-4o"
+    assert rows[0]["provider"] == "openai"
     assert rows[0]["endpoint"] == "/v1/chat/completions"
     assert rows[0]["user_id"] == "priced-user"
     assert rows[0]["status"] == "error"
@@ -139,11 +145,8 @@ def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_cl
     assert rows[0]["endpoint"] == "/v1/embeddings"
     assert rows[0]["cost"] is None
     assert rows[0]["counts_toward_budget"] is True
-    # The pass-through routes log the bare model with the instance in `provider`,
-    # where the chat pipeline logs the full `instance:model` selector. Pinned
-    # because the two forms render differently in the Activity log's Model column
-    # and the model filter matches one or the other, so the split should change
-    # deliberately rather than drift.
+    # Bare model with the instance in `provider`, the one form both scaffolds now
+    # use for every row they write (see the chat assertion above).
     assert rows[0]["model"] == "text-embedding-3-small"
     assert rows[0]["provider"] == "openai"
 
@@ -151,11 +154,11 @@ def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_cl
 def test_budget_exempt_key_writes_no_pricing_rejection_row(strict_pricing_client: TestClient) -> None:
     """A budget-exempt key skips the gate, so no missing-pricing row is written.
 
-    The gate is guarded by ``not budget_exempt``, which is what keeps every
-    pricing-rejection row at counts_toward_budget=True. If a refactor let the gate
-    fire for an exempt key, it would start writing counts_toward_budget=False
-    rows, which the dashboard classifies as imported and offers up to bulk delete
-    and set-price. Nothing else pins that, so pin it here.
+    The gate is guarded by ``not budget_exempt``: an exempt key is never debited,
+    so there is no budget for the require_pricing safety gate to protect. Nothing
+    else pins that, so pin it here. (Whether a rejection row could ever carry
+    counts_toward_budget=False is pinned separately, per gate, in
+    test_gateway_rejection_logging.py; the shared writer fixes the flag at True.)
 
     Structured as an A/B against an enforced key rather than as a bare "no row
     appeared": this fixture configures no providers, so an exempt request fails

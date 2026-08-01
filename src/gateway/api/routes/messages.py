@@ -470,7 +470,7 @@ async def create_message(
                 raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
 
         # Standalone: single attempt streaming.
-        resolved = resolve_dispatch_provider(ctx, config, request.model)
+        resolved = await resolve_dispatch_provider(ctx, config, request.model, adapter=_ADAPTER)
         call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
@@ -513,7 +513,7 @@ async def create_message(
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
-    resolved = resolve_dispatch_provider(ctx, config, request.model)
+    resolved = await resolve_dispatch_provider(ctx, config, request.model, adapter=_ADAPTER)
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,
