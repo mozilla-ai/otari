@@ -232,11 +232,18 @@ def _build_event(
     """
     provider: Any
     duration: Any
+    # No OTLP shape carries the 5m/1h cache-write split, so every cache write stays in
+    # the base (5m) bucket. Claude Code writes with both TTLs (measured on real session
+    # transcripts, roughly a quarter to a third of creation tokens are 5m and the rest
+    # 1h), so either default is wrong for the other share: 5m undercharges the 1h
+    # tokens, 1h overcharges the 5m ones. Anthropic prices a 1h write at 2x base input
+    # against 1.25x for a 5m one, so booking the base bucket keeps an imported estimate
+    # from ever reading above true cost. Callers holding the real split use
+    # POST /v1/usage/external-events, which takes cache_write_1h_tokens directly.
     cache_write_1h = 0
     event_name = attrs.get("event.name")
     if event_name == "api_request":
-        # Claude Code: cache reads/writes are additive (outside input_tokens), and
-        # it uses 1h caching with no split, so cache creation is booked as 1h.
+        # Claude Code: cache reads/writes are additive (outside input_tokens).
         source = "claude_code"
         provider = "anthropic"
         model = attrs.get("model")
@@ -245,7 +252,6 @@ def _build_event(
         output_tokens = _int(attrs.get("output_tokens"))
         cache_read = _int(attrs.get("cache_read_tokens"))
         cache_write = _int(attrs.get("cache_creation_tokens"))
-        cache_write_1h = cache_write
         session = attrs.get("session.id")
         duration = attrs.get("duration_ms", duration_ms)
         cache_tokens_in_prompt = False
