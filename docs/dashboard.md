@@ -167,7 +167,9 @@ gateway.
   dropped traffic, so neither is recorded. Diagnostic detail stays in the
   gateway logs rather than the browser.
 - **Usage**: aggregate usage and analytics, showing spend and volume over time,
-  broken down by model and by user.
+  broken down by model and by user, plus a switchable breakdown by session,
+  endpoint, provider, or source. Clicking any row opens the Activity log scoped
+  to that group, so "spend went up" leads straight to the requests behind it.
 
 ### Catalog
 

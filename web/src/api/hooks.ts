@@ -651,9 +651,11 @@ function usageParams(filters: UsageFilters): URLSearchParams {
   if (filters.status) params.set("status", filters.status);
   if (filters.model) params.set("model", filters.model);
   if (filters.endpoint) params.set("endpoint", filters.endpoint);
+  if (filters.provider) params.set("provider", filters.provider);
   if (filters.user_id) params.set("user_id", filters.user_id);
   if (filters.api_key_id) params.set("api_key_id", filters.api_key_id);
   if (filters.source) params.set("source", filters.source);
+  if (filters.source_label) params.set("source_label", filters.source_label);
   if (filters.priced !== undefined) params.set("priced", String(filters.priced));
   if (filters.counts_toward_budget !== undefined) {
     params.set("counts_toward_budget", String(filters.counts_toward_budget));

@@ -432,9 +432,13 @@ export interface UsageFilters {
   status?: string;
   model?: string;
   endpoint?: string;
+  provider?: string;
   user_id?: string;
   api_key_id?: string;
   source?: string;
+  // Session/project attribution (a row's `source_label`), so the log can be
+  // scoped to the one agent session a breakdown row points at.
+  source_label?: string;
   // Pricing state: true = only priced rows, false = only unpriced (cost null).
   priced?: boolean;
   // Budget participation: false scopes to imported rows (the bulk-op target set).
@@ -501,9 +505,10 @@ export interface UsageTotals {
   unpriced_requests?: number;
 }
 
-// One breakdown row (a model, a user, or an API key). `key` is null both for the
-// synthesized fold row (`is_other: true`) and for usage whose grouping column was
-// NULL, e.g. a since-deleted user (`is_other: false`); `is_other` tells them apart.
+// One breakdown row (a model, a user, an API key, a session, ...). `key` is null
+// both for the synthesized fold row (`is_other: true`) and for usage whose grouping
+// column was NULL, e.g. a since-deleted user or a gateway row with no session label
+// (`is_other: false`); `is_other` tells them apart.
 export interface UsageGroupRow {
   key: string | null;
   cost: number;
@@ -530,6 +535,14 @@ export interface UsageSummary {
   by_model: UsageGroupRow[];
   by_user: UsageGroupRow[];
   by_api_key: UsageGroupRow[];
+  // Provenance: gateway-served traffic vs each imported source (e.g. claude_code).
+  by_source: UsageGroupRow[];
+  // Session/project attribution for agent traffic. Gateway rows carry no label,
+  // so they all group under the single null key.
+  by_source_label: UsageGroupRow[];
+  // API surface (/v1/chat/completions vs /v1/messages vs ...) and upstream provider.
+  by_endpoint: UsageGroupRow[];
+  by_provider: UsageGroupRow[];
   series: UsageSeriesPoint[];
 }
 

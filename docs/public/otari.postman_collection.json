@@ -2131,7 +2131,7 @@
         {
           "name": "List Usage",
           "request": {
-            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, and endpoint.\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
+            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, endpoint,\nprovider, source, and session (``source_label``).\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
             "header": [],
             "method": "GET",
             "url": {
@@ -2180,9 +2180,21 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
                   "disabled": true,
                   "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "disabled": true,
+                  "key": "source_label",
                   "value": ""
                 },
                 {
@@ -2216,7 +2228,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget=&skip=&limit="
+              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&skip=&limit="
             }
           }
         },
@@ -2291,9 +2303,21 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
                   "disabled": true,
                   "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "disabled": true,
+                  "key": "source_label",
                   "value": ""
                 },
                 {
@@ -2315,7 +2339,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget="
+              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget="
             }
           }
         },
@@ -2388,7 +2412,7 @@
         {
           "name": "Usage Summary",
           "request": {
-            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key\n(top rows plus a reconciling ``other`` fold), and a UTC-bucketed time series.",
+            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold), and a UTC-bucketed time series.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2438,9 +2462,21 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
                   "disabled": true,
                   "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "disabled": true,
+                  "key": "source_label",
                   "value": ""
                 },
                 {
@@ -2468,14 +2504,14 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget=&bucket="
+              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&bucket="
             }
           }
         },
         {
           "name": "Usage Summary Csv",
           "request": {
-            "description": "Download the per-model / per-user / per-key / per-source breakdown as CSV.\n\nA dedicated route rather than a ``format=csv`` flag on ``/summary`` so that\nendpoint keeps a single JSON response model and a clean OpenAPI schema. The\nexport is **uncapped** (no top-N fold): finance wants every row. Kept separate\nfrom the bare-array ``/v1/usage`` contract, which is untouched.",
+            "description": "Download every breakdown the summary reports, as one CSV.\n\nOne row per (dimension, key): model, user, API key, source, session\n(``source_label``), endpoint, and provider. A dedicated route rather than a\n``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON\nresponse model and a clean OpenAPI schema. The export is **uncapped** (no\ntop-N fold): finance wants every row. Kept separate from the bare-array\n``/v1/usage`` contract, which is untouched.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2525,9 +2561,21 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
                   "disabled": true,
                   "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "disabled": true,
+                  "key": "source_label",
                   "value": ""
                 },
                 {
@@ -2549,7 +2597,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget="
+              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget="
             }
           }
         }

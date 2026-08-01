@@ -44,6 +44,13 @@ _MAX_SUMMARY_SPAN = timedelta(days=366)
 # single synthesized "other" row (so the tables still reconcile with the totals).
 _BREAKDOWN_TOP_N = 100
 
+# Sessions (``source_label``) are an order of magnitude higher-cardinality than
+# models or users: one agent workload can open hundreds of them in a month, and
+# the interesting signal is a long-ish head ("which tasks burned the budget"),
+# not just the top few. Give that dimension a deeper cap so the head is not
+# swallowed by the "other" fold.
+_SESSION_BREAKDOWN_TOP_N = 250
+
 Bucket = Literal["hour", "day"]
 
 
@@ -127,7 +134,9 @@ _USER_DESC = "Filter to a single user"
 _STATUS_DESC = "Filter to a single status (e.g. 'success' or 'error')"
 _MODEL_DESC = "Filter to a single model"
 _ENDPOINT_DESC = "Filter to a single endpoint (e.g. '/v1/chat/completions')"
+_PROVIDER_DESC = "Filter to a single provider (e.g. 'openai')"
 _SOURCE_DESC = "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')"
+_SOURCE_LABEL_DESC = "Filter to a single session/project label (the source_label carried by imported usage)"
 _API_KEY_DESC = "Filter to a single API key id"
 _PRICED_DESC = "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)"
 _COUNTS_DESC = (
@@ -144,7 +153,9 @@ def _usage_filters(
     status: str | None,
     model: str | None,
     endpoint: str | None,
+    provider: str | None = None,
     source: str | None = None,
+    source_label: str | None = None,
     api_key_id: str | None = None,
     priced: bool | None = None,
     counts_toward_budget: bool | None = None,
@@ -167,8 +178,12 @@ def _usage_filters(
         conditions.append(UsageLog.model == model)
     if endpoint is not None:
         conditions.append(UsageLog.endpoint == endpoint)
+    if provider is not None:
+        conditions.append(UsageLog.provider == provider)
     if source is not None:
         conditions.append(UsageLog.source == source)
+    if source_label is not None:
+        conditions.append(UsageLog.source_label == source_label)
     if api_key_id is not None:
         conditions.append(UsageLog.api_key_id == api_key_id)
     if priced is True:
@@ -189,7 +204,9 @@ async def list_usage(
     status: str | None = Query(default=None, description=_STATUS_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
+    provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
+    source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
@@ -198,7 +215,8 @@ async def list_usage(
 ) -> list[UsageEntry]:
     """List usage logs ordered by timestamp (most recent first).
 
-    Supports optional filters for time range, user, status, model, and endpoint.
+    Supports optional filters for time range, user, status, model, endpoint,
+    provider, source, and session (``source_label``).
     Paginated via skip/limit. The return shape is a bare JSON array; external
     billing/analytics consumers depend on this, so the total row count for a
     paginated UI is served separately by ``GET /v1/usage/count`` rather than
@@ -212,7 +230,9 @@ async def list_usage(
         status=status,
         model=model,
         endpoint=endpoint,
+        provider=provider,
         source=source,
+        source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
         counts_toward_budget=counts_toward_budget,
@@ -267,7 +287,9 @@ async def count_usage(
     status: str | None = Query(default=None, description=_STATUS_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
+    provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
+    source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
@@ -287,7 +309,9 @@ async def count_usage(
         status=status,
         model=model,
         endpoint=endpoint,
+        provider=provider,
         source=source,
+        source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
         counts_toward_budget=counts_toward_budget,
@@ -359,7 +383,7 @@ class UsageTotals(BaseModel):
 
 
 class UsageGroupRow(BaseModel):
-    """One breakdown row (a model, a user, or an API key).
+    """One breakdown row (a model, a user, an API key, a session, ...).
 
     ``key`` is None both for the synthesized fold row (``is_other=True``) and for a
     real group whose column was NULL (e.g. usage from a since-deleted user, with
@@ -395,6 +419,16 @@ class UsageSummary(BaseModel):
     by_user: list[UsageGroupRow]
     by_api_key: list[UsageGroupRow]
     by_source: list[UsageGroupRow]
+    # Session/project attribution for agent traffic: a handful of long-running
+    # sessions routinely account for most of a workload's tokens, so this is the
+    # dimension that turns "spend went up" into "this task went wrong". Gateway
+    # rows carry no label, so they group under a single null key.
+    by_source_label: list[UsageGroupRow]
+    # API surface (/v1/chat/completions vs /v1/messages vs /v1/responses) and
+    # upstream provider: the two splits a gateway operator needs and that no
+    # other endpoint reports.
+    by_endpoint: list[UsageGroupRow]
+    by_provider: list[UsageGroupRow]
     series: list[UsageSeriesPoint]
 
 
@@ -552,7 +586,9 @@ async def _summary_context(
     status: str | None,
     model: str | None,
     endpoint: str | None,
+    provider: str | None = None,
     source: str | None = None,
+    source_label: str | None = None,
     api_key_id: str | None = None,
     priced: bool | None = None,
     counts_toward_budget: bool | None = None,
@@ -569,7 +605,9 @@ async def _summary_context(
         status=status,
         model=model,
         endpoint=endpoint,
+        provider=provider,
         source=source,
+        source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
         counts_toward_budget=counts_toward_budget,
@@ -629,7 +667,9 @@ async def usage_summary(
     status: str | None = Query(default=None, description=_STATUS_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
+    provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
+    source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
@@ -639,8 +679,9 @@ async def usage_summary(
 
     Range-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``
     list, every aggregate is scoped to a bounded window so it stays served by the
-    timestamp index. Returns grand totals, breakdowns by model / user / API key
-    (top rows plus a reconciling ``other`` fold), and a UTC-bucketed time series.
+    timestamp index. Returns grand totals, breakdowns by model / user / API key /
+    source / session (``source_label``) / endpoint / provider (top rows plus a
+    reconciling ``other`` fold), and a UTC-bucketed time series.
     """
     start, end, conditions, totals = await _summary_context(
         db,
@@ -650,7 +691,9 @@ async def usage_summary(
         status=status,
         model=model,
         endpoint=endpoint,
+        provider=provider,
         source=source,
+        source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
         counts_toward_budget=counts_toward_budget,
@@ -659,6 +702,9 @@ async def usage_summary(
     by_user = await _breakdown(db, UsageLog.user_id, conditions, totals, limit=_BREAKDOWN_TOP_N)
     by_api_key = await _breakdown(db, UsageLog.api_key_id, conditions, totals, limit=_BREAKDOWN_TOP_N)
     by_source = await _breakdown(db, UsageLog.source, conditions, totals, limit=_BREAKDOWN_TOP_N)
+    by_source_label = await _breakdown(db, UsageLog.source_label, conditions, totals, limit=_SESSION_BREAKDOWN_TOP_N)
+    by_endpoint = await _breakdown(db, UsageLog.endpoint, conditions, totals, limit=_BREAKDOWN_TOP_N)
+    by_provider = await _breakdown(db, UsageLog.provider, conditions, totals, limit=_BREAKDOWN_TOP_N)
 
     expr = _bucket_expr(_dialect_name(db), bucket)
     series_rows = (
@@ -686,6 +732,9 @@ async def usage_summary(
         by_user=by_user,
         by_api_key=by_api_key,
         by_source=by_source,
+        by_source_label=by_source_label,
+        by_endpoint=by_endpoint,
+        by_provider=by_provider,
         series=series,
     )
 
@@ -711,17 +760,21 @@ async def usage_summary_csv(
     status: str | None = Query(default=None, description=_STATUS_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
+    provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
+    source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
 ) -> Response:
-    """Download the per-model / per-user / per-key / per-source breakdown as CSV.
+    """Download every breakdown the summary reports, as one CSV.
 
-    A dedicated route rather than a ``format=csv`` flag on ``/summary`` so that
-    endpoint keeps a single JSON response model and a clean OpenAPI schema. The
-    export is **uncapped** (no top-N fold): finance wants every row. Kept separate
-    from the bare-array ``/v1/usage`` contract, which is untouched.
+    One row per (dimension, key): model, user, API key, source, session
+    (``source_label``), endpoint, and provider. A dedicated route rather than a
+    ``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON
+    response model and a clean OpenAPI schema. The export is **uncapped** (no
+    top-N fold): finance wants every row. Kept separate from the bare-array
+    ``/v1/usage`` contract, which is untouched.
     """
     _start, _end, conditions, totals = await _summary_context(
         db,
@@ -731,7 +784,9 @@ async def usage_summary_csv(
         status=status,
         model=model,
         endpoint=endpoint,
+        provider=provider,
         source=source,
+        source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
         counts_toward_budget=counts_toward_budget,
@@ -741,6 +796,9 @@ async def usage_summary_csv(
         ("user", await _breakdown(db, UsageLog.user_id, conditions, totals, limit=None)),
         ("api_key", await _breakdown(db, UsageLog.api_key_id, conditions, totals, limit=None)),
         ("source", await _breakdown(db, UsageLog.source, conditions, totals, limit=None)),
+        ("session", await _breakdown(db, UsageLog.source_label, conditions, totals, limit=None)),
+        ("endpoint", await _breakdown(db, UsageLog.endpoint, conditions, totals, limit=None)),
+        ("provider", await _breakdown(db, UsageLog.provider, conditions, totals, limit=None)),
     )
 
     buffer = io.StringIO()

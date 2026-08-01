@@ -5322,7 +5322,7 @@
         "type": "object"
       },
       "UsageGroupRow": {
-        "description": "One breakdown row (a model, a user, or an API key).\n\n``key`` is None both for the synthesized fold row (``is_other=True``) and for a\nreal group whose column was NULL (e.g. usage from a since-deleted user, with\n``is_other=False``). ``is_other`` disambiguates the two so the UI does not\nmislabel deleted-user usage as the fold.",
+        "description": "One breakdown row (a model, a user, an API key, a session, ...).\n\n``key`` is None both for the synthesized fold row (``is_other=True``) and for a\nreal group whose column was NULL (e.g. usage from a since-deleted user, with\n``is_other=False``). ``is_other`` disambiguates the two so the UI does not\nmislabel deleted-user usage as the fold.",
         "properties": {
           "cost": {
             "title": "Cost",
@@ -5739,6 +5739,13 @@
             "title": "By Api Key",
             "type": "array"
           },
+          "by_endpoint": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By Endpoint",
+            "type": "array"
+          },
           "by_model": {
             "items": {
               "$ref": "#/components/schemas/UsageGroupRow"
@@ -5746,11 +5753,25 @@
             "title": "By Model",
             "type": "array"
           },
+          "by_provider": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By Provider",
+            "type": "array"
+          },
           "by_source": {
             "items": {
               "$ref": "#/components/schemas/UsageGroupRow"
             },
             "title": "By Source",
+            "type": "array"
+          },
+          "by_source_label": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By Source Label",
             "type": "array"
           },
           "by_user": {
@@ -5788,6 +5809,9 @@
           "by_user",
           "by_api_key",
           "by_source",
+          "by_source_label",
+          "by_endpoint",
+          "by_provider",
           "series"
         ],
         "title": "UsageSummary",
@@ -9533,7 +9557,7 @@
         ]
       },
       "get": {
-        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, and endpoint.\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
+        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, endpoint,\nprovider, source, and session (``source_label``).\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
         "operationId": "list_usage_v1_usage_get",
         "parameters": [
           {
@@ -9647,6 +9671,24 @@
             }
           },
           {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
             "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
             "in": "query",
             "name": "source",
@@ -9662,6 +9704,24 @@
               ],
               "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
               "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "title": "Source Label"
             }
           },
           {
@@ -9898,6 +9958,24 @@
             }
           },
           {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
             "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
             "in": "query",
             "name": "source",
@@ -9913,6 +9991,24 @@
               ],
               "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
               "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "title": "Source Label"
             }
           },
           {
@@ -10108,7 +10204,7 @@
     },
     "/v1/usage/summary": {
       "get": {
-        "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key\n(top rows plus a reconciling ``other`` fold), and a UTC-bucketed time series.",
+        "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold), and a UTC-bucketed time series.",
         "operationId": "usage_summary_v1_usage_summary_get",
         "parameters": [
           {
@@ -10222,6 +10318,24 @@
             }
           },
           {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
             "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
             "in": "query",
             "name": "source",
@@ -10237,6 +10351,24 @@
               ],
               "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
               "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "title": "Source Label"
             }
           },
           {
@@ -10348,7 +10480,7 @@
     },
     "/v1/usage/summary.csv": {
       "get": {
-        "description": "Download the per-model / per-user / per-key / per-source breakdown as CSV.\n\nA dedicated route rather than a ``format=csv`` flag on ``/summary`` so that\nendpoint keeps a single JSON response model and a clean OpenAPI schema. The\nexport is **uncapped** (no top-N fold): finance wants every row. Kept separate\nfrom the bare-array ``/v1/usage`` contract, which is untouched.",
+        "description": "Download every breakdown the summary reports, as one CSV.\n\nOne row per (dimension, key): model, user, API key, source, session\n(``source_label``), endpoint, and provider. A dedicated route rather than a\n``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON\nresponse model and a clean OpenAPI schema. The export is **uncapped** (no\ntop-N fold): finance wants every row. Kept separate from the bare-array\n``/v1/usage`` contract, which is untouched.",
         "operationId": "usage_summary_csv_v1_usage_summary_csv_get",
         "parameters": [
           {
@@ -10462,6 +10594,24 @@
             }
           },
           {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
             "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
             "in": "query",
             "name": "source",
@@ -10477,6 +10627,24 @@
               ],
               "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
               "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "title": "Source Label"
             }
           },
           {

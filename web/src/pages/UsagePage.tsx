@@ -1,5 +1,6 @@
 import { Button, Spinner } from "@heroui/react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
@@ -18,6 +19,7 @@ import type {
   UsageGroupRow,
   UsageMutationSelection,
   UsageSeriesPoint,
+  UsageSummary,
 } from "@/api/types";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { BulkActionBar } from "@/components/BulkActionBar";
@@ -68,6 +70,12 @@ interface BreakdownProps {
   // Turns a row key into the Activity-page filter to drill into (model vs user).
   onDrill: (key: string) => void;
   loading: boolean;
+  // How a real group whose column was NULL reads. The default suits an id that
+  // has gone missing (a deleted user); a dimension where NULL is a normal state
+  // (gateway rows carry no session label) passes its own wording.
+  unknownLabel?: string;
+  // Optional control rendered beside the heading (the dimension picker).
+  action?: ReactNode;
 }
 
 // One breakdown (by model / by user). Rows are spend-ranked with an inline
@@ -84,6 +92,8 @@ function BreakdownTable({
   emptyLabel,
   onDrill,
   loading,
+  unknownLabel = "(unknown)",
+  action,
 }: BreakdownProps) {
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? rows : rows.slice(0, TABLE_TOP_N);
@@ -106,7 +116,7 @@ function BreakdownTable({
               {row.is_other
                 ? `Other (${row.requests.toLocaleString()} req)`
                 : row.key === null
-                  ? "(unknown)"
+                  ? unknownLabel
                   : row.key}
             </span>
             <span className="h-1 w-full overflow-hidden rounded-full bg-[var(--otari-line)]">
@@ -125,7 +135,10 @@ function BreakdownTable({
 
   return (
     <div className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-[var(--otari-ink)]">{title}</h2>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-[var(--otari-ink)]">{title}</h2>
+        {action}
+      </div>
       <DataTable
         ariaLabel={title}
         columns={columns}
@@ -152,6 +165,35 @@ function BreakdownTable({
       ) : null}
     </div>
   );
+}
+
+// ---------- secondary breakdown dimensions ----------
+
+// Model and user get their own always-visible tables (the two questions asked on
+// every visit). The rest share one panel behind a picker: each answers a real
+// question, but only one at a time, and six stacked tables would bury the trend.
+// Every key doubles as the Activity-log filter to drill into, so a picked row
+// scopes the request log to exactly the group that was clicked.
+type BreakdownDimension = "source_label" | "endpoint" | "provider" | "source";
+
+const DIMENSION_TABS: { key: BreakdownDimension; label: string; unknownLabel: string }[] = [
+  // Sessions first: for agent traffic a few long-running sessions carry most of
+  // the spend, so this is usually the row that explains a bill.
+  { key: "source_label", label: "Session", unknownLabel: "(no session)" },
+  { key: "endpoint", label: "Endpoint", unknownLabel: "(unknown)" },
+  { key: "provider", label: "Provider", unknownLabel: "(unknown)" },
+  { key: "source", label: "Source", unknownLabel: "(unknown)" },
+];
+
+function dimensionRows(data: UsageSummary | undefined, dimension: BreakdownDimension): UsageGroupRow[] {
+  if (!data) return [];
+  return dimension === "source_label"
+    ? data.by_source_label
+    : dimension === "endpoint"
+      ? data.by_endpoint
+      : dimension === "provider"
+        ? data.by_provider
+        : data.by_source;
 }
 
 // ---------- chart ----------
@@ -417,6 +459,7 @@ export function UsagePage() {
   const [userFilter, setUserFilter] = useState("");
   const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [metric, setMetric] = useState<ChartMetric>("cost");
+  const [dimension, setDimension] = useState<BreakdownDimension>("source_label");
 
   const winStart = customMode ? customStart : startDate;
   const winEnd = customMode ? customEnd : undefined;
@@ -582,6 +625,8 @@ export function UsagePage() {
 
   const errorRate = totals && totals.request_count > 0 ? totals.error_count / totals.request_count : 0;
 
+  const activeDimension = DIMENSION_TABS.find((t) => t.key === dimension) ?? DIMENSION_TABS[0];
+
   // The bucketed series is already on the wire; reuse it for tile sparklines. A
   // single point has no trend to draw, so sparklines only appear with 2+ buckets.
   const series = data?.series ?? [];
@@ -740,6 +785,40 @@ export function UsagePage() {
               loading={summary.isLoading}
             />
           </div>
+
+          {/* The remaining dimensions, one at a time behind a picker. Session is
+              the default: it is the grouping that names the work behind a bill. */}
+          <BreakdownTable
+            title={`Spend by ${activeDimension.label.toLowerCase()}`}
+            rows={dimensionRows(data, dimension)}
+            totalCost={totals?.cost ?? 0}
+            emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
+            unknownLabel={activeDimension.unknownLabel}
+            // Drilling keeps the entity filters, like the model/user tables do.
+            onDrill={(key) =>
+              drillTo({
+                [dimension]: key,
+                model: modelFilter.trim() || undefined,
+                user_id: userFilter || undefined,
+                api_key_id: apiKeyFilter || undefined,
+              })
+            }
+            loading={summary.isLoading}
+            action={
+              <div className="inline-flex gap-1.5">
+                {DIMENSION_TABS.map((tab) => (
+                  <Button
+                    key={tab.key}
+                    size="sm"
+                    variant={dimension === tab.key ? "primary" : "outline"}
+                    onPress={() => setDimension(tab.key)}
+                  >
+                    {tab.label}
+                  </Button>
+                ))}
+              </div>
+            }
+          />
 
           {/* Raw rows for the same window, with the imported-row bulk actions. */}
           <UsageRequests filters={filters} anyFilter={anyFilter} />

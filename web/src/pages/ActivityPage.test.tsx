@@ -179,6 +179,30 @@ describe("ActivityPage", () => {
     await waitFor(() => expect(listCalls(calls).at(-1)).not.toContain("source="));
   });
 
+  it("honors a session drill-down and shows it as a clearable chip", async () => {
+    // The Usage page's session breakdown links here scoped to one source_label.
+    // Without the filter the log would silently show every session's requests.
+    const { calls } = mockApi({ rows: [entry({ source: "claude_code", source_label: "sess-1" })] });
+    renderPage(<ActivityPage />, "/activity?source_label=sess-1");
+
+    await screen.findByText("gpt-4o");
+    expect(listCalls(calls).some((url) => url.includes("source_label=sess-1"))).toBe(true);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Session/ }));
+    await waitFor(() => expect(listCalls(calls).at(-1)).not.toContain("source_label="));
+  });
+
+  it("honors endpoint and provider drill-downs", async () => {
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?endpoint=%2Fv1%2Fmessages&provider=anthropic");
+
+    await screen.findByText("gpt-4o");
+    const urls = listCalls(calls);
+    expect(urls.some((url) => url.includes("endpoint=%2Fv1%2Fmessages"))).toBe(true);
+    expect(urls.some((url) => url.includes("provider=anthropic"))).toBe(true);
+  });
+
   it("renders latency over a second as seconds and null latency as an em-dash", async () => {
     mockApi({
       rows: [

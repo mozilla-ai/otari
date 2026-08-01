@@ -34,6 +34,25 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
       { key: "bob", cost: 340, tokens: 4_400_000, requests: 34_000, is_other: false },
     ],
     by_api_key: [],
+    by_source: [
+      { key: "gateway", cost: 1_000, tokens: 9_000_000, requests: 60_100, is_other: false },
+      { key: "claude_code", cost: 240.5, tokens: 3_400_000, requests: 23_900, is_other: false },
+    ],
+    by_source_label: [
+      { key: "project:otari", cost: 700, tokens: 6_000_000, requests: 30_100, is_other: false },
+      { key: "project:docs", cost: 200, tokens: 2_000_000, requests: 9_200, is_other: false },
+      // Gateway traffic carries no session label: a real group with a null key,
+      // not the synthesized fold.
+      { key: null, cost: 340.5, tokens: 4_400_000, requests: 44_700, is_other: false },
+    ],
+    by_endpoint: [
+      { key: "/v1/chat/completions", cost: 900, tokens: 8_000_000, requests: 50_100, is_other: false },
+      { key: "/v1/messages", cost: 340.5, tokens: 4_400_000, requests: 33_900, is_other: false },
+    ],
+    by_provider: [
+      { key: "openai", cost: 880, tokens: 7_000_000, requests: 45_100, is_other: false },
+      { key: "anthropic", cost: 360.5, tokens: 5_400_000, requests: 38_900, is_other: false },
+    ],
     series: [
       { bucket_start: "2026-07-19T00:00:00Z", cost: 400, tokens: 4_000_000, requests: 28_000 },
       { bucket_start: "2026-07-20T00:00:00Z", cost: 840.5, tokens: 8_400_000, requests: 56_000 },
@@ -253,6 +272,78 @@ describe("UsagePage", () => {
     expect(loc.startsWith("/activity")).toBe(true);
     expect(loc).toContain("model=gpt-5.6");
     expect(loc).toContain("api_key_id=key-1");
+  });
+
+  it("shows the session breakdown by default, labelling unlabelled gateway traffic", async () => {
+    mockApi(summary());
+    renderPage(<UsagePage />);
+
+    // Session is the default secondary dimension: it is what names the work
+    // behind a bill for agent traffic.
+    expect(await screen.findByText("project:otari")).toBeInTheDocument();
+    expect(screen.getByText("Spend by session")).toBeInTheDocument();
+    expect(screen.getByText("project:docs")).toBeInTheDocument();
+    // Gateway rows carry no label. That is a real group, not the "other" fold,
+    // so it must not read as unknown/missing data.
+    expect(screen.getByText("(no session)")).toBeInTheDocument();
+  });
+
+  it("switches the secondary breakdown between session, endpoint, provider, and source", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("project:otari");
+
+    await user.click(screen.getByRole("button", { name: "Provider" }));
+    expect(screen.getByText("Spend by provider")).toBeInTheDocument();
+    expect(screen.getByText("anthropic")).toBeInTheDocument();
+    expect(screen.queryByText("project:otari")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Endpoint" }));
+    expect(screen.getByText("/v1/chat/completions")).toBeInTheDocument();
+
+    // by_source is computed and shipped by the server; it now has a home in the UI.
+    await user.click(screen.getByRole("button", { name: "Source" }));
+    expect(screen.getByText("claude_code")).toBeInTheDocument();
+  });
+
+  it("drills into the Activity log scoped to the clicked session", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+
+    const row = (await screen.findByText("project:otari")).closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
+    expect(loc.startsWith("/activity")).toBe(true);
+    expect(loc).toContain("source_label=project%3Aotari");
+  });
+
+  it("drills into the Activity log scoped to the clicked provider", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("project:otari");
+
+    await user.click(screen.getByRole("button", { name: "Provider" }));
+    const row = screen.getByText("anthropic").closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
+    expect(loc).toContain("provider=anthropic");
+  });
+
+  it("does not drill on the unlabelled-session row, which has no id to filter on", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+
+    const row = (await screen.findByText("(no session)")).closest("tr")!;
+    await user.click(row);
+
+    // Still on the Usage page: a null key cannot scope the request log.
+    expect(screen.queryByRole("status", { name: "Current location" })).not.toBeInTheDocument();
   });
 
   it("filters models by typeahead and commits the exact picked model", async () => {

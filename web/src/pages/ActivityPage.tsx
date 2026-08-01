@@ -112,6 +112,9 @@ const URL_DEFAULTS = {
   api_key_id: "",
   priced: "",
   source: "",
+  source_label: "",
+  endpoint: "",
+  provider: "",
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
 } as const;
@@ -268,6 +271,12 @@ export function ActivityPage() {
   // Provenance. No select of its own: it arrives from a drill-down (the pricing
   // alarm links here scoped to gateway traffic) and is visible/clearable as a chip.
   const sourceFilter = url.get("source");
+  // The Usage-page secondary breakdowns (session / endpoint / provider) drill in
+  // the same way: no select of their own, carried as a chip so the scoping is
+  // visible and one click removes it.
+  const sessionFilter = url.get("source_label");
+  const endpointFilter = url.get("endpoint");
+  const providerFilter = url.get("provider");
   const page = Math.max(0, url.getNumber("page"));
   // Snap URL-supplied sizes to the nearest offered option: selection latency
   // grows linearly with rows on the page, so an old bookmark with size=500
@@ -304,9 +313,23 @@ export function ActivityPage() {
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
       source: sourceFilter || undefined,
+      source_label: sessionFilter || undefined,
+      endpoint: endpointFilter || undefined,
+      provider: providerFilter || undefined,
       priced,
     }),
-    [win, statusFilter, modelFilter, userFilter, apiKeyFilter, sourceFilter, priced],
+    [
+      win,
+      statusFilter,
+      modelFilter,
+      userFilter,
+      apiKeyFilter,
+      sourceFilter,
+      sessionFilter,
+      endpointFilter,
+      providerFilter,
+      priced,
+    ],
   );
 
   const selection = useTableSelection();
@@ -336,8 +359,11 @@ export function ActivityPage() {
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
       source: sourceFilter || undefined,
+      source_label: sessionFilter || undefined,
+      endpoint: endpointFilter || undefined,
+      provider: providerFilter || undefined,
     }),
-    [win, statusFilter, userFilter, apiKeyFilter, sourceFilter],
+    [win, statusFilter, userFilter, apiKeyFilter, sourceFilter, sessionFilter, endpointFilter, providerFilter],
   );
   const modelSummary = useUsageSummary(modelSuggestFilters, "day");
   const modelOptions =
@@ -373,9 +399,25 @@ export function ActivityPage() {
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
       source: sourceFilter || undefined,
+      source_label: sessionFilter || undefined,
+      endpoint: endpointFilter || undefined,
+      provider: providerFilter || undefined,
       priced,
     }),
-    [winOutsideExtent, win, extentWin, statusFilter, modelFilter, userFilter, apiKeyFilter, sourceFilter, priced],
+    [
+      winOutsideExtent,
+      win,
+      extentWin,
+      statusFilter,
+      modelFilter,
+      userFilter,
+      apiKeyFilter,
+      sourceFilter,
+      sessionFilter,
+      endpointFilter,
+      providerFilter,
+      priced,
+    ],
   );
   const contextSummary = useUsageSummary(contextFilters, extentBucket);
   const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
@@ -395,7 +437,16 @@ export function ActivityPage() {
   const timeFiltered =
     Boolean(startParam || endParam) || (range !== ACTIVITY_DEFAULT_KEY && rangePreset?.seconds != null);
   const anyFilter = Boolean(
-    statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || pricedFilter || sourceFilter || timeFiltered,
+    statusFilter ||
+      modelFilter.trim() ||
+      userFilter ||
+      apiKeyFilter ||
+      pricedFilter ||
+      sourceFilter ||
+      sessionFilter ||
+      endpointFilter ||
+      providerFilter ||
+      timeFiltered,
   );
 
   // Active entity filters as removable chips (time is driven by the timeline, so
@@ -407,7 +458,17 @@ export function ActivityPage() {
     label: u.alias ? `${u.alias} (${u.user_id})` : u.user_id,
   }));
   const clearEntityFilters = () =>
-    url.patch({ status: "", priced: "", model: "", user_id: "", api_key_id: "", source: "" });
+    url.patch({
+      status: "",
+      priced: "",
+      model: "",
+      user_id: "",
+      api_key_id: "",
+      source: "",
+      source_label: "",
+      endpoint: "",
+      provider: "",
+    });
   const filterChips: FilterChip[] = [
     ...(statusFilter ? [{ key: "status", label: "Status", value: labelFrom(STATUS_OPTIONS, statusFilter), onClear: () => url.patch({ status: "" }) }] : []),
     ...(pricedFilter ? [{ key: "priced", label: "Priced", value: labelFrom(PRICED_OPTIONS, pricedFilter), onClear: () => url.patch({ priced: "" }) }] : []),
@@ -415,6 +476,9 @@ export function ActivityPage() {
     ...(modelFilter.trim() ? [{ key: "model", label: "Model", value: modelFilter.trim(), onClear: () => url.patch({ model: "" }) }] : []),
     ...(apiKeyFilter ? [{ key: "key", label: "API key", value: labelFrom(keyOptions, apiKeyFilter), onClear: () => url.patch({ api_key_id: "" }) }] : []),
     ...(sourceFilter ? [{ key: "source", label: "Source", value: sourceLabel(sourceFilter), onClear: () => url.patch({ source: "" }) }] : []),
+    ...(sessionFilter ? [{ key: "session", label: "Session", value: sessionFilter, onClear: () => url.patch({ source_label: "" }) }] : []),
+    ...(endpointFilter ? [{ key: "endpoint", label: "Endpoint", value: endpointFilter, onClear: () => url.patch({ endpoint: "" }) }] : []),
+    ...(providerFilter ? [{ key: "provider", label: "Provider", value: providerFilter, onClear: () => url.patch({ provider: "" }) }] : []),
   ];
 
   // Selection targets imported rows only; enforced gateway rows are disabled so
