@@ -66,9 +66,19 @@ _SUMMARY_DIMENSIONS: dict[str, tuple[Any, int]] = {
     "provider": (UsageLog.provider, _BREAKDOWN_TOP_N),
 }
 
+# The failure taxonomy (``errors_by_status_code``) is a GROUP BY pass like the
+# breakdowns above, but it groups failures by status code rather than spend by a
+# dimension, so it is selectable by name without living in _SUMMARY_DIMENSIONS.
+# It is the one dimension whose response field is not ``by_<name>``.
+_ERROR_TAXONOMY_DIMENSION = "status_code"
+
 # Keep in step with _SUMMARY_DIMENSIONS; the extra ``none`` is the explicit empty
 # selection (a repeated query param cannot express an empty list on the wire).
-SummaryDimension = Literal["model", "user", "api_key", "source", "source_label", "endpoint", "provider", "none"]
+SummaryDimension = Literal[
+    "model", "user", "api_key", "source", "source_label", "endpoint", "provider", "status_code", "none"
+]
+
+_ALL_SUMMARY_DIMENSIONS: set[str] = set(_SUMMARY_DIMENSIONS) | {_ERROR_TAXONOMY_DIMENSION}
 
 
 def _utc_iso(value: datetime) -> str:
@@ -105,6 +115,7 @@ class UsageEntry(BaseModel):
     cost: float | None
     status: str
     error_message: str | None
+    status_code: int | None
     latency_ms: int | None
     source: str
     source_label: str | None
@@ -134,6 +145,7 @@ class UsageEntry(BaseModel):
             cost=log.cost,
             status=log.status,
             error_message=log.error_message,
+            status_code=log.status_code,
             latency_ms=log.latency_ms,
         )
 
@@ -149,6 +161,10 @@ _START_DESC = "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch 
 _END_DESC = "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)"
 _USER_DESC = "Filter to a single user"
 _STATUS_DESC = "Filter to a single status (e.g. 'success' or 'error')"
+_STATUS_CODE_DESC = (
+    "Filter to a single failure status code (e.g. 429 for provider rate limits, "
+    "402 for missing-pricing rejections). Only error rows carry one"
+)
 _MODEL_DESC = "Filter to a single model"
 _ENDPOINT_DESC = "Filter to a single endpoint (e.g. '/v1/chat/completions')"
 _PROVIDER_DESC = "Filter to a single provider (e.g. 'openai')"
@@ -162,7 +178,8 @@ _COUNTS_DESC = (
 )
 _DIMENSIONS_DESC = (
     "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the "
-    "'by_<value>' response field it fills. Omit for every breakdown (the default); pass 'none' for a "
+    "'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in "
+    "'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a "
     "totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that "
     "reads only the tiles or the time series should say so. Fields that were not requested come back empty."
 )
@@ -182,6 +199,7 @@ def _usage_filters(
     api_key_id: str | None = None,
     priced: bool | None = None,
     counts_toward_budget: bool | None = None,
+    status_code: int | None = None,
 ) -> list[ColumnElement[bool]]:
     """Build the shared WHERE conditions for the list and count endpoints.
 
@@ -197,6 +215,8 @@ def _usage_filters(
         conditions.append(UsageLog.user_id == user_id)
     if status is not None:
         conditions.append(UsageLog.status == status)
+    if status_code is not None:
+        conditions.append(UsageLog.status_code == status_code)
     if model is not None:
         conditions.append(UsageLog.model == model)
     if endpoint is not None:
@@ -225,6 +245,7 @@ async def list_usage(
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: str | None = Query(default=None, description=_USER_DESC),
     status: str | None = Query(default=None, description=_STATUS_DESC),
+    status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
@@ -238,8 +259,8 @@ async def list_usage(
 ) -> list[UsageEntry]:
     """List usage logs ordered by timestamp (most recent first).
 
-    Supports optional filters for time range, user, status, model, endpoint,
-    provider, source, and session (``source_label``).
+    Supports optional filters for time range, user, status, failure status code,
+    model, endpoint, provider, source, and session (``source_label``).
     Paginated via skip/limit. The return shape is a bare JSON array; external
     billing/analytics consumers depend on this, so the total row count for a
     paginated UI is served separately by ``GET /v1/usage/count`` rather than
@@ -251,6 +272,7 @@ async def list_usage(
         end_date=end_date,
         user_id=user_id,
         status=status,
+        status_code=status_code,
         model=model,
         endpoint=endpoint,
         provider=provider,
@@ -308,6 +330,7 @@ async def count_usage(
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: str | None = Query(default=None, description=_USER_DESC),
     status: str | None = Query(default=None, description=_STATUS_DESC),
+    status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
@@ -330,6 +353,7 @@ async def count_usage(
         end_date=end_date,
         user_id=user_id,
         status=status,
+        status_code=status_code,
         model=model,
         endpoint=endpoint,
         provider=provider,
@@ -421,6 +445,22 @@ class UsageGroupRow(BaseModel):
     is_other: bool = False
 
 
+class UsageErrorCodeRow(BaseModel):
+    """One error-taxonomy row: the failures in the window sharing a status code.
+
+    ``status_code`` is None for failures recorded without one (rows written
+    before the column existed, and failures no HTTP status describes, e.g. a
+    stream that finished without usage data under the ``fail`` policy).
+    ``error_class`` is the coarse display bucket derived from the code, so a UI
+    can group "provider fault" against "my own misconfiguration" without
+    re-deriving a status ladder; the raw code stays alongside it for precision.
+    """
+
+    status_code: int | None
+    error_class: str
+    requests: int
+
+
 class UsageSeriesPoint(BaseModel):
     """One time bucket. ``bucket_start`` is canonical ISO-8601 UTC (``...Z``),
     identical across SQLite and PostgreSQL for the same underlying instant."""
@@ -457,6 +497,9 @@ class UsageSummary(BaseModel):
     # other endpoint reports.
     by_endpoint: list[UsageGroupRow]
     by_provider: list[UsageGroupRow]
+    # Failures only, so the taxonomy is not swamped by the successes that carry
+    # no status code. Counts reconcile with ``totals.error_count``.
+    errors_by_status_code: list[UsageErrorCodeRow]
     series: list[UsageSeriesPoint]
 
 
@@ -605,6 +648,60 @@ async def _breakdown(
     return result
 
 
+def error_class_for(status_code: int | None) -> str:
+    """Coarse display bucket for a failure's HTTP status code.
+
+    401 and 403 read as ``auth`` rather than as a budget denial because the codes
+    that actually reach this column come from upstream: a provider rejecting the
+    gateway's credentials. Budget and blocked-user rejections are refused before
+    anything is logged, so they have no row here to classify (see #317).
+    """
+    if status_code is None:
+        return "unknown"
+    if status_code == 402:
+        return "pricing"
+    if status_code == 429:
+        return "rate_limit"
+    if status_code in (401, 403, 407):
+        return "auth"
+    if 500 <= status_code <= 599:
+        return "provider_error"
+    if 400 <= status_code <= 499:
+        return "client_error"
+    return "unknown"
+
+
+async def _errors_by_status_code(
+    db: AsyncSession,
+    conditions: list[ColumnElement[bool]],
+) -> list[UsageErrorCodeRow]:
+    """Failures in the window grouped by status code, most frequent first.
+
+    The whole point of the column: this is a GROUP BY rather than substring
+    matching over provider-specific error prose. Capped at ``_BREAKDOWN_TOP_N``
+    distinct codes, which no real window reaches (HTTP has far fewer), so unlike
+    the cost breakdowns there is no synthesized fold row.
+    """
+    request_count = func.count()
+    rows = (
+        await db.execute(
+            select(UsageLog.status_code, request_count)
+            .where(*conditions, UsageLog.status == "error")
+            .group_by(UsageLog.status_code)
+            .order_by(request_count.desc())
+            .limit(_BREAKDOWN_TOP_N)
+        )
+    ).all()
+    return [
+        UsageErrorCodeRow(
+            status_code=row[0],
+            error_class=error_class_for(row[0]),
+            requests=int(row[1]),
+        )
+        for row in rows
+    ]
+
+
 async def _summary_context(
     db: AsyncSession,
     *,
@@ -620,6 +717,7 @@ async def _summary_context(
     api_key_id: str | None = None,
     priced: bool | None = None,
     counts_toward_budget: bool | None = None,
+    status_code: int | None = None,
 ) -> tuple[datetime, datetime, list[ColumnElement[bool]], UsageTotals]:
     """Resolve the bounded window, the shared WHERE conditions, and the grand
     totals: the common preamble both summary endpoints run, kept in one place so a
@@ -631,6 +729,7 @@ async def _summary_context(
         end_date=end,
         user_id=user_id,
         status=status,
+        status_code=status_code,
         model=model,
         endpoint=endpoint,
         provider=provider,
@@ -693,6 +792,7 @@ async def usage_summary(
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: str | None = Query(default=None, description=_USER_DESC),
     status: str | None = Query(default=None, description=_STATUS_DESC),
+    status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
@@ -710,10 +810,11 @@ async def usage_summary(
     list, every aggregate is scoped to a bounded window so it stays served by the
     timestamp index. Returns grand totals, breakdowns by model / user / API key /
     source / session (``source_label``) / endpoint / provider (top rows plus a
-    reconciling ``other`` fold), and a UTC-bucketed time series.
+    reconciling ``other`` fold), the error taxonomy grouped by failure status code,
+    and a UTC-bucketed time series.
 
     Each breakdown is its own ``GROUP BY`` pass, so a caller that reads only the
-    totals or the series should narrow ``dimensions`` rather than pay for all seven
+    totals or the series should narrow ``dimensions`` rather than pay for all eight
     (the dashboard's tiles, timeline context, and model typeahead all do). Omitting
     the parameter keeps the full set.
     """
@@ -723,6 +824,7 @@ async def usage_summary(
         end_date=end_date,
         user_id=user_id,
         status=status,
+        status_code=status_code,
         model=model,
         endpoint=endpoint,
         provider=provider,
@@ -734,12 +836,18 @@ async def usage_summary(
     )
     # ``none`` is dropped rather than rejected: it exists only so a caller can send
     # an empty selection, and it never contributes a dimension of its own.
-    requested: set[str] = set(_SUMMARY_DIMENSIONS) if dimensions is None else {d for d in dimensions if d != "none"}
+    requested: set[str] = _ALL_SUMMARY_DIMENSIONS if dimensions is None else {d for d in dimensions if d != "none"}
     breakdowns = {
         name: await _breakdown(db, column, conditions, totals, limit=cap)
         for name, (column, cap) in _SUMMARY_DIMENSIONS.items()
         if name in requested
     }
+    # The failure taxonomy is a GROUP BY pass like the others, so it answers to the
+    # same selector rather than being charged to every caller: the tiles and the
+    # timeline ask for no dimensions at all.
+    errors_by_status_code = (
+        await _errors_by_status_code(db, conditions) if _ERROR_TAXONOMY_DIMENSION in requested else []
+    )
 
     expr = _bucket_expr(_dialect_name(db), bucket)
     series_rows = (
@@ -770,6 +878,7 @@ async def usage_summary(
         by_source_label=breakdowns.get("source_label", []),
         by_endpoint=breakdowns.get("endpoint", []),
         by_provider=breakdowns.get("provider", []),
+        errors_by_status_code=errors_by_status_code,
         series=series,
     )
 
@@ -797,6 +906,7 @@ async def usage_summary_csv(
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: str | None = Query(default=None, description=_USER_DESC),
     status: str | None = Query(default=None, description=_STATUS_DESC),
+    status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
@@ -821,6 +931,7 @@ async def usage_summary_csv(
         end_date=end_date,
         user_id=user_id,
         status=status,
+        status_code=status_code,
         model=model,
         endpoint=endpoint,
         provider=provider,

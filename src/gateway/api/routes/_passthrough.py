@@ -37,6 +37,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._pipeline import (
     _elapsed_ms,
     _raise_for_unresolvable_model,
+    failure_status_code,
     log_gateway_rejection,
     rate_limit_headers,
     throttle_early_rejection,
@@ -212,17 +213,20 @@ async def run_passthrough(
                 provider=None,
                 endpoint=endpoint,
                 detail=str(exc.detail),
+                status_code=exc.status_code,
                 started_at=started_at,
             )
         raise
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    async def _log_rejection(detail: str, *, row_model: str, row_provider: str | None) -> None:
+    async def _log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
         """Record a gateway-side rejection of this request.
 
         Call after refunding the reservation, if one is held; this only writes a
         row (see :func:`log_gateway_rejection`) and never touches the budget.
+        ``status_code`` is the status this rejection is about to return, which the
+        row keeps so the failure taxonomy can tell a refusal from a provider fault.
         """
         await log_gateway_rejection(
             db=db,
@@ -233,6 +237,7 @@ async def run_passthrough(
             provider=row_provider,
             endpoint=endpoint,
             detail=detail,
+            status_code=status_code,
             started_at=started_at,
         )
 
@@ -255,7 +260,12 @@ async def run_passthrough(
             )
         except HTTPException as exc:
             if exc.status_code != status.HTTP_404_NOT_FOUND:
-                await _log_rejection(str(exc.detail), row_model=row_model, row_provider=row_provider)
+                await _log_rejection(
+                    str(exc.detail),
+                    row_model=row_model,
+                    row_provider=row_provider,
+                    status_code=exc.status_code,
+                )
             raise
 
     pricing: ModelPricing | None = None
@@ -273,14 +283,24 @@ async def run_passthrough(
             resolved = resolve_provider_selector(config, model, user_id)
         except (ValueError, AnyLLMError) as exc:
             await refund_reservation(db, reservation)
-            await _log_rejection(unresolvable_model_detail(model), row_model=model, row_provider=None)
+            await _log_rejection(
+                unresolvable_model_detail(model),
+                row_model=model,
+                row_provider=None,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
             _raise_for_unresolvable_model(model, exc)
     else:
         try:
             resolved = resolve_provider_selector(config, model, user_id)
         except (ValueError, AnyLLMError) as exc:
             # Nothing is reserved yet on this branch, so there is no refund to do.
-            await _log_rejection(unresolvable_model_detail(model), row_model=model, row_provider=None)
+            await _log_rejection(
+                unresolvable_model_detail(model),
+                row_model=model,
+                row_provider=None,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
             _raise_for_unresolvable_model(model, exc)
         if lookup_pricing:
             pricing = await find_model_pricing(db, resolved.instance, resolved.model)
@@ -307,6 +327,7 @@ async def run_passthrough(
                 no_pricing_detail,
                 row_model=resolved.model,
                 row_provider=resolved.instance,
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
             )
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -322,7 +343,12 @@ async def run_passthrough(
     ):
         await refund_reservation(db, reservation)
         not_allowed_detail = model_not_allowed_detail(model)
-        await _log_rejection(not_allowed_detail, row_model=resolved.model, row_provider=resolved.instance)
+        await _log_rejection(
+            not_allowed_detail,
+            row_model=resolved.model,
+            row_provider=resolved.instance,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=not_allowed_detail,
@@ -371,7 +397,7 @@ async def run_passthrough(
         await refund_reservation(db, reservation)
         raise
     except Exception as e:
-        await log_writer.put(_usage_row("error", error_message=str(e)))
+        await log_writer.put(_usage_row("error", error_message=str(e), status_code=failure_status_code(e)))
         await refund_reservation(db, reservation)
 
         mapped = map_provider_error(e) if map_provider_error else None

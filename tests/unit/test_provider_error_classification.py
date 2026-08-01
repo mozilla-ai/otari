@@ -20,6 +20,7 @@ from gateway.api.routes._pipeline import (
     PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL,
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
+    failure_status_code,
 )
 from gateway.api.routes._platform import _provider_failure_http_exc
 
@@ -149,6 +150,52 @@ def test_platform_terminal_exc_falls_back_to_generic() -> None:
     assert exc.status_code == 502
     assert exc.detail == "LLM provider error"
     assert "SECRET" not in str(exc.detail)
+
+
+# ---------------------------------------------------------------------------
+# failure_status_code: what lands on usage_logs.status_code
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status_code", [400, 401, 403, 404, 422, 429, 500, 503, 529])
+def test_failure_status_code_keeps_the_upstream_status(status_code: int) -> None:
+    """The upstream status is recorded verbatim, including the codes the caller
+    never sees: an upstream 401/403 surfaces as a generic 502 (a provider
+    rejecting the gateway's credentials must not be echoed as a client error),
+    but the log has to keep the 401 or the misconfiguration is unattributable.
+    """
+    assert failure_status_code(_StatusError(status_code)) == status_code
+
+
+def test_failure_status_code_reads_an_attached_response() -> None:
+    assert failure_status_code(_ResponseStatusError(429)) == 429
+
+
+def test_failure_status_code_records_504_for_a_timeout() -> None:
+    """A timeout carries no upstream status, so the gateway's own classification
+    is recorded rather than leaving the row unclassifiable."""
+    request = httpx.Request("POST", "http://upstream")
+    for exc in (asyncio.TimeoutError(), httpx.TimeoutException("slow"), OpenAIAPITimeoutError(request=request)):
+        assert failure_status_code(exc) == 504
+
+
+@pytest.mark.parametrize("exc", [Exception(_RAW), ValueError(_RAW), httpx.ConnectError("refused")])
+def test_failure_status_code_falls_back_to_502(exc: BaseException) -> None:
+    """An unreachable or otherwise unclassifiable provider still gets a code, so
+    every error row is groupable."""
+    assert failure_status_code(exc) == 502
+
+
+def test_failure_status_code_unwraps_original_exception() -> None:
+    """An any-llm-wrapped error surfaces the inner status, matching how
+    ``classify_provider_error`` reads the same chain."""
+
+    class _WrappedByAnyLLM(Exception):
+        def __init__(self, original_exception: BaseException) -> None:
+            super().__init__(str(original_exception))
+            self.original_exception = original_exception
+
+    assert failure_status_code(_WrappedByAnyLLM(_StatusError(429))) == 429
 
 
 @pytest.mark.parametrize("status_code", [400, 422])

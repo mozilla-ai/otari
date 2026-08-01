@@ -5466,6 +5466,17 @@
             "title": "Status",
             "type": "string"
           },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
@@ -5512,12 +5523,44 @@
           "cost",
           "status",
           "error_message",
+          "status_code",
           "latency_ms",
           "source",
           "source_label",
           "counts_toward_budget"
         ],
         "title": "UsageEntry",
+        "type": "object"
+      },
+      "UsageErrorCodeRow": {
+        "description": "One error-taxonomy row: the failures in the window sharing a status code.\n\n``status_code`` is None for failures recorded without one (rows written\nbefore the column existed, and failures no HTTP status describes, e.g. a\nstream that finished without usage data under the ``fail`` policy).\n``error_class`` is the coarse display bucket derived from the code, so a UI\ncan group \"provider fault\" against \"my own misconfiguration\" without\nre-deriving a status ladder; the raw code stays alongside it for precision.",
+        "properties": {
+          "error_class": {
+            "title": "Error Class",
+            "type": "string"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          }
+        },
+        "required": [
+          "status_code",
+          "error_class",
+          "requests"
+        ],
+        "title": "UsageErrorCodeRow",
         "type": "object"
       },
       "UsageGroupRow": {
@@ -6006,6 +6049,13 @@
             "title": "End Date",
             "type": "string"
           },
+          "errors_by_status_code": {
+            "items": {
+              "$ref": "#/components/schemas/UsageErrorCodeRow"
+            },
+            "title": "Errors By Status Code",
+            "type": "array"
+          },
           "series": {
             "items": {
               "$ref": "#/components/schemas/UsageSeriesPoint"
@@ -6033,6 +6083,7 @@
           "by_source_label",
           "by_endpoint",
           "by_provider",
+          "errors_by_status_code",
           "series"
         ],
         "title": "UsageSummary",
@@ -9891,7 +9942,7 @@
         ]
       },
       "get": {
-        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, endpoint,\nprovider, source, and session (``source_label``).\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
+        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, and session (``source_label``).\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
         "operationId": "list_usage_v1_usage_get",
         "parameters": [
           {
@@ -9966,6 +10017,24 @@
               ],
               "description": "Filter to a single status (e.g. 'success' or 'error')",
               "title": "Status"
+            }
+          },
+          {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+              "title": "Status Code"
             }
           },
           {
@@ -10256,6 +10325,24 @@
             }
           },
           {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+              "title": "Status Code"
+            }
+          },
+          {
             "description": "Filter to a single model",
             "in": "query",
             "name": "model",
@@ -10538,7 +10625,7 @@
     },
     "/v1/usage/summary": {
       "get": {
-        "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold), and a UTC-bucketed time series.\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all seven\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
+        "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold), the error taxonomy grouped by failure status code,\nand a UTC-bucketed time series.\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
         "operationId": "usage_summary_v1_usage_summary_get",
         "parameters": [
           {
@@ -10613,6 +10700,24 @@
               ],
               "description": "Filter to a single status (e.g. 'success' or 'error')",
               "title": "Status"
+            }
+          },
+          {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+              "title": "Status Code"
             }
           },
           {
@@ -10776,7 +10881,7 @@
             }
           },
           {
-            "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
+            "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
             "in": "query",
             "name": "dimensions",
             "required": false,
@@ -10792,6 +10897,7 @@
                       "source_label",
                       "endpoint",
                       "provider",
+                      "status_code",
                       "none"
                     ],
                     "type": "string"
@@ -10802,7 +10908,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
+              "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
               "title": "Dimensions"
             }
           }
@@ -10920,6 +11026,24 @@
               ],
               "description": "Filter to a single status (e.g. 'success' or 'error')",
               "title": "Status"
+            }
+          },
+          {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+              "title": "Status Code"
             }
           },
           {

@@ -112,6 +112,9 @@ def test_missing_pricing_rejection_is_recorded_in_the_usage_log(strict_pricing_c
     assert rows[0]["status"] == "error"
     assert rows[0]["cost"] is None
     assert "pricing" in rows[0]["error_message"].lower()
+    # The gateway's own rejection code, so this shows up as "pricing" in the error
+    # taxonomy instead of being indistinguishable from a provider fault (#433).
+    assert rows[0]["status_code"] == 402
     # Always an enforced row, never an imported-looking one: the dashboard treats
     # counts_toward_budget=False as imported and offers those to bulk delete and
     # set-price, which must never reach a row the gateway wrote itself.
@@ -145,6 +148,7 @@ def test_passthrough_missing_pricing_rejection_is_recorded_too(strict_pricing_cl
     assert rows[0]["endpoint"] == "/v1/embeddings"
     assert rows[0]["cost"] is None
     assert rows[0]["counts_toward_budget"] is True
+    assert rows[0]["status_code"] == 402
     # Bare model with the instance in `provider`, the one form both scaffolds now
     # use for every row they write (see the chat assertion above).
     assert rows[0]["model"] == "text-embedding-3-small"

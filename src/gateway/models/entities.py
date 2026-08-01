@@ -408,6 +408,17 @@ class UsageLog(Base):
     status: Mapped[str] = mapped_column()
     error_message: Mapped[str | None] = mapped_column()
 
+    # HTTP status that classifies a failure, so failures can be grouped with a
+    # GROUP BY instead of substring-matching provider-specific error prose. It is
+    # the status the provider returned when it sent one (an upstream 401 stays
+    # visible as a credential fault even though the caller sees the generic 502
+    # that keeps gateway config out of the response), otherwise the gateway's own
+    # rejection or classification code (402 missing pricing, 422 tool-loop cap,
+    # 504 timeout, 502 unreachable). Nullable: historical rows predate the column,
+    # a successful request has no failure to classify, and some failures carry no
+    # HTTP status at all (e.g. a stream that ended without usage data).
+    status_code: Mapped[int | None] = mapped_column()
+
     # Total server-side wall-clock for the request, in milliseconds. Nullable:
     # historical rows predate the column, and some write paths (batch jobs,
     # provider-never-reached rejections) have no meaningful request duration.
@@ -439,6 +450,7 @@ class UsageLog(Base):
             "cost": self.cost,
             "status": self.status,
             "error_message": self.error_message,
+            "status_code": self.status_code,
             "latency_ms": self.latency_ms,
         }
 

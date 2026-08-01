@@ -2208,7 +2208,7 @@
         {
           "name": "List Usage",
           "request": {
-            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, endpoint,\nprovider, source, and session (``source_label``).\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
+            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, and session (``source_label``).\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
             "header": [],
             "method": "GET",
             "url": {
@@ -2242,6 +2242,12 @@
                   "description": "Filter to a single status (e.g. 'success' or 'error')",
                   "disabled": true,
                   "key": "status",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+                  "disabled": true,
+                  "key": "status_code",
                   "value": ""
                 },
                 {
@@ -2305,7 +2311,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&skip=&limit="
+              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&skip=&limit="
             }
           }
         },
@@ -2368,6 +2374,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+                  "disabled": true,
+                  "key": "status_code",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single model",
                   "disabled": true,
                   "key": "model",
@@ -2416,7 +2428,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget="
+              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget="
             }
           }
         },
@@ -2489,7 +2501,7 @@
         {
           "name": "Usage Summary",
           "request": {
-            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold), and a UTC-bucketed time series.\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all seven\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
+            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold), the error taxonomy grouped by failure status code,\nand a UTC-bucketed time series.\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2524,6 +2536,12 @@
                   "description": "Filter to a single status (e.g. 'success' or 'error')",
                   "disabled": true,
                   "key": "status",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+                  "disabled": true,
+                  "key": "status_code",
                   "value": ""
                 },
                 {
@@ -2581,13 +2599,13 @@
                   "value": ""
                 },
                 {
-                  "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
+                  "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
                   "disabled": true,
                   "key": "dimensions",
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&bucket=&dimensions="
+              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&bucket=&dimensions="
             }
           }
         },
@@ -2629,6 +2647,12 @@
                   "description": "Filter to a single status (e.g. 'success' or 'error')",
                   "disabled": true,
                   "key": "status",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+                  "disabled": true,
+                  "key": "status_code",
                   "value": ""
                 },
                 {
@@ -2680,7 +2704,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget="
+              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget="
             }
           }
         }

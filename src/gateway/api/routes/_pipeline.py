@@ -297,6 +297,25 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     return None
 
 
+def failure_status_code(exc: BaseException) -> int:
+    """The HTTP status to record on the usage log for an upstream failure.
+
+    Prefers the status the provider actually returned, which is deliberately not
+    always the status the caller saw: an upstream 401/403 surfaces to the caller
+    as a generic 502 (a provider rejecting the gateway's credentials is a
+    gateway-config fault, and the response must not say so), but the log keeps
+    the 401 so "how much of my error rate is my own misconfiguration" stays
+    answerable. When the provider returned no status at all (timeout,
+    unreachable), records the gateway's own classification instead, so an error
+    row still carries a code to group on.
+    """
+    _kind, status_code = upstream_exception_shape(exc)
+    if status_code is not None:
+        return status_code
+    mapping = classify_provider_error(exc)
+    return mapping.status_code if mapping is not None else status.HTTP_502_BAD_GATEWAY
+
+
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
@@ -543,6 +562,7 @@ async def resolve_dispatch_provider(
             provider=None,
             endpoint=adapter.endpoint,
             detail=unresolvable_model_detail(model_selector),
+            status_code=status.HTTP_400_BAD_REQUEST,
             started_at=ctx.started_at,
         )
         _raise_for_unresolvable_model(model_selector, exc)
@@ -723,6 +743,7 @@ async def resolve_request_context(
                     provider=None,
                     endpoint=adapter.endpoint,
                     detail=user_forbidden_detail,
+                    status_code=exc.status_code,
                     started_at=started_at,
                 )
             raise
@@ -765,6 +786,7 @@ async def resolve_request_context(
                 provider=gate_instance,
                 endpoint=adapter.endpoint,
                 detail=not_allowed_detail,
+                status_code=status.HTTP_403_FORBIDDEN,
                 started_at=started_at,
             )
             raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
@@ -811,6 +833,7 @@ async def resolve_request_context(
                     provider=gate_instance,
                     endpoint=adapter.endpoint,
                     detail=str(exc.detail),
+                    status_code=exc.status_code,
                     started_at=started_at,
                 )
             raise
@@ -832,6 +855,7 @@ async def resolve_request_context(
                 provider=gate_instance,
                 endpoint=adapter.endpoint,
                 detail=no_pricing_detail,
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 started_at=started_at,
             )
             raise adapter.error(
@@ -1199,6 +1223,7 @@ async def log_usage(
     response: ChatCompletion | AsyncIterator[ChatCompletionChunk] | None = None,
     usage_override: CompletionUsage | None = None,
     error: str | None = None,
+    status_code: int | None = None,
     cost_override: float | None = None,
     latency_ms: int | None = None,
     counts_toward_budget: bool = True,
@@ -1220,6 +1245,8 @@ async def log_usage(
         response: Response object (if successful)
         usage_override: Usage data for streaming requests
         error: Error message (if failed)
+        status_code: HTTP status classifying the failure (see
+            ``UsageLog.status_code``), or None when nothing was rejected over HTTP
         cost_override: Fixed amount to record when billing without provider usage
         latency_ms: Total server-side request duration in milliseconds, or None
             when the caller has no meaningful duration to record
@@ -1238,6 +1265,7 @@ async def log_usage(
         endpoint=endpoint,
         status="success" if error is None else "error",
         error_message=error,
+        status_code=status_code,
         latency_ms=latency_ms,
         counts_toward_budget=counts_toward_budget,
     )
@@ -1338,6 +1366,7 @@ async def log_gateway_rejection(
     provider: str | None,
     endpoint: str,
     detail: str,
+    status_code: int,
     started_at: float | None,
 ) -> None:
     """Record a request the gateway itself refused before any provider was called.
@@ -1351,6 +1380,13 @@ async def log_gateway_rejection(
 
     Callers own the reservation: refund it before calling this, exactly as the
     pre-existing rejection sites do. Nothing here touches the budget.
+
+    ``status_code`` is the status the caller is about to return, and it is
+    required rather than optional: a rejection row without one classifies as
+    ``unknown`` in the failure taxonomy (``errors_by_status_code``), which is
+    indistinguishable from a pre-column historical row. It is always statically
+    known here, since these are the gateway's own refusals rather than upstream
+    faults, so there is nothing to infer from an exception.
 
     ``counts_toward_budget`` is always True. The dashboard classifies
     ``counts_toward_budget=False`` rows as imported usage and offers them for
@@ -1398,6 +1434,7 @@ async def log_gateway_rejection(
             endpoint=endpoint,
             user_id=user_id,
             error=detail,
+            status_code=status_code,
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=True,
         )
@@ -1416,6 +1453,7 @@ async def _log_failure_and_refund(
     provider: Any,
     model: str,
     error: str,
+    status_code: int | None = None,
 ) -> None:
     if ctx.db is None:
         return
@@ -1428,6 +1466,7 @@ async def _log_failure_and_refund(
         endpoint=adapter.endpoint,
         user_id=ctx.user_id,
         error=error,
+        status_code=status_code,
         latency_ms=_elapsed_ms(ctx.started_at),
         counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
     )
@@ -1678,7 +1717,9 @@ def build_streaming_response(
             await refund_reservation(db, reservation)
             return
         # 'estimate' and 'fail' both charge the up-front estimate; 'fail' also
-        # records the request as errored.
+        # records the request as errored. status_code stays NULL: the stream
+        # itself completed (the caller got a 200), so no HTTP status classifies
+        # this, and stamping one would fake a rejection that never happened.
         await log_usage(
             db=db,
             log_writer=log_writer,
@@ -1694,7 +1735,7 @@ def build_streaming_response(
         )
         await reconcile_reservation(db, reservation, reservation.estimate)
 
-    async def _on_error(error: str) -> None:
+    async def _on_error(exc: BaseException) -> None:
         if platform_active:
             assert platform_correlation_id is not None
             _schedule_usage_report(
@@ -1718,7 +1759,8 @@ def build_streaming_response(
             provider=provider,
             endpoint=adapter.endpoint,
             user_id=user_id,
-            error=error,
+            error=str(exc),
+            status_code=failure_status_code(exc),
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=_handle_counts_toward_budget(reservation),
         )
@@ -1848,7 +1890,7 @@ async def run_single_attempt_stream(
         await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     except Exception as exc:
-        await _log_failure_and_refund(ctx, adapter, provider, model, str(exc))
+        await _log_failure_and_refund(ctx, adapter, provider, model, str(exc), failure_status_code(exc))
         logger.error("Stream creation failed for %s:%s: %s", provider, model, exc)
         raise adapter.provider_error(exc) from exc
 
@@ -2283,7 +2325,7 @@ async def run_standalone_non_stream(
         # Gateway-owned cap, not an upstream provider failure. 422 lets
         # callers distinguish a runaway tool loop from a real outage.
         logger.warning("Tool loop iteration cap hit (standalone): cap=%d", tool_ctx.max_tool_iterations)
-        await _log_failure_and_refund(ctx, adapter, provider, model, str(e))
+        await _log_failure_and_refund(ctx, adapter, provider, model, str(e), 422)
         raise adapter.error(422, str(e), ErrorKind.INVALID_REQUEST) from e
     except SandboxNotReachableError as e:
         # Sandbox is gateway-side infra, not an LLM provider. Clearer detail
@@ -2297,6 +2339,6 @@ async def run_standalone_non_stream(
         await release_reservation(ctx)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from e
     except Exception as e:
-        await _log_failure_and_refund(ctx, adapter, provider, model, str(e))
+        await _log_failure_and_refund(ctx, adapter, provider, model, str(e), failure_status_code(e))
         logger.error("Provider call failed for %s:%s: %s", provider, model, e)
         raise adapter.provider_error(e) from e
