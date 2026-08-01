@@ -232,7 +232,8 @@ async def validate_provider_api_base(url: str) -> None:
 
     Scope: this gate covers the paths that *report* on an ``api_base`` (the
     connection-test endpoints and model discovery) and the credential write path
-    that persists it (``POST`` / ``PATCH /v1/provider-credentials``). It does not
+    that persists it (``POST /v1/provider-credentials`` and
+    ``PATCH /v1/provider-credentials/{instance}``). It does not
     gate the chat dispatch that dials the endpoint for real on every request, so
     it is not a general egress control.
 
