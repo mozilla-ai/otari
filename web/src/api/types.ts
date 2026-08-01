@@ -530,6 +530,9 @@ export interface UsageSummary {
   by_model: UsageGroupRow[];
   by_user: UsageGroupRow[];
   by_api_key: UsageGroupRow[];
+  // Provenance breakdown. Optional because it postdates the other groupings, so
+  // an older gateway serving a newer dashboard omits it; read it defensively.
+  by_source?: UsageGroupRow[];
   series: UsageSeriesPoint[];
 }
 

@@ -170,6 +170,105 @@ function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
 }
 
+// ---------- token composition ----------
+//
+// One total is the least useful number on the row: on a cached agent workload it
+// is ~98% cache read, so every row shows a large, similar-looking figure. The
+// composition is what varies, so the column renders the split.
+
+interface TokenComposition {
+  // Input tokens billed at the full input rate (the prompt minus whatever was
+  // served from, or written to, the cache).
+  fresh: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+  total: number;
+}
+
+function positive(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+// Split a row's tokens into fresh input / cache read / cache write / output, or
+// null when the row carries no usage at all (an error before the provider replied).
+//
+// `billing_meters` is preferred because it is the *normalized* view: providers
+// disagree on whether cache reads and writes are counted inside `prompt_tokens`
+// (OpenAI: yes, Anthropic: no), and the row does not record which convention its
+// numbers follow, so the raw columns alone cannot be split reliably. The writers
+// resolve that when they price a row, so meters are present for any priced row.
+// Failing that, assume the subset convention and clamp, which is exact whenever
+// there is no cache usage to misattribute.
+function tokenComposition(entry: UsageEntry): TokenComposition | null {
+  const meters = entry.billing_meters ?? null;
+  const totalInput = meters ? positive(meters.total_input_tokens) : positive(entry.prompt_tokens);
+  const cacheRead = meters ? positive(meters.cache_read_tokens) : positive(entry.cache_read_tokens);
+  const cacheWrite = meters ? positive(meters.cache_write_tokens) : positive(entry.cache_write_tokens);
+  const output = meters ? positive(meters.completion_tokens) : positive(entry.completion_tokens);
+  const fresh = Math.max(0, totalInput - cacheRead - cacheWrite);
+  const total = fresh + cacheRead + cacheWrite + output;
+  return total > 0 ? { fresh, cacheRead, cacheWrite, output, total } : null;
+}
+
+// Segment order runs input side first (fresh, then the two cache buckets), then
+// output. Shading is one hue at four lightnesses, ordered so the dearest tokens
+// read darkest: nothing is encoded by hue, and the tooltip / accessible name
+// carry every number, so the bar adds a shape to scan and removes no information.
+const TOKEN_SEGMENTS: { key: keyof Omit<TokenComposition, "total">; label: string; fill: string }[] = [
+  { key: "fresh", label: "Fresh input", fill: "var(--otari-brand)" },
+  { key: "cacheRead", label: "Cache read", fill: "var(--otari-line)" },
+  { key: "cacheWrite", label: "Cache write", fill: "var(--otari-brand-soft)" },
+  { key: "output", label: "Output", fill: "var(--otari-brand-dark)" },
+];
+
+// The total plus a thin stacked bar of its composition. Widths are SVG rect
+// attributes in a 100-unit viewBox (a dynamic Tailwind `w-[n%]` would not survive
+// the JIT scanner, and inline styles are out).
+//
+// The number shown is the sum of the segments, so the cell is internally
+// consistent and reads as "tokens billed". For an additive-convention row that is
+// higher than the raw `total_tokens` column (which excludes the cache buckets);
+// the raw fields stay visible, unchanged, in the detail panel.
+function TokenBar({ entry }: { entry: UsageEntry }) {
+  const composition = tokenComposition(entry);
+  if (composition === null) {
+    return <span className="tabular-nums">{formatTokens(entry.total_tokens)}</span>;
+  }
+  const parts = TOKEN_SEGMENTS.map((segment) => ({ ...segment, value: composition[segment.key] }));
+  const summary = parts
+    .filter((part) => part.value > 0)
+    .map((part) => `${part.label} ${part.value.toLocaleString()}`)
+    .join(", ");
+
+  let offset = 0;
+  const rects = parts.map((part) => {
+    const width = (part.value / composition.total) * 100;
+    const rect = { ...part, x: offset, width };
+    offset += width;
+    return rect;
+  });
+
+  return (
+    <span className="inline-flex flex-col items-end gap-1" title={summary}>
+      <span className="tabular-nums">{composition.total.toLocaleString()}</span>
+      <svg
+        viewBox="0 0 100 4"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`Token composition: ${summary}`}
+        className="h-1 w-16 overflow-hidden rounded-full bg-[var(--otari-bg)]"
+      >
+        {rects
+          .filter((rect) => rect.width > 0)
+          .map((rect) => (
+            <rect key={rect.key} x={rect.x} y={0} width={rect.width} height={4} fill={rect.fill} />
+          ))}
+      </svg>
+    </span>
+  );
+}
+
 export async function copyToClipboard(
   text: string,
   clipboard: Pick<Clipboard, "writeText"> | undefined = navigator.clipboard,
@@ -265,8 +364,8 @@ export function ActivityPage() {
   const userFilter = url.get("user_id");
   const apiKeyFilter = url.get("api_key_id");
   const pricedFilter = url.get("priced");
-  // Provenance. No select of its own: it arrives from a drill-down (the pricing
-  // alarm links here scoped to gateway traffic) and is visible/clearable as a chip.
+  // Provenance: gateway traffic vs an imported agent source. Set by its own select,
+  // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
   const sourceFilter = url.get("source");
   const page = Math.max(0, url.getNumber("page"));
   // Snap URL-supplied sizes to the nearest offered option: selection latency
@@ -280,16 +379,31 @@ export function ActivityPage() {
   );
 
   // Snapshot the window so a rolling preset does not recompute "now" every render
-  // (which would churn the query key). Re-anchored when the range changes or on refresh.
+  // (which would churn the query key). Re-anchored when the range selection changes,
+  // and by re-picking the active preset (see `pickPreset`).
+  //
+  // Both re-anchor effects skip their first run. The `useState` initializers have
+  // already snapshotted the window, so re-anchoring on mount only moves `start` by
+  // the milliseconds since, which changes `filters`, which trips the page reset
+  // below: a bookmarked or shared `?page=3` URL would silently open on page 1.
+  const selectionKey = `${range}|${startParam}|${endParam}`;
   const [win, setWin] = useState(() => resolveWindow(range, startParam, endParam));
+  const prevSelectionKey = useRef(selectionKey);
   useEffect(() => {
+    if (prevSelectionKey.current === selectionKey) return;
+    prevSelectionKey.current = selectionKey;
     setWin(resolveWindow(range, startParam, endParam));
-  }, [range, startParam, endParam]);
+  }, [selectionKey, range, startParam, endParam]);
 
   // The preset extent (ignoring any brushed bounds) that the timeline histogram
-  // spans. Snapshotted like `win`, re-anchored when the preset changes.
+  // spans. Snapshotted like `win`, re-anchored when the preset changes: a brushed
+  // sub-window must leave the extent alone, or zooming in would drag the frame
+  // (and refetch the histogram) along with it.
   const [extentWin, setExtentWin] = useState(() => resolveExtentWindow(range));
+  const prevRange = useRef(range);
   useEffect(() => {
+    if (prevRange.current === range) return;
+    prevRange.current = range;
     setExtentWin(resolveExtentWindow(range));
   }, [range]);
 
@@ -343,6 +457,31 @@ export function ActivityPage() {
   const modelOptions =
     modelSummary.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
   const keyOptions = (keys.data ?? []).map((k) => ({ value: k.id, label: k.key_name ?? `${k.id.slice(0, 8)}…` }));
+
+  // Source options, mirroring the model suggestions: sources with usage in the
+  // window, with the source filter itself omitted so switching from one source to
+  // another does not require clearing first. While neither this nor the model
+  // filter is set the two filter sets are equal, so the queries collapse into one.
+  const sourceSuggestFilters: UsageFilters = useMemo(
+    () => ({
+      start_date: win.start,
+      end_date: win.end,
+      status: statusFilter || undefined,
+      model: modelFilter.trim() || undefined,
+      user_id: userFilter || undefined,
+      api_key_id: apiKeyFilter || undefined,
+    }),
+    [win, statusFilter, modelFilter, userFilter, apiKeyFilter],
+  );
+  const sourceSummary = useUsageSummary(sourceSuggestFilters, "day");
+  // A drill-down can name a source with no rows in the window; keep it listed so
+  // the select shows the filter that is actually applied.
+  const sourceOptions = useMemo(() => {
+    const seen = (sourceSummary.data?.by_source ?? [])
+      .filter((r) => !r.is_other && r.key !== null)
+      .map((r) => r.key as string);
+    return sourceFilter && !seen.includes(sourceFilter) ? [sourceFilter, ...seen] : seen;
+  }, [sourceSummary.data, sourceFilter]);
 
   // The timeline histogram spans the whole preset *extent* (the rolling preset
   // window, independent of any brushed sub-window), so the brush always has
@@ -496,21 +635,36 @@ export function ActivityPage() {
     );
   };
 
-  // Refetch every window-scoped query (see the UsagePage refresh note): the
-  // model typeahead summary would otherwise stay on cached data whenever the
-  // re-anchored window resolves to the same query key.
+  // Refresh means "same view, newer rows", so it deliberately does *not* re-anchor
+  // a rolling preset's window. Re-anchoring recomputed "now", which changed
+  // `filters`, which tripped the page reset below: pressing refresh on page 12
+  // dropped the operator back onto page 1, making deep browsing unusable. The
+  // window is instead re-anchored when the range selection changes (see
+  // `pickPreset`). Every window-scoped query is refetched explicitly (see the
+  // UsagePage refresh note), since the keys are unchanged by design here.
   const refresh = () => {
-    setWin(resolveWindow(range, startParam, endParam));
-    setExtentWin(resolveExtentWindow(range));
     void usage.refetch();
     void count.refetch();
     void contextSummary.refetch();
     void modelSummary.refetch();
+    void sourceSummary.refetch();
   };
 
   // A rolling preset clears any explicit bounds; a timeline selection sets them
   // (the preset key is left as-is, since it still names the extent).
-  const pickPreset = (preset: RangePreset) => url.patch({ range: preset.key, start_date: "", end_date: "" });
+  const pickPreset = (preset: RangePreset) => {
+    // Re-picking the preset that is already active is the explicit "re-anchor to
+    // now" gesture. It leaves the URL untouched, so the effect that snapshots the
+    // window never fires; do it here instead. (Going *to* a different preset, or
+    // off an explicit range, changes the URL and that effect handles it, so
+    // re-anchoring here as well would fire a second query for the same view.)
+    if (preset.key === range && !startParam && !endParam) {
+      setWin(resolveWindow(preset.key, "", ""));
+      setExtentWin(resolveExtentWindow(preset.key));
+      return;
+    }
+    url.patch({ range: preset.key, start_date: "", end_date: "" });
+  };
   const pickCustom = (startIso: string, endIso: string) => url.patch({ start_date: startIso, end_date: endIso });
 
   // Memoized on keyLabels (the only per-render input) so DataTable's per-row
@@ -531,7 +685,7 @@ export function ActivityPage() {
       { id: "user", header: "User", cell: (e) => e.user_id ?? "—" },
       { id: "model", header: "Model", isRowHeader: true, cell: (e) => e.model },
       { id: "api_key", header: "API key", cell: (e) => <span className="text-[var(--otari-muted)]">{apiKeyLabel(e.api_key_id)}</span> },
-      { id: "tokens", header: "Tokens", align: "end", cell: (e) => formatTokens(e.total_tokens) },
+      { id: "tokens", header: "Tokens", align: "end", cell: (e) => <TokenBar entry={e} /> },
       { id: "cost", header: "Cost", align: "end", cell: (e) => formatUSD(e.cost) },
       { id: "latency", header: "Total time", align: "end", cell: (e) => formatLatency(e.latency_ms) },
       { id: "status", header: "Status", cell: (e) => <StatusPill status={e.status} /> },
@@ -574,6 +728,14 @@ export function ActivityPage() {
             {PRICED_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
+              </option>
+            ))}
+          </FilterSelect>
+          <FilterSelect id="filter-source" label="Source" value={sourceFilter} onChange={(value) => url.patch({ source: value })}>
+            <option value="">All</option>
+            {sourceOptions.map((source) => (
+              <option key={source} value={source}>
+                {sourceLabel(source)}
               </option>
             ))}
           </FilterSelect>

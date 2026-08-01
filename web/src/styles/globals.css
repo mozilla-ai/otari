@@ -11,6 +11,10 @@
      app chrome). Nothing fails the build if they drift, so update them here. */
   --otari-brand: #4e8295;
   --otari-brand-dark: #3c6678;
+  /* Mid-step of the brand ramp, between --otari-brand and --otari-line. Exists so
+     a small multi-part mark (the Activity token-composition bar) can shade its
+     segments by one hue at four legible lightnesses instead of by four hues. */
+  --otari-brand-soft: #a8c4ce;
   --otari-brand-tint: #eaf1f3;
   --otari-ink: #14242c;
   --otari-muted: #5b6b73;
