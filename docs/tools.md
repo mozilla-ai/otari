@@ -56,3 +56,9 @@ Use in a request:
 The bundled SearXNG backend is suitable for trying things out but rate-limited for sustained use. For production, point `OTARI_WEB_SEARCH_URL` at a licensed backend. Ready-to-run Brave and Tavily adapters ship in `scripts/` and are available as separate Compose profiles (`web-search-brave`, `web-search-tavily`).
 
 A runnable walkthrough is in `demo/web-search/`.
+
+To search directly rather than as part of a completion, use
+[`POST /v1/search`](api-reference.md#search). It is billed and usage-logged the
+same way, but the caller supplies the query instead of the model, and it is
+configured separately under
+[`search_tools`](configuration.md#search-tools).

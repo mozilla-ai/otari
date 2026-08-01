@@ -69,6 +69,12 @@ ENV_BRIDGED_FIELDS = (
 STREAM_MISSING_USAGE_POLICIES = ("estimate", "fail", "allow_free")
 VISION_STRATEGIES = ("describe", "ocr", "off")
 
+# Search providers the standalone POST /v1/search endpoint can dispatch to.
+# Declared here rather than in the adapter module so startup validation can
+# reject an unknown ``search_tools.<name>.provider`` without the config layer
+# importing the service layer.
+SEARCH_PROVIDERS = ("exa",)
+
 
 class _NonScalarField(Exception):
     """Raised when a config field is not a simple scalar settable from a plain env string."""
@@ -283,6 +289,16 @@ class GatewayConfig(BaseSettings):
         default_factory=dict,
         description=(
             "Pre-configured model USD pricing (model_key -> {input_price_per_million, output_price_per_million})"
+        ),
+    )
+    search_tools: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Search tools served by POST /v1/search, keyed by the name callers pass as "
+            "'search_tool_name' (or in the /v1/search/{tool} path). Each entry needs an "
+            "'api_key' and may declare a 'provider' (one of: exa; defaults to the tool "
+            "name), an 'api_base', a 'timeout' in seconds, and an 'options' mapping of "
+            "provider-native defaults. Standalone-mode only."
         ),
     )
     enable_metrics: bool = Field(
@@ -828,6 +844,43 @@ class GatewayConfig(BaseSettings):
             return providers
         return {instance: ({} if entry is None else entry) for instance, entry in providers.items()}
 
+    def validate_search_tools(self) -> None:
+        """Validate the ``search_tools`` map at startup so misconfig fails fast.
+
+        Every supported provider authenticates with an API key, so a tool
+        without one is rejected here rather than at request time as an opaque
+        upstream 401. The tool name doubles as a ``/v1/search/{tool}`` path
+        segment, so it must not contain a slash.
+        """
+        for name, entry in self.search_tools.items():
+            if not name:
+                msg = "search tool name must not be empty."
+                raise ValueError(msg)
+            if "/" in name:
+                msg = f"search tool name '{name}' must not contain '/' (it is used as a URL path segment)."
+                raise ValueError(msg)
+            if not isinstance(entry, dict):
+                msg = f"search_tools.{name} must be a mapping."
+                raise ValueError(msg)
+            provider = entry.get("provider") or name
+            if provider not in SEARCH_PROVIDERS:
+                msg = (
+                    f"search_tools.{name}.provider '{provider}' is not a supported search provider "
+                    f"(one of: {', '.join(SEARCH_PROVIDERS)})."
+                )
+                raise ValueError(msg)
+            if not entry.get("api_key"):
+                msg = f"search_tools.{name}.api_key is required."
+                raise ValueError(msg)
+            timeout = entry.get("timeout")
+            if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float))):
+                msg = f"search_tools.{name}.timeout must be a number of seconds."
+                raise ValueError(msg)
+            options = entry.get("options")
+            if options is not None and not isinstance(options, dict):
+                msg = f"search_tools.{name}.options must be a mapping."
+                raise ValueError(msg)
+
     @field_validator("stream_missing_usage_policy")
     @classmethod
     def _validate_stream_missing_usage_policy(cls, value: str) -> str:
@@ -979,6 +1032,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_mode_selection()
     config.validate_provider_instances()
     config.validate_aliases()
+    config.validate_search_tools()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
 

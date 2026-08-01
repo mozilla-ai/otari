@@ -94,6 +94,57 @@ For a full client setup example, see [Use with Claude Code](use-with-claude-code
 |--------|------|-------------|------|
 | `POST` | `/v1/rerank` | Reorder documents by relevance to a query. | API key or master key |
 
+### Search
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `POST` | `/v1/search` | Run a search against a configured search tool, named in `search_tool_name`. | API key or master key |
+| `POST` | `/v1/search/{search_tool_name}` | Same, with the tool named in the path. | API key or master key |
+
+Search tools are declared under [`search_tools`](configuration.md#search-tools)
+in `config.yml`. This is the direct counterpart to the `otari_web_search` tool:
+the tool answers a model's search call mid-completion, while this endpoint takes
+a query from the caller and returns results. Both forms log
+`endpoint="/v1/search"`, so one Activity filter covers every search.
+
+The request and response follow LiteLLM's `/v1/search` (itself shaped after
+Perplexity's Search API), so a client moving off the LiteLLM proxy needs no
+changes:
+
+```bash
+curl http://localhost:8000/v1/search/exa-search \
+  -H "Otari-Key: Bearer $OTARI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "post-training quantization for small models",
+    "max_results": 5,
+    "search_domain_filter": ["arxiv.org"]
+  }'
+```
+
+```json
+{
+  "object": "search",
+  "search_tool": "exa-search",
+  "results": [
+    {
+      "title": "…",
+      "url": "https://arxiv.org/abs/…",
+      "snippet": "…",
+      "date": "2026-01-02T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+Prefix a domain with `-` in `search_domain_filter` to exclude it instead of
+restricting to it. Search bills per request rather than per token, so a usage
+row carries zero tokens and a cost taken from the provider's own reported charge
+when it reports one (Exa does); otherwise it uses the flat per-request rate
+configured for `<provider>:<tool>`, under the same convention as
+[moderations](#moderations). Like moderations, search is exempt from
+`require_pricing`.
+
 ### Images
 
 | Method | Path | Description | Auth |

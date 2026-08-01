@@ -3983,6 +3983,181 @@
         "title": "RotateMasterKeyResponse",
         "type": "object"
       },
+      "SearchRequest": {
+        "description": "A search request, following LiteLLM's ``/v1/search`` body.",
+        "example": {
+          "max_results": 5,
+          "query": "otari llm gateway"
+        },
+        "properties": {
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Two-letter ISO country code to localize results to",
+            "title": "Country"
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "maximum": 20.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum number of results to return",
+            "title": "Max Results"
+          },
+          "max_tokens_per_page": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Approximate cap on the page content returned per result",
+            "title": "Max Tokens Per Page"
+          },
+          "query": {
+            "description": "The search query",
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "search_domain_filter": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Restrict results to these domains; prefix a domain with '-' to exclude it instead",
+            "title": "Search Domain Filter"
+          },
+          "search_tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Configured search tool to run against. Optional when exactly one tool is configured, and ignored on POST /v1/search/{search_tool_name}.",
+            "title": "Search Tool Name"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User ID for usage attribution",
+            "title": "User"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SearchRequest",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "description": "A completed search.",
+        "properties": {
+          "object": {
+            "const": "search",
+            "default": "search",
+            "title": "Object",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResultItem"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "search_tool": {
+            "description": "The configured search tool that served the request",
+            "title": "Search Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "search_tool",
+          "results"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SearchResultItem": {
+        "description": "One search result.",
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "SearchResultItem",
+        "type": "object"
+      },
       "SessionResponse": {
         "description": "A freshly minted dashboard session (the token travels only in the cookie).",
         "properties": {
@@ -9273,6 +9448,119 @@
         "summary": "Create Response",
         "tags": [
           "responses"
+        ]
+      }
+    },
+    "/v1/search": {
+      "post": {
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "operationId": "create_search_v1_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/v1/search/{search_tool_name}": {
+      "post": {
+        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "operationId": "create_search_for_tool_v1_search__search_tool_name__post",
+        "parameters": [
+          {
+            "description": "Configured search tool to run against",
+            "in": "path",
+            "name": "search_tool_name",
+            "required": true,
+            "schema": {
+              "description": "Configured search tool to run against",
+              "title": "Search Tool Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Search For Tool",
+        "tags": [
+          "search"
         ]
       }
     },

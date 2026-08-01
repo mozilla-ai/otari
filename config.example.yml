@@ -105,6 +105,20 @@ providers:
     # input_price_per_million: 0.25
     # output_price_per_million: 1.00
 
+# Search tools (optional): what POST /v1/search can run against, keyed by the
+# name callers pass as `search_tool_name` (or in the /v1/search/{tool} path).
+# `provider` defaults to the tool name and must be one of: exa. `options` holds
+# provider-native request defaults for knobs the request body has no field for;
+# the caller's query always wins. Standalone-mode only.
+# search_tools:
+#   exa-search:
+#     provider: exa
+#     api_key: ${EXA_API_KEY}
+#     # api_base: "https://api.exa.ai"   # optional
+#     # timeout: 30                      # optional, seconds
+#     options:
+#       type: fast
+
 # Model aliases (optional): expose a friendly display name that maps to a real
 # selector, hiding the underlying provider/model. Format: name -> target
 # ("provider:model" or a named "instance:model"). The alias is what users see in

@@ -1958,6 +1958,83 @@
     {
       "item": [
         {
+          "name": "Create Search",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
+            },
+            "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "search"
+              ],
+              "raw": "{{baseUrl}}/v1/search"
+            }
+          }
+        },
+        {
+          "name": "Create Search For Tool",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
+            },
+            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "search",
+                ":search_tool_name"
+              ],
+              "raw": "{{baseUrl}}/v1/search/:search_tool_name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "search_tool_name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "search"
+    },
+    {
+      "item": [
+        {
           "name": "Get Settings",
           "request": {
             "description": "Return non-secret runtime settings for the admin dashboard.",

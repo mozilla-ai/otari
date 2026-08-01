@@ -1,0 +1,299 @@
+"""Search pass-through endpoint: a direct, billed search request.
+
+``otari_web_search`` answers a model's tool call mid-completion. This endpoint
+is the standalone counterpart: the caller asks, the gateway asks the search
+provider, and the result comes straight back, having gone through the same
+auth, rate limit, budget reservation, and usage log as a completion. It exists
+so a client that proxies a search API can keep one gateway on the billing path
+instead of holding a second provider key of its own.
+
+The request and response follow LiteLLM's ``/v1/search`` (itself shaped after
+Perplexity's Search API), so a caller moving off the LiteLLM proxy needs no
+changes; :mod:`gateway.services.search_backend` translates to and from the
+provider's native shape and owns the per-provider adapters.
+
+Both the body-selected (``POST /v1/search``) and path-selected
+(``POST /v1/search/{search_tool_name}``) forms log ``endpoint="/v1/search"``,
+so one Activity filter covers every search regardless of how the tool was
+named.
+
+Billing: search is priced per request, not per token, so a usage row carries
+zero tokens and a cost taken from the provider's own reported charge when it
+reports one. Otherwise the cost is the flat per-request rate configured for
+``<provider>:<tool>`` under the same convention moderations uses
+(:func:`flat_request_cost`). Like moderations and audio, search is exempt from
+``require_pricing``: a provider that reports its own cost is metered whether or
+not a rate is configured, so failing closed would reject calls the gateway can
+bill precisely.
+"""
+
+import time
+import uuid
+from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
+from gateway.api.routes._passthrough import (
+    PASSTHROUGH_PROVIDER_ERROR_DETAIL,
+    resolve_passthrough_user_id,
+)
+from gateway.api.routes._pipeline import _elapsed_ms, rate_limit_headers
+from gateway.core.config import GatewayConfig
+from gateway.log_config import logger
+from gateway.models.entities import APIKey, UsageLog
+from gateway.rate_limit import check_rate_limit
+from gateway.services.budget_service import reconcile_reservation, refund_reservation, reserve_budget
+from gateway.services.log_writer import LogWriter
+from gateway.services.pricing_service import find_model_pricing, flat_request_cost
+from gateway.services.search_backend import (
+    MAX_RESULTS_CAP,
+    SearchHit,
+    SearchQuery,
+    SearchTool,
+    SearchToolError,
+    resolve_search_tool,
+    run_search,
+)
+
+router = APIRouter(prefix="/v1", tags=["search"])
+
+SEARCH_ENDPOINT = "/v1/search"
+
+# Perplexity's documented ceiling on search_domain_filter, mirrored so an
+# oversized list is rejected here rather than by the upstream provider.
+_MAX_DOMAIN_FILTERS = 20
+
+
+class SearchRequest(BaseModel):
+    """A search request, following LiteLLM's ``/v1/search`` body."""
+
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"query": "otari llm gateway", "max_results": 5}},
+    )
+
+    query: str = Field(min_length=1, description="The search query")
+    search_tool_name: str | None = Field(
+        default=None,
+        description=(
+            "Configured search tool to run against. Optional when exactly one tool is "
+            "configured, and ignored on POST /v1/search/{search_tool_name}."
+        ),
+    )
+    max_results: int | None = Field(
+        default=None, ge=1, le=MAX_RESULTS_CAP, description="Maximum number of results to return"
+    )
+    search_domain_filter: list[str] | None = Field(
+        default=None,
+        max_length=_MAX_DOMAIN_FILTERS,
+        description="Restrict results to these domains; prefix a domain with '-' to exclude it instead",
+    )
+    country: str | None = Field(default=None, description="Two-letter ISO country code to localize results to")
+    max_tokens_per_page: int | None = Field(
+        default=None, ge=1, description="Approximate cap on the page content returned per result"
+    )
+    user: str | None = Field(default=None, description="User ID for usage attribution")
+
+
+class SearchResultItem(BaseModel):
+    """One search result."""
+
+    title: str | None = None
+    url: str
+    snippet: str | None = None
+    date: str | None = None
+
+
+class SearchResponse(BaseModel):
+    """A completed search."""
+
+    object: Literal["search"] = "search"
+    search_tool: str = Field(description="The configured search tool that served the request")
+    results: list[SearchResultItem]
+
+
+@router.post("/search")
+async def create_search(
+    raw_request: Request,
+    response: Response,
+    request: SearchRequest,
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+) -> SearchResponse:
+    """Run a search against a configured search tool.
+
+    The tool is taken from ``search_tool_name``, which may be omitted when
+    exactly one tool is configured.
+
+    Authentication modes:
+    - Master key + user field: Use specified user (must exist)
+    - API key + user field: Use specified user (must exist)
+    - API key without user field: Use the shared "default" user
+    """
+    return await _dispatch_search(
+        raw_request=raw_request,
+        response=response,
+        request=request,
+        tool_name=request.search_tool_name,
+        auth_result=auth_result,
+        db=db,
+        config=config,
+        log_writer=log_writer,
+    )
+
+
+@router.post("/search/{search_tool_name}")
+async def create_search_for_tool(
+    raw_request: Request,
+    response: Response,
+    request: SearchRequest,
+    search_tool_name: Annotated[str, Path(description="Configured search tool to run against")],
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+) -> SearchResponse:
+    """Run a search against the search tool named in the path.
+
+    Identical to ``POST /v1/search`` except that the path names the tool, which
+    is the form LiteLLM clients use. Any ``search_tool_name`` in the body is
+    ignored.
+
+    Authentication modes:
+    - Master key + user field: Use specified user (must exist)
+    - API key + user field: Use specified user (must exist)
+    - API key without user field: Use the shared "default" user
+    """
+    return await _dispatch_search(
+        raw_request=raw_request,
+        response=response,
+        request=request,
+        tool_name=search_tool_name,
+        auth_result=auth_result,
+        db=db,
+        config=config,
+        log_writer=log_writer,
+    )
+
+
+async def _dispatch_search(
+    *,
+    raw_request: Request,
+    response: Response,
+    request: SearchRequest,
+    tool_name: str | None,
+    auth_result: tuple[APIKey | None, bool],
+    db: AsyncSession,
+    config: GatewayConfig,
+    log_writer: LogWriter,
+) -> SearchResponse:
+    """Run the search request scaffold: reserve, call, log, settle.
+
+    The shape mirrors :func:`gateway.api.routes._passthrough.run_passthrough`,
+    which cannot be reused directly: it resolves the request's model against
+    the any-llm provider instances, and a search tool is neither a model nor an
+    any-llm provider.
+    """
+    started_at = time.monotonic()
+    api_key, _ = auth_result
+    api_key_id = api_key.id if api_key else None
+    # A key flagged exclude_from_budget logs cost but is never reserved or folded
+    # into users.spend, matching every other billed endpoint.
+    budget_exempt = api_key is not None and api_key.exclude_from_budget
+
+    user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
+    rate_limit_info = check_rate_limit(raw_request, user_id)
+
+    # Resolved before any reservation is taken, so an unknown tool costs the
+    # caller nothing to be told about.
+    try:
+        tool = resolve_search_tool(config, tool_name)
+    except SearchToolError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    pricing_key = f"{tool.provider}:{tool.name}"
+    # A search tool is not a model, so the community default-pricing dataset can
+    # only produce a false match on the tool's name.
+    pricing = await find_model_pricing(db, tool.provider, tool.name, use_defaults=False)
+    reservation = await reserve_budget(
+        db,
+        user_id,
+        flat_request_cost(pricing),
+        model=pricing_key,
+        strategy=config.budget_strategy,
+        counts_toward_budget=not budget_exempt,
+    )
+
+    def usage_row(**overrides: Any) -> UsageLog:
+        return UsageLog(
+            id=str(uuid.uuid4()),
+            api_key_id=api_key_id,
+            user_id=user_id,
+            timestamp=datetime.now(UTC),
+            model=tool.name,
+            provider=tool.provider,
+            endpoint=SEARCH_ENDPOINT,
+            latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=not budget_exempt,
+            **overrides,
+        )
+
+    try:
+        outcome = await run_search(tool, _search_query(request))
+        # The provider's own charge is the true cost; the configured flat rate is
+        # the fallback for a provider that reports none.
+        cost = outcome.cost_usd if outcome.cost_usd is not None else flat_request_cost(pricing)
+        await log_writer.put(
+            usage_row(
+                status="success",
+                # Search bills per request; there are no tokens to report, and a
+                # zero is truthful where a null would read as "unknown".
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                cost=cost,
+            )
+        )
+        await reconcile_reservation(db, reservation, cost)
+    except HTTPException:
+        await refund_reservation(db, reservation)
+        raise
+    except Exception as exc:
+        await log_writer.put(usage_row(status="error", error_message=str(exc)))
+        await refund_reservation(db, reservation)
+        # The raw provider message is kept on the usage log and the gateway log,
+        # never in the response: it can carry upstream internals, and the
+        # pass-through routes hold the same line.
+        logger.error("Search failed for tool '%s' (%s): %s", tool.name, tool.provider, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=PASSTHROUGH_PROVIDER_ERROR_DETAIL,
+        ) from exc
+
+    if rate_limit_info:
+        for header, value in rate_limit_headers(rate_limit_info).items():
+            response.headers[header] = value
+
+    return _to_response(tool, outcome.results)
+
+
+def _search_query(request: SearchRequest) -> SearchQuery:
+    return SearchQuery(
+        query=request.query,
+        max_results=request.max_results,
+        domain_filter=tuple(request.search_domain_filter or ()),
+        country=request.country,
+        max_tokens_per_page=request.max_tokens_per_page,
+    )
+
+
+def _to_response(tool: SearchTool, hits: list[SearchHit]) -> SearchResponse:
+    return SearchResponse(
+        search_tool=tool.name,
+        results=[SearchResultItem(title=hit.title, url=hit.url, snippet=hit.snippet, date=hit.date) for hit in hits],
+    )
