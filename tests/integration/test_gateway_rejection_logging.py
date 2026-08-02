@@ -173,11 +173,14 @@ def test_unresolvable_selector_releases_the_reservation(
     estimate, and only fails later at dispatch. Before the refund, that hold
     stayed on ``users.reserved`` until the next budget reset (forever for a
     budget with no reset period).
+
+    Structured as an A/B, because ``reserved == 0.0`` alone would also hold if
+    the estimate were 0, which would make this test pass while guarding nothing.
+    The control puts the same request under a budget smaller than the estimate:
+    it is refused at the budget gate rather than reaching dispatch, which is only
+    possible if the raw selector really did match pricing and really did produce
+    a nonzero estimate. That is the precondition that makes the refund matter.
     """
-    budget_id = client.post("/v1/budgets", json={"max_budget": 100.0}, headers=master_key_header).json()[
-        "budget_id"
-    ]
-    _make_user(client, master_key_header, "stranded-user", budget_id=budget_id)
     priced = client.post(
         "/v1/pricing",
         json={
@@ -188,6 +191,19 @@ def test_unresolvable_selector_releases_the_reservation(
         headers=master_key_header,
     )
     assert priced.status_code == 200, priced.text
+
+    # Control: a budget far below the estimate turns the same request into a
+    # budget refusal (403), proving the estimate is nonzero and pricing matched.
+    tiny_budget = client.post("/v1/budgets", json={"max_budget": 0.001}, headers=master_key_header).json()[
+        "budget_id"
+    ]
+    _make_user(client, master_key_header, "tiny-budget-user", budget_id=tiny_budget)
+    assert _chat(client, master_key_header, model="ghostprovider:some-model", user="tiny-budget-user") == 403
+
+    budget_id = client.post("/v1/budgets", json={"max_budget": 100.0}, headers=master_key_header).json()[
+        "budget_id"
+    ]
+    _make_user(client, master_key_header, "stranded-user", budget_id=budget_id)
 
     assert _chat(client, master_key_header, model="ghostprovider:some-model", user="stranded-user") == 400
 
@@ -200,8 +216,13 @@ def test_unresolvable_selector_releases_the_reservation(
         session.close()
     assert float(reserved) == 0.0
 
-    # And the drop is still recorded, as for every other gate.
-    assert _one_error(client, master_key_header)["model"] == "ghostprovider:some-model"
+    # And the drop is still recorded, as for every other gate. Scoped by user
+    # because the control above left a budget-refusal row of its own.
+    rows = [r for r in _errors(client, master_key_header) if r["user_id"] == "stranded-user"]
+    assert len(rows) == 1, rows
+    assert rows[0]["model"] == "ghostprovider:some-model"
+    assert rows[0]["cost"] is None
+    assert rows[0]["counts_toward_budget"] is True
 
 
 def test_budget_exempt_key_rejection_row_still_counts_toward_budget(

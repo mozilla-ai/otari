@@ -1331,21 +1331,37 @@ async def log_gateway_rejection(
     traffic; the client-driven gates that do log (a selector that no longer
     resolves, a model outside an allow-list) are neither self-limiting nor
     expected, which is why the asymmetry is deliberate.
+
+    Writing the row is best-effort. Every caller logs and then re-raises the
+    rejection it was already going to return, so an exception escaping here
+    would replace a clean 403 or 400 with a 500 and make an unhealthy log writer
+    look like a broken gateway to the client. Observability must not change the
+    response contract, so a failure is swallowed and reported to the gateway log
+    instead. ``SingleLogWriter`` already absorbs ``SQLAlchemyError`` itself, so
+    what this catches is the rest (session setup or teardown, a writer whose
+    queue is gone). Nothing leaks by dropping the row: every call site refunds
+    its reservation before calling this, never after.
     """
     if db is None or user_id is None:
         return
-    await log_usage(
-        db=db,
-        log_writer=log_writer,
-        api_key_id=api_key_id,
-        model=model,
-        provider=provider,
-        endpoint=endpoint,
-        user_id=user_id,
-        error=detail,
-        latency_ms=_elapsed_ms(started_at),
-        counts_toward_budget=True,
-    )
+    try:
+        await log_usage(
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            model=model,
+            provider=provider,
+            endpoint=endpoint,
+            user_id=user_id,
+            error=detail,
+            latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=True,
+        )
+    except Exception as exc:
+        # Deliberately broad, and deliberately not re-raised: see the docstring.
+        # asyncio.CancelledError derives from BaseException, so a cancelled
+        # request still unwinds rather than being swallowed here.
+        logger.error("Failed to record gateway rejection for %s on %s: %s", user_id, endpoint, exc)
 
 
 async def _log_failure_and_refund(
