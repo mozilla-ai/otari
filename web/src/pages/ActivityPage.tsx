@@ -322,6 +322,14 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
         <DetailField label="Prompt tokens">{formatTokens(entry.prompt_tokens)}</DetailField>
         <DetailField label="Completion tokens">{formatTokens(entry.completion_tokens)}</DetailField>
         <DetailField label="Total tokens">{formatTokens(entry.total_tokens)}</DetailField>
+        {/* The Tokens column's number, spelled out here because it can exceed the
+            provider-reported total above: the row's composition counts the cache
+            buckets, which an additive-convention provider reports outside the prompt. */}
+        <DetailField label="Billed tokens">
+          <span title="Fresh input, cache reads and writes, and output: the tokens this request was priced on, and the total the activity row's bar splits.">
+            {formatTokens(tokenComposition(entry)?.total ?? null)}
+          </span>
+        </DetailField>
         <DetailField label="Cost">{formatUSD(entry.cost)}</DetailField>
         <DetailField label="Cache read tokens">{formatTokens(entry.cache_read_tokens)}</DetailField>
         <DetailField label="Cache write tokens">{formatTokens(entry.cache_write_tokens)}</DetailField>

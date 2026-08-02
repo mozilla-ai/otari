@@ -339,6 +339,42 @@ describe("ActivityPage", () => {
     expect(widths.reduce((a, b) => a + b, 0)).toBeCloseTo(100, 5);
   });
 
+  it("explains the column's total in the detail panel when it exceeds the raw one", async () => {
+    // An additive-convention row reports its cache buckets outside the prompt, so
+    // the billed total the column shows is far above the stored `total_tokens`.
+    // Both are spelled out, or the two numbers look like a bug.
+    const user = userEvent.setup();
+    mockApi({
+      rows: [
+        entry({
+          prompt_tokens: 1_000,
+          completion_tokens: 200,
+          total_tokens: 1_200,
+          cache_read_tokens: 98_000,
+          cache_write_tokens: 1_500,
+          billing_meters: {
+            total_input_tokens: 100_500,
+            fresh_input_tokens: 1_000,
+            cache_read_tokens: 98_000,
+            cache_write_tokens: 1_500,
+            cache_write_1h_tokens: 0,
+            completion_tokens: 200,
+          },
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("gpt-4o")).closest("tr")!;
+    await user.click(row);
+
+    const field = (label: string): string => screen.getByText(label).parentElement!.textContent ?? "";
+    expect(field("Total tokens")).toContain("1,200");
+    expect(field("Billed tokens")).toContain("100,700");
+    // Which is the number the row itself shows.
+    expect(within(row).getByText("100,700")).toBeInTheDocument();
+  });
+
   it("splits an unmetered row from its raw columns, and shows no bar without usage", async () => {
     // An unpriced row carries no billing meters, so the composition falls back to
     // the raw columns (cache read counted inside the prompt).
