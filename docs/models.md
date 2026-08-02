@@ -194,7 +194,8 @@ providers:
 Otari then calls the backend's model-listing endpoint at its default address
 (`http://127.0.0.1:11434` for Ollama, which also honors `OLLAMA_HOST`, and
 `http://127.0.0.1:8080/v1` for llama.cpp and llamafile) and lists what it finds
-as `ollama:<model>`. Point at a non-default address with `api_base`:
+under the instance name, so an `ollama` entry yields `ollama:<model>`. Point at a
+non-default address with `api_base`:
 
 ```yaml
 providers:

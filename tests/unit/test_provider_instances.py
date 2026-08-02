@@ -89,6 +89,13 @@ def test_valueless_entry_loads_as_empty_config() -> None:
     config.validate_provider_instances()  # no raise
 
 
+def test_valueless_providers_block_loads_as_no_providers() -> None:
+    # Commenting out every entry leaves a bare `providers:`, which YAML also reads
+    # as None. That should mean "no providers", not the same pydantic type error.
+    config = GatewayConfig(**yaml.safe_load("providers:\n"))
+    assert config.providers == {}
+
+
 def test_valueless_entry_from_yaml_is_a_configured_instance() -> None:
     # The whole point of the entry is opting the local backend into discovery,
     # which is scoped to config.providers, so the key must survive the load.

@@ -748,7 +748,13 @@ class GatewayConfig(BaseSettings):
         ``{}``, which means "this instance is configured, with no settings": the
         instance is then routable and, since discovery is scoped to the configured
         instances, also discoverable in ``GET /v1/models`` (issue #389).
+
+        A ``providers:`` block with no entries at all gets the same treatment, so
+        commenting out every entry reads as "no providers" rather than the same
+        confusing type error.
         """
+        if providers is None:
+            return {}
         if not isinstance(providers, dict):
             return providers
         return {instance: ({} if entry is None else entry) for instance, entry in providers.items()}
