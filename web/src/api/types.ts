@@ -462,6 +462,12 @@ export interface UsageMutationSelection {
   user_id?: string;
   api_key_id?: string;
   status?: string;
+  // Every scoping filter the Activity log honors must be repeatable here: the
+  // "all matching" path re-derives the target set server-side, so a filter the
+  // body omits silently widens a delete/reprice beyond what the operator saw.
+  endpoint?: string;
+  provider?: string;
+  source_label?: string;
   start_date?: string;
   end_date?: string;
   priced?: boolean;

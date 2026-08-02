@@ -789,6 +789,10 @@ export function UsagePage() {
           {/* The remaining dimensions, one at a time behind a picker. Session is
               the default: it is the grouping that names the work behind a bill. */}
           <BreakdownTable
+            // Remount per dimension so an expanded "show all" does not carry over:
+            // sessions can run to 250 rows, and inheriting that on Provider reads
+            // as a broken table rather than a deliberate expansion.
+            key={dimension}
             title={`Spend by ${activeDimension.label.toLowerCase()}`}
             rows={dimensionRows(data, dimension)}
             totalCost={totals?.cost ?? 0}

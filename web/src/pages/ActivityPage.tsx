@@ -525,6 +525,11 @@ export function ActivityPage() {
   // A bulk op targets either the current page selection (ids) or, once the operator
   // opted into "all matching", the filter itself (by_filter). The server scopes
   // either to imported rows.
+  //
+  // Every filter that scopes the table has to be forwarded here. "All matching" is
+  // counted client-side from the full filter set but re-derived server-side from
+  // this body, so any filter left out widens the delete/reprice past the rows the
+  // operator was shown (a session drill-down would wipe every other session).
   const selectionBody = (): UsageMutationSelection =>
     selection.allMatching
       ? {
@@ -533,6 +538,10 @@ export function ActivityPage() {
           user_id: filters.user_id,
           api_key_id: filters.api_key_id,
           status: filters.status,
+          source: filters.source,
+          source_label: filters.source_label,
+          endpoint: filters.endpoint,
+          provider: filters.provider,
           start_date: filters.start_date,
           end_date: filters.end_date,
           priced: filters.priced,

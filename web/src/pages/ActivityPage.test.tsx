@@ -405,6 +405,36 @@ describe("ActivityPage", () => {
     });
   });
 
+  it("carries the drill-down filters into an 'all matching' delete", async () => {
+    // The count that sizes "select all N" is taken under the session/provider
+    // scope, so the delete body has to repeat it. If it does not, the server
+    // re-derives a wider set and takes every other session's rows with it.
+    const user = userEvent.setup();
+    const { calls } = mockApi({
+      rows: [entry({ id: "imp-1", model: "imported-model", counts_toward_budget: false })],
+      total: 5,
+    });
+    renderPage(<ActivityPage />, "/activity?source_label=task-42&provider=anthropic&endpoint=external");
+
+    const row = (await screen.findByText("imported-model")).closest("tr")!;
+    await user.click(within(row).getByRole("checkbox"));
+    await user.click(await screen.findByRole("button", { name: /Select all 5 matching/ }));
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      const del = calls.find((c) => c.url.endsWith("/v1/usage") && c.method === "DELETE");
+      expect(del).toBeTruthy();
+      const body = JSON.parse(del!.body ?? "{}");
+      expect(body.by_filter).toBe(true);
+      expect(body.source_label).toBe("task-42");
+      expect(body.provider).toBe("anthropic");
+      expect(body.endpoint).toBe("external");
+    });
+  });
+
   it("sets a manual price on the selected imported rows", async () => {
     const user = userEvent.setup();
     const { calls } = mockApi({
