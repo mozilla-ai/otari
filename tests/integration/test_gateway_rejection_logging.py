@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from gateway.core.config import API_KEY_HEADER
 
@@ -159,6 +160,50 @@ def test_unresolvable_selector_rejection_is_recorded(client: TestClient, master_
     assert "Unknown or unsupported model" in row["error_message"]
 
 
+def test_unresolvable_selector_releases_the_reservation(
+    client: TestClient, master_key_header: dict[str, str], db_session_factory: Any
+) -> None:
+    """The 400 refunds its reservation, which it did not before #465.
+
+    The preamble tolerates a selector it cannot resolve and carries it into the
+    pricing lookup as the bare model with no provider. ``find_model_pricing``
+    then builds its key as the model alone, and that raw selector is exactly the
+    ``provider:model`` form stored pricing rows use, so an instance removed from
+    config while its pricing row survives still prices, still reserves a nonzero
+    estimate, and only fails later at dispatch. Before the refund, that hold
+    stayed on ``users.reserved`` until the next budget reset (forever for a
+    budget with no reset period).
+    """
+    budget_id = client.post("/v1/budgets", json={"max_budget": 100.0}, headers=master_key_header).json()[
+        "budget_id"
+    ]
+    _make_user(client, master_key_header, "stranded-user", budget_id=budget_id)
+    priced = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "ghostprovider:some-model",
+            "input_price_per_million": 2.5,
+            "output_price_per_million": 10.0,
+        },
+        headers=master_key_header,
+    )
+    assert priced.status_code == 200, priced.text
+
+    assert _chat(client, master_key_header, model="ghostprovider:some-model", user="stranded-user") == 400
+
+    session = db_session_factory()
+    try:
+        reserved = session.execute(
+            text("SELECT reserved FROM users WHERE user_id = 'stranded-user'")
+        ).scalar_one()
+    finally:
+        session.close()
+    assert float(reserved) == 0.0
+
+    # And the drop is still recorded, as for every other gate.
+    assert _one_error(client, master_key_header)["model"] == "ghostprovider:some-model"
+
+
 def test_budget_exempt_key_rejection_row_still_counts_toward_budget(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
@@ -218,6 +263,52 @@ def test_passthrough_rejections_are_recorded(
     assert row["user_id"] == "blocked-embedder"
     assert row["model"] == expected_model
     assert row["provider"] == expected_provider
+
+
+def test_passthrough_model_not_allowed_is_recorded(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """The pass-through allow-list gate records its 403, after refunding.
+
+    This gate sits after the reservation on both scaffolds, so unlike the chat
+    one it exercises the refund-then-log ordering.
+    """
+    _make_user(client, master_key_header, "scoped-embedder")
+    key = _make_key(
+        client, master_key_header, "scoped-embed", user_id="scoped-embedder", allowed_models=["cohere:*"]
+    )
+
+    resp = client.post(
+        "/v1/embeddings",
+        json={"model": "openai:text-embedding-3-small", "input": "hi"},
+        headers=key,
+    )
+    assert resp.status_code == 403
+
+    row = _one_error(client, master_key_header)
+    assert row["endpoint"] == "/v1/embeddings"
+    assert row["user_id"] == "scoped-embedder"
+    assert row["model"] == "text-embedding-3-small"
+    assert row["provider"] == "openai"
+    assert "not permitted" in row["error_message"]
+
+
+def test_passthrough_user_key_mismatch_is_recorded(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """The pass-through scaffold records a user/key mismatch like the pipeline does."""
+    _make_user(client, master_key_header, "embed-owner")
+    _make_user(client, master_key_header, "embed-stranger")
+    key = _make_key(client, master_key_header, "embed-owned", user_id="embed-owner")
+
+    resp = client.post(
+        "/v1/embeddings",
+        json={"model": "openai:text-embedding-3-small", "input": "hi", "user": "embed-stranger"},
+        headers=key,
+    )
+    assert resp.status_code == 403
+
+    row = _one_error(client, master_key_header)
+    assert row["user_id"] == "embed-owner"
+    # Nothing is resolved this early, so the row carries the raw selector.
+    assert row["model"] == "openai:text-embedding-3-small"
+    assert row["provider"] is None
 
 
 def test_unknown_user_rejection_writes_no_row(client: TestClient, master_key_header: dict[str, str]) -> None:

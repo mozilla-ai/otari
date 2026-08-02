@@ -161,10 +161,10 @@ gateway.
   status shows what is being dropped: no pricing under `require_pricing`, a
   model outside a key's allow-list, a blocked or over-budget user, a `user`
   field that does not match the key, and a selector that no longer resolves to a
-  configured provider. Those rows carry no cost, so they never move spend. Two
-  refusals are left out deliberately: a rejected API key (401), which has no
-  user to attribute the row to, and a rate-limited request (429), which is an
-  expected throttle rather than dropped traffic. Diagnostic detail stays in the
+  configured provider. Those rows carry no cost, so they never move spend. Not
+  every refusal is logged: a rejected API key (401) has no user to attribute the
+  row to, and a rate-limited request (429) is an expected throttle rather than
+  dropped traffic, so neither is recorded. Diagnostic detail stays in the
   gateway logs rather than the browser.
 - **Usage**: aggregate usage and analytics, showing spend and volume over time,
   broken down by model and by user.

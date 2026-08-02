@@ -516,9 +516,15 @@ async def resolve_dispatch_provider(
         return resolve_provider_selector(config, model_selector, ctx.user_id)
     except (ValueError, AnyLLMError) as exc:
         # The preamble deliberately tolerated this selector, so a reservation is
-        # already held: refund it, then record the drop. The estimate is always
-        # 0.0 here (a selector we cannot resolve has no pricing), so the refund
-        # moves nothing, but keeping it makes the site correct on its own terms.
+        # already held: refund it, then record the drop. The hold is not always
+        # zero, so this refund is load-bearing rather than a formality. The
+        # preamble carries an unresolvable selector into the pricing lookup as
+        # the bare model with no provider, and find_model_pricing then keys on
+        # the model alone, which is exactly the `provider:model` form stored
+        # pricing rows use. An instance removed from config while its pricing row
+        # survives therefore prices, reserves a real estimate, and only fails
+        # here; before this refund existed the hold stayed on users.reserved
+        # until the next budget reset (forever, for a budget with no period).
         await release_reservation(ctx)
         await log_gateway_rejection(
             db=ctx.db,
@@ -687,9 +693,11 @@ async def resolve_request_context(
             # the key's own user, so that rejection has a user to attribute the
             # drop to. resolve_user_id's other refusals (a master key with no
             # `user` field, a key with no user) name no existing user, and
-            # usage_logs.user_id is a foreign key, so they stay unlogged. The
-            # selector is only resolved below (aliases are user-scoped, so
-            # resolution needs the billed user), hence no provider on this row.
+            # usage_logs.user_id is a foreign key, so they stay unlogged.
+            # This row carries the raw selector and no provider, unlike the gates
+            # below it: nothing has been resolved this early, and resolving a
+            # selector purely to shape a log row is not worth the work on a path
+            # that is refusing the request anyway.
             if exc.status_code == status.HTTP_403_FORBIDDEN and api_key is not None:
                 await log_gateway_rejection(
                     db=db,
@@ -1311,13 +1319,18 @@ async def log_gateway_rejection(
     wrote itself. There is no cost on these rows for the flag to gate, so
     pinning it True is safe even for a key flagged ``exclude_from_budget``.
 
-    Two rejection classes deliberately stay unlogged. Authentication failures
-    (401) are refused before any user is known, and ``usage_logs.user_id`` is a
-    foreign key to ``users``, so a row for an unknown (or absent) user could not
-    be inserted anyway; ``user_id=None`` is therefore a no-op here rather than a
-    NULL-user row. Rate-limit rejections (429) are an expected, self-limiting
-    throttle rather than an incident, and logging them would let a hot-looping
-    client amplify itself into the usage table.
+    Some rejections deliberately stay unlogged, and for three different reasons.
+    An authentication failure (401) is refused before any user is known: the
+    column is nullable, so a NULL-user row would insert fine, but it could not be
+    attributed, acted on, or filtered, and writing one would let an
+    unauthenticated caller append to the usage table. ``user_id=None`` is
+    therefore a no-op here. A 404 for a user that does not exist is skipped for a
+    harder reason: ``usage_logs.user_id`` is a foreign key to ``users``, so that
+    row could not be inserted at all. A rate-limit rejection (429) is skipped
+    because a throttle is expected, self-limiting behavior rather than dropped
+    traffic; the client-driven gates that do log (a selector that no longer
+    resolves, a model outside an allow-list) are neither self-limiting nor
+    expected, which is why the asymmetry is deliberate.
     """
     if db is None or user_id is None:
         return

@@ -191,8 +191,9 @@ async def run_passthrough(
     except HTTPException as exc:
         # Only the user/key mismatch (403) has a user to attribute the drop to;
         # see log_gateway_rejection for the rejections that deliberately do not
-        # log. The selector is resolved below (aliases are user-scoped), so this
-        # row records the requested selector with no provider.
+        # log. Like its counterpart in the pipeline, this row carries the raw
+        # selector and no provider: nothing is resolved this early, and resolving
+        # purely to shape a log row is not worth it on a refusal path.
         if exc.status_code == status.HTTP_403_FORBIDDEN and api_key is not None:
             await log_gateway_rejection(
                 db=db,
