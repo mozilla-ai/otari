@@ -212,19 +212,24 @@ function tokenComposition(entry: UsageEntry): TokenComposition | null {
 }
 
 // Segment order runs input side first (fresh, then the two cache buckets), then
-// output. Shading is one hue at four lightnesses, ordered so the dearest tokens
-// read darkest: nothing is encoded by hue, and the tooltip / accessible name
-// carry every number, so the bar adds a shape to scan and removes no information.
+// output. Shading is one hue at four lightnesses, assigned for legibility rather
+// than for price: every fill clears the track it sits on, adjacent fills differ
+// enough to show their boundary, and the bucket that is usually the bulk (cache
+// read) takes a mid tone instead of the palest step, so a cache-heavy row reads
+// as a filled bar and a fresh-input row as a dark one. Nothing is encoded by hue,
+// and the tooltip / accessible name carry every number, so the bar adds a shape
+// to scan and removes no information.
 const TOKEN_SEGMENTS: { key: keyof Omit<TokenComposition, "total">; label: string; fill: string }[] = [
-  { key: "fresh", label: "Fresh input", fill: "var(--otari-brand)" },
-  { key: "cacheRead", label: "Cache read", fill: "var(--otari-line)" },
+  { key: "fresh", label: "Fresh input", fill: "var(--otari-ink)" },
+  { key: "cacheRead", label: "Cache read", fill: "var(--otari-brand)" },
   { key: "cacheWrite", label: "Cache write", fill: "var(--otari-brand-soft)" },
   { key: "output", label: "Output", fill: "var(--otari-brand-dark)" },
 ];
 
 // The total plus a thin stacked bar of its composition. Widths are SVG rect
 // attributes in a 100-unit viewBox (a dynamic Tailwind `w-[n%]` would not survive
-// the JIT scanner, and inline styles are out).
+// the JIT scanner, and inline styles are out). Proportions are exact, so a segment
+// under a percent or so lands sub-pixel; the tooltip carries the real numbers.
 //
 // The number shown is the sum of the segments, so the cell is internally
 // consistent and reads as "tokens billed". For an additive-convention row that is
@@ -257,7 +262,7 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
         preserveAspectRatio="none"
         role="img"
         aria-label={`Token composition: ${summary}`}
-        className="h-1 w-16 overflow-hidden rounded-full bg-[var(--otari-bg)]"
+        className="h-1.5 w-20 overflow-hidden rounded-full bg-[var(--otari-brand-tint)]"
       >
         {rects
           .filter((rect) => rect.width > 0)
@@ -458,10 +463,14 @@ export function ActivityPage() {
     modelSummary.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
   const keyOptions = (keys.data ?? []).map((k) => ({ value: k.id, label: k.key_name ?? `${k.id.slice(0, 8)}…` }));
 
-  // Source options, mirroring the model suggestions: sources with usage in the
-  // window, with the source filter itself omitted so switching from one source to
-  // another does not require clearing first. While neither this nor the model
-  // filter is set the two filter sets are equal, so the queries collapse into one.
+  // Source options: the sources with usage in the window. Like the model
+  // suggestions, this must ignore the source filter itself, or picking Claude Code
+  // would hide every other source and switching would mean clearing first.
+  //
+  // While no source is picked the model-suggestion summary is already computed
+  // without one, so its provenance breakdown is that full list and no second query
+  // is needed. Only a picked source needs its own, so it is fetched then and only
+  // then (each summary runs four grouped aggregations plus the series).
   const sourceSuggestFilters: UsageFilters = useMemo(
     () => ({
       start_date: win.start,
@@ -473,15 +482,14 @@ export function ActivityPage() {
     }),
     [win, statusFilter, modelFilter, userFilter, apiKeyFilter],
   );
-  const sourceSummary = useUsageSummary(sourceSuggestFilters, "day");
+  const sourceSummary = useUsageSummary(sourceSuggestFilters, "day", Boolean(sourceFilter));
+  const sourceBreakdown = (sourceFilter ? sourceSummary.data : modelSummary.data)?.by_source;
   // A drill-down can name a source with no rows in the window; keep it listed so
   // the select shows the filter that is actually applied.
   const sourceOptions = useMemo(() => {
-    const seen = (sourceSummary.data?.by_source ?? [])
-      .filter((r) => !r.is_other && r.key !== null)
-      .map((r) => r.key as string);
+    const seen = (sourceBreakdown ?? []).filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string);
     return sourceFilter && !seen.includes(sourceFilter) ? [sourceFilter, ...seen] : seen;
-  }, [sourceSummary.data, sourceFilter]);
+  }, [sourceBreakdown, sourceFilter]);
 
   // The timeline histogram spans the whole preset *extent* (the rolling preset
   // window, independent of any brushed sub-window), so the brush always has

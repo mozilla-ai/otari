@@ -13,8 +13,11 @@
   --otari-brand-dark: #3c6678;
   /* Mid-step of the brand ramp, between --otari-brand and --otari-line. Exists so
      a small multi-part mark (the Activity token-composition bar) can shade its
-     segments by one hue at four legible lightnesses instead of by four hues. */
-  --otari-brand-soft: #a8c4ce;
+     segments by one hue at four legible lightnesses instead of by four hues. It
+     is deliberately darker than --otari-line: a hairline token used as a data
+     fill sits at ~1.2:1 against the surrounding surface, which reads as an empty
+     bar rather than a segment. */
+  --otari-brand-soft: #8fb2bf;
   --otari-brand-tint: #eaf1f3;
   --otari-ink: #14242c;
   --otari-muted: #5b6b73;

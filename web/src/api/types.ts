@@ -530,8 +530,9 @@ export interface UsageSummary {
   by_model: UsageGroupRow[];
   by_user: UsageGroupRow[];
   by_api_key: UsageGroupRow[];
-  // Provenance breakdown. Optional because it postdates the other groupings, so
-  // an older gateway serving a newer dashboard omits it; read it defensively.
+  // Provenance breakdown. Optional because it postdates the other groupings: the
+  // built bundle ships inside the gateway, but `vite dev` can point at an older
+  // one that omits it, so read it defensively.
   by_source?: UsageGroupRow[];
   series: UsageSeriesPoint[];
 }
