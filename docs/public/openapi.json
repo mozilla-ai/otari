@@ -5536,6 +5536,14 @@
         "description": "One error-taxonomy row: the failures in the window sharing a status code.\n\n``status_code`` is None for failures recorded without one (rows written\nbefore the column existed, and failures no HTTP status describes, e.g. a\nstream that finished without usage data under the ``fail`` policy).\n``error_class`` is the coarse display bucket derived from the code, so a UI\ncan group \"provider fault\" against \"my own misconfiguration\" without\nre-deriving a status ladder; the raw code stays alongside it for precision.",
         "properties": {
           "error_class": {
+            "enum": [
+              "pricing",
+              "rate_limit",
+              "auth",
+              "provider_error",
+              "client_error",
+              "unknown"
+            ],
             "title": "Error Class",
             "type": "string"
           },

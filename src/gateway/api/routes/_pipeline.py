@@ -308,7 +308,17 @@ def failure_status_code(exc: BaseException) -> int:
     answerable. When the provider returned no status at all (timeout,
     unreachable), records the gateway's own classification instead, so an error
     row still carries a code to group on.
+
+    The tool-loop cap is checked first because it is the gateway's own limit, not
+    an upstream failure: it carries no HTTP status of its own, so it would
+    otherwise fall through to the generic 502 and read in the taxonomy as a
+    provider outage. It reaches here from the streaming path, where the cap is
+    raised while the SSE body is already streaming (see ``run_tool_loop_stream``)
+    and settles through ``on_error``; the non-streaming path records the same 422
+    at its own ``except MaxToolIterationsExceeded``.
     """
+    if isinstance(exc, MaxToolIterationsExceeded):
+        return status.HTTP_422_UNPROCESSABLE_CONTENT
     _kind, status_code = upstream_exception_shape(exc)
     if status_code is not None:
         return status_code

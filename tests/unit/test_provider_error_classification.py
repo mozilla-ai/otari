@@ -23,6 +23,7 @@ from gateway.api.routes._pipeline import (
     failure_status_code,
 )
 from gateway.api.routes._platform import _provider_failure_http_exc
+from gateway.services.mcp_loop import MaxToolIterationsExceeded
 
 _RAW = "raw provider detail SECRET token=abc123"
 
@@ -196,6 +197,20 @@ def test_failure_status_code_unwraps_original_exception() -> None:
             self.original_exception = original_exception
 
     assert failure_status_code(_WrappedByAnyLLM(_StatusError(429))) == 429
+
+
+def test_failure_status_code_records_422_for_the_tool_loop_cap() -> None:
+    """The gateway's own tool-loop cap records 422, not the generic 502.
+
+    The non-streaming path stamps 422 at its own ``except`` clause, but a
+    streaming request raises the cap while the SSE body is already in flight, so
+    it settles through ``on_error`` and lands here instead. Without this branch
+    the cap carries no status, falls through to 502, and shows up in the error
+    taxonomy as a provider outage: precisely the confusion the 422 exists to
+    prevent, and only on streaming traffic, so the two halves of the same failure
+    would classify differently.
+    """
+    assert failure_status_code(MaxToolIterationsExceeded("Exceeded max_tool_iterations=8")) == 422
 
 
 @pytest.mark.parametrize("status_code", [400, 422])

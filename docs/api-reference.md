@@ -245,9 +245,9 @@ into something a text-only local model can read.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `model`, `endpoint`, `provider`, `source`, `source_label`, `api_key_id`. | Master key |
+| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `status_code`, `model`, `endpoint`, `provider`, `source`, `source_label`, `api_key_id`. `status_code` is the HTTP status classifying a failure (e.g. 429 provider rate limit, 402 missing pricing); only error rows carry one. | Master key |
 | `GET` | `/v1/usage/count` | Total rows matching the filters (paginator total). | Master key |
-| `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source/session/endpoint/provider, and a time series. `dimensions` narrows which breakdowns are computed (each one is a separate `GROUP BY`); `dimensions=none` returns totals and series only. | Master key |
+| `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source/session/endpoint/provider, the failure taxonomy in `errors_by_status_code` (failures grouped by `status_code` with a coarse `error_class`), and a time series. `dimensions` narrows which breakdowns are computed (each one is a separate `GROUP BY`, including `status_code` for the taxonomy); `dimensions=none` returns totals and series only. | Master key |
 | `GET` | `/v1/usage/summary.csv` | Every breakdown as a CSV download. | Master key |
 | `POST` | `/v1/usage/external-events` | Import externally-observed usage (e.g. Claude Code) as source-tagged rows, priced at API rates, never counted toward budget. An API key (must be budget-exempt) attributes to its own user; the master key may name any user. Idempotent by `(source, source_event_id)`. See [Importing external usage](external-usage.md). | API key (budget-exempt) or master key |
 | `POST` | `/v1/traces` | OTLP receiver for GenAI usage **spans** (protobuf or JSON). Maps the OpenTelemetry GenAI conventions (`gen_ai.*`, `otari.*`) onto external usage ingestion. Any instrumented app can ship here. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |

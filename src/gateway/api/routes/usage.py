@@ -53,6 +53,11 @@ _SESSION_BREAKDOWN_TOP_N = 250
 
 Bucket = Literal["hour", "day"]
 
+# Coarse display buckets for a failure's status code. A closed Literal rather than
+# a bare str so the set lands in the OpenAPI schema as an enum and a consumer can
+# switch on it exhaustively instead of string-matching whatever the server sent.
+ErrorClass = Literal["pricing", "rate_limit", "auth", "provider_error", "client_error", "unknown"]
+
 # Every breakdown ``/summary`` can compute, mapped to the column it groups by and
 # its top-N cap. A dimension name is the ``by_<name>`` response field it fills, so
 # a caller reads the selector and the payload with one vocabulary.
@@ -457,7 +462,7 @@ class UsageErrorCodeRow(BaseModel):
     """
 
     status_code: int | None
-    error_class: str
+    error_class: ErrorClass
     requests: int
 
 
@@ -498,7 +503,10 @@ class UsageSummary(BaseModel):
     by_endpoint: list[UsageGroupRow]
     by_provider: list[UsageGroupRow]
     # Failures only, so the taxonomy is not swamped by the successes that carry
-    # no status code. Counts reconcile with ``totals.error_count``.
+    # no status code. Counts sum to ``totals.error_count``, unless a window
+    # somehow held more than ``_BREAKDOWN_TOP_N`` distinct codes, in which case
+    # the tail is omitted rather than folded (there is no synthesized "other"
+    # row: a null key would collide with the real "no code recorded" group).
     errors_by_status_code: list[UsageErrorCodeRow]
     series: list[UsageSeriesPoint]
 
@@ -648,7 +656,7 @@ async def _breakdown(
     return result
 
 
-def error_class_for(status_code: int | None) -> str:
+def error_class_for(status_code: int | None) -> ErrorClass:
     """Coarse display bucket for a failure's HTTP status code.
 
     401 and 403 read as ``auth`` rather than as a budget denial because the codes
