@@ -212,7 +212,13 @@ def build_exa_payload(tool: SearchTool, query: SearchQuery) -> dict[str, Any]:
     if query.max_tokens_per_page is not None or "text" not in contents:
         max_tokens = query.max_tokens_per_page or DEFAULT_MAX_TOKENS_PER_PAGE
         max_chars = max(1, min(max_tokens * _CHARS_PER_TOKEN, _EXA_MAX_CHARACTERS))
-        contents["text"] = {"maxCharacters": max_chars}
+        # Merge rather than replace: ``text`` has siblings (``verbosity``,
+        # ``includeHtmlTags``) that a tool may have pinned, and only the size is
+        # the caller's to set.
+        pinned = contents.get("text")
+        text_options = dict(pinned) if isinstance(pinned, dict) else {}
+        text_options["maxCharacters"] = max_chars
+        contents["text"] = text_options
     payload["contents"] = contents
 
     payload["query"] = query.query

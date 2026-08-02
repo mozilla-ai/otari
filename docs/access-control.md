@@ -29,7 +29,7 @@ curl -X POST http://localhost:8000/v1/users \
 ```
 
 - `user_id` is the stable identifier you choose; it is what spend and usage key on.
-- `allowed_models` is the default access-list the user's keys inherit. `null` (or omitted) means any model, `[]` denies everything, and a list restricts to canonical `instance:model` entries, with `instance:*` and `instance:prefix*` wildcards.
+- `allowed_models` is the default access-list the user's keys inherit. `null` (or omitted) means any model, `[]` denies everything, and a list restricts to canonical `instance:model` entries, with `instance:*` and `instance:prefix*` wildcards. The list also gates the non-model spend surfaces that key on the same `instance:model` form, so a restricted key that should be able to call [`POST /v1/search`](api-reference.md#search) needs its search tool named too, as `<provider>:<tool>` (for example `exa:exa-search`).
 - `blocked: true` stops the user from making requests without deleting anything; their calls are rejected until you unblock them.
 
 Manage users with `GET /v1/users`, `GET /v1/users/{user_id}`, `PATCH /v1/users/{user_id}` (update alias, budget, `blocked`, or `allowed_models`), and `DELETE /v1/users/{user_id}`. A user's response includes `spend` and `reserved` (in-flight spend held by accepted but not-yet-settled requests); the committed total is `spend + reserved`. `GET /v1/users/{user_id}/usage` returns that user's request log.

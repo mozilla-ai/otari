@@ -5,6 +5,7 @@ own job: auth, tool selection, budget reservation and settlement, and the usage
 row that makes a search visible in the Activity and Usage views.
 """
 
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -183,6 +184,61 @@ def test_search_max_results_above_cap_is_422(client: TestClient, api_key_header:
     payload = {**SEARCH_PAYLOAD, "max_results": 50}
     resp = client.post("/v1/search/exa-search", json=payload, headers=api_key_header)
     assert resp.status_code == 422
+
+
+def test_search_rejects_a_country_that_is_not_a_two_letter_code(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    payload = {**SEARCH_PAYLOAD, "country": "United States"}
+    resp = client.post("/v1/search/exa-search", json=payload, headers=api_key_header)
+    assert resp.status_code == 422
+
+
+def test_search_honors_the_keys_model_allowlist(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A key restricted to models it may call cannot spend on an unlisted search tool."""
+    client.post("/v1/users", json={"user_id": "narrow-user"}, headers=master_key_header)
+    key = client.post(
+        "/v1/keys",
+        json={"key_name": "narrow-key", "user_id": "narrow-user", "allowed_models": ["openai:gpt-4o"]},
+        headers=master_key_header,
+    ).json()
+    headers = {API_KEY_HEADER: f"Bearer {key['key']}"}
+
+    with _mock_search():
+        denied = client.post("/v1/search/exa-search", json=SEARCH_PAYLOAD, headers=headers)
+    assert denied.status_code == 403
+
+    # Naming the tool as <provider>:<tool> is what grants it.
+    client.patch(
+        f"/v1/keys/{key['id']}",
+        json={"allowed_models": ["openai:gpt-4o", "exa:exa-search"]},
+        headers=master_key_header,
+    )
+    with _mock_search():
+        allowed = client.post("/v1/search/exa-search", json=SEARCH_PAYLOAD, headers=headers)
+    assert allowed.status_code == 200
+
+
+def test_search_does_not_warn_about_provider_pricing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The tool key must not reach reserve_budget's any-llm model split.
+
+    It is not an any-llm selector, so the split fails and is swallowed into a
+    warning on every request. Worse, the shortcut behind it runs a
+    default-pricing lookup that the route's own use_defaults=False guard is
+    there to prevent, and can skip the reservation outright.
+    """
+    with caplog.at_level(logging.WARNING), _mock_search():
+        resp = client.post("/v1/search/exa-search", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 200
+    assert "Failed to determine provider pricing" not in caplog.text
 
 
 def test_search_logs_usage_with_provider_reported_cost(

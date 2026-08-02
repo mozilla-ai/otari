@@ -844,6 +844,15 @@ class GatewayConfig(BaseSettings):
             return providers
         return {instance: ({} if entry is None else entry) for instance, entry in providers.items()}
 
+    def search_tool_providers(self) -> set[str]:
+        """The distinct providers backing the configured search tools.
+
+        These are prefixes of the ``<provider>:<tool>`` keys that search pricing,
+        usage, and per-key access lists are written against, so the allow-list
+        writer has to accept them alongside real provider instances.
+        """
+        return {str(entry.get("provider") or name) for name, entry in self.search_tools.items()}
+
     def validate_search_tools(self) -> None:
         """Validate the ``search_tools`` map at startup so misconfig fails fast.
 

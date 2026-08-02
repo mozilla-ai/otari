@@ -108,8 +108,8 @@ a query from the caller and returns results. Both forms log
 `endpoint="/v1/search"`, so one Activity filter covers every search.
 
 The request and response follow LiteLLM's `/v1/search` (itself shaped after
-Perplexity's Search API), so a client moving off the LiteLLM proxy needs no
-changes:
+Perplexity's Search API), so a client moving off the LiteLLM proxy keeps its
+request shape:
 
 ```bash
 curl http://localhost:8000/v1/search/exa-search \
@@ -137,8 +137,18 @@ curl http://localhost:8000/v1/search/exa-search \
 }
 ```
 
-Prefix a domain with `-` in `search_domain_filter` to exclude it instead of
-restricting to it. Search bills per request rather than per token, so a usage
+The accepted request fields are `query`, `search_tool_name`, `max_results`
+(1 to 20), `search_domain_filter` (up to 20 entries; prefix a domain with `-` to
+exclude it rather than restrict to it), `country`, `max_tokens_per_page`, and
+`user`. Two differences from Perplexity are worth knowing before you migrate:
+`query` must be a single string, so the multi-query array form is rejected with
+a 422; and the filters Otari does not model (`search_recency_filter`,
+`search_context_size`, the published-date filters) are ignored rather than
+rejected, so check that your client does not depend on one. Provider-native
+knobs with no request field, such as Exa's `type` or `category`, belong in the
+tool's `options`.
+
+Search bills per request rather than per token, so a usage
 row carries zero tokens and a cost taken from the provider's own reported charge
 when it reports one (Exa does); otherwise it uses the flat per-request rate
 configured for `<provider>:<tool>`, under the same convention as

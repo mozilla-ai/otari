@@ -8,9 +8,13 @@ so a client that proxies a search API can keep one gateway on the billing path
 instead of holding a second provider key of its own.
 
 The request and response follow LiteLLM's ``/v1/search`` (itself shaped after
-Perplexity's Search API), so a caller moving off the LiteLLM proxy needs no
-changes; :mod:`gateway.services.search_backend` translates to and from the
-provider's native shape and owns the per-provider adapters.
+Perplexity's Search API), so a caller moving off the LiteLLM proxy keeps its
+request shape; :mod:`gateway.services.search_backend` translates to and from the
+provider's native shape and owns the per-provider adapters. Two Perplexity
+features are deliberately not modeled: ``query`` is a single string rather than
+the multi-query array, and the filters with no field below (recency, context
+size, published-date) are ignored rather than rejected. Both are called out in
+``docs/api-reference.md`` so a migrating caller can check for them.
 
 Both the body-selected (``POST /v1/search``) and path-selected
 (``POST /v1/search/{search_tool_name}``) forms log ``endpoint="/v1/search"``,
@@ -48,6 +52,7 @@ from gateway.models.entities import APIKey, UsageLog
 from gateway.rate_limit import check_rate_limit
 from gateway.services.budget_service import reconcile_reservation, refund_reservation, reserve_budget
 from gateway.services.log_writer import LogWriter
+from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import find_model_pricing, flat_request_cost
 from gateway.services.search_backend import (
     MAX_RESULTS_CAP,
@@ -91,7 +96,12 @@ class SearchRequest(BaseModel):
         max_length=_MAX_DOMAIN_FILTERS,
         description="Restrict results to these domains; prefix a domain with '-' to exclude it instead",
     )
-    country: str | None = Field(default=None, description="Two-letter ISO country code to localize results to")
+    country: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=2,
+        description="Two-letter ISO country code to localize results to",
+    )
     max_tokens_per_page: int | None = Field(
         default=None, ge=1, description="Approximate cap on the page content returned per result"
     )
@@ -217,6 +227,18 @@ async def _dispatch_search(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     pricing_key = f"{tool.provider}:{tool.name}"
+
+    # Model access control (per-key), keyed on the same <provider>:<tool> string
+    # pricing uses. A key with no list of its own inherits its user's default, so
+    # an unrestricted key is unaffected; a restricted one must name the search
+    # tool, which is the fail-closed side to be on for a brand-new spend surface.
+    key_allowlist = await resolve_request_allowlist(db, api_key)
+    if key_allowlist is not None and not is_model_allowed(key_allowlist, pricing_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=model_not_allowed_detail(pricing_key),
+        )
+
     # A search tool is not a model, so the community default-pricing dataset can
     # only produce a false match on the tool's name.
     pricing = await find_model_pricing(db, tool.provider, tool.name, use_defaults=False)
@@ -224,7 +246,13 @@ async def _dispatch_search(
         db,
         user_id,
         flat_request_cost(pricing),
-        model=pricing_key,
+        # Deliberately not the pricing key: ``model`` exists only to drive
+        # reserve_budget's free-model shortcut, which splits the string through
+        # any-llm. A search tool is not an any-llm model, so passing it logs a
+        # warning on every request, and for a tool whose name did happen to be an
+        # any-llm provider the shortcut would run an unguarded default-pricing
+        # lookup on the tool name and could skip the reservation outright.
+        model=None,
         strategy=config.budget_strategy,
         counts_toward_budget=not budget_exempt,
     )

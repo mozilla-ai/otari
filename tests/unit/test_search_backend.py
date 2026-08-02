@@ -140,15 +140,27 @@ def test_tool_options_are_defaults_and_never_displace_the_query() -> None:
 
 
 def test_tool_pinned_contents_survive_when_the_caller_asks_for_no_page_size() -> None:
-    tool = replace(_EXA_TOOL, options={"contents": {"text": {"maxCharacters": 200}}})
+    tool = replace(_EXA_TOOL, options={"contents": {"text": {"maxCharacters": 800}}})
     payload = build_exa_payload(tool, SearchQuery(query="q"))
-    assert payload["contents"]["text"]["maxCharacters"] == 200
+    assert payload["contents"]["text"]["maxCharacters"] == 800
 
 
 def test_caller_page_size_overrides_tool_pinned_contents() -> None:
-    tool = replace(_EXA_TOOL, options={"contents": {"text": {"maxCharacters": 200}}})
+    """The caller's size wins; 800 would survive if the override were a no-op."""
+    tool = replace(_EXA_TOOL, options={"contents": {"text": {"maxCharacters": 800}}})
     payload = build_exa_payload(tool, SearchQuery(query="q", max_tokens_per_page=50))
     assert payload["contents"]["text"]["maxCharacters"] == 200
+
+
+def test_caller_page_size_keeps_the_tools_other_text_options() -> None:
+    """Only the size is the caller's to set; pinned siblings are merged, not replaced."""
+    tool = replace(
+        _EXA_TOOL,
+        options={"contents": {"text": {"maxCharacters": 800, "verbosity": "full"}, "highlights": True}},
+    )
+    payload = build_exa_payload(tool, SearchQuery(query="q", max_tokens_per_page=50))
+    assert payload["contents"]["text"] == {"maxCharacters": 200, "verbosity": "full"}
+    assert payload["contents"]["highlights"] is True
 
 
 # --------------------------------------------------------------------------- #
