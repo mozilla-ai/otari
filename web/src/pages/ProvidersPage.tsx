@@ -1,5 +1,5 @@
 import { Button, Card, Chip, ComboBox, Description, Input, Label, ListBox, ListBoxItem, Spinner, TextField } from "@heroui/react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
@@ -475,10 +475,11 @@ function EditProviderForm({
 }: {
   provider: StoredProvider;
   onClose: () => void;
-  // Called when a save succeeds, so the page can retire anything that described
-  // the credentials as they were. Distinct from onClose, which also fires on
-  // cancel, where nothing was written and an existing verdict still holds.
-  onSaved: () => void;
+  // Called with the saved instance when a save succeeds, so the page can retire
+  // anything that described the credentials as they were. Distinct from onClose,
+  // which also fires on cancel, where nothing was written and an existing verdict
+  // still holds.
+  onSaved: (instance: string) => void;
 }) {
   const update = useUpdateStoredProvider();
   const [providerType, setProviderType] = useState(provider.provider_type ?? "");
@@ -501,7 +502,7 @@ function EditProviderForm({
       { instance: provider.instance, body },
       {
         onSuccess: () => {
-          onSaved();
+          onSaved(provider.instance);
           onClose();
         },
       },
@@ -806,11 +807,28 @@ export function ProvidersPage() {
     : !settings.isError;
   const showOnboarding = !loading && rows.length === 0 && !addOpen;
 
+  // Which test run each row is currently showing. A row's result is only worth
+  // recording while it is still the answer to the newest thing the operator asked
+  // for, and neither the pending marker nor the Test button's disabled state can
+  // establish that on its own: the button is per-row and keys off the marker
+  // (below), so clearing the marker re-enables it in the same instant, and a
+  // retest can start while the previous request is still in flight. A monotonic
+  // id per instance is the thing that actually settles it. In a ref because a
+  // late callback must read the current value, not the one its render closed over.
+  const testRuns = useRef<Record<string, number>>({});
+  const startTestRun = (instance: string) => {
+    const run = (testRuns.current[instance] ?? 0) + 1;
+    testRuns.current[instance] = run;
+    return run;
+  };
+
   // A test verdict describes the credentials as they were when it ran, so drop
   // it once the provider changes underneath it: otherwise the row keeps showing
   // a failure from the previous configuration, contradicting the status pill
-  // right above it (issue #464).
-  const clearTest = (instance: string) =>
+  // right above it (issue #464). Bumping the run id retires any request still in
+  // flight, so a slow test cannot write the old verdict back afterwards.
+  const clearTest = (instance: string) => {
+    startTestRun(instance);
     setTests((prev) => {
       // Own-property check: `in` also reports inherited keys, so an instance
       // named after one (`toString`) would read as having a verdict it does not.
@@ -819,30 +837,37 @@ export function ProvidersPage() {
       delete next[instance];
       return next;
     });
+  };
 
-  // Only record a result while this run's "pending" marker is still there. A test
-  // against an unreachable endpoint settles slowly, which is when the operator is
-  // most likely to go fix the credentials mid-flight; without this guard the save
-  // would clear the verdict and the timed-out test would then write it straight
-  // back, restoring the very staleness clearTest exists to remove.
-  const settleTest = (instance: string, state: TestState) =>
-    setTests((prev) =>
-      Object.hasOwn(prev, instance) && prev[instance].status === "pending" ? { ...prev, [instance]: state } : prev,
-    );
+  // Record a result only if its run is still the current one for that row, which
+  // rules out both a verdict retired by an edit or delete and one superseded by a
+  // later test on the same row.
+  const settleTest = (instance: string, run: number, state: TestState) => {
+    if (testRuns.current[instance] !== run) return;
+    setTests((prev) => ({ ...prev, [instance]: state }));
+  };
 
-  const runTest = (instance: string) => {
+  // Resolve each row's test from its own promise. One useMutation observer serves
+  // every row, and TanStack Query detaches it from the previous mutation as soon
+  // as the next `mutate` lands, discarding that call's onSuccess/onError: testing
+  // a second provider while the first was still in flight left the first row
+  // spinning on "Testing…", with its Test button disabled, for the life of the
+  // page. The promise from mutateAsync settles regardless of that detach.
+  const runTest = async (instance: string) => {
+    const run = startTestRun(instance);
     setTests((prev) => ({ ...prev, [instance]: { status: "pending" } }));
-    testProvider.mutate(instance, {
-      onSuccess: (result) => settleTest(instance, { status: "done", ...result }),
-      onError: (error) =>
-        settleTest(instance, {
-          status: "done",
-          ok: false,
-          model_count: 0,
-          error: errorMessage(error),
-          discovery_unsupported: false,
-        }),
-    });
+    try {
+      const result = await testProvider.mutateAsync(instance);
+      settleTest(instance, run, { status: "done", ...result });
+    } catch (error) {
+      settleTest(instance, run, {
+        status: "done",
+        ok: false,
+        model_count: 0,
+        error: errorMessage(error),
+        discovery_unsupported: false,
+      });
+    }
   };
 
   const columns: DataTableColumn<ProviderRow>[] = [
@@ -917,7 +942,7 @@ export function ProvidersPage() {
                 variant="outline"
                 // A row whose key can't be decrypted can't be tested; Edit/Delete still recover it.
                 isDisabled={tests[row.instance]?.status === "pending" || row.stored?.decryptable === false}
-                onPress={() => runTest(row.instance)}
+                onPress={() => void runTest(row.instance)}
               >
                 Test
               </Button>
@@ -1011,7 +1036,7 @@ export function ProvidersPage() {
         <EditProviderForm
           provider={editingProvider}
           onClose={() => setEditing(null)}
-          onSaved={() => clearTest(editingProvider.instance)}
+          onSaved={clearTest}
         />
       ) : null}
 

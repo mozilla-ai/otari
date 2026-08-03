@@ -106,6 +106,10 @@ interface MockOpts {
   // When set, POST .../test blocks on this promise, so a test can hold a
   // connection test in flight while the page is used.
   testGate?: Promise<unknown>;
+  // Scripts successive POST .../test calls, so a test can hold the first one in
+  // flight and let a later one answer first. Falls back to testGate/testResult
+  // once the script runs out.
+  testCalls?: { gate?: Promise<unknown>; result: TestProviderResult }[];
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -125,6 +129,7 @@ function mockApi(opts: MockOpts = {}) {
       discovery_unsupported: false,
     }));
   const healthRefresh = opts.healthRefresh ?? health;
+  let testCallCount = 0;
 
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
@@ -132,6 +137,12 @@ function mockApi(opts: MockOpts = {}) {
 
     if (url.includes("/v1/provider-credentials")) {
       if (url.endsWith("/test") && method === "POST") {
+        const scripted = opts.testCalls?.[testCallCount];
+        testCallCount += 1;
+        if (scripted) {
+          if (scripted.gate) await scripted.gate;
+          return jsonResponse(scripted.result);
+        }
         if (opts.testGate) await opts.testGate;
         return jsonResponse(testResult);
       }
@@ -147,9 +158,16 @@ function mockApi(opts: MockOpts = {}) {
           provider_type?: string | null;
           api_base?: string | null;
           api_key?: string | null;
+          expected_updated_at?: string | null;
         };
         const existing = storedList.find((p) => p.instance === instance);
         if (!existing) return jsonResponse({ detail: `Unknown provider: ${instance}` }, 404);
+        // Mirror the backend's optimistic-concurrency check: a non-null
+        // expected_updated_at that does not match the stored updated_at is a 412
+        // (see routes/providers.py, update_stored_provider).
+        if (body.expected_updated_at != null && body.expected_updated_at !== existing.updated_at) {
+          return jsonResponse({ detail: "This provider was modified since you loaded it; reload and retry." }, 412);
+        }
         // Mirror the backend, which keys off model_fields_set: an omitted field is
         // kept, a field sent as null is cleared (see routes/providers.py, UNSET).
         const row: StoredProvider = {
@@ -731,6 +749,79 @@ describe("ProvidersPage", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Test" })).toBeEnabled());
     expect(screen.queryByText("authentication failed: invalid key")).not.toBeInTheDocument();
+  });
+
+  it("lets the retest after a save win, even if the pre-save test answers last", async () => {
+    // Saving retires the pending verdict, which re-enables Test in the same
+    // instant, so the operator can retest the fixed credentials while the
+    // pre-save request is still hanging. Only the run id distinguishes the two:
+    // the late answer belongs to credentials that no longer exist.
+    let releaseStale: () => void = () => {};
+    const staleGate = new Promise<void>((resolve) => {
+      releaseStale = resolve;
+    });
+    mockApi({
+      stored: [storedProvider("otari", "1234")],
+      testCalls: [
+        {
+          gate: staleGate,
+          result: { ok: false, model_count: 0, error: "authentication failed: invalid key", discovery_unsupported: false },
+        },
+        { result: { ok: true, model_count: 7, error: null, discovery_unsupported: false } },
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1234");
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByText("Testing…")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.clear(screen.getByLabelText("API base"));
+    await user.type(screen.getByLabelText("API base"), "https://api.otari.ai/v1");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(screen.queryByText("Testing…")).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    releaseStale();
+
+    expect(await screen.findByText("Connected. 7 models available.")).toBeInTheDocument();
+    expect(screen.queryByText("authentication failed: invalid key")).not.toBeInTheDocument();
+  });
+
+  it("settles both rows when two connection tests run at once", async () => {
+    // One useMutation observer serves every row, and TanStack Query detaches it
+    // from the previous mutation as soon as the next mutate lands, dropping that
+    // call's callbacks. Testing a second provider while the first was in flight
+    // used to leave the first row spinning on "Testing…" with its Test button
+    // disabled for the life of the page.
+    let releaseTests: () => void = () => {};
+    const testGate = new Promise<void>((resolve) => {
+      releaseTests = resolve;
+    });
+    mockApi({
+      stored: [storedProvider("anthropic", "1111"), storedProvider("openai", "2222")],
+      testResult: { ok: true, model_count: 4, error: null, discovery_unsupported: false },
+      testGate,
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1111");
+    expect(screen.getAllByRole("button", { name: "Test" })).toHaveLength(2);
+    await user.click(screen.getAllByRole("button", { name: "Test" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "Test" })[1]);
+    expect(await screen.findAllByText("Testing…")).toHaveLength(2);
+
+    releaseTests();
+
+    // Both verdicts land, and neither row is left stuck pending.
+    await waitFor(() => expect(screen.getAllByText("Connected. 4 models available.")).toHaveLength(2));
+    expect(screen.queryByText("Testing…")).not.toBeInTheDocument();
+    for (const button of screen.getAllByRole("button", { name: "Test" })) {
+      expect(button).toBeEnabled();
+    }
   });
 
   it("does not automatically re-check all providers within an hour", async () => {
