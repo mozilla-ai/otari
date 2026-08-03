@@ -18,6 +18,8 @@ from gateway.core.database import reset_db
 from gateway.main import create_app
 from gateway.services.search_backend import SearchHit, SearchOutcome, SearchProviderError
 
+SEARCH_ENDPOINT = "/v1/search"
+
 SEARCH_PAYLOAD: dict[str, Any] = {"query": "what is otari"}
 
 _HITS = [
@@ -45,6 +47,21 @@ def test_config(postgres_url: str) -> GatewayConfig:
             "exa-fast": {"provider": "exa", "api_key": "exa-secret", "options": {"type": "fast"}},
         },
     )
+
+
+def _search_rows(client: TestClient, headers: dict[str, str], user_id: str) -> list[dict[str, Any]]:
+    """The user's search usage rows, from the admin view that exposes every column.
+
+    ``/v1/users/{id}/usage`` omits ``counts_toward_budget``, which the refusal
+    rows below have to assert on.
+    """
+    resp = client.get(
+        "/v1/usage",
+        params={"user_id": user_id, "endpoint": SEARCH_ENDPOINT},
+        headers=headers,
+    )
+    assert resp.status_code == 200, resp.text
+    return [dict(row) for row in resp.json()]
 
 
 def _mock_search(outcome: SearchOutcome | None = None, *, side_effect: Exception | None = None) -> Any:
@@ -235,13 +252,15 @@ def test_search_logs_an_unknown_tool_refusal(
     resp = client.post("/v1/search/nope", json=SEARCH_PAYLOAD, headers=api_key_header)
     assert resp.status_code == 400
 
-    logs = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header).json()
-    search_logs = [log for log in logs if log["endpoint"] == "/v1/search"]
+    search_logs = _search_rows(client, master_key_header, user_id)
     assert len(search_logs) == 1
     entry = search_logs[0]
     assert entry["status"] == "error"
     assert entry["model"] == "nope"
     assert entry["cost"] is None
+    # Never an imported-looking row: the dashboard offers those for bulk delete
+    # and set-price, which must not reach a row the gateway wrote itself.
+    assert entry["counts_toward_budget"] is True
     assert "Unknown search tool" in entry["error_message"]
 
 
@@ -265,14 +284,50 @@ def test_search_logs_an_allowlist_refusal(
         )
     assert resp.status_code == 403
 
-    logs = client.get("/v1/users/denied-user/usage", headers=master_key_header).json()
-    search_logs = [log for log in logs if log["endpoint"] == "/v1/search"]
+    search_logs = _search_rows(client, master_key_header, "denied-user")
     assert len(search_logs) == 1
     entry = search_logs[0]
     assert entry["status"] == "error"
     assert entry["model"] == "exa-search"
     assert entry["provider"] == "exa"
     assert entry["cost"] is None
+    assert entry["counts_toward_budget"] is True
+
+
+def test_a_budget_exempt_keys_search_refusal_still_counts_toward_budget(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """An exempt key's refusal row must not look like imported usage.
+
+    A key flagged ``exclude_from_budget`` writes ``counts_toward_budget=False``
+    on its served rows, and it can still be refused by the allow-list gate. The
+    flag is pinned True for every gateway-written refusal (see
+    ``log_gateway_rejection``), so the dashboard never offers one for bulk delete.
+    """
+    client.post("/v1/users", json={"user_id": "exempt-search-user"}, headers=master_key_header)
+    key = client.post(
+        "/v1/keys",
+        json={
+            "key_name": "exempt-search-key",
+            "user_id": "exempt-search-user",
+            "allowed_models": ["openai:gpt-4o"],
+            "exclude_from_budget": True,
+        },
+        headers=master_key_header,
+    ).json()
+
+    with _mock_search():
+        resp = client.post(
+            "/v1/search/exa-search",
+            json=SEARCH_PAYLOAD,
+            headers={API_KEY_HEADER: f"Bearer {key['key']}"},
+        )
+    assert resp.status_code == 403
+
+    search_logs = _search_rows(client, master_key_header, "exempt-search-user")
+    assert len(search_logs) == 1
+    assert search_logs[0]["counts_toward_budget"] is True
 
 
 def test_search_does_not_warn_about_provider_pricing(
