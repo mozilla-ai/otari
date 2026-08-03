@@ -17,7 +17,7 @@ from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 
 from gateway.auth.vertex_auth import setup_vertex_environment
-from gateway.core.config import GatewayConfig
+from gateway.core.config import GatewayConfig, provider_credential_env_names
 from gateway.services.alias_service import resolve_effective_alias
 
 # Keys that describe an instance to otari but are not credentials any-llm
@@ -41,20 +41,11 @@ def _provider_env_key_present(provider: LLMProvider) -> bool:
 
     Read directly from the environment because these are any-llm's own SDK
     variables, not otari config: any-llm falls back to them before raising, so
-    the placeholder must not shadow a key the operator supplied that way.
-
-    ``ENV_API_KEY_NAME`` is not always a single variable name: some providers use
-    a ``/``-joined label listing alternatives (e.g. gemini's
-    ``"GEMINI_API_KEY/GOOGLE_API_KEY"``), so treat it as candidates and count the
-    key present when any one of them is set.
+    the placeholder must not shadow a key the operator supplied that way. The
+    candidate names come from :func:`provider_credential_env_names`, shared with
+    the config layer so both agree on which variables carry a credential.
     """
-    try:
-        env_name = AnyLLM.get_provider_class(provider).ENV_API_KEY_NAME
-    except (ImportError, AttributeError):
-        return False
-    if not env_name:
-        return False
-    return any(os.getenv(candidate.strip()) for candidate in env_name.split("/") if candidate.strip())
+    return any(os.getenv(name) for name in provider_credential_env_names(provider.value) or ())
 
 
 def keyless_placeholder_api_key(provider: LLMProvider, api_base: Any, api_key: Any) -> str | None:

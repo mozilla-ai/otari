@@ -208,6 +208,11 @@ listing anything; the failure is cached briefly, so an offline local server does
 not slow down every request. For a local backend that serves no model-listing
 endpoint, declare the ids with `models:` as shown above.
 
+A bare entry naming a provider that *does* need a key (`openai:` with nothing
+beneath it) loads too, but Otari logs a warning at startup when no credential is
+configured for it and its environment variable is unset, since that shape is
+usually a truncated edit rather than an intentionally keyless instance.
+
 ## Model aliases
 
 An alias is a display name that maps to a real selector, so you can expose a

@@ -10,10 +10,13 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from any_llm import LLMProvider
+from any_llm import AnyLLM, LLMProvider
+from any_llm.exceptions import AnyLLMError
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from gateway.log_config import logger
 
 API_KEY_HEADER = "Otari-Key"
 # Aliases accepted for a provider instance's ``provider_type`` that map onto a
@@ -74,6 +77,32 @@ class _NonScalarField(Exception):
 def _get_platform_token_from_env() -> str | None:
     token = os.getenv(PLATFORM_TOKEN_ENV_VAR, "").strip()
     return token or None
+
+
+def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
+    """Environment variables any-llm reads for a provider's credential.
+
+    Returns an empty tuple when the provider needs no API key: the keyless local
+    backends (ollama, llamacpp, llamafile) declare the literal string ``"None"``,
+    and a provider authenticating through a cloud SDK (Vertex AI) declares an
+    empty name. Returns ``None`` when the provider cannot be inspected at all
+    (not a known implementation, or an optional SDK dependency that is not
+    installed), so callers can stay lenient about what they cannot determine.
+
+    The declared value is a label rather than always a single variable name:
+    providers with alternatives join them with ``/`` (gemini's
+    ``"GEMINI_API_KEY/GOOGLE_API_KEY"``) and providers needing several parts join
+    them with ``and`` (sagemaker), so it is split into candidate names.
+    """
+    try:
+        declared = AnyLLM.get_provider_class(provider_type).ENV_API_KEY_NAME
+    except (AnyLLMError, ImportError, AttributeError) as exc:
+        logger.debug("no credential env var known for provider type %r: %s", provider_type, exc)
+        return None
+    if not declared or declared == "None":
+        return ()
+    candidates = (part.strip() for chunk in declared.split("/") for part in chunk.split(" and "))
+    return tuple(candidate for candidate in candidates if candidate)
 
 
 class PricingTierConfig(BaseModel):
@@ -704,7 +733,9 @@ class GatewayConfig(BaseSettings):
         Fails fast at startup so a typo in ``provider_type`` (or a non-list
         ``models``) surfaces immediately rather than as a per-request error.
         Instances without a ``provider_type`` are left unvalidated to preserve
-        the existing lenient behavior (the key is the implementation).
+        the existing lenient behavior (the key is the implementation). A
+        settings-less entry for a provider that does need a credential only
+        warns, see :meth:`_warn_on_uncredentialed_bare_entry`.
         """
         for instance, entry in self.providers.items():
             # The selector splits on the first ``:`` / ``/``, so an instance name
@@ -731,6 +762,37 @@ class GatewayConfig(BaseSettings):
             if models is not None and not (isinstance(models, list) and all(isinstance(m, str) for m in models)):
                 msg = f"providers.{instance}.models must be a list of model id strings."
                 raise ValueError(msg)
+            if not entry:
+                self._warn_on_uncredentialed_bare_entry(instance)
+
+    def _warn_on_uncredentialed_bare_entry(self, instance: str) -> None:
+        """Warn when a settings-less entry names a provider that needs a credential.
+
+        A bare ``ollama:`` is the documented way to opt a keyless local backend
+        into discovery, but the same shape under a keyed provider (``openai:``
+        with nothing beneath it) is far more likely a truncated YAML edit than
+        intent, and it used to fail the load outright as a type error. Warn rather
+        than raise: the entry is legitimate whenever the credential reaches
+        any-llm another way (its own environment variable, an instance role), so a
+        gateway that works today must keep booting.
+
+        A settings-less entry has no ``provider_type`` to declare either, so the
+        instance name is the implementation the credential question is asked of.
+        """
+        env_names = provider_credential_env_names(instance)
+        # Empty: a keyless backend, nothing to warn about. None: a provider we
+        # cannot inspect, so we do not know that a credential is needed.
+        if not env_names:
+            return
+        if any(os.getenv(name) for name in env_names):
+            return
+        logger.warning(
+            "providers.%s has no settings and no credential: that provider needs an API key and none of %s is set. "
+            "A keyless local backend (ollama, llamacpp, llamafile) is configured this way on purpose; otherwise "
+            "this looks like a truncated config entry, and requests to it will fail.",
+            instance,
+            ", ".join(env_names),
+        )
 
     @field_validator("providers", mode="before")
     @classmethod
@@ -752,6 +814,12 @@ class GatewayConfig(BaseSettings):
         A ``providers:`` block with no entries at all gets the same treatment, so
         commenting out every entry reads as "no providers" rather than the same
         confusing type error.
+
+        The coercion is deliberately not limited to the keyless backends, since an
+        entry may name any instance; a bare entry under a provider that does need
+        a credential is caught at startup by
+        :meth:`GatewayConfig._warn_on_uncredentialed_bare_entry`, which keeps the
+        truncated-YAML case visible without failing the load.
         """
         if providers is None:
             return {}
