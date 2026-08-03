@@ -666,7 +666,12 @@ export function ActivityPage() {
     void count.refetch();
     void contextSummary.refetch();
     void modelSummary.refetch();
-    void sourceSummary.refetch();
+    // Guarded because refetch() ignores `enabled`: without a picked source the
+    // query is disabled by design and refetching it would fire a pointless
+    // extra summary request.
+    if (sourceFilter) {
+      void sourceSummary.refetch();
+    }
   };
 
   // A rolling preset clears any explicit bounds; a timeline selection sets them

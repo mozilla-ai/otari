@@ -2,6 +2,7 @@ import { Button, Spinner } from "@heroui/react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { ApiError } from "@/api/client";
 import { useKeys, useUsageGroupedSeries, useUsageSummary, useUsers } from "@/api/hooks";
 import type {
   UsageBucket,
@@ -287,6 +288,12 @@ export function UsagePage() {
   const previous = useUsageSummary(previousFilters ?? filters, bucket, previousFilters !== null);
   // The per-group stack, fetched only while a dimension is selected.
   const grouped = useUsageGroupedSeries(filters, bucket, groupBy || null);
+  // A 404 from the grouped endpoint is version skew: a gateway older than this
+  // dashboard (most often one not yet restarted onto the build that ships it).
+  // Fall back to the ungrouped view with a notice instead of a bare error.
+  const groupingUnsupported =
+    groupBy !== "" && grouped.error instanceof ApiError && grouped.error.status === 404;
+  const effectiveGroupBy = groupingUnsupported ? "" : groupBy;
 
   const data = summary.data;
   const totals = data?.totals;
@@ -433,7 +440,7 @@ export function UsagePage() {
   // pivoting happens here so the chart component stays dumb.
   const chart = useMemo((): { series: SeriesDef[]; data: StackedPoint[] } => {
     const buckets = series.map((p) => p.bucket_start);
-    if (groupBy) {
+    if (effectiveGroupBy) {
       const g = grouped.data;
       if (!g) return { series: [], data: [] };
       const defs = g.groups.map((row, index) => ({
@@ -442,7 +449,7 @@ export function UsagePage() {
           ? "Other"
           : row.key === null
             ? "(unknown)"
-            : groupBy === "api_key_id"
+            : effectiveGroupBy === "api_key_id"
               ? keyLabel(row.key)
               : row.key,
         color: row.is_other ? OTHER_COLOR : CAT_COLORS[index % CAT_COLORS.length],
@@ -499,10 +506,10 @@ export function UsagePage() {
     };
     // keyLabel is derived from query data; keys.data is the stable input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [series, groupBy, grouped.data, metric, hasComposition, hasErrors, keys.data]);
+  }, [series, effectiveGroupBy, grouped.data, metric, hasComposition, hasErrors, keys.data]);
 
   const formatValue = metricFormatter(metric);
-  const chartLoading = summary.isLoading || (Boolean(groupBy) && grouped.isLoading);
+  const chartLoading = summary.isLoading || (Boolean(effectiveGroupBy) && grouped.isLoading);
   const peak = chart.data.length
     ? Math.max(
         ...chart.data.map((row) => chart.series.reduce((sum, s) => sum + (typeof row[s.key] === "number" ? (row[s.key] as number) : 0), 0)),
@@ -568,7 +575,7 @@ export function UsagePage() {
         description="Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."
       />
 
-      <ErrorBanner error={summary.error ?? (groupBy ? grouped.error : null)} />
+      <ErrorBanner error={summary.error ?? (groupBy && !groupingUnsupported ? grouped.error : null)} />
 
       {/* Window + filter row: presets anchor the rolling window (dragging on the
           chart below selects an explicit sub-window), the Add filter toggle and
@@ -714,7 +721,7 @@ export function UsagePage() {
                     Reset zoom
                   </Button>
                 ) : null}
-                {summary.isFetching || (groupBy && grouped.isFetching) ? <Spinner size="sm" /> : null}
+                {summary.isFetching || (effectiveGroupBy && grouped.isFetching) ? <Spinner size="sm" /> : null}
                 <FilterSelect
                   ariaLabel="Group by"
                   value={groupBy}
@@ -726,6 +733,12 @@ export function UsagePage() {
                 />
               </div>
             </div>
+            {groupingUnsupported ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                The running gateway predates grouped series, so the chart shows ungrouped totals. Restart the gateway
+                on this build to enable grouping.
+              </div>
+            ) : null}
             <ChartLegend series={chart.series} />
             {chartLoading ? (
               <div className="flex h-64 items-center justify-center">
@@ -742,7 +755,7 @@ export function UsagePage() {
                   series={chart.series}
                   formatValue={formatValue}
                   formatXTick={(iso) => formatBucketLabel(iso, bucket)}
-                  ariaLabel={`${metric} per ${bucket}${groupBy ? `, grouped by ${groupBy}` : ""}`}
+                  ariaLabel={`${metric} per ${bucket}${effectiveGroupBy ? `, grouped by ${effectiveGroupBy}` : ""}`}
                   height={260}
                   showYAxis
                   showTotal

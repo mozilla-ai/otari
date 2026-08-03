@@ -510,3 +510,45 @@ def test_grouped_series_null_group_key_survives_when_in_top_n(
     assert point["is_other"] is False
     assert point["requests"] == 2
     assert point["cost"] == pytest.approx(0.30)
+
+
+def test_grouped_series_null_top_group_and_fold_stay_separate(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The three-arm fold CASE: a NULL group ranked in the top N must not merge
+    with the past-top-N fold, even though both are keyed NULL in SQL."""
+    ts = datetime(2025, 7, 1, 12, 0, tzinfo=UTC)
+    # The NULL user is the top spender; nine named users follow, so with top
+    # N = 8 the window keeps NULL + seven named groups and folds the last two.
+    _make_log(db_session, user_id=None, timestamp=ts, model="cf-model", cost=5.0, total_tokens=15)
+    for idx in range(9):
+        _make_log(
+            db_session, user_id=f"cf-u{idx}", timestamp=ts, model="cf-model", cost=1.0 - idx * 0.05, total_tokens=15
+        )
+    db_session.commit()
+
+    body = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "user_id",
+            "model": "cf-model",
+            "start_date": "2025-07-01T00:00:00Z",
+            "end_date": "2025-07-02T00:00:00Z",
+        },
+    ).json()
+
+    groups = body["groups"]
+    assert len([g for g in groups if g["key"] is None and not g["is_other"]]) == 1
+    assert len([g for g in groups if g["key"] is not None]) == 7
+    [fold] = [g for g in groups if g["is_other"]]
+    assert fold["requests"] == 2
+
+    points = body["points"]
+    [null_point] = [p for p in points if p["key"] is None and not p["is_other"]]
+    assert null_point["requests"] == 1
+    assert null_point["cost"] == pytest.approx(5.0)
+    [fold_point] = [p for p in points if p["is_other"]]
+    assert fold_point["requests"] == 2
+    assert fold_point["cost"] == pytest.approx(0.65 + 0.60)
+    assert sum(p["requests"] for p in points) == 10

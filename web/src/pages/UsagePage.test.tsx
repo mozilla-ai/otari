@@ -204,6 +204,29 @@ describe("UsagePage", () => {
     expect(calls.some((u) => u.includes("/v1/usage/series") && u.includes("group_by=model"))).toBe(true);
   });
 
+  it("falls back to ungrouped with a notice when the gateway lacks grouped series", async () => {
+    // Version skew: the dashboard ships inside the gateway, but a not-yet
+    // restarted gateway (or vite dev against an older one) has no
+    // /v1/usage/series. That must degrade to the ungrouped chart plus a
+    // notice, not spin through retries into a bare "Not Found" banner.
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/usage/series")) return jsonResponse({ detail: "Not Found" }, 404);
+      if (url.includes("/v1/usage/summary")) return jsonResponse(summary());
+      return jsonResponse([]);
+    });
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "model");
+
+    expect(await screen.findByText(/predates grouped series/)).toBeInTheDocument();
+    expect(screen.queryByText("Not Found")).not.toBeInTheDocument();
+    // The ungrouped single-series chart is still up (its caption renders).
+    expect(screen.getByText(/peak/)).toBeInTheDocument();
+  });
+
   it("stacks the billed token composition on the Tokens metric", async () => {
     const user = userEvent.setup();
     const base = summary();
