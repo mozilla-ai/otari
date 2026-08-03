@@ -222,6 +222,126 @@ def test_delete_round_trip(
     assert client.get("/v1/provider-credentials", headers=master_key_header).json() == []
 
 
+def test_create_rejects_internal_api_base_when_gate_on(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the SSRF gate on, POST refuses an internal api_base and persists nothing (issue #443)."""
+    _with_key(monkeypatch)
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    resp = client.post(
+        "/v1/provider-credentials",
+        json={"instance": "metadata", "api_key": "sk-1234", "api_base": "http://169.254.169.254/latest/"},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 400, resp.text
+    assert "OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS" in resp.json()["detail"]
+    # The blocked endpoint must not have been persisted.
+    assert client.get("/v1/provider-credentials", headers=master_key_header).json() == []
+
+
+def test_create_allows_public_api_base_when_gate_on(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate only blocks internal hosts; a public api_base still saves.
+
+    Uses a public IP literal rather than a hostname so the gate's address check
+    runs without depending on external DNS (the resolve path is covered by the
+    url_safety unit tests).
+    """
+    _with_key(monkeypatch)
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    resp = client.post(
+        "/v1/provider-credentials",
+        json={"instance": "openai", "api_key": "sk-1234", "api_base": "https://8.8.8.8/v1"},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 201, resp.text
+
+
+def test_create_allows_internal_api_base_by_default(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default (gate off) keeps the home-lab case working: an internal api_base saves."""
+    _with_key(monkeypatch)
+    monkeypatch.delenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", raising=False)
+    resp = client.post(
+        "/v1/provider-credentials",
+        json={"instance": "home_lab", "api_key": "sk-1234", "api_base": "http://10.0.0.5:11434/v1"},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 201, resp.text
+
+
+def test_patch_rejects_internal_api_base_when_gate_on(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the gate on, PATCH cannot swap a saved provider onto an internal api_base."""
+    _with_key(monkeypatch)
+    client.post(
+        "/v1/provider-credentials",
+        json={"instance": "openai", "api_key": "sk-1234", "api_base": "https://api.openai.com/v1"},
+        headers=master_key_header,
+    )
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    resp = client.patch(
+        "/v1/provider-credentials/openai",
+        json={"api_base": "http://169.254.169.254/latest/"},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 400, resp.text
+    # The original public api_base is untouched.
+    stored = client.get("/v1/provider-credentials", headers=master_key_header).json()
+    assert stored[0]["api_base"] == "https://api.openai.com/v1"
+
+
+def test_create_rejects_unresolvable_host_when_gate_on(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With the gate on, a host that cannot be resolved is refused (DNS-rebinding TOCTOU).
+
+    This makes the write path stricter than the report path it mirrors: even a
+    would-be public endpoint whose hostname does not currently resolve cannot be
+    persisted. `.invalid` never resolves (RFC 6761), so this needs no real DNS.
+    """
+    _with_key(monkeypatch)
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    resp = client.post(
+        "/v1/provider-credentials",
+        json={"instance": "proxy", "api_key": "sk-1234", "api_base": "https://does-not-exist.invalid/v1"},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 400, resp.text
+    assert "OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS" in resp.json()["detail"]
+    assert client.get("/v1/provider-credentials", headers=master_key_header).json() == []
+
+
+def test_patch_omitting_api_base_keeps_existing_base_when_gate_on(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Omitting api_base on PATCH does not re-validate it (omit-vs-null semantics).
+
+    An internal base stored while the gate was off stays put when an unrelated
+    field is updated with the gate on: the gate only runs when api_base is present
+    in the request body.
+    """
+    _with_key(monkeypatch)
+    monkeypatch.delenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", raising=False)
+    client.post(
+        "/v1/provider-credentials",
+        json={"instance": "home_lab", "api_key": "sk-1234", "api_base": "http://10.0.0.5:11434/v1"},
+        headers=master_key_header,
+    )
+    monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "false")
+    patched = client.patch(
+        "/v1/provider-credentials/home_lab",
+        json={"api_key": "sk-5678"},
+        headers=master_key_header,
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["api_base"] == "http://10.0.0.5:11434/v1"
+    assert patched.json()["last4"] == "5678"
+
+
 def test_invalid_instance_and_provider_type(
     client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

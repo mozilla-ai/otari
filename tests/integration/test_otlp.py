@@ -66,7 +66,7 @@ def _exempt_key(client: TestClient, master_key_header: dict[str, str], user_id: 
 
 
 def _seed_pricing(client: TestClient, master_key_header: dict[str, str]) -> None:
-    client.post(
+    resp = client.post(
         "/v1/pricing",
         json={
             "model_key": "anthropic:claude-opus-4-8",
@@ -74,10 +74,15 @@ def _seed_pricing(client: TestClient, master_key_header: dict[str, str]) -> None
             "output_price_per_million": 75.0,
             "cache_read_price_per_million": 1.5,
             "cache_write_price_per_million": 18.75,
+            "cache_write_1h_price_per_million": 30.0,
             "effective_at": "2020-01-01T00:00:00Z",
         },
         headers=master_key_header,
     )
+    assert resp.status_code == 200, resp.text
+    # The 1h rate must land distinct from the 5m one: if it fell back to the 5m rate,
+    # a cache write booked in the wrong bucket would cost the same and go unnoticed.
+    assert resp.json()["cache_write_1h_price_per_million"] == 30.0
 
 
 def test_otlp_api_request_is_ingested_and_priced(
@@ -96,11 +101,16 @@ def test_otlp_api_request_is_ingested_and_priced(
     assert row.counts_toward_budget is False
     assert row.model == "claude-opus-4-8"
     assert row.prompt_tokens == 1200 and row.completion_tokens == 450 and row.cache_read_tokens == 8000
-    # Claude Code uses 1h caching, and the event has no split, so cache creation is
-    # booked entirely as 1h (priced at the 1h rate, not the 5m base).
-    assert row.cache_write_tokens == 1024 and row.cache_write_1h_tokens == 1024
-    # Otari prices at its own configured rate (Claude Code's cost_usd is ignored).
-    assert row.cost is not None and row.cost > 0
+    # The api_request event carries no 5m/1h split, so cache creation stays in the base
+    # bucket and is priced at the 5m rate rather than the dearer 1h one.
+    assert row.cache_write_tokens == 1024 and row.cache_write_1h_tokens == 0
+    assert row.billing_meters is not None
+    assert row.billing_meters["cache_write_tokens"] == 1024
+    assert row.billing_meters["cache_write_1h_tokens"] == 0
+    # Otari prices at its own configured rates (Claude Code's cost_usd is ignored):
+    # 1200 fresh input + 450 output + 8000 cache read + 1024 cache writes at the 5m rate.
+    expected = (1200 * 15.0 + 450 * 75.0 + 8000 * 1.5 + 1024 * 18.75) / 1_000_000
+    assert row.cost == pytest.approx(expected)
     # The email attribute present in the OTLP record must never be persisted.
     assert "example.com" not in (row.source_label or "")
 

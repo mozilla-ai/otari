@@ -95,11 +95,21 @@ Or via environment variable:
 export OPENAI_API_KEY="sk-..."
 ```
 
-Both approaches work, for routing and for discovery alike: a provider whose
-native credential environment variable is set (for example `ANTHROPIC_API_KEY`)
-is callable as `provider:model` and its models also appear in `GET /v1/models`,
-even without a `providers` entry. Config file values take precedence over
-environment variables.
+Both approaches work for routing: a provider whose native credential environment
+variable is set (for example `ANTHROPIC_API_KEY`) is callable as
+`provider:model` even without a `providers` entry. Config file values take
+precedence over environment variables.
+
+Discovery is narrower. `GET /v1/models` lists only the providers in the
+`providers` block (plus anything added at runtime through the Providers page), so
+a provider that is callable through its environment variable alone is not listed
+until you configure it. Add the entry to have its models discovered:
+
+```yaml
+providers:
+  anthropic:
+    api_key: ${ANTHROPIC_API_KEY}
+```
 
 In standalone mode, provider config only tells Otari how to reach the backend.
 Otari also requires pricing for the model you call by default, unless
@@ -164,6 +174,44 @@ providers:
 
 The declared `models` are listed as `edge_box:<model>`. Direct requests work
 with or without this list; it only affects discovery.
+
+## Local providers
+
+Ollama, llama.cpp, and llamafile need no credential at all, so there is no
+environment variable that could signal one is in use, and Otari never dials a
+localhost port on spec. Routing works regardless: with a local server running,
+`ollama:llama3` is callable straight away, with no configuration.
+
+Discovery is what needs the entry. To have a local backend's models appear in
+`GET /v1/models`, name it in the `providers` block. There is nothing to put under
+the key, so a bare entry is enough:
+
+```yaml
+providers:
+  ollama:
+```
+
+Otari then calls the backend's model-listing endpoint at its default address
+(`http://127.0.0.1:11434` for Ollama, which also honors `OLLAMA_HOST`, and
+`http://127.0.0.1:8080/v1` for llama.cpp and llamafile) and lists what it finds
+under the instance name, so an `ollama` entry yields `ollama:<model>`. Point at a
+non-default address with `api_base`:
+
+```yaml
+providers:
+  ollama:
+    api_base: "http://gpu-box.example.ts.net:11434"
+```
+
+If the server is not running, discovery reports it as unreachable rather than
+listing anything; the failure is cached briefly, so an offline local server does
+not slow down every request. For a local backend that serves no model-listing
+endpoint, declare the ids with `models:` as shown above.
+
+A bare entry naming a provider that *does* need a key (`openai:` with nothing
+beneath it) loads too, but Otari logs a warning at startup when no credential is
+configured for it and its environment variable is unset, since that shape is
+usually a truncated edit rather than an intentionally keyless instance.
 
 ## Model aliases
 

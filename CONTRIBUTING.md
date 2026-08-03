@@ -34,7 +34,7 @@ git checkout -b fix/your-description
 After making changes:
 
 ```bash
-make lint        # ruff
+make lint        # architecture check + ruff
 make typecheck   # mypy --strict
 make test        # unit + integration
 ```

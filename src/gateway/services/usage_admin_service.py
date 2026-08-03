@@ -58,6 +58,10 @@ class UsageSelection(BaseModel):
     api_key_id: str | None = None
     status: str | None = None
     endpoint: str | None = None
+    provider: str | None = None
+    # Session/project attribution, so a bulk op driven from a session drill-down
+    # targets that session rather than every imported row in the window.
+    source_label: str | None = None
     start_date: datetime | None = None
     end_date: datetime | None = None
     # None: any; True: only rows with a cost; False: only rows with no cost yet.
@@ -144,6 +148,10 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
         conditions.append(UsageLog.status == selection.status)
     if selection.endpoint is not None:
         conditions.append(UsageLog.endpoint == selection.endpoint)
+    if selection.provider is not None:
+        conditions.append(UsageLog.provider == selection.provider)
+    if selection.source_label is not None:
+        conditions.append(UsageLog.source_label == selection.source_label)
     if selection.start_date is not None:
         conditions.append(UsageLog.timestamp >= selection.start_date)
     if selection.end_date is not None:

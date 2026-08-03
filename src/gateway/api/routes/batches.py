@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes._pipeline import _raise_for_unresolvable_model
+from gateway.api.routes._pipeline import _raise_for_unresolvable_model, failure_status_code
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -79,6 +79,7 @@ async def log_batch_usage(
     endpoint: str,
     user_id: str | None = None,
     error: str | None = None,
+    status_code: int | None = None,
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     total_tokens: int | None = None,
@@ -103,6 +104,7 @@ async def log_batch_usage(
         cost=cost,
         status="success" if error is None else "error",
         error_message=error,
+        status_code=status_code,
         counts_toward_budget=counts_toward_budget,
     )
     await log_writer.put(usage_log)
@@ -343,6 +345,7 @@ async def create_batch(
             endpoint="/v1/batches",
             user_id=user_id,
             error=str(e),
+            status_code=failure_status_code(e),
             counts_toward_budget=not budget_exempt,
         )
         await refund_reservation(db, reservation)

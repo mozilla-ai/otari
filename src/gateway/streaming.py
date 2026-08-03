@@ -97,7 +97,7 @@ async def streaming_generator(
     extract_usage: Callable[[Any], CompletionUsage | None],
     fmt: StreamFormat,
     on_complete: Callable[[CompletionUsage], Awaitable[None]],
-    on_error: Callable[[str], Awaitable[None]],
+    on_error: Callable[[BaseException], Awaitable[None]],
     label: str,
     on_no_usage: Callable[[], Awaitable[None]] | None = None,
     on_incomplete: Callable[[], Awaitable[None]] | None = None,
@@ -115,7 +115,9 @@ async def streaming_generator(
             underlying provider/model never appears on the wire.
         on_complete: Called with aggregated usage after successful streaming that
             included usage data
-        on_error: Called with error message on failure
+        on_error: Called with the raised exception on failure. The exception
+            itself, not a message, so the caller can classify it (e.g. record the
+            upstream HTTP status on the usage log) as well as render it.
         label: Identifier for error log messages (e.g., "openai:gpt-4")
         on_no_usage: Called when streaming completes successfully but the provider
             sent no usage data. Lets the caller bill per ``stream_missing_usage_policy``
@@ -167,7 +169,7 @@ async def streaming_generator(
             yield fmt.done_marker
         settled = True
         try:
-            await on_error(str(e))
+            await on_error(e)
         except Exception as log_err:
             logger.error("Failed to log streaming error usage: %s", log_err)
         logger.error("Streaming error for %s: %s", label, e)

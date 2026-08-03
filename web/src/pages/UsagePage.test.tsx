@@ -34,6 +34,25 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
       { key: "bob", cost: 340, tokens: 4_400_000, requests: 34_000, is_other: false },
     ],
     by_api_key: [],
+    by_source: [
+      { key: "gateway", cost: 1_000, tokens: 9_000_000, requests: 60_100, is_other: false },
+      { key: "claude_code", cost: 240.5, tokens: 3_400_000, requests: 23_900, is_other: false },
+    ],
+    by_source_label: [
+      { key: "project:otari", cost: 700, tokens: 6_000_000, requests: 30_100, is_other: false },
+      { key: "project:docs", cost: 200, tokens: 2_000_000, requests: 9_200, is_other: false },
+      // Gateway traffic carries no session label: a real group with a null key,
+      // not the synthesized fold.
+      { key: null, cost: 340.5, tokens: 4_400_000, requests: 44_700, is_other: false },
+    ],
+    by_endpoint: [
+      { key: "/v1/chat/completions", cost: 900, tokens: 8_000_000, requests: 50_100, is_other: false },
+      { key: "/v1/messages", cost: 340.5, tokens: 4_400_000, requests: 33_900, is_other: false },
+    ],
+    by_provider: [
+      { key: "openai", cost: 880, tokens: 7_000_000, requests: 45_100, is_other: false },
+      { key: "anthropic", cost: 360.5, tokens: 5_400_000, requests: 38_900, is_other: false },
+    ],
     series: [
       { bucket_start: "2026-07-19T00:00:00Z", cost: 400, tokens: 4_000_000, requests: 28_000 },
       { bucket_start: "2026-07-20T00:00:00Z", cost: 840.5, tokens: 8_400_000, requests: 56_000 },
@@ -370,6 +389,113 @@ describe("UsagePage", () => {
     expect(loc).toContain("api_key_id=key-1");
   });
 
+  it("shows the session breakdown by default, labelling unlabelled gateway traffic", async () => {
+    mockApi(summary());
+    renderPage(<UsagePage />);
+
+    // Session is the default secondary dimension: it is what names the work
+    // behind a bill for agent traffic.
+    expect(await screen.findByText("project:otari")).toBeInTheDocument();
+    expect(screen.getByText("Spend by session")).toBeInTheDocument();
+    expect(screen.getByText("project:docs")).toBeInTheDocument();
+    // Gateway rows carry no label. That is a real group, not the "other" fold,
+    // so it must not read as unknown/missing data.
+    expect(screen.getByText("(no session)")).toBeInTheDocument();
+  });
+
+  it("marks the active dimension button as pressed", async () => {
+    // The picker's selected state cannot ride on the button variant alone: to
+    // assistive tech that is four identically-named buttons with no indication of
+    // which dimension the table below is showing.
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("project:otari");
+
+    expect(screen.getByRole("button", { name: "Session" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Provider" })).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByRole("button", { name: "Provider" }));
+    expect(screen.getByRole("button", { name: "Provider" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Session" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("asks the summary endpoint only for the breakdowns the page renders", async () => {
+    // Each breakdown is its own GROUP BY over the window. The page renders model,
+    // user, and the four picker dimensions; the previous-period and timeline-context
+    // reads use only totals/series, so they must opt out of all of them.
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("project:otari");
+
+    const summaryCalls = fetchMock.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("/v1/usage/summary"));
+    const main = summaryCalls.find((u) => u.includes("dimensions=model") && u.includes("dimensions=user"));
+    expect(main).toBeDefined();
+    expect(main).toContain("dimensions=source_label");
+    expect(main).toContain("dimensions=provider");
+    // No table on this page breaks spend down by API key.
+    expect(main).not.toContain("dimensions=api_key");
+    expect(summaryCalls.some((u) => u.includes("dimensions=none"))).toBe(true);
+  });
+
+  it("switches the secondary breakdown between session, endpoint, provider, and source", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("project:otari");
+
+    await user.click(screen.getByRole("button", { name: "Provider" }));
+    expect(screen.getByText("Spend by provider")).toBeInTheDocument();
+    expect(screen.getByText("anthropic")).toBeInTheDocument();
+    expect(screen.queryByText("project:otari")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Endpoint" }));
+    expect(screen.getByText("/v1/chat/completions")).toBeInTheDocument();
+
+    // by_source is computed and shipped by the server; it now has a home in the UI.
+    await user.click(screen.getByRole("button", { name: "Source" }));
+    expect(screen.getByText("claude_code")).toBeInTheDocument();
+  });
+
+  it("drills into the Activity log scoped to the clicked session", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+
+    const row = (await screen.findByText("project:otari")).closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
+    expect(loc.startsWith("/activity")).toBe(true);
+    expect(loc).toContain("source_label=project%3Aotari");
+  });
+
+  it("drills into the Activity log scoped to the clicked provider", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("project:otari");
+
+    await user.click(screen.getByRole("button", { name: "Provider" }));
+    const row = screen.getByText("anthropic").closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
+    expect(loc).toContain("provider=anthropic");
+  });
+
+  it("does not drill on the unlabelled-session row, which has no id to filter on", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+
+    const row = (await screen.findByText("(no session)")).closest("tr")!;
+    await user.click(row);
+
+    // Still on the Usage page: a null key cannot scope the request log.
+    expect(screen.queryByRole("status", { name: "Current location" })).not.toBeInTheDocument();
+  });
+
   it("filters models by typeahead and commits the exact picked model", async () => {
     const fetchMock = mockApi(summary());
     const user = userEvent.setup();
@@ -456,9 +582,13 @@ describe("UsagePage", () => {
   });
 
   it("hides the source dimension while only one source exists", async () => {
-    // The fixture has no by_source rows at all (a plain gateway), so neither
-    // the breakdown tab nor the group-by option should surface provenance.
-    mockApi(summary());
+    // A plain gateway: every row shares one source, so neither the breakdown
+    // tab nor the group-by option should surface provenance.
+    mockApi(
+      summary({
+        by_source: [{ key: "gateway", cost: 1240.5, tokens: 12_400_000, requests: 84_000, is_other: false }],
+      }),
+    );
     renderPage(<UsagePage />);
     await screen.findByText("$1,240.50");
 

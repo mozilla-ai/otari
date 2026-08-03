@@ -1,5 +1,5 @@
 import { Button, Card, Chip, ComboBox, Description, Input, Label, ListBox, ListBoxItem, Spinner, TextField } from "@heroui/react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import {
@@ -468,7 +468,19 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
   );
 }
 
-function EditProviderForm({ provider, onClose }: { provider: StoredProvider; onClose: () => void }) {
+function EditProviderForm({
+  provider,
+  onClose,
+  onSaved,
+}: {
+  provider: StoredProvider;
+  onClose: () => void;
+  // Called with the saved instance when a save succeeds, so the page can retire
+  // anything that described the credentials as they were. Distinct from onClose,
+  // which also fires on cancel, where nothing was written and an existing verdict
+  // still holds.
+  onSaved: (instance: string) => void;
+}) {
   const update = useUpdateStoredProvider();
   const [providerType, setProviderType] = useState(provider.provider_type ?? "");
   const [apiBase, setApiBase] = useState(provider.api_base ?? "");
@@ -486,7 +498,15 @@ function EditProviderForm({ provider, onClose }: { provider: StoredProvider; onC
     if (replacingKey && apiKey.trim()) {
       body.api_key = apiKey.trim();
     }
-    update.mutate({ instance: provider.instance, body }, { onSuccess: onClose });
+    update.mutate(
+      { instance: provider.instance, body },
+      {
+        onSuccess: () => {
+          onSaved(provider.instance);
+          onClose();
+        },
+      },
+    );
   };
 
   return (
@@ -787,22 +807,67 @@ export function ProvidersPage() {
     : !settings.isError;
   const showOnboarding = !loading && rows.length === 0 && !addOpen;
 
-  const runTest = (instance: string) => {
-    setTests((prev) => ({ ...prev, [instance]: { status: "pending" } }));
-    testProvider.mutate(instance, {
-      onSuccess: (result) => setTests((prev) => ({ ...prev, [instance]: { status: "done", ...result } })),
-      onError: (error) =>
-        setTests((prev) => ({
-          ...prev,
-          [instance]: {
-            status: "done",
-            ok: false,
-            model_count: 0,
-            error: errorMessage(error),
-            discovery_unsupported: false,
-          },
-        })),
+  // Which test run each row is currently showing. A row's result is only worth
+  // recording while it is still the answer to the newest thing the operator asked
+  // for, and neither the pending marker nor the Test button's disabled state can
+  // establish that on its own: the button is per-row and keys off the marker
+  // (below), so clearing the marker re-enables it in the same instant, and a
+  // retest can start while the previous request is still in flight. A monotonic
+  // id per instance is the thing that actually settles it. In a ref because a
+  // late callback must read the current value, not the one its render closed over.
+  const testRuns = useRef<Record<string, number>>({});
+  const startTestRun = (instance: string) => {
+    const run = (testRuns.current[instance] ?? 0) + 1;
+    testRuns.current[instance] = run;
+    return run;
+  };
+
+  // A test verdict describes the credentials as they were when it ran, so drop
+  // it once the provider changes underneath it: otherwise the row keeps showing
+  // a failure from the previous configuration, contradicting the status pill
+  // right above it (issue #464). Bumping the run id retires any request still in
+  // flight, so a slow test cannot write the old verdict back afterwards.
+  const clearTest = (instance: string) => {
+    startTestRun(instance);
+    setTests((prev) => {
+      // Own-property check: `in` also reports inherited keys, so an instance
+      // named after one (`toString`) would read as having a verdict it does not.
+      if (!Object.hasOwn(prev, instance)) return prev;
+      const next = { ...prev };
+      delete next[instance];
+      return next;
     });
+  };
+
+  // Record a result only if its run is still the current one for that row, which
+  // rules out both a verdict retired by an edit or delete and one superseded by a
+  // later test on the same row.
+  const settleTest = (instance: string, run: number, state: TestState) => {
+    if (testRuns.current[instance] !== run) return;
+    setTests((prev) => ({ ...prev, [instance]: state }));
+  };
+
+  // Resolve each row's test from its own promise. One useMutation observer serves
+  // every row, and TanStack Query detaches it from the previous mutation as soon
+  // as the next `mutate` lands, discarding that call's onSuccess/onError: testing
+  // a second provider while the first was still in flight left the first row
+  // spinning on "Testing…", with its Test button disabled, for the life of the
+  // page. The promise from mutateAsync settles regardless of that detach.
+  const runTest = async (instance: string) => {
+    const run = startTestRun(instance);
+    setTests((prev) => ({ ...prev, [instance]: { status: "pending" } }));
+    try {
+      const result = await testProvider.mutateAsync(instance);
+      settleTest(instance, run, { status: "done", ...result });
+    } catch (error) {
+      settleTest(instance, run, {
+        status: "done",
+        ok: false,
+        model_count: 0,
+        error: errorMessage(error),
+        discovery_unsupported: false,
+      });
+    }
   };
 
   const columns: DataTableColumn<ProviderRow>[] = [
@@ -877,7 +942,7 @@ export function ProvidersPage() {
                 variant="outline"
                 // A row whose key can't be decrypted can't be tested; Edit/Delete still recover it.
                 isDisabled={tests[row.instance]?.status === "pending" || row.stored?.decryptable === false}
-                onPress={() => runTest(row.instance)}
+                onPress={() => void runTest(row.instance)}
               >
                 Test
               </Button>
@@ -894,7 +959,9 @@ export function ProvidersPage() {
               <ConfirmButton
                 confirmLabel="Delete"
                 isPending={deleteProvider.isPending}
-                onConfirm={() => deleteProvider.mutate(row.instance)}
+                // Clear the verdict too: a provider re-added under the same name
+                // is a different provider, and would otherwise inherit it.
+                onConfirm={() => deleteProvider.mutate(row.instance, { onSuccess: () => clearTest(row.instance) })}
               >
                 Delete
               </ConfirmButton>
@@ -965,7 +1032,13 @@ export function ProvidersPage() {
           out to be unavailable, retract it so its submit can never reach the create
           mutation. The banner above explains why. */}
       {addOpen && secretKeyConfigured ? <AddProviderForm onClose={() => setAddOpen(false)} /> : null}
-      {editingProvider ? <EditProviderForm provider={editingProvider} onClose={() => setEditing(null)} /> : null}
+      {editingProvider ? (
+        <EditProviderForm
+          provider={editingProvider}
+          onClose={() => setEditing(null)}
+          onSaved={clearTest}
+        />
+      ) : null}
 
       {!loading && rows.length > 0 && health.data && health.data.total > 0 ? (
         <HealthSummary

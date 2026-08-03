@@ -10,10 +10,13 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from any_llm import LLMProvider
+from any_llm import AnyLLM, LLMProvider
+from any_llm.exceptions import AnyLLMError
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from gateway.log_config import logger
 
 API_KEY_HEADER = "Otari-Key"
 # Aliases accepted for a provider instance's ``provider_type`` that map onto a
@@ -66,6 +69,12 @@ ENV_BRIDGED_FIELDS = (
 STREAM_MISSING_USAGE_POLICIES = ("estimate", "fail", "allow_free")
 VISION_STRATEGIES = ("describe", "ocr", "off")
 
+# Search providers the standalone POST /v1/search endpoint can dispatch to.
+# Declared here rather than in the adapter module so startup validation can
+# reject an unknown ``search_tools.<name>.provider`` without the config layer
+# importing the service layer.
+SEARCH_PROVIDERS = ("exa",)
+
 
 class _NonScalarField(Exception):
     """Raised when a config field is not a simple scalar settable from a plain env string."""
@@ -74,6 +83,32 @@ class _NonScalarField(Exception):
 def _get_platform_token_from_env() -> str | None:
     token = os.getenv(PLATFORM_TOKEN_ENV_VAR, "").strip()
     return token or None
+
+
+def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
+    """Environment variables any-llm reads for a provider's credential.
+
+    Returns an empty tuple when the provider needs no API key: the keyless local
+    backends (ollama, llamacpp, llamafile) declare the literal string ``"None"``,
+    and a provider authenticating through a cloud SDK (Vertex AI) declares an
+    empty name. Returns ``None`` when the provider cannot be inspected at all
+    (not a known implementation, or an optional SDK dependency that is not
+    installed), so callers can stay lenient about what they cannot determine.
+
+    The declared value is a label rather than always a single variable name:
+    providers with alternatives join them with ``/`` (gemini's
+    ``"GEMINI_API_KEY/GOOGLE_API_KEY"``) and providers needing several parts join
+    them with ``and`` (sagemaker), so it is split into candidate names.
+    """
+    try:
+        declared = AnyLLM.get_provider_class(provider_type).ENV_API_KEY_NAME
+    except (AnyLLMError, ImportError, AttributeError) as exc:
+        logger.debug("no credential env var known for provider type %r: %s", provider_type, exc)
+        return None
+    if not declared or declared == "None":
+        return ()
+    candidates = (part.strip() for chunk in declared.split("/") for part in chunk.split(" and "))
+    return tuple(candidate for candidate in candidates if candidate)
 
 
 class PricingTierConfig(BaseModel):
@@ -254,6 +289,16 @@ class GatewayConfig(BaseSettings):
         default_factory=dict,
         description=(
             "Pre-configured model USD pricing (model_key -> {input_price_per_million, output_price_per_million})"
+        ),
+    )
+    search_tools: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description=(
+            "Search tools served by POST /v1/search, keyed by the name callers pass as "
+            "'search_tool_name' (or in the /v1/search/{tool} path). Each entry needs an "
+            "'api_key' and may declare a 'provider' (one of: exa; defaults to the tool "
+            "name), an 'api_base', a 'timeout' in seconds, and an 'options' mapping of "
+            "provider-native defaults. Standalone-mode only."
         ),
     )
     enable_metrics: bool = Field(
@@ -540,10 +585,11 @@ class GatewayConfig(BaseSettings):
             "SSRF gate: allow a provider api_base that resolves to private/loopback/reserved hosts. "
             "On by default (the opposite of the other SSRF gates) because operator-supplied api_base "
             "values are master-key gated and the home-lab / self-hosted use case depends on private "
-            "endpoints. Set to false to make provider connection tests and model discovery refuse an "
-            "internal api_base. Scoped to those report paths only: chat dispatch (which dials the "
-            "endpoint) and the credential write path (which persists it) are not gated, so this is not "
-            "a general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
+            "endpoints. Set to false to make provider connection tests, model discovery, and the "
+            "credential write path (POST /v1/provider-credentials and PATCH /v1/provider-credentials/{instance}) "
+            "refuse an internal api_base. "
+            "Chat dispatch (which dials the endpoint on every request) is not gated, so this is not a "
+            "general egress control. Also settable via OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS."
         ),
     )
     mode: str | None = Field(
@@ -704,7 +750,9 @@ class GatewayConfig(BaseSettings):
         Fails fast at startup so a typo in ``provider_type`` (or a non-list
         ``models``) surfaces immediately rather than as a per-request error.
         Instances without a ``provider_type`` are left unvalidated to preserve
-        the existing lenient behavior (the key is the implementation).
+        the existing lenient behavior (the key is the implementation). A
+        settings-less entry for a provider that does need a credential only
+        warns, see :meth:`_warn_on_uncredentialed_bare_entry`.
         """
         for instance, entry in self.providers.items():
             # The selector splits on the first ``:`` / ``/``, so an instance name
@@ -730,6 +778,123 @@ class GatewayConfig(BaseSettings):
             models = entry.get("models")
             if models is not None and not (isinstance(models, list) and all(isinstance(m, str) for m in models)):
                 msg = f"providers.{instance}.models must be a list of model id strings."
+                raise ValueError(msg)
+            if not entry:
+                self._warn_on_uncredentialed_bare_entry(instance)
+
+    def _warn_on_uncredentialed_bare_entry(self, instance: str) -> None:
+        """Warn when a settings-less entry names a provider that needs a credential.
+
+        A bare ``ollama:`` is the documented way to opt a keyless local backend
+        into discovery, but the same shape under a keyed provider (``openai:``
+        with nothing beneath it) is far more likely a truncated YAML edit than
+        intent, and it used to fail the load outright as a type error. Warn rather
+        than raise: the entry is legitimate whenever the credential reaches
+        any-llm another way (its own environment variable, an instance role), so a
+        gateway that works today must keep booting.
+
+        A settings-less entry has no ``provider_type`` to declare either, so the
+        instance name is the implementation the credential question is asked of.
+        """
+        env_names = provider_credential_env_names(instance)
+        # Empty: a keyless backend, nothing to warn about. None: a provider we
+        # cannot inspect, so we do not know that a credential is needed.
+        if not env_names:
+            return
+        if any(os.getenv(name) for name in env_names):
+            return
+        logger.warning(
+            "providers.%s has no settings and no credential: that provider needs an API key and none of %s is set. "
+            "A keyless local backend (ollama, llamacpp, llamafile) is configured this way on purpose; otherwise "
+            "this looks like a truncated config entry, and requests to it will fail.",
+            instance,
+            ", ".join(env_names),
+        )
+
+    @field_validator("providers", mode="before")
+    @classmethod
+    def _coerce_valueless_provider_entries(cls, providers: Any) -> Any:
+        """Treat a provider entry with no body as an empty config block.
+
+        A keyless local backend (ollama, llamacpp, llamafile) has no credential to
+        declare, so the natural way to configure one is a bare key::
+
+            providers:
+              ollama:
+
+        YAML parses that as ``None``, which the ``dict[str, dict[str, Any]]``
+        annotation would otherwise reject with a type error. Normalize it to
+        ``{}``, which means "this instance is configured, with no settings": the
+        instance is then routable and, since discovery is scoped to the configured
+        instances, also discoverable in ``GET /v1/models`` (issue #389).
+
+        A ``providers:`` block with no entries at all gets the same treatment, so
+        commenting out every entry reads as "no providers" rather than the same
+        confusing type error.
+
+        The coercion is deliberately not limited to the keyless backends, since an
+        entry may name any instance; a bare entry under a provider that does need
+        a credential is caught at startup by
+        :meth:`GatewayConfig._warn_on_uncredentialed_bare_entry`, which keeps the
+        truncated-YAML case visible without failing the load.
+        """
+        if providers is None:
+            return {}
+        if not isinstance(providers, dict):
+            return providers
+        return {instance: ({} if entry is None else entry) for instance, entry in providers.items()}
+
+    def search_tool_providers(self) -> set[str]:
+        """The distinct providers backing the configured search tools.
+
+        These are prefixes of the ``<provider>:<tool>`` keys that search pricing,
+        usage, and per-key access lists are written against, so the allow-list
+        writer has to accept them alongside real provider instances.
+        """
+        return {str(entry.get("provider") or name) for name, entry in self.search_tools.items()}
+
+    def validate_search_tools(self) -> None:
+        """Validate the ``search_tools`` map at startup so misconfig fails fast.
+
+        Every supported provider authenticates with an API key, so a tool
+        without one is rejected here rather than at request time as an opaque
+        upstream 401. The tool name doubles as a ``/v1/search/{tool}`` path
+        segment, so it must not contain a slash.
+        """
+        for name, entry in self.search_tools.items():
+            if not name:
+                msg = "search tool name must not be empty."
+                raise ValueError(msg)
+            if "/" in name:
+                msg = f"search tool name '{name}' must not contain '/' (it is used as a URL path segment)."
+                raise ValueError(msg)
+            if not isinstance(entry, dict):
+                msg = f"search_tools.{name} must be a mapping."
+                raise ValueError(msg)
+            provider = entry.get("provider") or name
+            if provider not in SEARCH_PROVIDERS:
+                msg = (
+                    f"search_tools.{name}.provider '{provider}' is not a supported search provider "
+                    f"(one of: {', '.join(SEARCH_PROVIDERS)})."
+                )
+                raise ValueError(msg)
+            if not entry.get("api_key"):
+                msg = f"search_tools.{name}.api_key is required."
+                raise ValueError(msg)
+            timeout = entry.get("timeout")
+            if timeout is not None:
+                if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+                    msg = f"search_tools.{name}.timeout must be a number of seconds."
+                    raise ValueError(msg)
+                # A negative timeout would reach httpx and fail at request time,
+                # and a zero is silently swapped for the default when the tool is
+                # resolved. Both are misconfigurations worth failing on here.
+                if timeout <= 0:
+                    msg = f"search_tools.{name}.timeout must be greater than 0 seconds, got {timeout}."
+                    raise ValueError(msg)
+            options = entry.get("options")
+            if options is not None and not isinstance(options, dict):
+                msg = f"search_tools.{name}.options must be a mapping."
                 raise ValueError(msg)
 
     @field_validator("stream_missing_usage_policy")
@@ -883,6 +1048,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_mode_selection()
     config.validate_provider_instances()
     config.validate_aliases()
+    config.validate_search_tools()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
 

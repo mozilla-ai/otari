@@ -34,6 +34,8 @@ def _make_log(
     counts_toward_budget: bool,
     user_id: str = "u",
     source: str = "claude_code",
+    source_label: str | None = None,
+    provider: str = "openai",
     model: str = "openai/gpt-4",
     prompt_tokens: int | None = 1000,
     completion_tokens: int | None = 500,
@@ -49,9 +51,10 @@ def _make_log(
         user_id=user_id,
         timestamp=timestamp,
         model=model,
-        provider="openai",
+        provider=provider,
         endpoint="external" if not counts_toward_budget else "/v1/chat/completions",
         source=source,
+        source_label=source_label,
         # Imported rows carry a unique source_event_id (idempotency); gateway rows leave it NULL.
         source_event_id=log_id if not counts_toward_budget else None,
         counts_toward_budget=counts_toward_budget,
@@ -114,6 +117,48 @@ def test_delete_by_filter_source(
     assert _get(db_session, "cc-1") is None
     assert _get(db_session, "cc-2") is None
     assert _get(db_session, "other-1") is not None
+
+
+def test_delete_by_filter_scopes_to_one_session(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # The Usage-page session breakdown drills into Activity scoped to one
+    # source_label. "Select all matching" is counted under that scope, so the
+    # delete must honor it: without it, deleting the 1 row the operator was shown
+    # would take every other session's rows in the window with it.
+    _make_log(db_session, log_id="sess-a", counts_toward_budget=False, source_label="task-42")
+    _make_log(db_session, log_id="sess-b", counts_toward_budget=False, source_label="task-43")
+    _make_log(db_session, log_id="sess-none", counts_toward_budget=False)
+    db_session.commit()
+
+    resp = client.request(
+        "DELETE", DELETE_PATH, json={"by_filter": True, "source_label": "task-42"}, headers=master_key_header
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 1}
+
+    db_session.expire_all()
+    assert _get(db_session, "sess-a") is None
+    assert _get(db_session, "sess-b") is not None
+    assert _get(db_session, "sess-none") is not None
+
+
+def test_delete_by_filter_scopes_to_one_provider(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _make_log(db_session, log_id="p-anthropic", counts_toward_budget=False, provider="anthropic")
+    _make_log(db_session, log_id="p-openai", counts_toward_budget=False, provider="openai")
+    db_session.commit()
+
+    resp = client.request(
+        "DELETE", DELETE_PATH, json={"by_filter": True, "provider": "anthropic"}, headers=master_key_header
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 1}
+
+    db_session.expire_all()
+    assert _get(db_session, "p-anthropic") is None
+    assert _get(db_session, "p-openai") is not None
 
 
 def test_delete_by_filter_unpriced_only(

@@ -1958,6 +1958,83 @@
     {
       "item": [
         {
+          "name": "Create Search",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
+            },
+            "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when\n  ``reject_user_mismatch`` is disabled); it is never billed to that user.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "search"
+              ],
+              "raw": "{{baseUrl}}/v1/search"
+            }
+          }
+        },
+        {
+          "name": "Create Search For Tool",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
+            },
+            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when\n  ``reject_user_mismatch`` is disabled); it is never billed to that user.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "search",
+                ":search_tool_name"
+              ],
+              "raw": "{{baseUrl}}/v1/search/:search_tool_name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "search_tool_name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "search"
+    },
+    {
+      "item": [
+        {
           "name": "Get Settings",
           "request": {
             "description": "Return non-secret runtime settings for the admin dashboard.",
@@ -2131,7 +2208,7 @@
         {
           "name": "List Usage",
           "request": {
-            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, and endpoint.\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
+            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, and session (``source_label``).\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
             "header": [],
             "method": "GET",
             "url": {
@@ -2168,6 +2245,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+                  "disabled": true,
+                  "key": "status_code",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single model",
                   "disabled": true,
                   "key": "model",
@@ -2180,9 +2263,21 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
                   "disabled": true,
                   "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "disabled": true,
+                  "key": "source_label",
                   "value": ""
                 },
                 {
@@ -2216,7 +2311,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget=&skip=&limit="
+              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&skip=&limit="
             }
           }
         },
@@ -2279,6 +2374,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+                  "disabled": true,
+                  "key": "status_code",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single model",
                   "disabled": true,
                   "key": "model",
@@ -2291,9 +2392,21 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
                   "disabled": true,
                   "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "disabled": true,
+                  "key": "source_label",
                   "value": ""
                 },
                 {
@@ -2315,7 +2428,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget="
+              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget="
             }
           }
         },
@@ -2481,7 +2594,7 @@
         {
           "name": "Usage Summary",
           "request": {
-            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource (top rows plus a reconciling ``other`` fold, billed token counts), and\na UTC-bucketed time series carrying each bucket's error count and billed\ntoken composition (input incl. cache, cache read/write, output).",
+            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold, billed token counts), the error taxonomy grouped\nby failure status code, and a UTC-bucketed time series carrying each bucket's\nerror count and billed token composition (input incl. cache, cache read/write,\noutput).\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2519,6 +2632,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+                  "disabled": true,
+                  "key": "status_code",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single model",
                   "disabled": true,
                   "key": "model",
@@ -2531,9 +2650,21 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
                   "disabled": true,
                   "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "disabled": true,
+                  "key": "source_label",
                   "value": ""
                 },
                 {
@@ -2559,16 +2690,22 @@
                   "disabled": true,
                   "key": "bucket",
                   "value": ""
+                },
+                {
+                  "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
+                  "disabled": true,
+                  "key": "dimensions",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget=&bucket="
+              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&bucket=&dimensions="
             }
           }
         },
         {
           "name": "Usage Summary Csv",
           "request": {
-            "description": "Download the per-model / per-user / per-key / per-source breakdown as CSV.\n\nA dedicated route rather than a ``format=csv`` flag on ``/summary`` so that\nendpoint keeps a single JSON response model and a clean OpenAPI schema. The\nexport is **uncapped** (no top-N fold): finance wants every row. ``tokens``\nis the billed total (fresh input, both cache buckets, and output), matching\nthe dashboard's analytics. Kept separate from the bare-array ``/v1/usage``\ncontract, which is untouched.",
+            "description": "Download every breakdown the summary reports, as one CSV.\n\nOne row per (dimension, key): model, user, API key, source, session\n(``source_label``), endpoint, and provider. A dedicated route rather than a\n``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON\nresponse model and a clean OpenAPI schema. The export is **uncapped** (no\ntop-N fold): finance wants every row. ``tokens`` is the billed total (fresh\ninput, both cache buckets, and output), matching the dashboard's analytics.\nKept separate from the bare-array ``/v1/usage`` contract, which is untouched.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2606,6 +2743,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+                  "disabled": true,
+                  "key": "status_code",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single model",
                   "disabled": true,
                   "key": "model",
@@ -2618,9 +2761,21 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
                   "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
                   "disabled": true,
                   "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "disabled": true,
+                  "key": "source_label",
                   "value": ""
                 },
                 {
@@ -2642,7 +2797,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&model=&endpoint=&source=&api_key_id=&priced=&counts_toward_budget="
+              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget="
             }
           }
         }

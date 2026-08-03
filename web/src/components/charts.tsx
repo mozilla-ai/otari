@@ -171,8 +171,16 @@ export function TrendChart({
   };
 
   const selectable = Boolean(onSelectRange) && data.length > 1;
+  // Clamp before dereferencing: a `window` computed against a longer series can
+  // still be in flight when `data` shrinks (a filter change landing first), and
+  // an out-of-range index would blank the chart instead of degrading it.
+  const last = data.length - 1;
+  const clampIndex = (index: number) => Math.min(Math.max(index, 0), Math.max(last, 0));
   const dimmed =
-    windowRange && (windowRange.startIndex > 0 || windowRange.endIndex < data.length - 1) ? windowRange : null;
+    windowRange && data.length > 0
+      ? { startIndex: clampIndex(windowRange.startIndex), endIndex: clampIndex(windowRange.endIndex) }
+      : null;
+  const showDimming = dimmed !== null && (dimmed.startIndex > 0 || dimmed.endIndex < last);
 
   return (
     <div
@@ -236,7 +244,7 @@ export function TrendChart({
           {/* Out-of-window dimming (start side, then end side), under the drag
               highlight. ReferenceArea x-bounds are category values, so the
               shading stays glued to its buckets across resizes. */}
-          {dimmed && dimmed.startIndex > 0 ? (
+          {showDimming && dimmed && dimmed.startIndex > 0 ? (
             <ReferenceArea
               x1={data[0].x}
               x2={data[dimmed.startIndex - 1].x}
@@ -245,7 +253,7 @@ export function TrendChart({
               stroke="none"
             />
           ) : null}
-          {dimmed && dimmed.endIndex < data.length - 1 ? (
+          {showDimming && dimmed && dimmed.endIndex < last ? (
             <ReferenceArea
               x1={data[dimmed.endIndex + 1].x}
               x2={data[data.length - 1].x}

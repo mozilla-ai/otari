@@ -35,6 +35,10 @@ def _make_log(
     timestamp: datetime,
     api_key_id: str | None = None,
     model: str = "gpt-4",
+    provider: str | None = "openai",
+    endpoint: str = "/v1/chat/completions",
+    source: str = "gateway",
+    source_label: str | None = None,
     prompt_tokens: int | None = 10,
     completion_tokens: int | None = 5,
     total_tokens: int | None = 15,
@@ -54,8 +58,10 @@ def _make_log(
             api_key_id=api_key_id,
             timestamp=timestamp,
             model=model,
-            provider="openai",
-            endpoint="/v1/chat/completions",
+            provider=provider,
+            endpoint=endpoint,
+            source=source,
+            source_label=source_label,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
@@ -92,10 +98,15 @@ def test_summary_empty_range_is_all_zero(client: TestClient, master_key_header: 
         "avg_latency_ms": None,
         "unpriced_requests": 0,
         "billed_input_tokens": 0,
+        "billed_output_tokens": 0,
     }
     assert body["by_model"] == []
     assert body["by_user"] == []
     assert body["by_api_key"] == []
+    assert body["by_source"] == []
+    assert body["by_source_label"] == []
+    assert body["by_endpoint"] == []
+    assert body["by_provider"] == []
     assert body["series"] == []
 
 
@@ -131,6 +142,28 @@ def test_summary_null_cost_and_tokens_coalesce_to_zero(
     assert totals["request_count"] == 1
 
 
+def test_summary_unpriced_count_excludes_gateway_rejections(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """``unpriced_requests`` is a pricing-gap signal, so only served rows count.
+
+    The dashboard renders it as "N unpriced" next to the cost, meaning traffic is
+    being metered without a price. A gateway-side rejection row also carries
+    ``cost=NULL`` (nothing was spent), so counting error rows would make a budget
+    or allow-list incident read as a pricing misconfiguration instead.
+    """
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(db_session, user_id="gap", timestamp=now, cost=None)
+    _make_log(db_session, user_id="gap", timestamp=now, cost=None, status="error")
+    _make_log(db_session, user_id="gap", timestamp=now, cost=0.02)
+    db_session.commit()
+
+    totals = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "gap"}).json()["totals"]
+    assert totals["request_count"] == 3
+    assert totals["error_count"] == 1
+    assert totals["unpriced_requests"] == 1
+
+
 def test_summary_breakdowns_reconcile_with_totals(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
@@ -141,7 +174,15 @@ def test_summary_breakdowns_reconcile_with_totals(
 
     body = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "rec"}).json()
     grand = body["totals"]["cost"]
-    for dimension in ("by_model", "by_user", "by_api_key"):
+    for dimension in (
+        "by_model",
+        "by_user",
+        "by_api_key",
+        "by_source",
+        "by_source_label",
+        "by_endpoint",
+        "by_provider",
+    ):
         assert sum(r["cost"] for r in body[dimension]) == pytest.approx(grand), dimension
         assert sum(r["requests"] for r in body[dimension]) == body["totals"]["request_count"], dimension
     # by_model is ordered by spend desc: gpt-4 (0.20) before claude (0.05).
@@ -168,6 +209,248 @@ def test_summary_top_n_fold_reconciles(
     assert all(row["is_other"] is False for row in by_model[:-1])
     assert sum(r["requests"] for r in by_model) == body["totals"]["request_count"] == 105
     assert sum(r["cost"] for r in by_model) == pytest.approx(body["totals"]["cost"])
+
+
+def test_summary_breaks_down_by_session_endpoint_and_provider(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # Two imported agent sessions plus one gateway request: the three dimensions
+    # stored on every row but previously absent from the aggregates.
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(
+        db_session,
+        user_id="dim",
+        timestamp=now,
+        source="claude_code",
+        source_label="session-a",
+        endpoint="external",
+        provider="anthropic",
+        cost=0.50,
+        prompt_tokens=30,
+        completion_tokens=20,
+        total_tokens=50,
+    )
+    _make_log(
+        db_session,
+        user_id="dim",
+        timestamp=now,
+        source="claude_code",
+        source_label="session-b",
+        endpoint="external",
+        provider="anthropic",
+        cost=0.20,
+        total_tokens=20,
+    )
+    _make_log(
+        db_session,
+        user_id="dim",
+        timestamp=now,
+        endpoint="/v1/chat/completions",
+        provider="openai",
+        cost=0.10,
+        total_tokens=10,
+    )
+    db_session.commit()
+
+    body = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "dim"}).json()
+
+    # Sessions, spend-ranked. Gateway rows carry no label, so they group under a
+    # real null key that is *not* the synthesized fold.
+    sessions = {row["key"]: row for row in body["by_source_label"]}
+    assert [row["key"] for row in body["by_source_label"]] == ["session-a", "session-b", None]
+    assert sessions["session-a"]["cost"] == pytest.approx(0.50)
+    assert sessions["session-a"]["tokens"] == 50
+    assert sessions[None]["requests"] == 1
+    assert sessions[None]["is_other"] is False
+
+    endpoints = {row["key"]: row["requests"] for row in body["by_endpoint"]}
+    assert endpoints == {"external": 2, "/v1/chat/completions": 1}
+
+    providers = {row["key"]: row["cost"] for row in body["by_provider"]}
+    assert providers["anthropic"] == pytest.approx(0.70)
+    assert providers["openai"] == pytest.approx(0.10)
+
+
+def test_summary_session_breakdown_has_a_deeper_top_n(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # Session cardinality dwarfs model/user cardinality, so that dimension keeps a
+    # deeper cap (250) than the others (100): 150 sessions all stay named here,
+    # while the same number of models would already be folding.
+    now = datetime.now(UTC) - timedelta(hours=1)
+    for idx in range(150):
+        _make_log(
+            db_session,
+            user_id="deep",
+            timestamp=now,
+            model=f"m{idx:03d}",
+            source="claude_code",
+            source_label=f"s{idx:03d}",
+            cost=0.01,
+            total_tokens=1,
+        )
+    db_session.commit()
+
+    body = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "deep"}).json()
+    assert len(body["by_source_label"]) == 150
+    assert all(row["is_other"] is False for row in body["by_source_label"])
+    # The shallower cap still applies to the other dimensions.
+    assert len(body["by_model"]) == 101
+    assert body["by_model"][-1]["is_other"] is True
+
+
+_BREAKDOWN_FIELDS = (
+    "by_model",
+    "by_user",
+    "by_api_key",
+    "by_source",
+    "by_source_label",
+    "by_endpoint",
+    "by_provider",
+)
+
+
+def test_summary_computes_every_breakdown_by_default(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # Omitting `dimensions` is the pre-selector behavior and must stay that way:
+    # existing consumers never learned to ask for a breakdown.
+    _make_log(db_session, user_id="dims", timestamp=datetime.now(UTC) - timedelta(hours=1), api_key_id=None)
+    db_session.commit()
+
+    body = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "dims"}).json()
+    assert all(body[field] for field in _BREAKDOWN_FIELDS)
+
+
+def test_summary_dimensions_selects_only_the_requested_breakdowns(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # Each breakdown is its own GROUP BY pass, so a caller that reads one table
+    # asks for one dimension. The excluded fields stay present but empty, so a
+    # narrowed request cannot change the response schema.
+    _make_log(db_session, user_id="pick", timestamp=datetime.now(UTC) - timedelta(hours=1))
+    db_session.commit()
+
+    resp = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": "pick", "dimensions": ["model", "provider"]}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [row["key"] for row in body["by_model"]] == ["gpt-4"]
+    assert [row["key"] for row in body["by_provider"]] == ["openai"]
+    assert body["by_user"] == []
+    assert body["by_source_label"] == []
+    assert body["by_endpoint"] == []
+    # Totals and the series are never gated by the selector: they are what the
+    # narrowed callers (tiles, timeline context) are asking for.
+    assert body["totals"]["request_count"] == 1
+    assert len(body["series"]) >= 1
+
+
+def test_summary_dimensions_none_skips_every_breakdown(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # "none" is how a totals/series-only caller expresses an empty selection, since
+    # a repeated query param has no empty-list form.
+    _make_log(db_session, user_id="bare", timestamp=datetime.now(UTC) - timedelta(hours=1), cost=0.25)
+    db_session.commit()
+
+    body = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": "bare", "dimensions": "none"}
+    ).json()
+    assert all(body[field] == [] for field in _BREAKDOWN_FIELDS)
+    assert body["totals"]["cost"] == pytest.approx(0.25)
+    assert body["series"]
+
+
+def test_summary_rejects_unknown_dimension(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = client.get(SUMMARY_PATH, headers=master_key_header, params={"dimensions": "cost_center"})
+    assert resp.status_code == 422
+
+
+def test_summary_filters_by_session_endpoint_and_provider(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(
+        db_session,
+        user_id="scope",
+        timestamp=now,
+        source="claude_code",
+        source_label="wanted",
+        endpoint="external",
+        provider="anthropic",
+        cost=0.50,
+    )
+    _make_log(
+        db_session,
+        user_id="scope",
+        timestamp=now,
+        source="claude_code",
+        source_label="other",
+        endpoint="external",
+        provider="anthropic",
+        cost=0.30,
+    )
+    _make_log(db_session, user_id="scope", timestamp=now, endpoint="/v1/chat/completions", provider="openai", cost=0.20)
+    db_session.commit()
+
+    scoped = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": "scope", "source_label": "wanted"}
+    ).json()
+    assert scoped["totals"]["request_count"] == 1
+    assert scoped["totals"]["cost"] == pytest.approx(0.50)
+
+    by_endpoint = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": "scope", "endpoint": "external"}
+    ).json()
+    assert by_endpoint["totals"]["request_count"] == 2
+
+    by_provider = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": "scope", "provider": "openai"}
+    ).json()
+    assert by_provider["totals"]["request_count"] == 1
+
+
+def test_usage_list_and_count_filter_by_session_and_provider(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # The drill-down from a session breakdown row: the raw log must be scopable to
+    # that one session, and /count must agree so the paginator's total matches.
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(
+        db_session,
+        user_id="drill",
+        timestamp=now,
+        source="claude_code",
+        source_label="sess-1",
+        provider="anthropic",
+    )
+    _make_log(
+        db_session,
+        user_id="drill",
+        timestamp=now,
+        source="claude_code",
+        source_label="sess-2",
+        provider="anthropic",
+    )
+    _make_log(db_session, user_id="drill", timestamp=now, provider="openai")
+    db_session.commit()
+
+    rows = client.get(
+        "/v1/usage", headers=master_key_header, params={"user_id": "drill", "source_label": "sess-1"}
+    ).json()
+    assert [row["source_label"] for row in rows] == ["sess-1"]
+    count = client.get(
+        "/v1/usage/count", headers=master_key_header, params={"user_id": "drill", "source_label": "sess-1"}
+    ).json()
+    assert count["total"] == 1
+
+    openai_rows = client.get(
+        "/v1/usage", headers=master_key_header, params={"user_id": "drill", "provider": "openai"}
+    ).json()
+    assert len(openai_rows) == 1
+    assert openai_rows[0]["provider"] == "openai"
 
 
 def test_summary_series_day_buckets_are_canonical_utc(
@@ -317,6 +600,32 @@ def test_csv_export_shape_and_reconciliation(
     assert sum(float(r[2]) for r in model_rows) == pytest.approx(0.30)
 
 
+def test_csv_export_includes_session_endpoint_and_provider(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(
+        db_session,
+        user_id="csvdim",
+        timestamp=now,
+        source="claude_code",
+        source_label="session-a",
+        endpoint="external",
+        provider="anthropic",
+        cost=0.10,
+        total_tokens=10,
+    )
+    db_session.commit()
+
+    resp = client.get(CSV_PATH, headers=master_key_header, params={"user_id": "csvdim"})
+    rows = list(csv.reader(io.StringIO(resp.text)))[1:]
+    by_dimension = {r[0]: r[1] for r in rows}
+    assert by_dimension["session"] == "session-a"
+    assert by_dimension["endpoint"] == "external"
+    assert by_dimension["provider"] == "anthropic"
+    assert by_dimension["source"] == "claude_code"
+
+
 def test_csv_export_guards_formula_injection(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
@@ -396,6 +705,54 @@ def test_series_composition_prefers_meters_and_falls_back(
     # Breakdowns report the same billed quantity (input + output).
     [model_row] = body["by_model"]
     assert model_row["tokens"] == 1100 + 80
+
+
+def test_breakdown_fold_reconciles_billed_output_with_divergent_meters(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The fold row must use billed output, not the raw completion column.
+
+    A row whose completion meter diverges from its column (here: a NULL column
+    with a meter present) would otherwise drift the residual, and the top
+    groups' billed output could push the fold's token count negative.
+    """
+    ts = datetime(2025, 7, 1, 12, 0, tzinfo=UTC)
+    # Two models so a fold exists when only the top one is kept... the summary
+    # cap is 100, so instead diverge the meters and check exact reconciliation.
+    _make_log(
+        db_session,
+        user_id="divg",
+        timestamp=ts,
+        model="metered",
+        prompt_tokens=10,
+        completion_tokens=None,
+        billing_meters={
+            "total_input_tokens": 10,
+            "fresh_input_tokens": 10,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cache_write_1h_tokens": 0,
+            "completion_tokens": 40,
+        },
+    )
+    _make_log(db_session, user_id="divg", timestamp=ts, model="plain")
+    db_session.commit()
+
+    body = client.get(
+        SUMMARY_PATH,
+        headers=master_key_header,
+        params={"user_id": "divg", "start_date": "2025-07-01T00:00:00Z", "end_date": "2025-07-02T00:00:00Z"},
+    ).json()
+    totals = body["totals"]
+    # Billed output prefers the meter (40) over the NULL column, plus the plain
+    # row's raw 5.
+    assert totals["billed_output_tokens"] == 45
+    assert totals["completion_tokens"] == 5
+    # Per-group billed sums reconcile with the billed totals exactly.
+    by_model = {r["key"]: r for r in body["by_model"]}
+    assert by_model["metered"]["tokens"] == 10 + 40
+    assert by_model["plain"]["tokens"] == 10 + 5
+    assert sum(r["tokens"] for r in body["by_model"]) == totals["billed_input_tokens"] + totals["billed_output_tokens"]
 
 
 def test_grouped_series_requires_master_key_and_group_by(client: TestClient) -> None:

@@ -432,9 +432,13 @@ export interface UsageFilters {
   status?: string;
   model?: string;
   endpoint?: string;
+  provider?: string;
   user_id?: string;
   api_key_id?: string;
   source?: string;
+  // Session/project attribution (a row's `source_label`), so the log can be
+  // scoped to the one agent session a breakdown row points at.
+  source_label?: string;
   // Pricing state: true = only priced rows, false = only unpriced (cost null).
   priced?: boolean;
   // Budget participation: false scopes to imported rows (the bulk-op target set).
@@ -458,6 +462,12 @@ export interface UsageMutationSelection {
   user_id?: string;
   api_key_id?: string;
   status?: string;
+  // Every scoping filter the Activity log honors must be repeatable here: the
+  // "all matching" path re-derives the target set server-side, so a filter the
+  // body omits silently widens a delete/reprice beyond what the operator saw.
+  endpoint?: string;
+  provider?: string;
+  source_label?: string;
   start_date?: string;
   end_date?: string;
   priced?: boolean;
@@ -503,11 +513,15 @@ export interface UsageTotals {
   // each row's billing meters, so cache hit rate (cache_read / billed_input) is
   // meaningful across providers. Optional: postdates the other totals.
   billed_input_tokens?: number;
+  // Billed output tokens, normalized the same way (falls back to
+  // completion_tokens on older gateways).
+  billed_output_tokens?: number;
 }
 
-// One breakdown row (a model, a user, or an API key). `key` is null both for the
-// synthesized fold row (`is_other: true`) and for usage whose grouping column was
-// NULL, e.g. a since-deleted user (`is_other: false`); `is_other` tells them apart.
+// One breakdown row (a model, a user, an API key, a session, ...). `key` is null
+// both for the synthesized fold row (`is_other: true`) and for usage whose grouping
+// column was NULL, e.g. a since-deleted user or a gateway row with no session label
+// (`is_other: false`); `is_other` tells them apart.
 export interface UsageGroupRow {
   key: string | null;
   cost: number;
@@ -533,8 +547,21 @@ export interface UsageSeriesPoint {
   output_tokens?: number;
 }
 
+// A breakdown the summary endpoint can compute. Each value names the `by_<value>`
+// field it fills. Every breakdown is its own GROUP BY pass server-side, so a
+// caller lists the ones it actually renders; the rest come back as empty arrays.
+export type SummaryDimension =
+  | "model"
+  | "user"
+  | "api_key"
+  | "source"
+  | "source_label"
+  | "endpoint"
+  | "provider";
+
 // Aggregated spend/volume for the Usage & analytics page. `start_date`/`end_date`
-// echo the (clamped) window the server actually aggregated over.
+// echo the (clamped) window the server actually aggregated over. A breakdown the
+// request did not ask for is present but empty.
 export interface UsageSummary {
   start_date: string;
   end_date: string;
@@ -543,10 +570,14 @@ export interface UsageSummary {
   by_model: UsageGroupRow[];
   by_user: UsageGroupRow[];
   by_api_key: UsageGroupRow[];
-  // Provenance breakdown. Optional because it postdates the other groupings: the
-  // built bundle ships inside the gateway, but `vite dev` can point at an older
-  // one that omits it, so read it defensively.
-  by_source?: UsageGroupRow[];
+  // Provenance: gateway-served traffic vs each imported source (e.g. claude_code).
+  by_source: UsageGroupRow[];
+  // Session/project attribution for agent traffic. Gateway rows carry no label,
+  // so they all group under the single null key.
+  by_source_label: UsageGroupRow[];
+  // API surface (/v1/chat/completions vs /v1/messages vs ...) and upstream provider.
+  by_endpoint: UsageGroupRow[];
+  by_provider: UsageGroupRow[];
   series: UsageSeriesPoint[];
 }
 

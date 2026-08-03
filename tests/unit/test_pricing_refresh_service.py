@@ -5,8 +5,8 @@ from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
-from genai_prices import data as genai_data
 from genai_prices.data_snapshot import DataSnapshot, get_snapshot
+from genai_prices.update_prices import DEFAULT_UPDATE_URL
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,9 +19,25 @@ _PERSISTED_SNAPSHOT = (
 )
 
 
+def test_refresh_targets_the_maintained_feed() -> None:
+    """Pins below genai-prices 0.1.0 fetch the frozen v1 feed, which never changes again."""
+
+    assert DEFAULT_UPDATE_URL.endswith("prices/new_data/v2/data.json")
+
+
+def test_parse_snapshot_normalizes_upstream_normalization_errors() -> None:
+    raw_snapshot = (
+        '[{"id":"test","name":"Test","api_pattern":"","models":['
+        '{"id":"model","match":{"equals":"model"},"prices":[1]}]}]'
+    )
+
+    with pytest.raises(ValueError, match="Invalid genai-prices snapshot"):
+        pricing_refresh_service._parse_snapshot(raw_snapshot)
+
+
 def _snapshot_with_changed_price() -> tuple[DataSnapshot, str, str]:
     raw_snapshot = _PERSISTED_SNAPSHOT.replace('"input_mtok":"1"', '"input_mtok":"987.654"')
-    providers = genai_data.providers_schema.validate_json(raw_snapshot)
+    providers = pricing_refresh_service._parse_snapshot(raw_snapshot)
     return DataSnapshot(providers=providers, from_auto_update=True), "test:model", raw_snapshot
 
 

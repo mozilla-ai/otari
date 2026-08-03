@@ -3983,6 +3983,183 @@
         "title": "RotateMasterKeyResponse",
         "type": "object"
       },
+      "SearchRequest": {
+        "description": "A search request, following LiteLLM's ``/v1/search`` body.",
+        "example": {
+          "max_results": 5,
+          "query": "otari llm gateway"
+        },
+        "properties": {
+          "country": {
+            "anyOf": [
+              {
+                "maxLength": 2,
+                "minLength": 2,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Two-letter ISO country code to localize results to",
+            "title": "Country"
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "maximum": 20.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum number of results to return",
+            "title": "Max Results"
+          },
+          "max_tokens_per_page": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Approximate cap on the page content returned per result",
+            "title": "Max Tokens Per Page"
+          },
+          "query": {
+            "description": "The search query",
+            "minLength": 1,
+            "title": "Query",
+            "type": "string"
+          },
+          "search_domain_filter": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Restrict results to these domains; prefix a domain with '-' to exclude it instead",
+            "title": "Search Domain Filter"
+          },
+          "search_tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Configured search tool to run against. Optional when exactly one tool is configured, and ignored on POST /v1/search/{search_tool_name}.",
+            "title": "Search Tool Name"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User ID for usage attribution",
+            "title": "User"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "title": "SearchRequest",
+        "type": "object"
+      },
+      "SearchResponse": {
+        "description": "A completed search.",
+        "properties": {
+          "object": {
+            "const": "search",
+            "default": "search",
+            "title": "Object",
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchResultItem"
+            },
+            "title": "Results",
+            "type": "array"
+          },
+          "search_tool": {
+            "description": "The configured search tool that served the request",
+            "title": "Search Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "search_tool",
+          "results"
+        ],
+        "title": "SearchResponse",
+        "type": "object"
+      },
+      "SearchResultItem": {
+        "description": "One search result.",
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "SearchResultItem",
+        "type": "object"
+      },
       "SessionResponse": {
         "description": "A freshly minted dashboard session (the token travels only in the cookie).",
         "properties": {
@@ -5019,6 +5196,17 @@
             ],
             "title": "Priced"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
           "source": {
             "anyOf": [
               {
@@ -5029,6 +5217,17 @@
               }
             ],
             "title": "Source"
+          },
+          "source_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Label"
           },
           "start_date": {
             "anyOf": [
@@ -5267,6 +5466,17 @@
             "title": "Status",
             "type": "string"
           },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
@@ -5313,6 +5523,7 @@
           "cost",
           "status",
           "error_message",
+          "status_code",
           "latency_ms",
           "source",
           "source_label",
@@ -5321,8 +5532,47 @@
         "title": "UsageEntry",
         "type": "object"
       },
+      "UsageErrorCodeRow": {
+        "description": "One error-taxonomy row: the failures in the window sharing a status code.\n\n``status_code`` is None for failures recorded without one (rows written\nbefore the column existed, and failures no HTTP status describes, e.g. a\nstream that finished without usage data under the ``fail`` policy).\n``error_class`` is the coarse display bucket derived from the code, so a UI\ncan group \"provider fault\" against \"my own misconfiguration\" without\nre-deriving a status ladder; the raw code stays alongside it for precision.",
+        "properties": {
+          "error_class": {
+            "enum": [
+              "pricing",
+              "rate_limit",
+              "auth",
+              "provider_error",
+              "client_error",
+              "unknown"
+            ],
+            "title": "Error Class",
+            "type": "string"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          }
+        },
+        "required": [
+          "status_code",
+          "error_class",
+          "requests"
+        ],
+        "title": "UsageErrorCodeRow",
+        "type": "object"
+      },
       "UsageGroupRow": {
-        "description": "One breakdown row (a model, a user, or an API key).\n\n``key`` is None both for the synthesized fold row (``is_other=True``) and for a\nreal group whose column was NULL (e.g. usage from a since-deleted user, with\n``is_other=False``). ``is_other`` disambiguates the two so the UI does not\nmislabel deleted-user usage as the fold.",
+        "description": "One breakdown row (a model, a user, an API key, a session, ...).\n\n``key`` is None both for the synthesized fold row (``is_other=True``) and for a\nreal group whose column was NULL (e.g. usage from a since-deleted user, with\n``is_other=False``). ``is_other`` disambiguates the two so the UI does not\nmislabel deleted-user usage as the fold.",
         "properties": {
           "cost": {
             "title": "Cost",
@@ -5772,6 +6022,17 @@
             ],
             "title": "Priced"
           },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
           "source": {
             "anyOf": [
               {
@@ -5782,6 +6043,17 @@
               }
             ],
             "title": "Source"
+          },
+          "source_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Label"
           },
           "start_date": {
             "anyOf": [
@@ -5848,7 +6120,7 @@
         "type": "object"
       },
       "UsageSummary": {
-        "description": "Aggregate spend/volume for the Usage & analytics page.",
+        "description": "Aggregate spend/volume for the Usage & analytics page.\n\nEvery breakdown field is always present. One the caller excluded through\n``dimensions`` comes back as an empty list, the same shape a window with no\nmatching rows produces, so narrowing the selector never changes the schema.",
         "properties": {
           "bucket": {
             "enum": [
@@ -5865,6 +6137,13 @@
             "title": "By Api Key",
             "type": "array"
           },
+          "by_endpoint": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By Endpoint",
+            "type": "array"
+          },
           "by_model": {
             "items": {
               "$ref": "#/components/schemas/UsageGroupRow"
@@ -5872,11 +6151,25 @@
             "title": "By Model",
             "type": "array"
           },
+          "by_provider": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By Provider",
+            "type": "array"
+          },
           "by_source": {
             "items": {
               "$ref": "#/components/schemas/UsageGroupRow"
             },
             "title": "By Source",
+            "type": "array"
+          },
+          "by_source_label": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "By Source Label",
             "type": "array"
           },
           "by_user": {
@@ -5889,6 +6182,13 @@
           "end_date": {
             "title": "End Date",
             "type": "string"
+          },
+          "errors_by_status_code": {
+            "items": {
+              "$ref": "#/components/schemas/UsageErrorCodeRow"
+            },
+            "title": "Errors By Status Code",
+            "type": "array"
           },
           "series": {
             "items": {
@@ -5914,6 +6214,10 @@
           "by_user",
           "by_api_key",
           "by_source",
+          "by_source_label",
+          "by_endpoint",
+          "by_provider",
+          "errors_by_status_code",
           "series"
         ],
         "title": "UsageSummary",
@@ -5936,6 +6240,11 @@
           "billed_input_tokens": {
             "default": 0,
             "title": "Billed Input Tokens",
+            "type": "integer"
+          },
+          "billed_output_tokens": {
+            "default": 0,
+            "title": "Billed Output Tokens",
             "type": "integer"
           },
           "cache_read_tokens": {
@@ -9339,6 +9648,119 @@
         ]
       }
     },
+    "/v1/search": {
+      "post": {
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when\n  ``reject_user_mismatch`` is disabled); it is never billed to that user.",
+        "operationId": "create_search_v1_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/v1/search/{search_tool_name}": {
+      "post": {
+        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when\n  ``reject_user_mismatch`` is disabled); it is never billed to that user.",
+        "operationId": "create_search_for_tool_v1_search__search_tool_name__post",
+        "parameters": [
+          {
+            "description": "Configured search tool to run against",
+            "in": "path",
+            "name": "search_tool_name",
+            "required": true,
+            "schema": {
+              "description": "Configured search tool to run against",
+              "title": "Search Tool Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Search For Tool",
+        "tags": [
+          "search"
+        ]
+      }
+    },
     "/v1/settings": {
       "get": {
         "description": "Return non-secret runtime settings for the admin dashboard.",
@@ -9664,7 +10086,7 @@
         ]
       },
       "get": {
-        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, model, and endpoint.\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
+        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, and session (``source_label``).\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
         "operationId": "list_usage_v1_usage_get",
         "parameters": [
           {
@@ -9742,6 +10164,24 @@
             }
           },
           {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+              "title": "Status Code"
+            }
+          },
+          {
             "description": "Filter to a single model",
             "in": "query",
             "name": "model",
@@ -9778,6 +10218,24 @@
             }
           },
           {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
             "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
             "in": "query",
             "name": "source",
@@ -9793,6 +10251,24 @@
               ],
               "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
               "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "title": "Source Label"
             }
           },
           {
@@ -9993,6 +10469,24 @@
             }
           },
           {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+              "title": "Status Code"
+            }
+          },
+          {
             "description": "Filter to a single model",
             "in": "query",
             "name": "model",
@@ -10029,6 +10523,24 @@
             }
           },
           {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
             "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
             "in": "query",
             "name": "source",
@@ -10044,6 +10556,24 @@
               ],
               "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
               "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "title": "Source Label"
             }
           },
           {
@@ -10496,7 +11026,7 @@
     },
     "/v1/usage/summary": {
       "get": {
-        "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource (top rows plus a reconciling ``other`` fold, billed token counts), and\na UTC-bucketed time series carrying each bucket's error count and billed\ntoken composition (input incl. cache, cache read/write, output).",
+        "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold, billed token counts), the error taxonomy grouped\nby failure status code, and a UTC-bucketed time series carrying each bucket's\nerror count and billed token composition (input incl. cache, cache read/write,\noutput).\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
         "operationId": "usage_summary_v1_usage_summary_get",
         "parameters": [
           {
@@ -10574,6 +11104,24 @@
             }
           },
           {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+              "title": "Status Code"
+            }
+          },
+          {
             "description": "Filter to a single model",
             "in": "query",
             "name": "model",
@@ -10610,6 +11158,24 @@
             }
           },
           {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
             "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
             "in": "query",
             "name": "source",
@@ -10625,6 +11191,24 @@
               ],
               "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
               "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "title": "Source Label"
             }
           },
           {
@@ -10696,6 +11280,38 @@
               "title": "Bucket",
               "type": "string"
             }
+          },
+          {
+            "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
+            "in": "query",
+            "name": "dimensions",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "model",
+                      "user",
+                      "api_key",
+                      "source",
+                      "source_label",
+                      "endpoint",
+                      "provider",
+                      "status_code",
+                      "none"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty.",
+              "title": "Dimensions"
+            }
           }
         ],
         "responses": {
@@ -10736,7 +11352,7 @@
     },
     "/v1/usage/summary.csv": {
       "get": {
-        "description": "Download the per-model / per-user / per-key / per-source breakdown as CSV.\n\nA dedicated route rather than a ``format=csv`` flag on ``/summary`` so that\nendpoint keeps a single JSON response model and a clean OpenAPI schema. The\nexport is **uncapped** (no top-N fold): finance wants every row. ``tokens``\nis the billed total (fresh input, both cache buckets, and output), matching\nthe dashboard's analytics. Kept separate from the bare-array ``/v1/usage``\ncontract, which is untouched.",
+        "description": "Download every breakdown the summary reports, as one CSV.\n\nOne row per (dimension, key): model, user, API key, source, session\n(``source_label``), endpoint, and provider. A dedicated route rather than a\n``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON\nresponse model and a clean OpenAPI schema. The export is **uncapped** (no\ntop-N fold): finance wants every row. ``tokens`` is the billed total (fresh\ninput, both cache buckets, and output), matching the dashboard's analytics.\nKept separate from the bare-array ``/v1/usage`` contract, which is untouched.",
         "operationId": "usage_summary_csv_v1_usage_summary_csv_get",
         "parameters": [
           {
@@ -10814,6 +11430,24 @@
             }
           },
           {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+              "title": "Status Code"
+            }
+          },
+          {
             "description": "Filter to a single model",
             "in": "query",
             "name": "model",
@@ -10850,6 +11484,24 @@
             }
           },
           {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
             "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
             "in": "query",
             "name": "source",
@@ -10865,6 +11517,24 @@
               ],
               "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
               "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "title": "Source Label"
             }
           },
           {

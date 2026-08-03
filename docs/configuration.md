@@ -67,6 +67,7 @@ pricing:
 | `providers` | dict | `{}` | Provider credentials (see below) |
 | `aliases` | dict | `{}` | Model name aliases (display name to target selector `instance:model` or `provider:model`). The alias is what users see in `GET /v1/models` and in response `model` fields; pricing, budgets, and usage key on the resolved target. Standalone mode only. |
 | `pricing` | dict | `{}` | Model pricing entries |
+| `search_tools` | dict | `{}` | Search tools served by `POST /v1/search` (see below). Standalone mode only. |
 | `enable_metrics` | bool | `false` | Enable Prometheus `/metrics` endpoint |
 | `enable_docs` | bool | `true` | Enable `/docs`, `/redoc`, `/openapi.json` |
 | `bootstrap_api_key` | bool | `true` | Create a first-use API key on startup when none exist |
@@ -77,7 +78,7 @@ pricing:
 | `reject_user_mismatch` | bool | `true` | When `true`, a non-master key whose request names a `user` other than its own is rejected (HTTP 403). When `false`, the client `user` is still forwarded to the provider but spend is always bound to the key's own user. The master key may always bill an arbitrary user. |
 | `stream_missing_usage_policy` | string | `"estimate"` | How to bill a streamed response that completes with no provider usage data: `"estimate"` (charge the up-front estimate), `"fail"` (charge estimate and mark errored), or `"allow_free"` (don't bill). |
 | `budget_estimate_default_output_tokens` | int | `1024` | Output-token count assumed when reserving budget for a request with no declared max output; reconciled to actual usage on completion. |
-| `model_discovery` | bool | `true` | Auto-discover models for `GET /v1/models`, from configured providers and from any provider made callable by its native credential environment variable alone (so the catalog matches what routing can reach). |
+| `model_discovery` | bool | `true` | Auto-discover models for `GET /v1/models` from the configured providers: the `providers` block plus anything added at runtime on the Providers page. A provider that is callable through its credential environment variable alone is not discovered until it has an entry. |
 | `model_cache_ttl_seconds` | int | `300` | TTL for the in-memory model-discovery cache (`0` disables caching). |
 | `model_discovery_timeout_seconds` | float | `10.0` | Per-provider timeout for a live model-discovery (`list_models`) call. Bounds how long an unreachable or slow provider can stall discovery before it is treated as failed. |
 | `model_discovery_negative_ttl_seconds` | float | `30.0` | How long a failed model-discovery result is remembered before the provider is dialed again, so an unreachable provider is not re-tried on every request (`0` disables negative caching). |
@@ -105,7 +106,7 @@ pricing:
 | `web_search_allow_private_hosts` | bool | `false` | SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. Also settable via `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`. |
 | `mcp_allow_loopback` | bool | `true` | SSRF gate: allow MCP server URLs that resolve to loopback (same-host sidecars). Also settable via `OTARI_MCP_ALLOW_LOOPBACK`. |
 | `mcp_allow_private_hosts` | bool | `false` | SSRF gate: allow MCP server URLs that resolve to private/reserved hosts (and accept hostnames that fail to resolve at validation time). Also settable via `OTARI_MCP_ALLOW_PRIVATE_HOSTS`. |
-| `provider_allow_private_hosts` | bool | `true` | SSRF gate: allow a provider `api_base` that resolves to private/loopback/reserved hosts. On by default (unlike the other gates), because `api_base` is master-key gated and the home-lab use case depends on private endpoints. Set to `false` to make provider connection tests and model discovery refuse an internal `api_base`. This gate covers only those report paths: chat dispatch (which dials the endpoint) and the credential write path (which persists it) are not gated, so it is not a general egress control. Also settable via `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS`. |
+| `provider_allow_private_hosts` | bool | `true` | SSRF gate: allow a provider `api_base` that resolves to private/loopback/reserved hosts. On by default (unlike the other gates), because `api_base` is master-key gated and the home-lab use case depends on private endpoints. Set to `false` to make provider connection tests, model discovery, and the credential write path (`POST /v1/provider-credentials` and `PATCH /v1/provider-credentials/{instance}`) refuse an internal `api_base`, so a blocked endpoint cannot be persisted. With the gate on, the write path enforces the same URL shape as the report path: the `api_base` must be an `http(s)` URL whose hostname resolves, so a non-`http(s)` scheme, a value with no hostname (e.g. `myproxy:8080`), or a host that cannot be resolved (including a temporarily-unreachable public one, a deliberate anti-DNS-rebinding stance) is refused with HTTP 400 before the private-range check. Chat dispatch (which dials the endpoint on every request) is not gated, so it is not a general egress control. Also settable via `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS`. |
 | `mode` | string | none | Operating mode (`"standalone"` or `"hybrid"`; the legacy value `"platform"` means hybrid): when unset, the mode is derived from the presence of `OTARI_AI_TOKEN`; when set explicitly it is enforced at startup, so `"hybrid"` without a token and `"standalone"` with a token both fail as conflicting configuration. |
 | `platform` | dict | `{}` | otari.ai integration settings (`base_url`, timeouts, retries) |
 
@@ -178,7 +179,7 @@ These operator-facing settings configure the gateway-managed tools (`otari_code_
 | `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS` | `false` | SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. |
 | `OTARI_MCP_ALLOW_LOOPBACK` | `true` | SSRF gate: allow MCP server URLs that resolve to loopback (same-host sidecars). |
 | `OTARI_MCP_ALLOW_PRIVATE_HOSTS` | `false` | SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept hostnames that fail to resolve at validation time. |
-| `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS` | `true` | SSRF gate: allow a provider `api_base` that resolves to private/loopback/reserved hosts. On by default (unlike the other gates). Set to `false` to make provider connection tests and model discovery refuse an internal `api_base`. Does not gate chat dispatch or the credential write path, so it is not a general egress control. |
+| `OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS` | `true` | SSRF gate: allow a provider `api_base` that resolves to private/loopback/reserved hosts. On by default (unlike the other gates). Set to `false` to make provider connection tests, model discovery, and the credential write path refuse an internal `api_base`; with the gate on, a non-`http(s)`, hostname-less, or currently-unresolvable `api_base` is also refused. Does not gate chat dispatch, so it is not a general egress control. |
 
 ### Provider credentials
 
@@ -255,6 +256,75 @@ providers:
 ```
 
 The `credentials` field points to a Google Cloud service account JSON file.
+
+## Search tools
+
+`search_tools` declares what [`POST /v1/search`](api-reference.md#search) can
+run against, keyed by the name callers pass as `search_tool_name` (or in the
+`/v1/search/{tool}` path):
+
+```yaml
+search_tools:
+  exa-search:
+    provider: exa
+    api_key: ${EXA_API_KEY}
+    # api_base: "https://api.exa.ai"   # optional; override to route via a proxy
+    # timeout: 30                      # optional; seconds
+    options:                           # optional provider-native defaults
+      type: fast
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `provider` | string | the tool name | Search provider to dispatch to. Supported: `exa`. |
+| `api_key` | string | required | Credential for the provider. |
+| `api_base` | string | provider default | Override the provider's base URL. |
+| `timeout` | number | `30` | Request timeout in seconds; must be greater than 0. |
+| `options` | dict | `{}` | Provider-native request fields used as defaults. |
+
+`options` is the escape hatch for knobs the LiteLLM-shaped request has no field
+for, such as Exa's `type`, `category`, or `moderation`. Fields derived from the
+request win over it, and `query` always comes from the caller.
+
+Page content is requested by default, because the `snippet` on each result is
+that text. Providers charge per page for it, so a deployment that only wants
+ranked URLs (or highlights) can opt out by pinning `contents.text` to null:
+
+```yaml
+search_tools:
+  exa-urls-only:
+    provider: exa
+    api_key: ${EXA_API_KEY}
+    options:
+      contents:
+        text: null        # no page content, so no per-page content charge
+        highlights: true  # keep the cheaper highlight sentences as the snippet
+```
+
+The opt-out is the operator's, so it holds even for a request that carries
+`max_tokens_per_page`.
+
+Every entry is validated at startup, so an unsupported provider or a missing
+`api_key` fails before the first request. Search tools are standalone mode only:
+in hybrid mode, search is the platform's to configure.
+
+To price search, add a flat per-request rate under the model key
+`<provider>:<tool>` (for example `exa:exa-search`), following the same
+convention as moderations: the stored `input_price_per_million` is USD per
+million requests, so `5000.0` charges $0.005 per search. For what a search is
+billed at, this is only a fallback; when the provider reports its own charge
+(Exa returns `costDollars`), that is what gets billed.
+
+Configuring the rate anyway is strongly recommended, because it is also what
+the gateway reserves against the caller's budget *before* the search runs. With
+no rate configured, that reservation is $0: a user already over their cap is
+still refused, but one just under it can overshoot by a search's cost, and
+concurrent searches cannot see each other's holds. Spend stays truthful either
+way (the provider's charge is reconciled onto the usage row afterwards), so this
+is about how tightly the cap holds, not about billing accuracy. Set the rate to
+a typical search cost for the tool and the pre-flight hold does its job. Otari
+logs a warning at startup for any configured search tool with no rate; an
+explicit `0` counts as configured, for a tool you mean to be free.
 
 ## Pricing
 
