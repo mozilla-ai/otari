@@ -300,6 +300,16 @@ describe("ActivityPage", () => {
     expect(select).toHaveValue("codex");
   });
 
+  it("hides the source picker while only one source exists", async () => {
+    // Most gateways only ever see their own traffic; a provenance select with a
+    // single option is noise, so it only appears once a second source shows up.
+    mockApi({ rows: [entry(), entry({ id: "b" })] });
+    renderPage(<ActivityPage />);
+    await screen.findAllByText("gpt-4o");
+
+    await waitFor(() => expect(screen.queryByLabelText("Source")).not.toBeInTheDocument());
+  });
+
   it("shows a row's token composition rather than one uninformative total", async () => {
     // A cached agent request: the total is ~98% cache read, so the total alone
     // makes every row look alike. The bar carries the split.

@@ -54,4 +54,14 @@ describe("FilterChips", () => {
     await user.click(screen.getByRole("button", { name: "Clear all" }));
     expect(clearAll).toHaveBeenCalledOnce();
   });
+
+  it("renders start and end slots on the toggle row", () => {
+    render(
+      <FilterChips chips={[]} start={<button>30d</button>} end={<span>Showing window</span>}>
+        <span>pickers</span>
+      </FilterChips>,
+    );
+    expect(screen.getByRole("button", { name: "30d" })).toBeInTheDocument();
+    expect(screen.getByText("Showing window")).toBeInTheDocument();
+  });
 });

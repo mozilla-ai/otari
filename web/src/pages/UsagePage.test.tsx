@@ -422,20 +422,43 @@ describe("UsagePage", () => {
     expect(await screen.findByText(/No usage yet/)).toBeInTheDocument();
   });
 
-  it("hands the current view off to the Activity log instead of duplicating its table", async () => {
-    const user = userEvent.setup();
+  it("no longer duplicates the Activity page's per-request table", async () => {
     mockApi(summary());
     renderPage(<UsagePage />);
     await screen.findByText("$1,240.50");
 
     // The per-request table (and its bulk actions) lives on the Activity page;
-    // Usage carries the whole current view across instead of a second copy.
+    // the breakdown rows drill there instead.
     expect(screen.queryByText("Individual requests")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Open activity log" }));
+  });
 
-    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
-    expect(loc.startsWith("/activity")).toBe(true);
-    expect(loc).toContain("start_date=");
+  it("hides the source dimension while only one source exists", async () => {
+    // The fixture has no by_source rows at all (a plain gateway), so neither
+    // the breakdown tab nor the group-by option should surface provenance.
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    expect(screen.queryByRole("button", { name: "Source" })).not.toBeInTheDocument();
+    const groupSelect = screen.getByRole("combobox", { name: "Group by" });
+    expect(within(groupSelect).queryByRole("option", { name: "By source" })).not.toBeInTheDocument();
+  });
+
+  it("offers the source dimension once several sources exist", async () => {
+    mockApi(
+      summary({
+        by_source: [
+          { key: "gateway", cost: 900, tokens: 9_000_000, requests: 60_000, is_other: false },
+          { key: "claude_code", cost: 340.5, tokens: 3_400_000, requests: 24_000, is_other: false },
+        ],
+      }),
+    );
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    expect(screen.getByRole("button", { name: "Source" })).toBeInTheDocument();
+    const groupSelect = screen.getByRole("combobox", { name: "Group by" });
+    expect(within(groupSelect).getByRole("option", { name: "By source" })).toBeInTheDocument();
   });
 
   it("keeps the filter pickers behind an 'Add filter' toggle", async () => {

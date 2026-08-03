@@ -394,6 +394,13 @@ export function UsagePage() {
 
   const errorRate = totals && totals.request_count > 0 ? totals.error_count / totals.request_count : 0;
 
+  // Provenance only earns UI (a group-by option, a breakdown tab) once the
+  // window actually has more than one source: most gateways see only their own
+  // traffic, and a single-option dimension is noise. Kept while it is the
+  // active grouping so switching windows never strands the selection.
+  const multiSource = (data?.by_source ?? []).filter((r) => !r.is_other).length > 1;
+  const showSource = multiSource || groupBy === "source";
+
   // ---------- derived analytics ----------
 
   const series = data?.series ?? [];
@@ -551,63 +558,48 @@ export function UsagePage() {
     },
   ] as const;
   const [dimension, setDimension] = useState<(typeof dimensions)[number]["key"]>("model");
-  const activeDimension = dimensions.find((d) => d.key === dimension) ?? dimensions[0];
+  const visibleDimensions = dimensions.filter((d) => d.key !== "source" || multiSource || dimension === "source");
+  const activeDimension = visibleDimensions.find((d) => d.key === dimension) ?? visibleDimensions[0];
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Usage & analytics"
         description="Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."
-        action={
-          <Button
-            size="sm"
-            variant="outline"
-            onPress={() =>
-              // Hand the whole current view (window + entity filters) to the
-              // Activity log, which owns the per-request table and its bulk
-              // actions; keeping a second copy of that table here only split
-              // the feature across two pages.
-              drillTo({
-                model: modelFilter.trim() || undefined,
-                user_id: userFilter || undefined,
-                api_key_id: apiKeyFilter || undefined,
-              })
-            }
-          >
-            Open activity log
-          </Button>
-        }
       />
 
       <ErrorBanner error={summary.error ?? (groupBy ? grouped.error : null)} />
 
-      {/* Window row: presets anchor the rolling window; dragging on the chart
-          below selects an explicit sub-window. Chips carry entity filters. */}
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {USAGE_PRESETS.map((p) => (
-            <Button
-              key={p.key}
-              size="sm"
-              variant={!customMode && preset.key === p.key ? "primary" : "outline"}
-              onPress={() => pickPreset(p)}
-            >
-              {p.label}
-            </Button>
-          ))}
-          <div className="ml-auto flex items-center gap-3">
+      {/* Window + filter row: presets anchor the rolling window (dragging on the
+          chart below selects an explicit sub-window), the Add filter toggle and
+          its chips share the same line, and the caption + refresh sit at the
+          right edge. */}
+      <FilterChips
+        chips={filterChips}
+        onClearAll={clearEntityFilters}
+        start={USAGE_PRESETS.map((p) => (
+          <Button
+            key={p.key}
+            size="sm"
+            variant={!customMode && preset.key === p.key ? "primary" : "outline"}
+            onPress={() => pickPreset(p)}
+          >
+            {p.label}
+          </Button>
+        ))}
+        end={
+          <>
             <span className="text-xs text-[var(--otari-muted)]">
               Showing {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
             </span>
             <RefreshButton onRefresh={refresh} isFetching={summary.isFetching} updatedAt={summary.dataUpdatedAt} />
-          </div>
-        </div>
-        <FilterChips chips={filterChips} onClearAll={clearEntityFilters}>
-          <FilterComboBox label="User" value={userFilter} onChange={setUserFilter} options={userOptions} placeholder="All users" />
-          <FilterComboBox label="Model" value={modelFilter} onChange={setModelFilter} options={modelOptionList} placeholder="All models" />
-          <FilterComboBox label="API key" value={apiKeyFilter} onChange={setApiKeyFilter} options={keyOptions} placeholder="All keys" />
-        </FilterChips>
-      </div>
+          </>
+        }
+      >
+        <FilterComboBox label="User" value={userFilter} onChange={setUserFilter} options={userOptions} placeholder="All users" />
+        <FilterComboBox label="Model" value={modelFilter} onChange={setModelFilter} options={modelOptionList} placeholder="All models" />
+        <FilterComboBox label="API key" value={apiKeyFilter} onChange={setApiKeyFilter} options={keyOptions} placeholder="All keys" />
+      </FilterChips>
 
       {isEmptyEver ? (
         <EmptyState
@@ -727,7 +719,10 @@ export function UsagePage() {
                   ariaLabel="Group by"
                   value={groupBy}
                   onChange={(value) => setGroupBy(value as "" | UsageGroupBy)}
-                  options={GROUP_OPTIONS.map((o) => ({ value: o.value, label: o.value ? `By ${o.label.toLowerCase()}` : "No grouping" }))}
+                  options={GROUP_OPTIONS.filter((o) => o.value !== "source" || showSource).map((o) => ({
+                    value: o.value,
+                    label: o.value ? `By ${o.label.toLowerCase()}` : "No grouping",
+                  }))}
                 />
               </div>
             </div>
@@ -767,7 +762,7 @@ export function UsagePage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-sm font-semibold text-[var(--otari-ink)]">Spend by {activeDimension.label.toLowerCase()}</h2>
               <div className="inline-flex gap-1.5">
-                {dimensions.map((d) => (
+                {visibleDimensions.map((d) => (
                   <Button
                     key={d.key}
                     size="sm"

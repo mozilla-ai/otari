@@ -750,14 +750,20 @@ export function ActivityPage() {
               </option>
             ))}
           </FilterSelect>
-          <FilterSelect id="filter-source" label="Source" value={sourceFilter} onChange={(value) => url.patch({ source: value })}>
-            <option value="">All</option>
-            {sourceOptions.map((source) => (
-              <option key={source} value={source}>
-                {sourceLabel(source)}
-              </option>
-            ))}
-          </FilterSelect>
+          {/* Provenance only earns a select once there is more than one source
+              to choose between: most gateways see only their own traffic, and a
+              filter with a single option is noise. A drill-down that arrives
+              with a source applied keeps the select so it stays clearable. */}
+          {sourceOptions.length > 1 || sourceFilter ? (
+            <FilterSelect id="filter-source" label="Source" value={sourceFilter} onChange={(value) => url.patch({ source: value })}>
+              <option value="">All</option>
+              {sourceOptions.map((source) => (
+                <option key={source} value={source}>
+                  {sourceLabel(source)}
+                </option>
+              ))}
+            </FilterSelect>
+          ) : null}
           <FilterComboBox
             label="API key"
             value={apiKeyFilter}
