@@ -669,15 +669,20 @@ async def _breakdown(
 def error_class_for(status_code: int | None) -> ErrorClass:
     """Coarse display bucket for a failure's HTTP status code.
 
-    401 and 403 read as ``auth`` rather than as a budget denial because the codes
-    that reach this column today come from upstream: a provider rejecting the
-    gateway's credentials. Budget and blocked-user rejections are refused before
-    the provider call and currently write no row at all (see #317), so they have
-    nothing here to classify. Once #465 starts recording them they arrive with no
-    status code and land in ``unknown``; whichever change stamps a code on those
-    rows owns the decision of what they should read as, because a blocked or
-    over-budget user is refused with 403 and would otherwise be filed under
-    ``auth`` alongside a genuine credential fault.
+    Two kinds of code reach this column: the status a provider returned, and the
+    status the gateway itself refused with, since #465 records those rejections
+    too and each row carries the code it returned (403 for a blocked or
+    over-budget user, a user/key mismatch, or a model outside a key's allow-list,
+    402 for missing pricing, 400 for a selector that no longer resolves).
+
+    So ``auth`` currently covers both a provider rejecting the gateway's
+    credentials and the gateway rejecting the caller, and a **budget denial files
+    as ``auth``**, because ``reserve_budget`` refuses with 403 and the code is all
+    this function sees. Splitting budget and permission refusals into their own
+    class needs a discriminator the row does not reliably carry (``provider`` is
+    NULL only on the gates that refuse before the selector resolves, not on the
+    budget gate), and these names are dashboard-visible, so that stays a
+    deliberate follow-up rather than something guessed at here.
     """
     if status_code is None:
         return "unknown"
