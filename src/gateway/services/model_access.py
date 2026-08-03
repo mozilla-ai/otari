@@ -128,8 +128,17 @@ def is_model_allowed(allowlist: list[str] | None, canonical_key: str) -> bool:
 
 
 def _known_prefix(config: GatewayConfig, prefix: str) -> bool:
-    """Whether a prefix names a configured instance or a known any-llm provider."""
+    """Whether a prefix names something an allow-list entry can legitimately gate.
+
+    A configured provider instance or a known any-llm provider, plus the
+    providers behind the configured search tools: ``/v1/search`` checks the same
+    allow-list against its ``<provider>:<tool>`` key, so refusing to store that
+    prefix would leave a restricted key permanently denied search with no way for
+    an operator to grant it.
+    """
     if prefix in config.providers:
+        return True
+    if prefix in config.search_tool_providers():
         return True
     try:
         LLMProvider(prefix)

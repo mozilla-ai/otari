@@ -15,6 +15,14 @@ _PROVIDER_CRASHED = "provider crashed"
 _LOGGING_FAILED = "logging failed too"
 
 
+class _StatusCodeError(Exception):
+    """Upstream failure carrying an HTTP status, as the provider SDKs raise."""
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(_PROVIDER_CRASHED)
+        self.status_code = status_code
+
+
 def _format_chunk(chunk: str) -> str:
     return f"data: {chunk}\n\n"
 
@@ -37,7 +45,7 @@ async def test_streaming_generator_success_with_usage() -> None:
     async def on_complete(usage: CompletionUsage) -> None:
         completed_usage.append(usage)
 
-    async def on_error(error: str) -> None:
+    async def on_error(exc: BaseException) -> None:
         pytest.fail("on_error should not be called")
 
     events = [
@@ -67,7 +75,7 @@ async def test_streaming_generator_no_usage_skips_on_complete() -> None:
         nonlocal completed
         completed = True
 
-    async def on_error(error: str) -> None:
+    async def on_error(exc: BaseException) -> None:
         pytest.fail("on_error should not be called")
 
     events = [
@@ -97,7 +105,7 @@ async def test_streaming_generator_no_usage_invokes_on_no_usage() -> None:
         nonlocal completed
         completed = True
 
-    async def on_error(error: str) -> None:
+    async def on_error(exc: BaseException) -> None:
         pytest.fail("on_error should not be called")
 
     async def on_no_usage() -> None:
@@ -131,7 +139,7 @@ async def test_streaming_generator_on_incomplete_on_client_disconnect() -> None:
     async def on_complete(usage: CompletionUsage) -> None:
         settled.append("complete")
 
-    async def on_error(error: str) -> None:
+    async def on_error(exc: BaseException) -> None:
         settled.append("error")
 
     async def on_no_usage() -> None:
@@ -172,8 +180,8 @@ async def test_streaming_generator_error_openai_format() -> None:
     async def on_complete(usage: CompletionUsage) -> None:
         pytest.fail("on_complete should not be called on error")
 
-    async def on_error(error: str) -> None:
-        error_logged.append(error)
+    async def on_error(exc: BaseException) -> None:
+        error_logged.append(str(exc))
 
     async def _failing_stream() -> AsyncIterator[str]:
         yield "hello"
@@ -199,14 +207,52 @@ async def test_streaming_generator_error_openai_format() -> None:
 
 
 @pytest.mark.asyncio
+async def test_streaming_generator_hands_the_exception_to_on_error() -> None:
+    """on_error receives the raised exception itself, not a rendered message.
+
+    The settlement callback classifies it (recording the upstream HTTP status on
+    the usage log, see ``failure_status_code``), which a string cannot support:
+    provider error prose carries no reliable status. Pinned separately from the
+    format tests above, which only compare ``str(exc)`` and so would pass either
+    way.
+    """
+    raised = _StatusCodeError(429)
+    received: list[BaseException] = []
+
+    async def on_complete(usage: CompletionUsage) -> None:
+        pytest.fail("on_complete should not be called on error")
+
+    async def on_error(exc: BaseException) -> None:
+        received.append(exc)
+
+    async def _failing_stream() -> AsyncIterator[str]:
+        raise raised
+        yield  # pragma: no cover
+
+    async for _ in streaming_generator(
+        stream=_failing_stream(),
+        format_chunk=_format_chunk,
+        extract_usage=lambda _: None,
+        fmt=OPENAI_STREAM_FORMAT,
+        on_complete=on_complete,
+        on_error=on_error,
+        label="test:model",
+    ):
+        pass
+
+    assert received == [raised]
+    assert getattr(received[0], "status_code", None) == 429
+
+
+@pytest.mark.asyncio
 async def test_streaming_generator_error_anthropic_format() -> None:
     error_logged: list[str] = []
 
     async def on_complete(usage: CompletionUsage) -> None:
         pytest.fail("on_complete should not be called on error")
 
-    async def on_error(error: str) -> None:
-        error_logged.append(error)
+    async def on_error(exc: BaseException) -> None:
+        error_logged.append(str(exc))
 
     async def _failing_stream() -> AsyncIterator[str]:
         raise RuntimeError(_PROVIDER_CRASHED)
@@ -236,7 +282,7 @@ async def test_streaming_generator_error_logging_failure_is_swallowed() -> None:
     async def on_complete(usage: CompletionUsage) -> None:
         pytest.fail("on_complete should not be called on error")
 
-    async def on_error(error: str) -> None:
+    async def on_error(exc: BaseException) -> None:
         raise RuntimeError(_LOGGING_FAILED)
 
     async def _failing_stream() -> AsyncIterator[str]:

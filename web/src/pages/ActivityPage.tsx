@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
+  NO_BREAKDOWNS,
   useDeleteUsage,
   useKeys,
   useSetUsagePrice,
@@ -11,7 +12,7 @@ import {
   useUsageSummary,
   useUsers,
 } from "@/api/hooks";
-import type { UsageEntry, UsageFilters, UsageMutationSelection } from "@/api/types";
+import type { SummaryDimension, UsageEntry, UsageFilters, UsageMutationSelection } from "@/api/types";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -101,6 +102,9 @@ const PRICED_OPTIONS: { label: string; value: string }[] = [
 
 const DEFAULT_PAGE_SIZE = 50;
 
+// The only breakdown this page reads: the in-window models behind the typeahead.
+const MODEL_BREAKDOWN: SummaryDimension[] = ["model"];
+
 // All filter + pagination state, with defaults, kept in the URL.
 const URL_DEFAULTS = {
   range: ACTIVITY_DEFAULT_KEY,
@@ -112,6 +116,9 @@ const URL_DEFAULTS = {
   api_key_id: "",
   priced: "",
   source: "",
+  source_label: "",
+  endpoint: "",
+  provider: "",
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
 } as const;
@@ -380,6 +387,12 @@ export function ActivityPage() {
   // Provenance: gateway traffic vs an imported agent source. Set by its own select,
   // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
   const sourceFilter = url.get("source");
+  // The Usage-page secondary breakdowns (session / endpoint / provider) drill in
+  // the same way: no select of their own, carried as a chip so the scoping is
+  // visible and one click removes it.
+  const sessionFilter = url.get("source_label");
+  const endpointFilter = url.get("endpoint");
+  const providerFilter = url.get("provider");
   const page = Math.max(0, url.getNumber("page"));
   // Snap URL-supplied sizes to the nearest offered option: selection latency
   // grows linearly with rows on the page, so an old bookmark with size=500
@@ -431,9 +444,23 @@ export function ActivityPage() {
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
       source: sourceFilter || undefined,
+      source_label: sessionFilter || undefined,
+      endpoint: endpointFilter || undefined,
+      provider: providerFilter || undefined,
       priced,
     }),
-    [win, statusFilter, modelFilter, userFilter, apiKeyFilter, sourceFilter, priced],
+    [
+      win,
+      statusFilter,
+      modelFilter,
+      userFilter,
+      apiKeyFilter,
+      sourceFilter,
+      sessionFilter,
+      endpointFilter,
+      providerFilter,
+      priced,
+    ],
   );
 
   const selection = useTableSelection();
@@ -463,10 +490,15 @@ export function ActivityPage() {
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
       source: sourceFilter || undefined,
+      source_label: sessionFilter || undefined,
+      endpoint: endpointFilter || undefined,
+      provider: providerFilter || undefined,
     }),
-    [win, statusFilter, userFilter, apiKeyFilter, sourceFilter],
+    [win, statusFilter, userFilter, apiKeyFilter, sourceFilter, sessionFilter, endpointFilter, providerFilter],
   );
-  const modelSummary = useUsageSummary(modelSuggestFilters, "day");
+  // Only `by_model` is read, so only that breakdown is requested: the typeahead
+  // has no use for the other six GROUP BY passes.
+  const modelSummary = useUsageSummary(modelSuggestFilters, "day", MODEL_BREAKDOWN);
   const modelOptions =
     modelSummary.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
   const keyOptions = (keys.data ?? []).map((k) => ({ value: k.id, label: k.key_name ?? `${k.id.slice(0, 8)}…` }));
@@ -528,11 +560,28 @@ export function ActivityPage() {
       user_id: userFilter || undefined,
       api_key_id: apiKeyFilter || undefined,
       source: sourceFilter || undefined,
+      source_label: sessionFilter || undefined,
+      endpoint: endpointFilter || undefined,
+      provider: providerFilter || undefined,
       priced,
     }),
-    [winOutsideExtent, win, extentWin, statusFilter, modelFilter, userFilter, apiKeyFilter, sourceFilter, priced],
+    [
+      winOutsideExtent,
+      win,
+      extentWin,
+      statusFilter,
+      modelFilter,
+      userFilter,
+      apiKeyFilter,
+      sourceFilter,
+      sessionFilter,
+      endpointFilter,
+      providerFilter,
+      priced,
+    ],
   );
-  const contextSummary = useUsageSummary(contextFilters, extentBucket);
+  // The timeline reads `series` only.
+  const contextSummary = useUsageSummary(contextFilters, extentBucket, NO_BREAKDOWNS);
   const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
     bucketStart: p.bucket_start,
     requests: p.requests,
@@ -553,7 +602,16 @@ export function ActivityPage() {
   const timeFiltered =
     Boolean(startParam || endParam) || (range !== ACTIVITY_DEFAULT_KEY && rangePreset?.seconds != null);
   const anyFilter = Boolean(
-    statusFilter || modelFilter.trim() || userFilter || apiKeyFilter || pricedFilter || sourceFilter || timeFiltered,
+    statusFilter ||
+      modelFilter.trim() ||
+      userFilter ||
+      apiKeyFilter ||
+      pricedFilter ||
+      sourceFilter ||
+      sessionFilter ||
+      endpointFilter ||
+      providerFilter ||
+      timeFiltered,
   );
 
   // Active entity filters as removable chips (time is driven by the timeline, so
@@ -565,7 +623,17 @@ export function ActivityPage() {
     label: u.alias ? `${u.alias} (${u.user_id})` : u.user_id,
   }));
   const clearEntityFilters = () =>
-    url.patch({ status: "", priced: "", model: "", user_id: "", api_key_id: "", source: "" });
+    url.patch({
+      status: "",
+      priced: "",
+      model: "",
+      user_id: "",
+      api_key_id: "",
+      source: "",
+      source_label: "",
+      endpoint: "",
+      provider: "",
+    });
   const filterChips: FilterChip[] = [
     ...(statusFilter ? [{ key: "status", label: "Status", value: labelFrom(STATUS_OPTIONS, statusFilter), onClear: () => url.patch({ status: "" }) }] : []),
     ...(pricedFilter ? [{ key: "priced", label: "Priced", value: labelFrom(PRICED_OPTIONS, pricedFilter), onClear: () => url.patch({ priced: "" }) }] : []),
@@ -573,6 +641,9 @@ export function ActivityPage() {
     ...(modelFilter.trim() ? [{ key: "model", label: "Model", value: modelFilter.trim(), onClear: () => url.patch({ model: "" }) }] : []),
     ...(apiKeyFilter ? [{ key: "key", label: "API key", value: labelFrom(keyOptions, apiKeyFilter), onClear: () => url.patch({ api_key_id: "" }) }] : []),
     ...(sourceFilter ? [{ key: "source", label: "Source", value: sourceLabel(sourceFilter), onClear: () => url.patch({ source: "" }) }] : []),
+    ...(sessionFilter ? [{ key: "session", label: "Session", value: sessionFilter, onClear: () => url.patch({ source_label: "" }) }] : []),
+    ...(endpointFilter ? [{ key: "endpoint", label: "Endpoint", value: endpointFilter, onClear: () => url.patch({ endpoint: "" }) }] : []),
+    ...(providerFilter ? [{ key: "provider", label: "Provider", value: providerFilter, onClear: () => url.patch({ provider: "" }) }] : []),
   ];
 
   // Selection targets imported rows only; enforced gateway rows are disabled so
@@ -619,6 +690,11 @@ export function ActivityPage() {
   // A bulk op targets either the current page selection (ids) or, once the operator
   // opted into "all matching", the filter itself (by_filter). The server scopes
   // either to imported rows.
+  //
+  // Every filter that scopes the table has to be forwarded here. "All matching" is
+  // counted client-side from the full filter set but re-derived server-side from
+  // this body, so any filter left out widens the delete/reprice past the rows the
+  // operator was shown (a session drill-down would wipe every other session).
   const selectionBody = (): UsageMutationSelection =>
     selection.allMatching
       ? {
@@ -627,6 +703,10 @@ export function ActivityPage() {
           user_id: filters.user_id,
           api_key_id: filters.api_key_id,
           status: filters.status,
+          source: filters.source,
+          source_label: filters.source_label,
+          endpoint: filters.endpoint,
+          provider: filters.provider,
           start_date: filters.start_date,
           end_date: filters.end_date,
           priced: filters.priced,

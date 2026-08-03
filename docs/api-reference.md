@@ -94,6 +94,74 @@ For a full client setup example, see [Use with Claude Code](use-with-claude-code
 |--------|------|-------------|------|
 | `POST` | `/v1/rerank` | Reorder documents by relevance to a query. | API key or master key |
 
+### Search
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `POST` | `/v1/search` | Run a search against a configured search tool, named in `search_tool_name`. | API key or master key |
+| `POST` | `/v1/search/{search_tool_name}` | Same, with the tool named in the path. | API key or master key |
+
+Search tools are declared under [`search_tools`](configuration.md#search-tools)
+in `config.yml`. This is the direct counterpart to the `otari_web_search` tool:
+the tool answers a model's search call mid-completion, while this endpoint takes
+a query from the caller and returns results. Both forms log
+`endpoint="/v1/search"`, so one Activity filter covers every search.
+
+The request and response follow LiteLLM's `/v1/search` (itself shaped after
+Perplexity's Search API), so a client moving off the LiteLLM proxy keeps its
+request shape:
+
+```bash
+curl http://localhost:8000/v1/search/exa-search \
+  -H "Otari-Key: Bearer $OTARI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "post-training quantization for small models",
+    "max_results": 5,
+    "search_domain_filter": ["arxiv.org"]
+  }'
+```
+
+```json
+{
+  "object": "search",
+  "search_tool": "exa-search",
+  "results": [
+    {
+      "title": "…",
+      "url": "https://arxiv.org/abs/…",
+      "snippet": "…",
+      "date": "2026-01-02T00:00:00.000Z"
+    }
+  ]
+}
+```
+
+The accepted request fields are `query`, `search_tool_name`, `max_results`
+(1 to 20), `search_domain_filter` (up to 20 entries; prefix a domain with `-` to
+exclude it rather than restrict to it), `country`, `max_tokens_per_page`, and
+`user`. Two differences from Perplexity are worth knowing before you migrate:
+`query` must be a single string, so the multi-query array form is rejected with
+a 422; and the filters Otari does not model (`search_recency_filter`,
+`search_context_size`, the published-date filters) are ignored rather than
+rejected, so check that your client does not depend on one. Provider-native
+knobs with no request field, such as Exa's `type` or `category`, belong in the
+tool's `options`.
+
+Search bills per request rather than per token, so a usage
+row carries zero tokens and a cost taken from the provider's own reported charge
+when it reports one (Exa does); otherwise it uses the flat per-request rate
+configured for `<provider>:<tool>`, under the same convention as
+[moderations](#moderations). Like moderations, search is exempt from
+`require_pricing`. Configuring the flat rate is still
+[recommended](configuration.md#search-tools): it is what gets reserved against
+the caller's budget before the search runs.
+
+A search the gateway itself refuses, an unknown or ambiguous `search_tool_name`
+(400) or a tool the key's allowed-models list does not name (403), is written to
+the usage log too, with a null cost, so refused searches are visible in Activity
+and counted as failures rather than only in the caller's own logs.
+
 ### Images
 
 | Method | Path | Description | Auth |
@@ -177,10 +245,10 @@ into something a text-only local model can read.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `model`, `endpoint`, `source`, `api_key_id`. | Master key |
+| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `status_code`, `model`, `endpoint`, `provider`, `source`, `source_label`, `api_key_id`. `status_code` is the HTTP status classifying a failure (e.g. 429 provider rate limit, 402 missing pricing); only error rows carry one, so filtering by it also restricts to `status=error` unless `status` is passed explicitly. | Master key |
 | `GET` | `/v1/usage/count` | Total rows matching the filters (paginator total). | Master key |
-| `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source, and a time series. | Master key |
-| `GET` | `/v1/usage/summary.csv` | The breakdowns as a CSV download. | Master key |
+| `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source/session/endpoint/provider, the failure taxonomy in `errors_by_status_code` (failures grouped by `status_code` with a coarse `error_class`), and a time series. `dimensions` narrows which breakdowns are computed (each one is a separate `GROUP BY`, including `status_code` for the taxonomy); `dimensions=none` returns totals and series only. | Master key |
+| `GET` | `/v1/usage/summary.csv` | Every breakdown as a CSV download. | Master key |
 | `POST` | `/v1/usage/external-events` | Import externally-observed usage (e.g. Claude Code) as source-tagged rows, priced at API rates, never counted toward budget. An API key (must be budget-exempt) attributes to its own user; the master key may name any user. Idempotent by `(source, source_event_id)`. See [Importing external usage](external-usage.md). | API key (budget-exempt) or master key |
 | `POST` | `/v1/traces` | OTLP receiver for GenAI usage **spans** (protobuf or JSON). Maps the OpenTelemetry GenAI conventions (`gen_ai.*`, `otari.*`) onto external usage ingestion. Any instrumented app can ship here. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |
 | `POST` | `/v1/logs` | OTLP receiver for GenAI usage **log events** (protobuf or JSON), including Claude Code's `api_request` and Codex's `codex.sse_event` / `codex.api_request`. Same mapping as `/v1/traces`. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |

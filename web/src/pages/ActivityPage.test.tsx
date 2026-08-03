@@ -170,6 +170,23 @@ describe("ActivityPage", () => {
     expect(listCalls(calls).some((url) => url.includes("api_key_id=key-1"))).toBe(true);
   });
 
+  it("asks the summary endpoint only for the breakdowns it reads", async () => {
+    // Two summary reads back this page: the model typeahead (by_model) and the
+    // timeline histogram (series only). Each breakdown is a separate GROUP BY over
+    // the window server-side, so neither may request the full set.
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />);
+
+    await screen.findByText("gpt-4o");
+    const summaryCalls = calls.filter((c) => c.url.includes("/v1/usage/summary")).map((c) => c.url);
+    expect(summaryCalls.length).toBeGreaterThan(0);
+    expect(summaryCalls.some((url) => url.includes("dimensions=model"))).toBe(true);
+    expect(summaryCalls.some((url) => url.includes("dimensions=none"))).toBe(true);
+    // No caller here reads a session/provider/user breakdown.
+    expect(summaryCalls.some((url) => url.includes("dimensions=source_label"))).toBe(false);
+    expect(summaryCalls.every((url) => url.includes("dimensions="))).toBe(true);
+  });
+
   it("honors a source drill-down and shows it as a clearable chip", async () => {
     // The pricing alarm links here scoped to gateway traffic. The param has no
     // select of its own, so if the page ignored it the banner's count and this
@@ -184,6 +201,30 @@ describe("ActivityPage", () => {
     const chip = screen.getByRole("button", { name: /Source/ });
     await user.click(chip);
     await waitFor(() => expect(listCalls(calls).at(-1)).not.toContain("source="));
+  });
+
+  it("honors a session drill-down and shows it as a clearable chip", async () => {
+    // The Usage page's session breakdown links here scoped to one source_label.
+    // Without the filter the log would silently show every session's requests.
+    const { calls } = mockApi({ rows: [entry({ source: "claude_code", source_label: "sess-1" })] });
+    renderPage(<ActivityPage />, "/activity?source_label=sess-1");
+
+    await screen.findByText("gpt-4o");
+    expect(listCalls(calls).some((url) => url.includes("source_label=sess-1"))).toBe(true);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Session/ }));
+    await waitFor(() => expect(listCalls(calls).at(-1)).not.toContain("source_label="));
+  });
+
+  it("honors endpoint and provider drill-downs", async () => {
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?endpoint=%2Fv1%2Fmessages&provider=anthropic");
+
+    await screen.findByText("gpt-4o");
+    const urls = listCalls(calls);
+    expect(urls.some((url) => url.includes("endpoint=%2Fv1%2Fmessages"))).toBe(true);
+    expect(urls.some((url) => url.includes("provider=anthropic"))).toBe(true);
   });
 
   it("renders latency over a second as seconds and null latency as an em-dash", async () => {
@@ -581,6 +622,41 @@ describe("ActivityPage", () => {
       const del = calls.find((c) => c.url.endsWith("/v1/usage") && c.method === "DELETE");
       expect(del).toBeTruthy();
       expect(del!.body).toContain("imp-1");
+    });
+  });
+
+  it("carries the drill-down filters into an 'all matching' delete", async () => {
+    // The count that sizes "select all N" is taken under the source/session/provider
+    // scope, so the delete body has to repeat it. If it does not, the server
+    // re-derives a wider set: omitting `source` alone widened the target from one
+    // imported source to every imported row in the window.
+    const user = userEvent.setup();
+    const { calls } = mockApi({
+      rows: [entry({ id: "imp-1", model: "imported-model", counts_toward_budget: false })],
+      total: 5,
+    });
+    renderPage(
+      <ActivityPage />,
+      "/activity?source=claude_code&source_label=task-42&provider=anthropic&endpoint=external",
+    );
+
+    const row = (await screen.findByText("imported-model")).closest("tr")!;
+    await user.click(within(row).getByRole("checkbox"));
+    await user.click(await screen.findByRole("button", { name: /Select all 5 matching/ }));
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      const del = calls.find((c) => c.url.endsWith("/v1/usage") && c.method === "DELETE");
+      expect(del).toBeTruthy();
+      const body = JSON.parse(del!.body ?? "{}");
+      expect(body.by_filter).toBe(true);
+      expect(body.source).toBe("claude_code");
+      expect(body.source_label).toBe("task-42");
+      expect(body.provider).toBe("anthropic");
+      expect(body.endpoint).toBe("external");
     });
   });
 

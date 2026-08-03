@@ -231,9 +231,11 @@ async def validate_provider_api_base(url: str) -> None:
     check is skipped; scheme/host validation applies only once the gate is on.
 
     Scope: this gate covers the paths that *report* on an ``api_base`` (the
-    connection-test endpoints and model discovery). It does not gate the chat
-    dispatch that dials the endpoint for real, nor the credential write path that
-    persists it, so it is not a general egress control.
+    connection-test endpoints and model discovery) and the credential write path
+    that persists it (``POST /v1/provider-credentials`` and
+    ``PATCH /v1/provider-credentials/{instance}``). It does not
+    gate the chat dispatch that dials the endpoint for real on every request, so
+    it is not a general egress control.
 
     Async to keep the event loop unblocked during DNS resolution (see
     :func:`_resolve_all_async`). Raises :class:`UnsafeURLError` on rejection;

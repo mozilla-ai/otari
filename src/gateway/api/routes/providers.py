@@ -49,6 +49,7 @@ from gateway.services.secret_box import (
     SecretDecryptionError,
     decrypt_secret,
 )
+from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 router = APIRouter(prefix="/v1", tags=["providers"])
 
@@ -397,6 +398,24 @@ def _validate_instance(instance: str, provider_type: str | None) -> None:
             ) from exc
 
 
+async def _gate_api_base(api_base: str | None) -> None:
+    """Reject persisting an internal ``api_base`` when the SSRF gate is on.
+
+    Mirrors the report-path gate (connection tests, model discovery): a no-op
+    in the default allow-all state, but when the operator sets
+    ``OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS=false`` a private/link-local/reserved
+    ``api_base`` is refused here, so a blocked endpoint cannot be persisted in
+    the first place (issue #443). Truthy check so an empty/absent api_base
+    (the "use the SDK default endpoint" case) is not treated as a URL.
+    """
+    if not api_base:
+        return
+    try:
+        await validate_provider_api_base(api_base)
+    except UnsafeURLError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+
+
 async def _commit(db: AsyncSession, *, conflict_detail: str | None = None) -> None:
     try:
         await db.commit()
@@ -514,6 +533,7 @@ async def create_stored_provider(
 ) -> StoredProviderResponse:
     """Add a provider at runtime. Storing a key requires OTARI_SECRET_KEY."""
     _validate_instance(request.instance, request.provider_type)
+    await _gate_api_base(request.api_base)
     if await get_credential(db, request.instance) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -571,6 +591,8 @@ async def update_stored_provider(
     _validate_instance(instance, request.provider_type)
     # Distinguish "field omitted" (keep) from "field set to null" (clear).
     sent = request.model_fields_set
+    if "api_base" in sent:
+        await _gate_api_base(request.api_base)
     try:
         row = await save_credential(
             db,

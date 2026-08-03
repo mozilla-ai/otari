@@ -12,6 +12,12 @@ uses (``_classify_upstream_error``) and surface as HTTP 502: an upstream outage
 is an upstream failure, not a gateway bug, matching the chat, messages, and
 responses routes. The raw provider message is never included in the response
 detail (it is preserved on the usage log's ``error_message``).
+
+Every row this scaffold writes comes from one of two places: ``_usage_row`` for
+the outcomes of an attempted provider call (success, provider error), and the
+shared ``log_gateway_rejection`` for requests the gateway refused before ever
+calling a provider, which the chat/messages/responses pipeline uses too so both
+scaffolds record a rejection identically.
 """
 
 from __future__ import annotations
@@ -21,14 +27,22 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 from any_llm.exceptions import AnyLLMError
 from fastapi import HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.routes._helpers import resolve_user_id
-from gateway.api.routes._pipeline import _elapsed_ms, _raise_for_unresolvable_model, rate_limit_headers
+from gateway.api.routes._pipeline import (
+    _elapsed_ms,
+    _raise_for_unresolvable_model,
+    failure_status_code,
+    log_gateway_rejection,
+    rate_limit_headers,
+    throttle_early_rejection,
+    unresolvable_model_detail,
+)
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -36,6 +50,7 @@ from gateway.model_labeling import relabel_model
 from gateway.models.entities import APIKey, ModelPricing, UsageLog
 from gateway.rate_limit import check_rate_limit
 from gateway.services.budget_service import (
+    ReservationHandle,
     reconcile_reservation,
     refund_reservation,
     reserve_budget,
@@ -173,19 +188,94 @@ async def run_passthrough(
     # the spend write) and stamped on the usage row.
     budget_exempt = api_key is not None and api_key.exclude_from_budget
 
-    user_id = resolve_passthrough_user_id(auth_result, user, reject_mismatch=config.reject_user_mismatch)
+    try:
+        user_id = resolve_passthrough_user_id(auth_result, user, reject_mismatch=config.reject_user_mismatch)
+    except HTTPException as exc:
+        # Only the user/key mismatch (403) has a user to attribute the drop to;
+        # see log_gateway_rejection for the rejections that deliberately do not
+        # log. Like its counterpart in the pipeline, this row carries the raw
+        # selector and no provider: nothing is resolved this early, and resolving
+        # purely to shape a log row is not worth it on a refusal path.
+        # Also like its counterpart, this gate precedes check_rate_limit, so the
+        # write is charged to the key's own bucket and skipped once throttled
+        # (see throttle_early_rejection). The response stays 403.
+        if (
+            exc.status_code == status.HTTP_403_FORBIDDEN
+            and api_key is not None
+            and not throttle_early_rejection(raw_request, str(api_key.user_id))
+        ):
+            await log_gateway_rejection(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                user_id=api_key.user_id,
+                model=model,
+                provider=None,
+                endpoint=endpoint,
+                detail=str(exc.detail),
+                status_code=exc.status_code,
+                started_at=started_at,
+            )
+        raise
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
+    async def _log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
+        """Record a gateway-side rejection of this request.
+
+        Call after refunding the reservation, if one is held; this only writes a
+        row (see :func:`log_gateway_rejection`) and never touches the budget.
+        ``status_code`` is the status this rejection is about to return, which the
+        row keeps so the failure taxonomy can tell a refusal from a provider fault.
+        """
+        await log_gateway_rejection(
+            db=db,
+            log_writer=log_writer,
+            api_key_id=api_key_id,
+            user_id=user_id,
+            model=row_model,
+            provider=row_provider,
+            endpoint=endpoint,
+            detail=detail,
+            status_code=status_code,
+            started_at=started_at,
+        )
+
+    async def _reserve(estimated_cost: float, *, row_model: str, row_provider: str | None) -> ReservationHandle:
+        """Reserve the estimate, recording a blocked/over-budget refusal.
+
+        ``reserve_budget`` reserves nothing on the paths that raise, so there is
+        nothing to refund here. The 404 for an unknown user is left unlogged:
+        ``usage_logs.user_id`` is a foreign key to ``users``, so a row naming a
+        user that does not exist could not be inserted.
+        """
+        try:
+            return await reserve_budget(
+                db,
+                user_id,
+                estimated_cost,
+                model=model,
+                strategy=config.budget_strategy,
+                counts_toward_budget=not budget_exempt,
+            )
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_404_NOT_FOUND:
+                await _log_rejection(
+                    str(exc.detail),
+                    row_model=row_model,
+                    row_provider=row_provider,
+                    status_code=exc.status_code,
+                )
+            raise
+
     pricing: ModelPricing | None = None
     if reserve_before_resolve:
-        reservation = await reserve_budget(
-            db,
-            user_id,
+        # Nothing is resolved yet, so a rejection here records the requested
+        # selector with no provider.
+        reservation = await _reserve(
             estimate(None) if estimate else 0.0,
-            model=model,
-            strategy=config.budget_strategy,
-            counts_toward_budget=not budget_exempt,
+            row_model=model,
+            row_provider=None,
         )
         # The reservation is already held, so refund it before mapping an
         # unresolvable selector to 400; otherwise the estimate leaks.
@@ -193,23 +283,33 @@ async def run_passthrough(
             resolved = resolve_provider_selector(config, model, user_id)
         except (ValueError, AnyLLMError) as exc:
             await refund_reservation(db, reservation)
+            await _log_rejection(
+                unresolvable_model_detail(model),
+                row_model=model,
+                row_provider=None,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
             _raise_for_unresolvable_model(model, exc)
     else:
         try:
             resolved = resolve_provider_selector(config, model, user_id)
         except (ValueError, AnyLLMError) as exc:
+            # Nothing is reserved yet on this branch, so there is no refund to do.
+            await _log_rejection(
+                unresolvable_model_detail(model),
+                row_model=model,
+                row_provider=None,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
             _raise_for_unresolvable_model(model, exc)
         if lookup_pricing:
             pricing = await find_model_pricing(db, resolved.instance, resolved.model)
         # Reserve first so user/blocked/budget rejections (404/403) precede the
         # missing-pricing rejection (402); refund if we then reject for no pricing.
-        reservation = await reserve_budget(
-            db,
-            user_id,
+        reservation = await _reserve(
             estimate(pricing) if estimate else 0.0,
-            model=model,
-            strategy=config.budget_strategy,
-            counts_toward_budget=not budget_exempt,
+            row_model=resolved.model,
+            row_provider=resolved.instance,
         )
         # A budget-exempt key is never debited, so the require_pricing safety gate
         # does not apply: the call proceeds and logs cost=null when unpriced.
@@ -223,20 +323,11 @@ async def run_passthrough(
             # Record the rejection so dropped traffic is visible in the activity
             # log and countable as an error, rather than only reaching the
             # operator as a user complaint. cost stays null: nothing was spent.
-            await log_writer.put(
-                UsageLog(
-                    id=str(uuid.uuid4()),
-                    api_key_id=api_key_id,
-                    user_id=user_id,
-                    timestamp=datetime.now(UTC),
-                    model=resolved.model,
-                    provider=resolved.instance,
-                    endpoint=endpoint,
-                    status="error",
-                    error_message=no_pricing_detail,
-                    latency_ms=_elapsed_ms(started_at),
-                    counts_toward_budget=not budget_exempt,
-                )
+            await _log_rejection(
+                no_pricing_detail,
+                row_model=resolved.model,
+                row_provider=resolved.instance,
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
             )
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -251,16 +342,26 @@ async def run_passthrough(
         key_allowlist, f"{resolved.instance}:{resolved.model}"
     ):
         await refund_reservation(db, reservation)
+        not_allowed_detail = model_not_allowed_detail(model)
+        await _log_rejection(
+            not_allowed_detail,
+            row_model=resolved.model,
+            row_provider=resolved.instance,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=model_not_allowed_detail(model),
+            detail=not_allowed_detail,
         )
 
-    try:
-        result = await call_provider(resolved)
+    def _usage_row(row_status: str, **outcome: Any) -> UsageLog:
+        """Build this request's usage row, varying only the outcome columns.
 
-        prompt_tokens, completion_tokens, total_tokens = usage_tokens(result) if usage_tokens else (0, 0, 0)
-        usage_log = UsageLog(
+        The identity and attribution columns are identical for every outcome, so
+        they live here once: a new column is added in one place rather than at
+        each of the call sites below.
+        """
+        return UsageLog(
             id=str(uuid.uuid4()),
             api_key_id=api_key_id,
             user_id=user_id,
@@ -268,12 +369,21 @@ async def run_passthrough(
             model=resolved.model,
             provider=resolved.instance,
             endpoint=endpoint,
-            status="success",
+            status=row_status,
+            latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=not budget_exempt,
+            **outcome,
+        )
+
+    try:
+        result = await call_provider(resolved)
+
+        prompt_tokens, completion_tokens, total_tokens = usage_tokens(result) if usage_tokens else (0, 0, 0)
+        usage_log = _usage_row(
+            "success",
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
-            latency_ms=_elapsed_ms(started_at),
-            counts_toward_budget=not budget_exempt,
         )
 
         cost = compute_cost(result, pricing) if compute_cost else None
@@ -287,20 +397,7 @@ async def run_passthrough(
         await refund_reservation(db, reservation)
         raise
     except Exception as e:
-        error_log = UsageLog(
-            id=str(uuid.uuid4()),
-            api_key_id=api_key_id,
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            model=resolved.model,
-            provider=resolved.instance,
-            endpoint=endpoint,
-            status="error",
-            error_message=str(e),
-            latency_ms=_elapsed_ms(started_at),
-            counts_toward_budget=not budget_exempt,
-        )
-        await log_writer.put(error_log)
+        await log_writer.put(_usage_row("error", error_message=str(e), status_code=failure_status_code(e)))
         await refund_reservation(db, reservation)
 
         mapped = map_provider_error(e) if map_provider_error else None

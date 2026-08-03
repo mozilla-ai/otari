@@ -1,4 +1,4 @@
-.PHONY: help dev test test-unit test-integration lint typecheck openapi-check postman postman-check changelog
+.PHONY: help dev test test-unit test-integration lint check-architecture typecheck openapi-check postman postman-check changelog
 
 help:
 	@printf "Available targets:\n"
@@ -6,7 +6,8 @@ help:
 	@printf "  test Run full test suite (unit + integration)\n"
 	@printf "  test-unit Run unit tests\n"
 	@printf "  test-integration Run integration tests\n"
-	@printf "  lint Run Ruff lint checks\n"
+	@printf "  lint Run Ruff lint checks and the architecture check\n"
+	@printf "  check-architecture Enforce gateway layer rules (also run by lint)\n"
 	@printf "  typecheck Run mypy type checks\n"
 	@printf "  openapi-check Verify the OpenAPI spec is up to date\n"
 	@printf "  postman Regenerate the Postman collection from the OpenAPI spec\n"
@@ -28,8 +29,13 @@ test-unit:
 test-integration:
 	uv run pytest -v tests/integration
 
-lint:
+lint: check-architecture
 	uv run ruff check src tests scripts
+
+# Enforce gateway layer rules. Pure stdlib; runs as part of `make lint` (which
+# otari-lint.yml calls on every PR) and stays independently runnable.
+check-architecture:
+	uv run python scripts/check_architecture.py
 
 typecheck:
 	uv run mypy

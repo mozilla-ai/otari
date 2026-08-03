@@ -1,12 +1,13 @@
 """Preview and apply explicit updates to the genai-prices snapshot."""
 
 import asyncio
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import httpx
-from genai_prices import data as genai_data
 from genai_prices.data_snapshot import DataSnapshot, get_snapshot, set_custom_snapshot
+from genai_prices.types import Provider, _providers_from_raw
 from genai_prices.update_prices import DEFAULT_UPDATE_URL, UpdatePrices
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -29,6 +30,18 @@ PRICE_SNAPSHOT_REFRESH_TTL_SECONDS = 30.0
 # worker that served it; the refresher uses this to converge sibling workers and
 # replicas without re-applying (and clearing the price cache) on every tick.
 _applied_snapshot_raw: str | None = None
+
+
+def _parse_snapshot(raw_snapshot: str) -> list[Provider]:
+    """Parse a raw feed payload the way genai-prices parses its own.
+
+    The helper is private upstream, but the v2 feed needs its normalization and
+    ``UpdatePrices.fetch`` cannot parse an already-persisted payload.
+    """
+    try:
+        return _providers_from_raw(json.loads(raw_snapshot))
+    except Exception as exc:
+        raise ValueError("Invalid genai-prices snapshot") from exc
 
 
 @dataclass(frozen=True)
@@ -123,7 +136,7 @@ def _fetch_latest_snapshot() -> _PendingSnapshot:
     response = httpx.get(DEFAULT_UPDATE_URL, timeout=timeout)
     response.raise_for_status()
     raw_snapshot = response.content.decode("utf-8")
-    providers = genai_data.providers_schema.validate_json(raw_snapshot)
+    providers = _parse_snapshot(raw_snapshot)
     return _PendingSnapshot(
         snapshot=DataSnapshot(providers=providers, from_auto_update=True),
         raw_snapshot=raw_snapshot,
@@ -173,7 +186,7 @@ async def confirm_price_refresh(session: AsyncSession) -> bool:
     # make this attribute access re-fetch a row that no longer exists.
     raw_snapshot = pending_row.snapshot
     try:
-        providers = genai_data.providers_schema.validate_json(raw_snapshot)
+        providers = _parse_snapshot(raw_snapshot)
     except ValueError as exc:
         raise PricingRefreshError("The pending genai-prices data is invalid") from exc
 
@@ -223,7 +236,7 @@ def _apply_active_snapshot(raw_snapshot: str) -> None:
     """Activate a raw snapshot in this worker and record what was applied."""
 
     global _applied_snapshot_raw
-    providers = genai_data.providers_schema.validate_json(raw_snapshot)
+    providers = _parse_snapshot(raw_snapshot)
     set_custom_snapshot(DataSnapshot(providers=providers, from_auto_update=True))
     reset_price_cache()
     _applied_snapshot_raw = raw_snapshot

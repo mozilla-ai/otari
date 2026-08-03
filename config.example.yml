@@ -84,6 +84,12 @@ providers:
   #   models:
   #     - deepseek-v4-flash
 
+  # Keyless local backends (ollama, llamacpp, llamafile) take no credential, so a
+  # bare key is the whole entry. Routing works without it; the entry is what puts
+  # the local server's models in /v1/models. Add `api_base` for a non-default
+  # address.
+  # ollama:
+
   # Add more providers as needed...
 
 # Model pricing configuration (optional but necessary for price tracking)
@@ -98,6 +104,20 @@ providers:
   # openai:gpt-5:
     # input_price_per_million: 0.25
     # output_price_per_million: 1.00
+
+# Search tools (optional): what POST /v1/search can run against, keyed by the
+# name callers pass as `search_tool_name` (or in the /v1/search/{tool} path).
+# `provider` defaults to the tool name and must be one of: exa. `options` holds
+# provider-native request defaults for knobs the request body has no field for;
+# the caller's query always wins. Standalone-mode only.
+# search_tools:
+#   exa-search:
+#     provider: exa
+#     api_key: ${EXA_API_KEY}
+#     # api_base: "https://api.exa.ai"   # optional
+#     # timeout: 30                      # optional, seconds
+#     options:
+#       type: fast
 
 # Model aliases (optional): expose a friendly display name that maps to a real
 # selector, hiding the underlying provider/model. Format: name -> target

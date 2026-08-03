@@ -268,6 +268,7 @@ async def find_model_pricing(
     model: str,
     *,
     as_of: datetime | None = None,
+    use_defaults: bool = True,
 ) -> ModelPricing | None:
     """Look up model pricing as of a timestamp.
 
@@ -276,6 +277,12 @@ async def find_model_pricing(
     maintained default pricing from genai-prices. Explicit pricing stored in the
     database always takes precedence over defaults. The default fallback is gated
     by ``GatewayConfig.default_pricing`` via :func:`configure_default_pricing`.
+
+    ``use_defaults=False`` skips that fallback for keys that are not models at
+    all. The genai-prices lookup falls back to a provider-agnostic match on the
+    bare name, so a search tool an operator happened to name after a real model
+    would otherwise pick up that model's per-million-token rate and be billed
+    under a per-request convention.
     """
 
     lookup_time = normalize_effective_at(as_of)
@@ -285,7 +292,7 @@ async def find_model_pricing(
     if pricing is None and provider:
         pricing = await _find_by_model_key(db, f"{provider}/{model}", lookup_time)
 
-    if pricing is None and default_pricing_enabled():
+    if pricing is None and use_defaults and default_pricing_enabled():
         pricing = default_model_pricing(provider, model, lookup_time)
 
     return pricing

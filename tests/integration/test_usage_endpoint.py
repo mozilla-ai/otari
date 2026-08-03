@@ -34,6 +34,7 @@ def _make_log(
     cost: float | None = 0.01,
     status: str = "success",
     error_message: str | None = None,
+    status_code: int | None = None,
     latency_ms: int | None = None,
     log_id: str | None = None,
 ) -> UsageLog:
@@ -52,6 +53,7 @@ def _make_log(
         cost=cost,
         status=status,
         error_message=error_message,
+        status_code=status_code,
         latency_ms=latency_ms,
     )
     db.add(log)
@@ -243,6 +245,7 @@ def test_list_usage_response_shape(
         cost=1.23,
         status="error",
         error_message="capacity",
+        status_code=503,
         latency_ms=842,
         log_id="shape-log-id",
     )
@@ -271,6 +274,7 @@ def test_list_usage_response_shape(
         "cost": 1.23,
         "status": "error",
         "error_message": "capacity",
+        "status_code": 503,
         "latency_ms": 842,
         "source": "gateway",
         "source_label": None,

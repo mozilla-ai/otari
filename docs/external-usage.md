@@ -202,6 +202,16 @@ see the dedicated guides:
 - [Use with Claude Code](use-with-claude-code.md)
 - [Use with Codex](use-with-codex.md)
 
+No OTLP shape reports the 5-minute/1-hour split of cache creation, so every imported
+cache write is priced at the 5-minute rate. Claude Code does use both TTLs, and its
+`api_request` event reports only a combined `cache_creation_tokens`, so whichever rate
+Otari assumes is wrong for the other share: the 5-minute assumption undercharges the
+1-hour writes (the larger share on measured Claude Code workloads), and assuming
+1 hour would overcharge the 5-minute ones. A 1-hour write costs 2x base input against
+1.25x for a 5-minute one, so Otari books the cheaper bucket and an imported cost never
+reads above true cost. To bill the true split, send `cache_write_1h_tokens` yourself
+via `POST /v1/usage/external-events`.
+
 ## Other sources
 
 `POST /v1/usage/external-events` (above) is the explicit path for any source that is

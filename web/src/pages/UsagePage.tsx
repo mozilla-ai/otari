@@ -3,8 +3,9 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
-import { useKeys, useUsageGroupedSeries, useUsageSummary, useUsers } from "@/api/hooks";
+import { NO_BREAKDOWNS, useKeys, useUsageGroupedSeries, useUsageSummary, useUsers } from "@/api/hooks";
 import type {
+  SummaryDimension,
   UsageBucket,
   UsageFilters,
   UsageGroupBy,
@@ -137,6 +138,10 @@ interface BreakdownProps {
   rows: UsageGroupRow[];
   totalCost: number;
   emptyLabel: string;
+  // How a real group whose column was NULL reads. The default suits an id that
+  // has gone missing (a deleted user); a dimension where NULL is a normal state
+  // (gateway rows carry no session label) passes its own wording.
+  unknownLabel?: string;
   // Maps a row key to a human label (e.g. API key id -> key name).
   labelFor?: (key: string) => string;
   // Turns a row key into the Activity-page filter to drill into.
@@ -151,7 +156,16 @@ interface BreakdownProps {
 const OTHER_KEY = "__other__";
 const UNKNOWN_KEY = "__unknown__";
 
-function BreakdownTable({ dimensionLabel, rows, totalCost, emptyLabel, labelFor, onDrill, loading }: BreakdownProps) {
+function BreakdownTable({
+  dimensionLabel,
+  rows,
+  totalCost,
+  emptyLabel,
+  unknownLabel = "(unknown)",
+  labelFor,
+  onDrill,
+  loading,
+}: BreakdownProps) {
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? rows : rows.slice(0, TABLE_TOP_N);
   const hidden = rows.length - visible.length;
@@ -173,7 +187,7 @@ function BreakdownTable({ dimensionLabel, rows, totalCost, emptyLabel, labelFor,
               {row.is_other
                 ? `Other (${row.requests.toLocaleString()} req)`
                 : row.key === null
-                  ? "(unknown)"
+                  ? unknownLabel
                   : (labelFor?.(row.key) ?? row.key)}
             </span>
             <span className="h-1 w-full overflow-hidden rounded-full bg-[var(--otari-line)]">
@@ -219,6 +233,32 @@ function BreakdownTable({ dimensionLabel, rows, totalCost, emptyLabel, labelFor,
       ) : null}
     </div>
   );
+}
+
+// ---------- which breakdowns the page asks for ----------
+
+// Every dimension a tab below can show. Requested explicitly so a new
+// server-side dimension does not silently start costing this page a GROUP BY,
+// and so tile-only queries (previous window, typeahead, overview) stay cheap by
+// contrast.
+const PAGE_BREAKDOWNS: SummaryDimension[] = ["model", "user", "api_key", "source", "source_label", "endpoint", "provider"];
+
+// The typeahead's own summary drops the model filter, so it only needs by_model.
+const MODEL_BREAKDOWN: SummaryDimension[] = ["model"];
+
+// ---------- breakdown dimensions ----------
+
+// One breakdown tab. Model and user are the two questions asked on every visit;
+// the rest answer a real question each, so they share the same tab strip rather
+// than stacking seven tables.
+interface BreakdownDimensionDef {
+  key: SummaryDimension;
+  label: string;
+  rows: UsageGroupRow[];
+  // How a group whose column was NULL reads (see BreakdownTable.unknownLabel).
+  unknownLabel?: string;
+  labelFor?: (key: string) => string;
+  drill: (key: string) => void;
 }
 
 // ---------- page ----------
@@ -284,8 +324,9 @@ export function UsagePage() {
     };
   }, [customMode, winStart, winEnd, filters, preset.seconds, startDate]);
 
-  const summary = useUsageSummary(filters, bucket);
-  const previous = useUsageSummary(previousFilters ?? filters, bucket, previousFilters !== null);
+  const summary = useUsageSummary(filters, bucket, PAGE_BREAKDOWNS);
+  // Deltas read `totals` only, so the previous window skips every breakdown.
+  const previous = useUsageSummary(previousFilters ?? filters, bucket, NO_BREAKDOWNS, previousFilters !== null);
   // The per-group stack, fetched only while a dimension is selected.
   const grouped = useUsageGroupedSeries(filters, bucket, groupBy || null);
   // A 404 from the grouped endpoint is version skew: a gateway older than this
@@ -304,7 +345,8 @@ export function UsagePage() {
   // omits the model filter, so the list stays complete when a model is selected,
   // and derived directly from query data rather than mirrored into state.
   const modelSuggestFilters: UsageFilters = useMemo(() => ({ ...filters, model: undefined }), [filters]);
-  const modelSuggest = useUsageSummary(modelSuggestFilters, bucket);
+  // The typeahead reads only the model breakdown, so only it is requested.
+  const modelSuggest = useUsageSummary(modelSuggestFilters, bucket, MODEL_BREAKDOWN);
   const modelOptions =
     modelSuggest.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
 
@@ -524,38 +566,60 @@ export function UsagePage() {
     if (range) pickCustom(range.startIso, range.endIso);
   };
 
-  // ---------- breakdown dimensions ----------
+  // ---------- breakdown tabs ----------
 
-  const dimensions = [
+  const dimensions: BreakdownDimensionDef[] = [
     {
       key: "model",
       label: "Model",
       rows: data?.by_model ?? [],
-      labelFor: undefined as ((key: string) => string) | undefined,
-      drill: (key: string) => drillTo({ model: key, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+      drill: (key) => drillTo({ model: key, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
     },
     {
       key: "user",
       label: "User",
       rows: data?.by_user ?? [],
-      labelFor: undefined as ((key: string) => string) | undefined,
-      drill: (key: string) =>
+      drill: (key) =>
         drillTo({ user_id: key, model: modelFilter.trim() || undefined, api_key_id: apiKeyFilter || undefined }),
     },
     {
       key: "api_key",
       label: "API key",
       rows: data?.by_api_key ?? [],
-      labelFor: keyLabel as ((key: string) => string) | undefined,
-      drill: (key: string) =>
+      labelFor: keyLabel,
+      drill: (key) =>
         drillTo({ api_key_id: key, model: modelFilter.trim() || undefined, user_id: userFilter || undefined }),
+    },
+    // Sessions first among the secondary dimensions: for agent traffic a few
+    // long-running sessions carry most of the spend, so this is usually the row
+    // that explains a bill.
+    {
+      key: "source_label",
+      label: "Session",
+      rows: data?.by_source_label ?? [],
+      unknownLabel: "(no session)",
+      drill: (key) =>
+        drillTo({ source_label: key, model: modelFilter.trim() || undefined, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+    },
+    {
+      key: "endpoint",
+      label: "Endpoint",
+      rows: data?.by_endpoint ?? [],
+      drill: (key) =>
+        drillTo({ endpoint: key, model: modelFilter.trim() || undefined, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+    },
+    {
+      key: "provider",
+      label: "Provider",
+      rows: data?.by_provider ?? [],
+      drill: (key) =>
+        drillTo({ provider: key, model: modelFilter.trim() || undefined, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
     },
     {
       key: "source",
       label: "Source",
       rows: data?.by_source ?? [],
-      labelFor: undefined as ((key: string) => string) | undefined,
-      drill: (key: string) =>
+      drill: (key) =>
         drillTo({
           source: key,
           model: modelFilter.trim() || undefined,
@@ -563,8 +627,8 @@ export function UsagePage() {
           api_key_id: apiKeyFilter || undefined,
         }),
     },
-  ] as const;
-  const [dimension, setDimension] = useState<(typeof dimensions)[number]["key"]>("model");
+  ];
+  const [dimension, setDimension] = useState<SummaryDimension>("model");
   const visibleDimensions = dimensions.filter((d) => d.key !== "source" || multiSource || dimension === "source");
   const activeDimension = visibleDimensions.find((d) => d.key === dimension) ?? visibleDimensions[0];
 
@@ -709,6 +773,7 @@ export function UsagePage() {
                     key={tab.key}
                     size="sm"
                     variant={metric === tab.key ? "primary" : "outline"}
+                    aria-pressed={metric === tab.key}
                     onPress={() => setMetric(tab.key)}
                   >
                     {tab.label}
@@ -780,6 +845,7 @@ export function UsagePage() {
                     key={d.key}
                     size="sm"
                     variant={dimension === d.key ? "primary" : "outline"}
+                    aria-pressed={dimension === d.key}
                     onPress={() => setDimension(d.key)}
                   >
                     {d.label}
@@ -792,6 +858,7 @@ export function UsagePage() {
               rows={activeDimension.rows}
               totalCost={totals?.cost ?? 0}
               emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
+              unknownLabel={activeDimension.unknownLabel}
               labelFor={activeDimension.labelFor}
               // Drilling keeps the other active filters, so the log stays scoped
               // to them instead of showing every request for the group.

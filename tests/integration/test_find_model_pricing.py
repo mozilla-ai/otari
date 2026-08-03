@@ -194,6 +194,18 @@ async def test_find_pricing_falls_back_to_genai_defaults(async_db: AsyncSession)
 
 
 @pytest.mark.asyncio
+async def test_find_pricing_skips_genai_defaults_when_asked(async_db: AsyncSession) -> None:
+    """use_defaults=False suppresses the fallback for keys that are not models.
+
+    The genai-prices lookup also tries a provider-agnostic match on the bare
+    name, so a non-model key (a search tool named after a real model) would
+    otherwise inherit that model's per-million-token rate.
+    """
+    configure_default_pricing(True)
+    assert await find_model_pricing(async_db, "exa", "gpt-4o", use_defaults=False) is None
+
+
+@pytest.mark.asyncio
 async def test_find_pricing_db_overrides_genai_defaults(async_db: AsyncSession) -> None:
     """An explicit DB price for a known model wins over the genai-prices default."""
     configure_default_pricing(True)

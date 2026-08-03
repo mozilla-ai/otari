@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
+import yaml
 from any_llm import LLMProvider
 from any_llm.exceptions import AnyLLMError
 
 from gateway.api.routes.pricing import _candidate_model_keys
-from gateway.core.config import GatewayConfig, ModelCapabilityConfig
+from gateway.core.config import GatewayConfig, ModelCapabilityConfig, provider_credential_env_names
+from gateway.log_config import logger as gateway_logger
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
     _KEYLESS_PLACEHOLDER_API_KEY,
@@ -77,6 +81,117 @@ def test_validate_allows_instance_without_provider_type() -> None:
     # Backward compatible: keys that are real providers need no provider_type and
     # are not hard-validated here.
     GatewayConfig(providers={"openai": {"api_key": "sk"}}).validate_provider_instances()
+
+
+def test_valueless_entry_loads_as_empty_config() -> None:
+    # Regression (mozilla-ai/otari#389): a keyless local backend has no credential
+    # to declare, so `ollama:` with no body is the natural config. YAML parses that
+    # as None, which the dict[str, dict] annotation rejected outright.
+    config = GatewayConfig(providers={"ollama": None})  # type: ignore[dict-item]
+    assert config.providers == {"ollama": {}}
+    config.validate_provider_instances()  # no raise
+
+
+def test_valueless_providers_block_loads_as_no_providers() -> None:
+    # Commenting out every entry leaves a bare `providers:`, which YAML also reads
+    # as None. That should mean "no providers", not the same pydantic type error.
+    config = GatewayConfig(**yaml.safe_load("providers:\n"))
+    assert config.providers == {}
+
+
+def test_valueless_entry_from_yaml_is_a_configured_instance() -> None:
+    # The whole point of the entry is opting the local backend into discovery,
+    # which is scoped to config.providers, so the key must survive the load.
+    config = GatewayConfig(**yaml.safe_load("providers:\n  ollama:\n"))
+    assert "ollama" in config.providers
+    assert config.provider_instance_type("ollama") == "ollama"
+
+
+def _capture_gateway_logs(caplog: pytest.LogCaptureFixture) -> None:
+    """Route the ``gateway`` logger (which does not propagate) into caplog."""
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+
+
+def _validate_capturing_warnings(config: GatewayConfig, caplog: pytest.LogCaptureFixture) -> str:
+    _capture_gateway_logs(caplog)
+    try:
+        config.validate_provider_instances()  # no raise
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    return caplog.text
+
+
+def test_bare_keyless_local_entry_warns_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    # A keyless backend has no credential to declare, so the bare entry is the
+    # intended config: it must stay silent, and stay discoverable.
+    config = GatewayConfig(**yaml.safe_load("providers:\n  ollama:\n  llamacpp:\n  llamafile:\n"))
+    assert _validate_capturing_warnings(config, caplog) == ""
+    assert set(config.providers) == {"ollama", "llamacpp", "llamafile"}
+
+
+def test_bare_keyed_entry_warns(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    # `openai:` with nothing beneath it used to be a startup type error. It now
+    # loads, so warn: with no credential anywhere it is far more likely a
+    # truncated YAML edit than an intentionally uncredentialed instance.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    config = GatewayConfig(**yaml.safe_load("providers:\n  openai:\n"))
+    text = _validate_capturing_warnings(config, caplog)
+    assert "providers.openai" in text
+    assert "OPENAI_API_KEY" in text
+
+
+def test_bare_keyed_entry_with_env_credential_warns_nothing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # any-llm falls back to the provider's own env var, so a bare entry backed by
+    # OPENAI_API_KEY is a working config, not a typo.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-from-env")
+    config = GatewayConfig(**yaml.safe_load("providers:\n  openai:\n"))
+    assert _validate_capturing_warnings(config, caplog) == ""
+
+
+def test_bare_entry_of_unknown_instance_warns_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    # An instance that is not a known any-llm implementation is left alone here
+    # (validate_provider_instances is lenient about it), so there is no basis for
+    # claiming it needs a credential.
+    config = GatewayConfig(**yaml.safe_load("providers:\n  mystery_box:\n"))
+    assert _validate_capturing_warnings(config, caplog) == ""
+
+
+def test_entry_with_settings_but_no_credential_warns_nothing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Only a settings-less entry looks like a truncated edit; an entry with a body
+    # is a deliberate config that predates this check.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    config = GatewayConfig(providers={"openai": {"models": ["gpt-4o"]}})
+    assert _validate_capturing_warnings(config, caplog) == ""
+
+
+# ---------------------------------------------------------------------------
+# provider_credential_env_names
+# ---------------------------------------------------------------------------
+
+
+def test_credential_env_names_single() -> None:
+    assert provider_credential_env_names("openai") == ("OPENAI_API_KEY",)
+
+
+def test_credential_env_names_splits_alternatives() -> None:
+    # gemini declares "GEMINI_API_KEY/GOOGLE_API_KEY"; either one authenticates.
+    assert provider_credential_env_names("gemini") == ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+
+
+def test_credential_env_names_empty_for_keyless_backends() -> None:
+    # any-llm spells "no credential" as the literal string "None".
+    for keyless in ("ollama", "llamacpp", "llamafile"):
+        assert provider_credential_env_names(keyless) == ()
+
+
+def test_credential_env_names_none_for_unknown_provider() -> None:
+    # Not "keyless": unknowable, which callers treat as no basis for a warning.
+    assert provider_credential_env_names("not-a-real-provider") is None
 
 
 def test_validate_rejects_instance_name_with_separator() -> None:
