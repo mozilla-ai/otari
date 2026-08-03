@@ -16,8 +16,16 @@ assertion is repeated per gate rather than factored out.
 The two deliberate omissions (an unauthenticated 401, and an unknown user whose
 row could not satisfy the ``usage_logs.user_id`` foreign key) are pinned too, so
 they stay decisions rather than regressions.
+
+One gate needs an ordering test as well as a content test. Every gate here sits
+behind ``check_rate_limit`` except the user/key mismatch, so that one charges the
+key's own rate-limit bucket itself (``throttle_early_rejection``) instead of
+letting a client loop mismatched requests and append a row per request. The last
+two tests pin that on both scaffolds: the rows are bounded by the limit, and the
+response the client sees is still the 403, never a 429.
 """
 
+from collections.abc import Generator
 from typing import Any
 
 import pytest
@@ -25,6 +33,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from gateway.core.config import API_KEY_HEADER
+
+from .test_rate_limiting import _make_rate_limit_client
+
+# Small enough that a handful of requests exhausts it, so the bound is visible.
+_RPM = 3
 
 _MESSAGES = [{"role": "user", "content": "hi"}]
 
@@ -351,3 +364,62 @@ def test_auth_failure_writes_no_row(client: TestClient, master_key_header: dict[
     """
     assert _chat(client, {API_KEY_HEADER: "Bearer not-a-real-key"}, model="openai:gpt-4o") == 401
     assert _errors(client, master_key_header) == []
+
+
+@pytest.fixture
+def rate_limited_client(postgres_url: str) -> Generator[TestClient]:
+    """A gateway with a small per-user RPM, for the two ordering tests below."""
+    yield from _make_rate_limit_client(postgres_url, rate_limit_rpm=_RPM)
+
+
+def test_mismatch_rows_are_bounded_by_the_rate_limit(
+    rate_limited_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The mismatch gate cannot be looped into unbounded usage rows.
+
+    It is the only logging gate that fires before ``check_rate_limit``, so
+    without charging the bucket itself a valid key could append a row per
+    request forever: DB write amplification plus an inflated error count on its
+    own key. Sending more than the limit must therefore produce at most ``_RPM``
+    rows, while every response stays a 403.
+    """
+    client = rate_limited_client
+    _make_user(client, master_key_header, "rl-owner")
+    _make_user(client, master_key_header, "rl-stranger")
+    key = _make_key(client, master_key_header, "rl-owned", user_id="rl-owner")
+
+    attempts = _RPM * 2
+    statuses = [_chat(client, key, model="openai:gpt-4o", user="rl-stranger") for _ in range(attempts)]
+
+    # The refusal a client sees must not depend on whether the gateway still had
+    # room to record it: a throttled mismatch is still answered 403, not 429.
+    assert statuses == [403] * attempts
+    assert len(_errors(client, master_key_header)) == _RPM
+
+    # And the refusals really consumed the key's own bucket rather than merely
+    # going unlogged, which is what makes the loop self-limiting.
+    assert _chat(client, key, model="openai:gpt-4o") == 429
+
+
+def test_passthrough_mismatch_rows_are_bounded_by_the_rate_limit(
+    rate_limited_client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The same bound holds on the pass-through scaffold, which has its own copy
+    of the mismatch gate ahead of ``check_rate_limit``."""
+    client = rate_limited_client
+    _make_user(client, master_key_header, "rl-embed-owner")
+    _make_user(client, master_key_header, "rl-embed-stranger")
+    key = _make_key(client, master_key_header, "rl-embed-owned", user_id="rl-embed-owner")
+
+    attempts = _RPM * 2
+    statuses = [
+        client.post(
+            "/v1/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hi", "user": "rl-embed-stranger"},
+            headers=key,
+        ).status_code
+        for _ in range(attempts)
+    ]
+
+    assert statuses == [403] * attempts
+    assert len(_errors(client, master_key_header)) == _RPM

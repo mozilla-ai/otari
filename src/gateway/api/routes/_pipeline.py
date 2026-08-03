@@ -525,6 +525,14 @@ async def resolve_dispatch_provider(
         # survives therefore prices, reserves a real estimate, and only fails
         # here; before this refund existed the hold stayed on users.reserved
         # until the next budget reset (forever, for a budget with no period).
+        #
+        # Releasing here and then raising is safe only because no caller above
+        # catches this 400 and releases again: refund_reservation is not
+        # idempotent (_release_reserved clamps at 0, but a second call still
+        # subtracts the estimate a second time, silently handing the user budget
+        # they never gave back). chat.py, messages.py and responses.py all let
+        # the 400 propagate. Anyone adding an outer handler around
+        # resolve_dispatch_provider must not refund in it.
         await release_reservation(ctx)
         await log_gateway_rejection(
             db=ctx.db,
@@ -698,7 +706,14 @@ async def resolve_request_context(
             # below it: nothing has been resolved this early, and resolving a
             # selector purely to shape a log row is not worth the work on a path
             # that is refusing the request anyway.
-            if exc.status_code == status.HTTP_403_FORBIDDEN and api_key is not None:
+            # This gate is the only one that fires before check_rate_limit, so
+            # the write is charged to the key's own bucket and skipped once
+            # throttled; see throttle_early_rejection. The response stays 403.
+            if (
+                exc.status_code == status.HTTP_403_FORBIDDEN
+                and api_key is not None
+                and not throttle_early_rejection(raw_request, str(api_key.user_id))
+            ):
                 await log_gateway_rejection(
                     db=db,
                     log_writer=log_writer,
@@ -1289,6 +1304,30 @@ async def release_reservation(ctx: RequestContext) -> None:
         await refund_reservation(ctx.db, ctx.reservation)
 
 
+def throttle_early_rejection(raw_request: Request, user_id: str) -> bool:
+    """Charge a pre-rate-limit refusal to ``user_id``'s bucket, reporting the verdict.
+
+    The user/key mismatch gate is the one rejection that fires *before*
+    ``check_rate_limit`` on both request scaffolds (every other gate that logs,
+    the allow-list, the budget, an unresolvable selector, sits after it). Logging
+    it unconditionally would therefore let a valid key loop mismatched requests
+    and append a usage row per request without ever being throttled: DB write
+    amplification plus an inflated error count on its own key. Consuming a slot
+    here makes that loop self-limiting.
+
+    Returns True when the request is now over the limit, meaning the caller must
+    skip the row (the same outcome a throttled request already gets at the gates
+    below, which never run). The 429 is deliberately swallowed rather than
+    raised: the mismatch keeps answering 403, because which error a client sees
+    must not depend on how the gateway chose to record it.
+    """
+    try:
+        check_rate_limit(raw_request, user_id)
+    except HTTPException:
+        return True
+    return False
+
+
 async def log_gateway_rejection(
     *,
     db: AsyncSession | None,
@@ -1332,6 +1371,11 @@ async def log_gateway_rejection(
     resolves, a model outside an allow-list) are neither self-limiting nor
     expected, which is why the asymmetry is deliberate.
 
+    Every gate that does log sits behind ``check_rate_limit``, so the rows a
+    single key can append are bounded by its user's RPM. The one gate that fires
+    earlier, the user/key mismatch, charges the bucket itself through
+    :func:`throttle_early_rejection` to keep that bound.
+
     Writing the row is best-effort. Every caller logs and then re-raises the
     rejection it was already going to return, so an exception escaping here
     would replace a clean 403 or 400 with a 500 and make an unhealthy log writer
@@ -1357,11 +1401,13 @@ async def log_gateway_rejection(
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=True,
         )
-    except Exception as exc:
+    except Exception:
         # Deliberately broad, and deliberately not re-raised: see the docstring.
         # asyncio.CancelledError derives from BaseException, so a cancelled
-        # request still unwinds rather than being swallowed here.
-        logger.error("Failed to record gateway rejection for %s on %s: %s", user_id, endpoint, exc)
+        # request still unwinds rather than being swallowed here. Logged with the
+        # traceback, because a swallowed exception is the only evidence an
+        # operator gets that the writer or its session is unhealthy.
+        logger.exception("Failed to record gateway rejection for %s on %s", user_id, endpoint)
 
 
 async def _log_failure_and_refund(

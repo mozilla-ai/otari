@@ -39,6 +39,7 @@ from gateway.api.routes._pipeline import (
     _raise_for_unresolvable_model,
     log_gateway_rejection,
     rate_limit_headers,
+    throttle_early_rejection,
     unresolvable_model_detail,
 )
 from gateway.api.routes._platform import _classify_upstream_error
@@ -194,7 +195,14 @@ async def run_passthrough(
         # log. Like its counterpart in the pipeline, this row carries the raw
         # selector and no provider: nothing is resolved this early, and resolving
         # purely to shape a log row is not worth it on a refusal path.
-        if exc.status_code == status.HTTP_403_FORBIDDEN and api_key is not None:
+        # Also like its counterpart, this gate precedes check_rate_limit, so the
+        # write is charged to the key's own bucket and skipped once throttled
+        # (see throttle_early_rejection). The response stays 403.
+        if (
+            exc.status_code == status.HTTP_403_FORBIDDEN
+            and api_key is not None
+            and not throttle_early_rejection(raw_request, str(api_key.user_id))
+        ):
             await log_gateway_rejection(
                 db=db,
                 log_writer=log_writer,

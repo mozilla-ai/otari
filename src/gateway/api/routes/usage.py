@@ -350,8 +350,11 @@ class UsageTotals(BaseModel):
     request_count: int
     error_count: int
     avg_latency_ms: float | None
-    # Rows with no configured price (cost is NULL), e.g. imported usage for an
-    # unpriced model. Surfaced so a $0 cost is not mistaken for free usage.
+    # Served rows with no configured price (cost is NULL), e.g. imported usage for
+    # an unpriced model. Surfaced so a $0 cost is not mistaken for free usage.
+    # Scoped to status="success": a gateway-side rejection also carries cost=NULL
+    # (nothing was spent), so counting error rows here would make a budget or
+    # allow-list incident read as a pricing misconfiguration.
     unpriced_requests: int = 0
 
 
@@ -466,7 +469,11 @@ async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> Us
                 func.count(),
                 func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
                 func.avg(UsageLog.latency_ms),
-                func.coalesce(func.sum(case((UsageLog.cost.is_(None), 1), else_=0)), 0),
+                # Unpriced *served* rows only; see UsageTotals.unpriced_requests.
+                func.coalesce(
+                    func.sum(case(((UsageLog.status == "success") & UsageLog.cost.is_(None), 1), else_=0)),
+                    0,
+                ),
             ).where(*conditions)
         )
     ).one()

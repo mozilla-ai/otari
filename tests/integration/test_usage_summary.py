@@ -122,6 +122,28 @@ def test_summary_null_cost_and_tokens_coalesce_to_zero(
     assert totals["request_count"] == 1
 
 
+def test_summary_unpriced_count_excludes_gateway_rejections(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """``unpriced_requests`` is a pricing-gap signal, so only served rows count.
+
+    The dashboard renders it as "N unpriced" next to the cost, meaning traffic is
+    being metered without a price. A gateway-side rejection row also carries
+    ``cost=NULL`` (nothing was spent), so counting error rows would make a budget
+    or allow-list incident read as a pricing misconfiguration instead.
+    """
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(db_session, user_id="gap", timestamp=now, cost=None)
+    _make_log(db_session, user_id="gap", timestamp=now, cost=None, status="error")
+    _make_log(db_session, user_id="gap", timestamp=now, cost=0.02)
+    db_session.commit()
+
+    totals = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "gap"}).json()["totals"]
+    assert totals["request_count"] == 3
+    assert totals["error_count"] == 1
+    assert totals["unpriced_requests"] == 1
+
+
 def test_summary_breakdowns_reconcile_with_totals(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
