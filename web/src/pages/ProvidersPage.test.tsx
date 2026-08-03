@@ -695,6 +695,44 @@ describe("ProvidersPage", () => {
     expect(screen.queryByText("authentication failed: invalid key")).not.toBeInTheDocument();
   });
 
+  it("does not let a test still in flight write its verdict back after a delete", async () => {
+    // The delete path retires the verdict through its own callback, separate from
+    // the save path, and the request behind it is still hanging. A provider
+    // re-added under the same name is a different provider, so the late result
+    // must not surface on its row.
+    let releaseTest: () => void = () => {};
+    const testGate = new Promise<void>((resolve) => {
+      releaseTest = resolve;
+    });
+    mockApi({
+      stored: [storedProvider("otari", "1234")],
+      testResult: { ok: false, model_count: 0, error: "authentication failed: invalid key", discovery_unsupported: false },
+      testGate,
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1234");
+    await user.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByText("Testing…")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await screen.findByText("Welcome to Otari");
+
+    await user.click(screen.getByRole("button", { name: "Add your first provider" }));
+    await user.click(screen.getByRole("button", { name: "Custom endpoint" }));
+    await user.type(screen.getByLabelText("Name"), "otari");
+    await user.type(screen.getByLabelText("API base"), "https://api.otari.ai/v1");
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+    await screen.findByRole("button", { name: "Test" });
+
+    releaseTest();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Test" })).toBeEnabled());
+    expect(screen.queryByText("authentication failed: invalid key")).not.toBeInTheDocument();
+  });
+
   it("does not automatically re-check all providers within an hour", async () => {
     const fetchMock = mockApi({ meta: [providerInfo("openai")] });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
