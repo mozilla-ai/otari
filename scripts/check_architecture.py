@@ -36,7 +36,9 @@ class LayerRule(TypedDict):
 # Rules are keyed by the layer's path below src/. Only "forbidden" is enforced;
 # "allowed" documents the layer contract for reviewers. Cross-cutting top-level
 # modules (gateway.log_config, gateway.metrics, ...) are always importable and
-# are not listed.
+# are not listed. Restrictions accumulate down the tree, so a file under
+# gateway/api/routes answers to a gateway/api entry as well as its own; a nested
+# layer can add restrictions but cannot opt out of an enclosing layer's.
 RULES: dict[str, LayerRule] = {
     "gateway/services": {
         "allowed": ["gateway.repositories", "gateway.models", "gateway.core", "gateway.auth"],
@@ -117,11 +119,17 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
 
     """
     relative_path = file_path.relative_to(src_root).as_posix()
-    rule = next(
-        (layer_rule for fragment, layer_rule in RULES.items() if relative_path.startswith(fragment + "/")),
-        None,
+    # Restrictions accumulate: a file answers to its own layer's rules and to
+    # every enclosing layer's, so declaration order cannot silently shadow
+    # either a nested rule or a broader one. Most specific first, so a violation
+    # is attributed to the closest layer that forbids it.
+    matches = sorted(
+        ((fragment, layer_rule) for fragment, layer_rule in RULES.items() if relative_path.startswith(fragment + "/")),
+        key=lambda match: len(match[0]),
+        reverse=True,
     )
-    if rule is None or not rule["forbidden"]:
+    forbidden = [(prefix, layer_rule["description"]) for _, layer_rule in matches for prefix in layer_rule["forbidden"]]
+    if not forbidden:
         return []
 
     try:
@@ -137,8 +145,9 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
         if not isinstance(node, ast.Import | ast.ImportFrom):
             continue
         for module in _imported_modules(node, file_path, src_root):
-            if any(_matches(module, forbidden) for forbidden in rule["forbidden"]):
-                violations.append((node.lineno, module, f"Forbidden import in {rule['description']}"))
+            offended = next((description for prefix, description in forbidden if _matches(module, prefix)), None)
+            if offended is not None:
+                violations.append((node.lineno, module, f"Forbidden import in {offended}"))
                 break
     return violations
 
