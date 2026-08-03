@@ -7,27 +7,19 @@ Scope: entire repo.
 
 ## Project Snapshot
 - Project: `otari`, an OpenAI-compatible LLM gateway (API key management, budget enforcement, usage tracking). The Python package is named `gateway` (not `otari`): the `otari` distribution name on PyPI belongs to the Otari client SDK, which `any-llm-sdk` depends on, so a top-level `otari` import package here would collide with it. User-facing names (CLI, env vars, docs, OpenAPI title) are `otari`; only the internal import path stays `gateway`.
-- Language/runtime: Python 3.13+.
-- Package manager + task runner: `uv`.
-- App type: FastAPI gateway service with async SQLAlchemy + Alembic.
-- Source root: `src/gateway` (the package is imported as `gateway.*`; uvicorn runs with `--app-dir src`).
-- Tests: `tests/unit` and `tests/integration`.
-- Database: SQLite by default (async via `aiosqlite`), PostgreSQL in integration tests (async via `asyncpg`).
 - Provider calls go through the `any-llm` SDK (`any_llm`), not hand-rolled HTTP clients.
 
 ## Skills & Scoped Instructions
 Detailed, task-scoped guidance lives outside this file so it loads only when relevant
 (progressive disclosure). Read the applicable one before editing:
 
-- **Backend (`src/gateway/`)** → [.github/skills/backend-standards/SKILL.md](.github/skills/backend-standards/SKILL.md): async SQLAlchemy house style, layering, the budget/reservation lifecycle, migrations, config/logging conventions.
-- **Dashboard (`web/`)** → [.github/skills/frontend-standards/SKILL.md](.github/skills/frontend-standards/SKILL.md): HeroUI v3, the `--otari-*` design tokens, TanStack Query patterns, and Vitest testing for the admin dashboard.
+- **Backend (`src/gateway/`)** → [src/gateway/CLAUDE.md](src/gateway/CLAUDE.md) (request lifecycle, budget enforcement, built-in tools, data/sessions, config layering, DB + logging patterns) and [.github/skills/backend-standards/SKILL.md](.github/skills/backend-standards/SKILL.md): async SQLAlchemy house style, layering, the budget/reservation lifecycle, migrations, config/logging conventions.
+- **Dashboard (`web/`)** → [web/CLAUDE.md](web/CLAUDE.md) (auth/session model, runtime provider management, build + bundled guide, PWA, serving) and [.github/skills/frontend-standards/SKILL.md](.github/skills/frontend-standards/SKILL.md): HeroUI v3, the `--otari-*` design tokens, TanStack Query patterns, and Vitest testing for the admin dashboard.
 - **Reviewing a change** → the path-scoped files in [.github/instructions/](.github/instructions/) auto-apply during Copilot reviews (they carry `applyTo` globs): [security-review](.github/instructions/security-review.instructions.md) (budget/tenant isolation, auth, SSRF, prompt injection) and [performance-review](.github/instructions/performance-review.instructions.md) (N+1, indexes, pagination limits, transaction atomicity) for `src/gateway/`, and [frontend-standards](.github/instructions/frontend-standards.instructions.md) (HeroUI v3, design tokens, TanStack Query) for `web/`.
 
 The `.claude/skills` directory symlinks to `.github/skills`, so the same skills are available to Claude and to GitHub Copilot from one source.
 
 ## Architecture (Big Picture)
-Read these together before changing request behavior, the flow spans several files.
-
 For the open-core OSS/enterprise seam (ports, adapters, the capability lines, and the rules for keeping the boundary), see [ARCHITECTURE.md](ARCHITECTURE.md). It is a north-star document describing the intended architecture, so ground current-state work in `src/gateway/`.
 
 ### Two runtime modes
@@ -36,181 +28,45 @@ For the open-core OSS/enterprise seam (ports, adapters, the capability lines, an
 - **Hybrid**: per-request provider credentials are resolved from the platform service (otari.ai); local DB/user/budget management is skipped and usage is reported upstream. `register_routers()` (`src/gateway/api/main.py`) only mounts `chat`, `messages`, `responses`, and `health`; management routers (keys/users/budgets/pricing/usage/etc.) are standalone-only.
 - Hybrid mode spans two trust contexts that this codebase treats identically: a gateway someone self-hosts against otari.ai using a workspace's own (BYO) provider keys, and the gateway mozilla.ai operates as part of otari.ai, which additionally serves mozilla.ai-managed models. The managed-vs-BYO boundary (platform-owned upstream credentials are returned only to mozilla.ai's gateway, never to a self-hosted one) is enforced on the platform side (otari-ai), not here. User-facing explanation lives in `docs/modes.md`; the wire contract in `docs/hybrid-mode-protocol.md`.
 
-### Request lifecycle (chat completions)
-1. App + middleware: `src/gateway/main.py` builds the FastAPI app, adds CORS + a security-headers middleware, and enforces auth on every path except `_PUBLIC_PREFIXES` (`/health`).
-2. Auth: `src/gateway/api/deps.py` extracts the key from `Otari-Key` (canonical `API_KEY_HEADER` in `core/config.py`) or `Authorization: Bearer`; validates the SHA-256 hash against the `api_keys` table, or matches the master key.
-3. Route handler: `src/gateway/api/routes/chat.py` resolves the billed user, runs budget checks (standalone) or resolves platform credentials, applies input guardrails, and extracts gateway-managed tools.
-4. Dispatch: the provider/model is split with `AnyLLM.split_model_provider(...)` and the call is made via `acompletion(...)` from `any_llm`. Hybrid mode walks multiple resolved attempts with fallback (`src/gateway/api/routes/_platform.py`, streaming in `src/gateway/streaming.py`).
-5. Usage + budget reconciliation: standalone writes a `UsageLog` row via the log writer and reconciles spend; platform reports usage upstream.
+The per-request flow (auth → budget → dispatch → reconciliation) spans several files and is documented in [src/gateway/CLAUDE.md](src/gateway/CLAUDE.md). Read it before changing request behavior.
 
-### Budget enforcement
-`src/gateway/services/budget_service.py` reserves an estimated cost before the call and reconciles/refunds after. Strategy is selectable (`for_update` row-lock, `cas` compare-and-swap, or `disabled`) via `OTARI_BUDGET_STRATEGY`. Per-period resets are driven by `next_budget_reset_at` on the user.
-
-### Built-in tools vs pass-through
-Only `otari_*` tool types are run by the gateway; every other tool type is forwarded to the provider untouched (`src/gateway/api/routes/_tools.py`). `otari_code_execution` → `SandboxBackend` (`services/sandbox_backend.py`), `otari_web_search` → `WebSearchBackend` (`services/web_search_backend.py`). The agentic tool/MCP loop lives in `services/mcp_loop.py`. Request-level guardrails (`services/guardrails.py`) are a caller-opted, input-side check run before the provider; SSRF checks for outbound URLs live in `services/url_safety.py`.
-
-### Data, sessions, migrations
-ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, UsageLog, ModelPricing, BudgetResetLog). The async engine/session factory and `init_db` live in `src/gateway/core/database.py`; routes get a session via the `get_db` dependency, non-request code uses `create_session()`. Alembic migrations are in `alembic/versions/` and run on startup when `auto_migrate` is set.
-
-### Config layering
-`GatewayConfig` (`src/gateway/core/config.py`) loads `config.yml` (with `${VAR}` env interpolation) and layers env vars on top. The user-facing prefix is `OTARI_`, applied both as init overrides for every scalar field via `_apply_otari_env_overrides` (so `OTARI_` wins over YAML) and as the native pydantic `env_prefix` (which covers complex fields). Service-level env vars (e.g. web search, guardrails) read through `otari_env()` in `core/env.py`, which reads the `OTARI_` prefix.
-## Setup Commands
-- Create venv: `uv venv`
-- Activate venv: `source .venv/bin/activate`
-- Install deps (dev): `uv sync --dev`
-- Install deps exactly as lockfile (CI-style): `uv sync --dev --frozen`
-## Run Commands
-- Run Otari from config: `uv run otari serve --config config.yml`
-- Run dev server (reload + `.env`): `make dev`
-- Initialize DB schema: `uv run otari init-db --config config.yml`
-- Run migrations to head: `uv run otari migrate --config config.yml`
-- Run migrations to specific revision: `uv run otari migrate --revision <rev>`
-## Build / Packaging Commands
-- Python package build backend is configured via `setuptools` in `pyproject.toml`.
-- If you need a local package build artifact, use: `uv build`
-- Docker local build/run: `docker compose up --build`
-- CI Docker smoke check is implemented in `scripts/docker_liveness_check.sh`.
-## Web Dashboard (`web/`)
-- The standalone admin dashboard is a React + HeroUI v3 SPA in `web/` (Vite, Tailwind v4, TanStack Query). It browses the model catalogue, sets model pricing, manages aliases, adds/edits provider API keys, and toggles runtime settings; it calls the management API (`/v1/models`, `/v1/pricing`, `/v1/aliases`, `/v1/provider-credentials`, `/v1/settings`) as the master key: entered once on a sign-in screen, the key is exchanged (`POST /v1/auth/session`) for an HttpOnly session cookie with a TTL (`dashboard_session_ttl_hours`, table `dashboard_sessions`), so the raw key is never persisted in the browser and a sign-in survives tab closes and restarts. The auth dependencies in `api/deps.py` accept the cookie only when a request carries no header credentials; master-key rotation revokes every session and re-mints the caller's.
-- Runtime provider management: the Providers page (`web/src/pages/ProvidersPage.tsx`) manages the `provider_credentials` table via `/v1/provider-credentials` (CRUD + `POST /{instance}/test`). Backend: `services/provider_store_service.py` overlays stored providers onto `config.providers` (per-config baseline on `config._provider_baseline`, refreshed by a TTL refresher wired in the lifespan like the alias refresher, standalone-only); `services/secret_box.py` encrypts keys with `OTARI_SECRET_KEY` (Fernet); `services/master_key_service.py` generates + prints a master key on first run when none is set (hash in `runtime_settings`). Keys are write-only over the API (responses expose only `last4`).
-- Build: `npm --prefix web ci && npm --prefix web run build`. Output goes to `src/gateway/static/dashboard/` (set in `web/vite.config.ts`), which is committed so the wheel and Docker image ship the dashboard with no Node build stage. Rebuild and commit after any change under `web/src`.
-- Bundled user guide: the dashboard renders `docs/dashboard.md` at `/#/docs` (linked from the sidebar footer) by importing it with Vite's `?raw` (`web/src/pages/DocsPage.tsx`), so the running dashboard ships the guide it matches. The guide lives outside `web/`, so `web/vite.config.ts` grants `server.fs` access to the repo root. Editing `docs/dashboard.md` makes the committed bundle stale, so rebuild the dashboard after; the staleness check triggers on it too (`.github/workflows/otari-dashboard.yml`).
-- Home-screen install (PWA): `web/public/pwa/` holds the web app manifest and the PNG app icons (`icon-192`, `icon-512`, a `maskable` 512, and an `apple-touch-icon` for iOS), all generated from the Otari mark in `web/public/favicon.svg` (white mark on `--otari-brand`). Vite copies the directory into the bundle and `src/gateway/main.py` mounts it at `/pwa` alongside the dashboard, so it is standalone-only; `web/index.html` links the manifest plus the `apple-*`/`theme-color` meta tags. There is deliberately no service worker: Chrome dropped the fetch-handler requirement for menu installs, and the dashboard is live API data with nothing worth caching offline.
-- Checks: `npm --prefix web run typecheck`, `npm --prefix web test`. CI runs these and fails if the committed bundle is stale (`.github/workflows/otari-dashboard.yml`).
-- Serving: standalone mode serves `index.html` at `/` and hashed assets under `/assets` (`src/gateway/main.py`, `src/gateway/dashboard.py`); the get-started tutorial moved to `/welcome`. Hybrid mode has no local management API, so `/` keeps serving the tutorial. Client-side routing uses react-router's `HashRouter` (routes live under `/#/providers`, `/#/models`, `/#/aliases`, `/#/settings`), so hash routes need no server catch-all and the API/asset paths are never shadowed.
-## Lint / Typecheck Commands
-- Ruff is configured for linting (rules: `E`, `F`, `I`; line length: 120) in `pyproject.toml`.
-- Run lint checks with `make lint`; it runs the architecture check and then Ruff (`uv run ruff check src tests scripts`). Ruff alone is not equivalent.
-- The architecture check (`scripts/check_architecture.py`, also runnable via `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, API routes must not import `sqlalchemy.orm`, and repository modules end in `_repository.py`.
-- Both are enforced in CI via `.github/workflows/otari-lint.yml` (it calls `make lint`).
-- Primary static checks present in dev dependencies: `ruff`, `mypy`.
-- mypy is configured `strict` over `src`, `tests`, and `scripts` (`pyproject.toml`).
-- Run type checks with `make typecheck` (or `uv run mypy`).
-- mypy is also enforced in CI via `.github/workflows/otari-typecheck.yml`.
+## Lint / Typecheck
+- Run lint checks with `make lint`; it runs the architecture check and then Ruff. **Ruff alone is not equivalent.**
+- The architecture check (`scripts/check_architecture.py`, also `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, API routes must not import `sqlalchemy.orm`, and repository modules end in `_repository.py`.
 - If introducing a formatter/linter, keep changes in a separate PR unless requested.
-## Test Commands
-- Main local suite (matches Makefile):
-  - `make test`
-  - expands to `uv run pytest -v tests/unit tests/integration`
-  - unit only: `make test-unit`; integration only: `make test-integration`
-- CI-style tests with coverage + parallel (unit and integration run separately):
-  - `uv run pytest tests/unit -v --cov --cov-report=xml -n auto`
-  - `uv run pytest tests/integration -v --cov --cov-report=xml --cov-append -n auto`
-### Running a Single Test (important)
-- Single test file:
-  - `uv run pytest tests/unit/test_gateway_cli.py -v`
-- Single test function via node id:
-  - `uv run pytest tests/unit/test_gateway_cli.py::test_gateway_config_defaults_to_sqlite -v`
-- Single integration test function:
-  - `uv run pytest tests/integration/test_health.py::test_health_check -v`
-- Pattern-filtered run:
-  - `uv run pytest tests/integration -k "budget and reset" -v`
-### Test Environment Notes
-- `pytest.ini` sets:
-  - `timeout = 120`
-  - There is no global rerun policy. A blanket `reruns` would let a test that
-    passes one time in several count as green, hiding flakiness and ordering
-    bugs suite-wide. Mark a genuinely flaky test with
-    `@pytest.mark.flaky(reruns=...)` (from `pytest-rerunfailures`) and say why,
-    rather than reintroducing a global retry.
-- Integration tests can use:
-  - `TEST_DATABASE_URL` (if provided), or
-  - Testcontainers PostgreSQL (`postgres:17`) if not provided.
-- Running integration tests without Docker may fail when Testcontainers is required.
-## OpenAPI Spec Commands
-- Generate OpenAPI JSON:
-  - `uv run python scripts/generate_openapi.py`
-- Check OpenAPI is up to date (CI behavior):
-  - `make openapi-check` (or `uv run python scripts/generate_openapi.py --check`)
-- Default output path:
-  - `docs/public/openapi.json`
-- The Postman collection is generated **from** that spec, so it goes stale
+
+## Test Notes
+- There is no global rerun policy in `pytest.ini`. A blanket `reruns` would let a test that
+  passes one time in several count as green, hiding flakiness and ordering
+  bugs suite-wide. Mark a genuinely flaky test with
+  `@pytest.mark.flaky(reruns=...)` (from `pytest-rerunfailures`) and say why,
+  rather than reintroducing a global retry.
+- Integration tests can use `TEST_DATABASE_URL` (if provided), or Testcontainers PostgreSQL (`postgres:17`) if not. Running integration tests without Docker may fail when Testcontainers is required.
+
+## Generated Artifacts
+- The Postman collection is generated **from** `docs/public/openapi.json`, so it goes stale
   whenever the spec does, including for a change that only edits a route's
   docstring (descriptions are carried into the collection). Regenerate both, and
-  commit both:
-  - `make postman` (or `uv run python scripts/generate_postman.py`)
-  - `make postman-check` verifies it, and the same `openapi-spec` CI job runs
-    both checks, so missing this fails CI even when `openapi-check` passes.
-  - Output path: `docs/public/otari.postman_collection.json`
-## Repository Conventions
-### Imports
-- Use grouped imports in this order:
-  1) stdlib
-  2) third-party
-  3) local (`gateway.*`)
-- Separate groups with one blank line.
-- Prefer explicit imports over wildcard imports.
-- Use `TYPE_CHECKING` for type-only imports when helpful (`routes/_helpers.py`).
-### Formatting
-- Follow existing style consistent with Black-like formatting:
-  - trailing commas in multiline literals/calls,
-  - one statement per line,
-  - clear vertical spacing between top-level defs/classes.
-- Keep docstrings concise and meaningful for public functions/classes.
-- Avoid adding comments unless logic is non-obvious.
-### Typing
-- Add type hints to new/changed functions (project is strongly typed in practice).
-- Prefer modern syntax:
-  - `str | None` over `Optional[str]`
-  - built-in generics like `list[str]`, `dict[str, Any]`
-- Annotate SQLAlchemy fields with `Mapped[...]` in ORM models.
-- For FastAPI dependencies, prefer `Annotated[..., Depends(...)]`.
-### Naming
-- `snake_case`: functions, variables, module names.
-- `PascalCase`: classes, Pydantic models, SQLAlchemy entities.
-- Constants: `UPPER_SNAKE_CASE` (`API_KEY_HEADER`, `_PUBLIC_PREFIXES`).
-- Test files: `test_*.py`; test functions: `test_*`.
-### FastAPI / API Patterns
-- Define request/response schemas with Pydantic models near route handlers.
-- Keep route prefixes/tags explicit on each router.
-- Return typed response models instead of raw dicts when practical.
-- Use HTTP status constants from `fastapi.status`.
-### Database Patterns
-- Use Alembic migrations; do not manually mutate live schemas.
-- For write operations:
-  - `db.commit()` in `try`,
-  - `db.rollback()` on `SQLAlchemyError`,
-  - re-raise mapped API/domain errors.
-- Reuse repository helpers (e.g., `get_active_user`) for shared query logic.
-### Error Handling
-- Raise explicit `HTTPException` in API layer with clear `detail` messages.
-- Preserve security posture: do not leak internals in public error responses.
-- Service-specific exceptions live alongside their service modules in `src/gateway/services/` (e.g. `UnsafeURLError`, `GuardrailsNotReachableError`).
-- Prefer specific exceptions (`ValueError`, `SQLAlchemyError`) over broad `except Exception`.
-### Logging
-- Use module logger from `gateway.log_config`.
-- Prefer structured/contextual log messages with `%s` formatting placeholders.
-- Do not log secrets, tokens, or raw API keys (bootstrap exception is intentional one-time behavior).
-## CI Rules to Mirror Locally
-- Python version for CI: 3.14 (`.github/workflows/otari-tests.yml`), matching the Docker image; the package still supports 3.13+ (`requires-python = ">=3.13"`).
-- Install deps with frozen lockfile in CI.
-- Tests run with coverage and xdist in CI.
-- OpenAPI spec freshness is enforced in CI (`--check`).
+  commit both: `make openapi-check` and `make postman` / `make postman-check`. The same
+  `openapi-spec` CI job runs both checks, so missing this fails CI even when
+  `openapi-check` passes.
 - `CHANGELOG.md` and the GitHub Release body are generated from Conventional
   Commits by git-cliff (`cliff.toml`) at release time, not per-PR. Because PRs are
   squash-merged, the PR title is what git-cliff parses; `otari-pr-title.yml`
   enforces a conventional title. Visibility rules live in `RELEASE.md`
   ("Changelog visibility"). Do not hand-edit `CHANGELOG.md`; the release
   workflows regenerate it.
-## Practical Agent Workflow
-- Before coding: read nearby module + related tests.
-- After coding: run the smallest relevant pytest node id first.
-- Then run broader impacted tests.
-- If API contract changed: regenerate or check OpenAPI spec.
-- Keep diffs focused; avoid opportunistic refactors unless requested.
+- Editing anything under `web/src` **or** `docs/dashboard.md` makes the committed dashboard
+  bundle (`src/gateway/static/dashboard/`) stale; rebuild and commit it. See
+  [web/CLAUDE.md](web/CLAUDE.md).
 
-## Key Paths
-- App entry and wiring: `src/gateway/main.py`
-- CLI entrypoint: `src/gateway/cli.py`
-- Config + env resolution: `src/gateway/core/config.py`
-- DB init/session helpers: `src/gateway/core/database.py`
-- API routers: `src/gateway/api/routes/`
-- ORM models: `src/gateway/models/entities.py`
-- Alembic migrations: `alembic/versions/`
-- OpenAPI generator: `scripts/generate_openapi.py`
-- Admin dashboard source: `web/` (built bundle committed at `src/gateway/static/dashboard/`)
-- Dashboard bundle locator: `src/gateway/dashboard.py`
-- Open-core architecture seam (north-star): `ARCHITECTURE.md`
+## Repository Conventions
+- Use `TYPE_CHECKING` for type-only imports when helpful (`routes/_helpers.py`).
+- Avoid adding comments unless logic is non-obvious; keep docstrings concise and meaningful for public functions/classes.
+- Preserve security posture: do not leak internals in public error responses.
+- Service-specific exceptions live alongside their service modules in `src/gateway/services/` (e.g. `UnsafeURLError`, `GuardrailsNotReachableError`).
+- Do not log secrets, tokens, or raw API keys (bootstrap exception is intentional one-time behavior).
+- CI runs Python 3.14 (`.github/workflows/otari-tests.yml`), matching the Docker image; the package still supports 3.13+ (`requires-python = ">=3.13"`).
 
 ## Change Validation Checklist
 - If you touched API routes or schemas, run relevant integration tests first.
