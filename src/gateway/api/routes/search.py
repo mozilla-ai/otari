@@ -21,6 +21,11 @@ Both the body-selected (``POST /v1/search``) and path-selected
 so one Activity filter covers every search regardless of how the tool was
 named.
 
+A request the gateway itself turns away (an unknown or ambiguous tool name, a
+tool the caller's key may not use) writes a usage row too, with a null cost:
+refused traffic is dropped traffic, and it should be visible in Activity and
+countable as a failure rather than invisible outside the caller's own logs.
+
 Billing: search is priced per request, not per token, so a usage row carries
 zero tokens and a cost taken from the provider's own reported charge when it
 reports one. Otherwise the cost is the flat per-request rate configured for
@@ -71,6 +76,11 @@ SEARCH_ENDPOINT = "/v1/search"
 # Perplexity's documented ceiling on search_domain_filter, mirrored so an
 # oversized list is rejected here rather than by the upstream provider.
 _MAX_DOMAIN_FILTERS = 20
+
+# Stands in for the usage row's model when the request named no tool that could
+# be resolved (unknown name, or none given with several configured). The column
+# is not nullable, and "unknown" reads better in Activity than an empty string.
+_UNRESOLVED_TOOL = "unknown"
 
 
 class SearchRequest(BaseModel):
@@ -141,9 +151,10 @@ async def create_search(
     exactly one tool is configured.
 
     Authentication modes:
-    - Master key + user field: Use specified user (must exist)
-    - API key + user field: Use specified user (must exist)
-    - API key without user field: Use the shared "default" user
+    - Master key: the ``user`` field is required and may name any existing user.
+    - API key: usage and spend always bind to the key's own user. A ``user``
+      field naming a different user is rejected with 403 (or ignored, when
+      ``reject_user_mismatch`` is disabled); it is never billed to that user.
     """
     return await _dispatch_search(
         raw_request=raw_request,
@@ -175,9 +186,10 @@ async def create_search_for_tool(
     ignored.
 
     Authentication modes:
-    - Master key + user field: Use specified user (must exist)
-    - API key + user field: Use specified user (must exist)
-    - API key without user field: Use the shared "default" user
+    - Master key: the ``user`` field is required and may name any existing user.
+    - API key: usage and spend always bind to the key's own user. A ``user``
+      field naming a different user is rejected with 403 (or ignored, when
+      ``reject_user_mismatch`` is disabled); it is never billed to that user.
     """
     return await _dispatch_search(
         raw_request=raw_request,
@@ -219,12 +231,40 @@ async def _dispatch_search(
     user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
+    def usage_row(*, model: str, provider: str | None, **overrides: Any) -> UsageLog:
+        return UsageLog(
+            id=str(uuid.uuid4()),
+            api_key_id=api_key_id,
+            user_id=user_id,
+            timestamp=datetime.now(UTC),
+            model=model,
+            provider=provider,
+            endpoint=SEARCH_ENDPOINT,
+            latency_ms=_elapsed_ms(started_at),
+            counts_toward_budget=not budget_exempt,
+            **overrides,
+        )
+
     # Resolved before any reservation is taken, so an unknown tool costs the
-    # caller nothing to be told about.
+    # caller nothing to be told about. The refusal is still logged: a request
+    # the gateway turned away is dropped traffic, and it belongs in Activity and
+    # in the failure count rather than reaching the operator as a complaint.
+    # cost stays null on every refusal row, since nothing was spent.
     try:
         tool = resolve_search_tool(config, tool_name)
     except SearchToolError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        tool_error_detail = str(exc)
+        await log_writer.put(
+            usage_row(
+                # No tool was resolved, so there is no provider to attribute the
+                # row to and the name is whatever the caller asked for.
+                model=tool_name or _UNRESOLVED_TOOL,
+                provider=None,
+                status="error",
+                error_message=tool_error_detail,
+            )
+        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=tool_error_detail) from exc
 
     pricing_key = f"{tool.provider}:{tool.name}"
 
@@ -234,10 +274,16 @@ async def _dispatch_search(
     # tool, which is the fail-closed side to be on for a brand-new spend surface.
     key_allowlist = await resolve_request_allowlist(db, api_key)
     if key_allowlist is not None and not is_model_allowed(key_allowlist, pricing_key):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=model_not_allowed_detail(pricing_key),
+        not_allowed_detail = model_not_allowed_detail(pricing_key)
+        await log_writer.put(
+            usage_row(
+                model=tool.name,
+                provider=tool.provider,
+                status="error",
+                error_message=not_allowed_detail,
+            )
         )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
 
     # A search tool is not a model, so the community default-pricing dataset can
     # only produce a false match on the tool's name.
@@ -257,20 +303,6 @@ async def _dispatch_search(
         counts_toward_budget=not budget_exempt,
     )
 
-    def usage_row(**overrides: Any) -> UsageLog:
-        return UsageLog(
-            id=str(uuid.uuid4()),
-            api_key_id=api_key_id,
-            user_id=user_id,
-            timestamp=datetime.now(UTC),
-            model=tool.name,
-            provider=tool.provider,
-            endpoint=SEARCH_ENDPOINT,
-            latency_ms=_elapsed_ms(started_at),
-            counts_toward_budget=not budget_exempt,
-            **overrides,
-        )
-
     try:
         outcome = await run_search(tool, _search_query(request))
         # The provider's own charge is the true cost; the configured flat rate is
@@ -278,6 +310,8 @@ async def _dispatch_search(
         cost = outcome.cost_usd if outcome.cost_usd is not None else flat_request_cost(pricing)
         await log_writer.put(
             usage_row(
+                model=tool.name,
+                provider=tool.provider,
                 status="success",
                 # Search bills per request; there are no tokens to report, and a
                 # zero is truthful where a null would read as "unknown".
@@ -292,7 +326,9 @@ async def _dispatch_search(
         await refund_reservation(db, reservation)
         raise
     except Exception as exc:
-        await log_writer.put(usage_row(status="error", error_message=str(exc)))
+        await log_writer.put(
+            usage_row(model=tool.name, provider=tool.provider, status="error", error_message=str(exc))
+        )
         await refund_reservation(db, reservation)
         # The raw provider message is kept on the usage log and the gateway log,
         # never in the response: it can carry upstream internals, and the

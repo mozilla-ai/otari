@@ -9455,7 +9455,7 @@
     },
     "/v1/search": {
       "post": {
-        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when\n  ``reject_user_mismatch`` is disabled); it is never billed to that user.",
         "operationId": "create_search_v1_search_post",
         "requestBody": {
           "content": {
@@ -9505,7 +9505,7 @@
     },
     "/v1/search/{search_tool_name}": {
       "post": {
-        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key + user field: Use specified user (must exist)\n- API key + user field: Use specified user (must exist)\n- API key without user field: Use the shared \"default\" user",
+        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when\n  ``reject_user_mismatch`` is disabled); it is never billed to that user.",
         "operationId": "create_search_for_tool_v1_search__search_tool_name__post",
         "parameters": [
           {

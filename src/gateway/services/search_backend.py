@@ -23,6 +23,11 @@ the caller. Every entry is validated at startup by
 ``GatewayConfig.validate_search_tools``, so an unsupported provider or a
 missing API key fails before the first request.
 
+Provider calls go through one pooled ``httpx.AsyncClient`` for the process
+(:func:`get_search_client`), closed on shutdown by :func:`close_search_client`.
+A search is a single request, so a client per call would pay a fresh TCP and TLS
+handshake every time and pool nothing.
+
 The wire contract of the route follows LiteLLM's ``/v1/search`` (itself shaped
 after Perplexity's Search API) so a caller migrating off the LiteLLM proxy
 needs no request changes. Translating that contract to and from each provider's
@@ -59,6 +64,32 @@ _EXA_MAX_CHARACTERS = 10_000
 # How much of an upstream error body is kept for the usage log's error_message.
 # The full body can be large and is never returned to the caller.
 _ERROR_BODY_CHARS = 500
+
+# Pooled client, shared by every search in the process so connections survive
+# between requests. Created lazily and replaced when closed; no lock is needed
+# because there is no await between the check and the assignment, so two
+# coroutines cannot interleave and build two clients.
+_client: httpx.AsyncClient | None = None
+
+
+def get_search_client() -> httpx.AsyncClient:
+    """The process-wide pooled client search requests are dispatched on.
+
+    Timeouts are per tool, so they are passed on each request rather than baked
+    into the client.
+    """
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient()
+    return _client
+
+
+async def close_search_client() -> None:
+    """Close the pooled client. A no-op when no search was ever dispatched."""
+    global _client
+    client, _client = _client, None
+    if client is not None and not client.is_closed:
+        await client.aclose()
 
 
 class SearchToolError(ValueError):
@@ -205,21 +236,32 @@ def build_exa_payload(tool: SearchTool, query: SearchQuery) -> dict[str, Any]:
         payload["userLocation"] = query.country
 
     # Exa returns page text only when asked for it, and the response's
-    # ``snippet`` is that text, so contents are always requested. A tool that
+    # ``snippet`` is that text, so contents are requested by default. A tool that
     # pins its own ``contents.text`` keeps it unless the caller asked for a
-    # specific per-page size.
+    # specific per-page size. Pinning ``text: null`` (or ``false``) opts out
+    # entirely: page content is what Exa charges per page for, and a caller that
+    # wants only ranked URLs, or highlights, should not have to pay for it. The
+    # opt-out is the operator's, so it holds even when the request carries a
+    # ``max_tokens_per_page``.
     contents = dict(payload.get("contents") or {})
-    if query.max_tokens_per_page is not None or "text" not in contents:
+    pinned = contents.get("text")
+    if "text" in contents and (pinned is None or pinned is False):
+        del contents["text"]
+    elif query.max_tokens_per_page is not None or "text" not in contents:
         max_tokens = query.max_tokens_per_page or DEFAULT_MAX_TOKENS_PER_PAGE
         max_chars = max(1, min(max_tokens * _CHARS_PER_TOKEN, _EXA_MAX_CHARACTERS))
         # Merge rather than replace: ``text`` has siblings (``verbosity``,
         # ``includeHtmlTags``) that a tool may have pinned, and only the size is
         # the caller's to set.
-        pinned = contents.get("text")
         text_options = dict(pinned) if isinstance(pinned, dict) else {}
         text_options["maxCharacters"] = max_chars
         contents["text"] = text_options
-    payload["contents"] = contents
+    # An opted-out tool with nothing else pinned wants no ``contents`` block at
+    # all, rather than an empty one Exa would have to interpret.
+    if contents:
+        payload["contents"] = contents
+    else:
+        payload.pop("contents", None)
 
     payload["query"] = query.query
     return payload
@@ -227,13 +269,14 @@ def build_exa_payload(tool: SearchTool, query: SearchQuery) -> dict[str, Any]:
 
 async def _search_exa(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
     payload = build_exa_payload(tool, query)
+    client = get_search_client()
     try:
-        async with httpx.AsyncClient(timeout=tool.timeout_s) as client:
-            response = await client.post(
-                f"{tool.api_base}/search",
-                json=payload,
-                headers={"x-api-key": tool.api_key},
-            )
+        response = await client.post(
+            f"{tool.api_base}/search",
+            json=payload,
+            headers={"x-api-key": tool.api_key},
+            timeout=tool.timeout_s,
+        )
     except httpx.HTTPError as exc:
         msg = f"exa search request failed: {exc}"
         raise SearchProviderError(msg) from exc

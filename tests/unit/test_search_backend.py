@@ -8,12 +8,13 @@ response translation back. The provider is stubbed with an
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from typing import Any
 
 import httpx
 import pytest
+import pytest_asyncio
 
 from gateway.core.config import GatewayConfig
 from gateway.services.search_backend import (
@@ -22,6 +23,8 @@ from gateway.services.search_backend import (
     SearchTool,
     SearchToolError,
     build_exa_payload,
+    close_search_client,
+    get_search_client,
     resolve_search_tool,
     run_search,
 )
@@ -49,6 +52,18 @@ def _patch_transport(monkeypatch: pytest.MonkeyPatch, handler: Callable[[httpx.R
         return real_async_client(transport=transport)
 
     monkeypatch.setattr("gateway.services.search_backend.httpx.AsyncClient", factory)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _fresh_pooled_client() -> AsyncIterator[None]:
+    """Drop the module's pooled client around each test.
+
+    The client is process-wide by design, so without this a mock transport (and
+    the event loop it was built on) would leak into the next test.
+    """
+    await close_search_client()
+    yield
+    await close_search_client()
 
 
 # --------------------------------------------------------------------------- #
@@ -152,6 +167,26 @@ def test_caller_page_size_overrides_tool_pinned_contents() -> None:
     assert payload["contents"]["text"]["maxCharacters"] == 200
 
 
+@pytest.mark.parametrize("pinned", [None, False])
+def test_tool_can_opt_out_of_page_content(pinned: object) -> None:
+    """Pinning contents.text to null/false suppresses the per-page content charge."""
+    tool = replace(_EXA_TOOL, options={"contents": {"text": pinned, "highlights": True}})
+    payload = build_exa_payload(tool, SearchQuery(query="q"))
+    assert payload["contents"] == {"highlights": True}
+
+
+def test_opting_out_of_page_content_drops_an_empty_contents_block() -> None:
+    tool = replace(_EXA_TOOL, options={"contents": {"text": None}})
+    assert "contents" not in build_exa_payload(tool, SearchQuery(query="q"))
+
+
+def test_page_content_opt_out_survives_a_caller_page_size() -> None:
+    """The opt-out is the operator's: a request cannot re-enable the charge."""
+    tool = replace(_EXA_TOOL, options={"contents": {"text": None, "highlights": True}})
+    payload = build_exa_payload(tool, SearchQuery(query="q", max_tokens_per_page=256))
+    assert payload["contents"] == {"highlights": True}
+
+
 def test_caller_page_size_keeps_the_tools_other_text_options() -> None:
     """Only the size is the caller's to set; pinned siblings are merged, not replaced."""
     tool = replace(
@@ -244,6 +279,43 @@ async def test_run_search_raises_when_the_provider_is_unreachable(monkeypatch: p
 
 
 # --------------------------------------------------------------------------- #
+# Pooled client
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_searches_share_one_pooled_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Connections survive between searches instead of a handshake per request."""
+    timeouts: list[object] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        timeouts.append(request.extensions.get("timeout", {}).get("connect"))
+        return httpx.Response(200, json={"results": []})
+
+    _patch_transport(monkeypatch, handler)
+    await run_search(_EXA_TOOL, SearchQuery(query="one"))
+    first = get_search_client()
+    await run_search(replace(_EXA_TOOL, timeout_s=5.0), SearchQuery(query="two"))
+
+    assert get_search_client() is first
+    # The client is shared, so the per-tool timeout has to ride on the request.
+    assert timeouts == [30.0, 5.0]
+
+
+@pytest.mark.asyncio
+async def test_closing_the_pooled_client_lets_the_next_search_rebuild_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shutdown closes the client; a later search must not reuse the closed one."""
+    _patch_transport(monkeypatch, lambda _r: httpx.Response(200, json={"results": []}))
+    await run_search(_EXA_TOOL, SearchQuery(query="one"))
+    closed = get_search_client()
+    await close_search_client()
+    assert closed.is_closed
+
+    await run_search(_EXA_TOOL, SearchQuery(query="two"))
+    assert get_search_client() is not closed
+
+
+# --------------------------------------------------------------------------- #
 # Startup validation
 # --------------------------------------------------------------------------- #
 
@@ -257,6 +329,9 @@ async def test_run_search_raises_when_the_provider_is_unreachable(monkeypatch: p
         ({"exa": {}}, "api_key is required"),
         ({"exa": {"api_key": "k", "options": "nope"}}, "options must be a mapping"),
         ({"exa": {"api_key": "k", "timeout": "soon"}}, "timeout must be a number"),
+        ({"exa": {"api_key": "k", "timeout": 0}}, "timeout must be greater than 0"),
+        ({"exa": {"api_key": "k", "timeout": -5}}, "timeout must be greater than 0"),
+        ({"exa": {"api_key": "k", "timeout": 0.5}}, None),
         ({"ex/a": {"provider": "exa", "api_key": "k"}}, "must not contain '/'"),
     ],
 )

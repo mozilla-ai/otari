@@ -26,6 +26,7 @@ from gateway.services.master_key_service import ensure_master_key
 from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
     warn_if_require_pricing_without_pricing,
+    warn_if_search_tools_lack_flat_pricing,
 )
 from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
@@ -38,6 +39,7 @@ from gateway.services.provider_store_service import (
     run_provider_refresher,
 )
 from gateway.services.runtime_settings_service import apply_overrides_from_db
+from gateway.services.search_backend import close_search_client
 from gateway.services.secret_box import validate_secret_key
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
 from gateway.version import __version__
@@ -138,6 +140,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 await bootstrap_first_api_key(config, session)
                 await initialize_pricing_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
+                await warn_if_search_tools_lack_flat_pricing(config, session)
                 await load_aliases_at_startup(session)
             log_writer = create_log_writer(config.log_writer_strategy)
             app.state.file_store = build_file_store(config)
@@ -181,6 +184,9 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
                 await log_writer.stop()
+            # POST /v1/search dispatches on one pooled client for the process, so
+            # shutdown owns closing it. A no-op when no search was ever served.
+            await close_search_client()
 
     return lifespan
 

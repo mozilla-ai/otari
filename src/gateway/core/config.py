@@ -882,9 +882,16 @@ class GatewayConfig(BaseSettings):
                 msg = f"search_tools.{name}.api_key is required."
                 raise ValueError(msg)
             timeout = entry.get("timeout")
-            if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float))):
-                msg = f"search_tools.{name}.timeout must be a number of seconds."
-                raise ValueError(msg)
+            if timeout is not None:
+                if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+                    msg = f"search_tools.{name}.timeout must be a number of seconds."
+                    raise ValueError(msg)
+                # A negative timeout would reach httpx and fail at request time,
+                # and a zero is silently swapped for the default when the tool is
+                # resolved. Both are misconfigurations worth failing on here.
+                if timeout <= 0:
+                    msg = f"search_tools.{name}.timeout must be greater than 0 seconds, got {timeout}."
+                    raise ValueError(msg)
             options = entry.get("options")
             if options is not None and not isinstance(options, dict):
                 msg = f"search_tools.{name}.options must be a mapping."

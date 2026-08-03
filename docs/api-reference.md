@@ -153,7 +153,14 @@ row carries zero tokens and a cost taken from the provider's own reported charge
 when it reports one (Exa does); otherwise it uses the flat per-request rate
 configured for `<provider>:<tool>`, under the same convention as
 [moderations](#moderations). Like moderations, search is exempt from
-`require_pricing`.
+`require_pricing`. Configuring the flat rate is still
+[recommended](configuration.md#search-tools): it is what gets reserved against
+the caller's budget before the search runs.
+
+A search the gateway itself refuses, an unknown or ambiguous `search_tool_name`
+(400) or a tool the key's allowed-models list does not name (403), is written to
+the usage log too, with a null cost, so refused searches are visible in Activity
+and counted as failures rather than only in the caller's own logs.
 
 ### Images
 

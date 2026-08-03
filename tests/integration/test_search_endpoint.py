@@ -223,6 +223,58 @@ def test_search_honors_the_keys_model_allowlist(
     assert allowed.status_code == 200
 
 
+def test_search_logs_an_unknown_tool_refusal(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A 400 for a tool that is not configured is still visible as dropped traffic."""
+    user_id = api_key_obj["user_id"]
+
+    resp = client.post("/v1/search/nope", json=SEARCH_PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 400
+
+    logs = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header).json()
+    search_logs = [log for log in logs if log["endpoint"] == "/v1/search"]
+    assert len(search_logs) == 1
+    entry = search_logs[0]
+    assert entry["status"] == "error"
+    assert entry["model"] == "nope"
+    assert entry["cost"] is None
+    assert "Unknown search tool" in entry["error_message"]
+
+
+def test_search_logs_an_allowlist_refusal(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A 403 from the key's allowed-models list writes a usage row, with no cost."""
+    client.post("/v1/users", json={"user_id": "denied-user"}, headers=master_key_header)
+    key = client.post(
+        "/v1/keys",
+        json={"key_name": "denied-key", "user_id": "denied-user", "allowed_models": ["openai:gpt-4o"]},
+        headers=master_key_header,
+    ).json()
+
+    with _mock_search():
+        resp = client.post(
+            "/v1/search/exa-search",
+            json=SEARCH_PAYLOAD,
+            headers={API_KEY_HEADER: f"Bearer {key['key']}"},
+        )
+    assert resp.status_code == 403
+
+    logs = client.get("/v1/users/denied-user/usage", headers=master_key_header).json()
+    search_logs = [log for log in logs if log["endpoint"] == "/v1/search"]
+    assert len(search_logs) == 1
+    entry = search_logs[0]
+    assert entry["status"] == "error"
+    assert entry["model"] == "exa-search"
+    assert entry["provider"] == "exa"
+    assert entry["cost"] is None
+
+
 def test_search_does_not_warn_about_provider_pricing(
     client: TestClient,
     api_key_header: dict[str, str],
