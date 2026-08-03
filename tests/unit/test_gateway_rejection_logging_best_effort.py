@@ -56,6 +56,9 @@ def _kwargs(log_writer: Any) -> dict[str, Any]:
         "provider": "openai",
         "endpoint": "/v1/chat/completions",
         "detail": "User 'user-1' has exceeded budget limit",
+        # The status this rejection returns, recorded so the failure taxonomy can
+        # tell a refusal from a provider fault (see UsageLog.status_code).
+        "status_code": 403,
         "started_at": None,
     }
 
@@ -78,3 +81,6 @@ async def test_healthy_writer_still_records_the_rejection() -> None:
     assert row.cost is None
     assert row.counts_toward_budget is True
     assert row.user_id == "user-1"
+    # Without this the row classifies as "unknown" in errors_by_status_code,
+    # indistinguishable from a row written before the column existed.
+    assert row.status_code == 403

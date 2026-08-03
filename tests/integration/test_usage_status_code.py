@@ -18,6 +18,10 @@ import pytest
 from any_llm.types.completion import ChatCompletion, ChatCompletionMessage, Choice, CompletionUsage
 from fastapi.testclient import TestClient
 
+# The gateway-rejection gates are set up exactly as the tests that own them do,
+# so a gate whose fixture shape changes cannot drift between the two files.
+from .test_gateway_rejection_logging import _make_key, _make_user, _zero_budget
+
 _MESSAGES = [{"role": "user", "content": "Hi"}]
 _MODEL = "openai:gpt-4o"
 
@@ -54,8 +58,8 @@ def _upstream_succeeds() -> Iterator[None]:
         yield
 
 
-def _chat(client: TestClient, headers: dict[str, str], *, stream: bool = False) -> int:
-    body: dict[str, Any] = {"model": _MODEL, "messages": _MESSAGES}
+def _chat(client: TestClient, headers: dict[str, str], *, stream: bool = False, **overrides: Any) -> int:
+    body: dict[str, Any] = {"model": _MODEL, "messages": _MESSAGES, **overrides}
     if stream:
         body["stream"] = True
     return int(client.post("/v1/chat/completions", json=body, headers=headers).status_code)
@@ -338,3 +342,140 @@ def test_batch_create_failure_records_the_upstream_status(
     assert summary["errors_by_status_code"] == [
         {"status_code": 503, "error_class": "provider_error", "requests": 1}
     ]
+
+
+def _one_error_row(client: TestClient, master_key_header: dict[str, str]) -> dict[str, Any]:
+    rows = _error_rows(client, master_key_header)
+    assert len(rows) == 1, rows
+    return rows[0]
+
+
+def _embeddings(client: TestClient, headers: dict[str, str], model: str, **body: Any) -> int:
+    response = client.post("/v1/embeddings", json={"model": model, "input": "hi", **body}, headers=headers)
+    return int(response.status_code)
+
+
+# ---------------------------------------------------------------------------
+# Gateway-side rejections (#465): the gateway refused the request itself, so the
+# row carries the status it returned rather than an upstream one. Without a code
+# these rows classify as "unknown", which is indistinguishable from a row written
+# before the column existed, so every gate that writes one is pinned here.
+# ---------------------------------------------------------------------------
+
+
+def test_over_budget_rejection_records_its_403(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The refusal raised inside ``reserve_budget`` records the 403 it returns.
+
+    A budget denial reads as ``auth`` in the taxonomy, which is deliberate for now
+    and documented on ``error_class_for``: the code alone cannot separate the
+    gateway refusing the caller from a provider refusing the gateway.
+    """
+    _make_user(client, master_key_header, "broke-user", budget_id=_zero_budget(client, master_key_header))
+
+    assert _chat(client, master_key_header, user="broke-user") == 403
+
+    assert _one_error_row(client, master_key_header)["status_code"] == 403
+    summary = client.get("/v1/usage/summary", headers=master_key_header).json()
+    assert summary["errors_by_status_code"] == [{"status_code": 403, "error_class": "auth", "requests": 1}]
+
+
+def test_user_key_mismatch_rejection_records_its_403(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The mismatch gate fires before anything is resolved and still records 403."""
+    _make_user(client, master_key_header, "owner")
+    _make_user(client, master_key_header, "someone-else")
+    key = _make_key(client, master_key_header, "owned", user_id="owner")
+
+    assert _chat(client, key, user="someone-else") == 403
+
+    row = _one_error_row(client, master_key_header)
+    assert row["user_id"] == "owner"
+    assert row["status_code"] == 403
+
+
+def test_allow_list_rejection_records_its_403(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A key's allow-list refusal records 403, so a mis-scoped key is not filed as
+    a provider outage."""
+    _make_user(client, master_key_header, "scoped-user")
+    key = _make_key(client, master_key_header, "scoped", user_id="scoped-user", allowed_models=["anthropic:*"])
+
+    assert _chat(client, key) == 403
+
+    assert _one_error_row(client, master_key_header)["status_code"] == 403
+
+
+def test_unresolvable_selector_rejection_records_its_400(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A selector that no longer resolves records the 400 the caller sees, which
+    reads as ``client_error`` rather than as a provider fault."""
+    _make_user(client, master_key_header, "curious-user")
+
+    assert _chat(client, master_key_header, model="nosuchprovider:some-model", user="curious-user") == 400
+
+    assert _one_error_row(client, master_key_header)["status_code"] == 400
+    summary = client.get("/v1/usage/summary", headers=master_key_header).json()
+    assert summary["errors_by_status_code"] == [{"status_code": 400, "error_class": "client_error", "requests": 1}]
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"),
+    [("openai:text-embedding-3-small", 403), ("nosuchprovider:embed", 400)],
+)
+def test_passthrough_gateway_rejections_record_the_status_they_return(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    model: str,
+    expected: int,
+) -> None:
+    """The pass-through scaffold stamps its own rejections too: a blocked user
+    refused after the selector resolved (403) and a selector that never resolved
+    (400). These settle through the scaffold's own helper, so the chat coverage
+    above says nothing about them."""
+    _make_user(client, master_key_header, "blocked-embedder", blocked=True)
+
+    assert _embeddings(client, master_key_header, model, user="blocked-embedder") == expected
+
+    row = _one_error_row(client, master_key_header)
+    assert row["endpoint"] == "/v1/embeddings"
+    assert row["status_code"] == expected
+
+
+def test_passthrough_allow_list_rejection_records_its_403(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The pass-through allow-list gate refunds and then records its 403."""
+    _make_user(client, master_key_header, "scoped-embedder")
+    key = _make_key(
+        client, master_key_header, "scoped-embed", user_id="scoped-embedder", allowed_models=["cohere:*"]
+    )
+
+    assert _embeddings(client, key, "openai:text-embedding-3-small") == 403
+
+    assert _one_error_row(client, master_key_header)["status_code"] == 403
+
+
+def test_passthrough_user_key_mismatch_records_its_403(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The pass-through mismatch gate records 403, like its pipeline counterpart."""
+    _make_user(client, master_key_header, "embed-owner")
+    _make_user(client, master_key_header, "embed-stranger")
+    key = _make_key(client, master_key_header, "embed-owned", user_id="embed-owner")
+
+    assert _embeddings(client, key, "openai:text-embedding-3-small", user="embed-stranger") == 403
+
+    row = _one_error_row(client, master_key_header)
+    assert row["user_id"] == "embed-owner"
+    assert row["status_code"] == 403
