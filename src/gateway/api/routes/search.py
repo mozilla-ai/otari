@@ -52,7 +52,12 @@ from gateway.api.routes._passthrough import (
     PASSTHROUGH_PROVIDER_ERROR_DETAIL,
     resolve_passthrough_user_id,
 )
-from gateway.api.routes._pipeline import _elapsed_ms, log_gateway_rejection, rate_limit_headers
+from gateway.api.routes._pipeline import (
+    _elapsed_ms,
+    failure_status_code,
+    log_gateway_rejection,
+    rate_limit_headers,
+)
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
@@ -233,12 +238,14 @@ async def _dispatch_search(
     user_id = resolve_passthrough_user_id(auth_result, request.user, reject_mismatch=config.reject_user_mismatch)
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
-    async def log_rejection(detail: str, *, row_model: str, row_provider: str | None) -> None:
+    async def log_rejection(detail: str, *, row_model: str, row_provider: str | None, status_code: int) -> None:
         """Record a search the gateway itself refused.
 
         The shared writer owns the row shape (``status="error"``, no cost,
         ``counts_toward_budget`` pinned True) and swallows a writer failure, so a
         sick log writer cannot turn this route's 400 or 403 into a 500.
+        ``status_code`` is the status this refusal returns, which the row keeps so
+        the failure taxonomy can tell a refusal from a provider fault.
         """
         await log_gateway_rejection(
             db=db,
@@ -249,6 +256,7 @@ async def _dispatch_search(
             provider=row_provider,
             endpoint=SEARCH_ENDPOINT,
             detail=detail,
+            status_code=status_code,
             started_at=started_at,
         )
 
@@ -263,7 +271,12 @@ async def _dispatch_search(
         # No tool was resolved, so there is no provider to attribute the row to
         # and the name is whatever the caller asked for, matching how the
         # pass-through routes log a selector that did not resolve.
-        await log_rejection(tool_error_detail, row_model=tool_name or _UNRESOLVED_TOOL, row_provider=None)
+        await log_rejection(
+            tool_error_detail,
+            row_model=tool_name or _UNRESOLVED_TOOL,
+            row_provider=None,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=tool_error_detail) from exc
 
     pricing_key = f"{tool.provider}:{tool.name}"
@@ -275,7 +288,12 @@ async def _dispatch_search(
     key_allowlist = await resolve_request_allowlist(db, api_key)
     if key_allowlist is not None and not is_model_allowed(key_allowlist, pricing_key):
         not_allowed_detail = model_not_allowed_detail(pricing_key)
-        await log_rejection(not_allowed_detail, row_model=tool.name, row_provider=tool.provider)
+        await log_rejection(
+            not_allowed_detail,
+            row_model=tool.name,
+            row_provider=tool.provider,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=not_allowed_detail)
 
     # A search tool is not a model, so the community default-pricing dataset can
@@ -336,7 +354,7 @@ async def _dispatch_search(
         await refund_reservation(db, reservation)
         raise
     except Exception as exc:
-        await log_writer.put(usage_row(status="error", error_message=str(exc)))
+        await log_writer.put(usage_row(status="error", error_message=str(exc), status_code=failure_status_code(exc)))
         await refund_reservation(db, reservation)
         # The raw provider message is kept on the usage log and the gateway log,
         # never in the response: it can carry upstream internals, and the

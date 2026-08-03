@@ -262,6 +262,9 @@ def test_search_logs_an_unknown_tool_refusal(
     # and set-price, which must not reach a row the gateway wrote itself.
     assert entry["counts_toward_budget"] is True
     assert "Unknown search tool" in entry["error_message"]
+    # The status this refusal returned, so it groups as a client error in the
+    # failure taxonomy instead of as an unclassified row (#433).
+    assert entry["status_code"] == 400
 
 
 def test_search_logs_an_allowlist_refusal(
@@ -292,6 +295,7 @@ def test_search_logs_an_allowlist_refusal(
     assert entry["provider"] == "exa"
     assert entry["cost"] is None
     assert entry["counts_toward_budget"] is True
+    assert entry["status_code"] == 403
 
 
 def test_a_budget_exempt_keys_search_refusal_still_counts_toward_budget(
