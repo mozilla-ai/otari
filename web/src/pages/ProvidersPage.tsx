@@ -475,8 +475,9 @@ function EditProviderForm({
 }: {
   provider: StoredProvider;
   onClose: () => void;
-  // Called only after the credentials actually changed on the server, so the
-  // page can retire anything that described the old ones.
+  // Called when a save succeeds, so the page can retire anything that described
+  // the credentials as they were. Distinct from onClose, which also fires on
+  // cancel, where nothing was written and an existing verdict still holds.
   onSaved: () => void;
 }) {
   const update = useUpdateStoredProvider();
@@ -811,7 +812,9 @@ export function ProvidersPage() {
   // right above it (issue #464).
   const clearTest = (instance: string) =>
     setTests((prev) => {
-      if (!(instance in prev)) return prev;
+      // Own-property check: `in` also reports inherited keys, so an instance
+      // named after one (`toString`) would read as having a verdict it does not.
+      if (!Object.hasOwn(prev, instance)) return prev;
       const next = { ...prev };
       delete next[instance];
       return next;
@@ -823,7 +826,9 @@ export function ProvidersPage() {
   // would clear the verdict and the timed-out test would then write it straight
   // back, restoring the very staleness clearTest exists to remove.
   const settleTest = (instance: string, state: TestState) =>
-    setTests((prev) => (prev[instance]?.status === "pending" ? { ...prev, [instance]: state } : prev));
+    setTests((prev) =>
+      Object.hasOwn(prev, instance) && prev[instance].status === "pending" ? { ...prev, [instance]: state } : prev,
+    );
 
   const runTest = (instance: string) => {
     setTests((prev) => ({ ...prev, [instance]: { status: "pending" } }));
