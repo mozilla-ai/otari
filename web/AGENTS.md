@@ -1,6 +1,6 @@
 # Web Dashboard (`web/`)
 
-`web/CLAUDE.md` is a symlink to this file. Always edit `AGENTS.md` directly; never modify `CLAUDE.md`.
+`web/CLAUDE.md` is a one-line `@AGENTS.md` import of this file. Always edit `AGENTS.md` directly; never modify `CLAUDE.md`, and do not delete it: Claude Code discovers `CLAUDE.md`, not `AGENTS.md`, so the import is what loads this file.
 
 Loaded when working under `web/`. For house style (HeroUI v3, `--otari-*` design
 tokens, TanStack Query, Vitest), read

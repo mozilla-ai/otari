@@ -1,6 +1,6 @@
 # Gateway internals (`src/gateway/`)
 
-`src/gateway/CLAUDE.md` is a symlink to this file. Always edit `AGENTS.md` directly; never modify `CLAUDE.md`.
+`src/gateway/CLAUDE.md` is a one-line `@AGENTS.md` import of this file. Always edit `AGENTS.md` directly; never modify `CLAUDE.md`, and do not delete it: Claude Code discovers `CLAUDE.md`, not `AGENTS.md`, so the import is what loads this file.
 
 Loaded when working under `src/gateway/`. For house style (async SQLAlchemy 2.0,
 layering, the budget/reservation lifecycle, migrations, config/logging), read

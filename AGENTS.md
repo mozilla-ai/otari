@@ -3,7 +3,7 @@
 Guidance for agentic coding tools working in this repository.
 Scope: entire repo.
 
-`CLAUDE.md` is a symlink to this file. Always edit `AGENTS.md` directly; never modify `CLAUDE.md`.
+`CLAUDE.md` is a one-line `@AGENTS.md` import of this file, not a symlink, so it survives Windows clones (Git for Windows checks symlinks out as plain text files by default). Always edit `AGENTS.md` directly; never modify `CLAUDE.md`. The same pairing is used in `web/` and `src/gateway/`.
 
 ## Project Snapshot
 - Project: `otari`, an OpenAI-compatible LLM gateway (API key management, budget enforcement, usage tracking). The Python package is named `gateway` (not `otari`): the `otari` distribution name on PyPI belongs to the Otari client SDK, which `any-llm-sdk` depends on, so a top-level `otari` import package here would collide with it. User-facing names (CLI, env vars, docs, OpenAPI title) are `otari`; only the internal import path stays `gateway`.
@@ -46,10 +46,11 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 ## Generated Artifacts
 - The Postman collection is generated **from** `docs/public/openapi.json`, so it goes stale
   whenever the spec does, including for a change that only edits a route's
-  docstring (descriptions are carried into the collection). Regenerate both, and
-  commit both: `make openapi-check` and `make postman` / `make postman-check`. The same
-  `openapi-spec` CI job runs both checks, so missing this fails CI even when
-  `openapi-check` passes.
+  docstring (descriptions are carried into the collection). Regenerate both and commit
+  both: `uv run python scripts/generate_openapi.py`, then `make postman`. Note there is
+  no `make openapi` target; `make openapi-check` only validates. Verify with
+  `make openapi-check` and `make postman-check`. The same `openapi-spec` CI job runs both
+  checks, so missing this fails CI even when `openapi-check` passes.
 - `CHANGELOG.md` and the GitHub Release body are generated from Conventional
   Commits by git-cliff (`cliff.toml`) at release time, not per-PR. Because PRs are
   squash-merged, the PR title is what git-cliff parses; `otari-pr-title.yml`
