@@ -220,6 +220,37 @@ def test_summary_groups_failures_by_status_code(
     assert sum(row["requests"] for row in taxonomy) == summary["totals"]["error_count"]
 
 
+@pytest.mark.parametrize(
+    ("params", "expected_rows"),
+    [
+        ({}, 1),
+        ({"dimensions": "status_code"}, 1),
+        ({"dimensions": "none"}, 0),
+        ({"dimensions": "model"}, 0),
+    ],
+)
+def test_summary_taxonomy_answers_to_the_dimension_selector(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    params: dict[str, str],
+    expected_rows: int,
+) -> None:
+    """The taxonomy is one more GROUP BY pass, so it obeys ``dimensions`` like the
+    spend breakdowns do (#469): present by default and when asked for by name,
+    skipped for a caller that only wants totals and the series, which is what the
+    dashboard's tiles and timelines request.
+    """
+    with _upstream_fails(_StatusError(429)):
+        _chat(client, api_key_header)
+
+    summary = client.get("/v1/usage/summary", params=params, headers=master_key_header).json()
+    assert len(summary["errors_by_status_code"]) == expected_rows
+    # Either way the totals still count the failure: only the extra pass is skipped.
+    assert summary["totals"]["error_count"] == 1
+
+
 def test_summary_taxonomy_excludes_successful_requests(
     client: TestClient,
     api_key_header: dict[str, str],
