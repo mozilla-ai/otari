@@ -2335,7 +2335,7 @@ async def run_standalone_non_stream(
         # Gateway-owned cap, not an upstream provider failure. 422 lets
         # callers distinguish a runaway tool loop from a real outage.
         logger.warning("Tool loop iteration cap hit (standalone): cap=%d", tool_ctx.max_tool_iterations)
-        await _log_failure_and_refund(ctx, adapter, provider, model, str(e), 422)
+        await _log_failure_and_refund(ctx, adapter, provider, model, str(e), status.HTTP_422_UNPROCESSABLE_CONTENT)
         raise adapter.error(422, str(e), ErrorKind.INVALID_REQUEST) from e
     except SandboxNotReachableError as e:
         # Sandbox is gateway-side infra, not an LLM provider. Clearer detail
