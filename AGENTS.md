@@ -13,8 +13,8 @@ Scope: entire repo.
 Detailed, task-scoped guidance lives outside this file so it loads only when relevant
 (progressive disclosure). Read the applicable one before editing:
 
-- **Backend (`src/gateway/`)** → [src/gateway/CLAUDE.md](src/gateway/CLAUDE.md) (request lifecycle, budget enforcement, built-in tools, data/sessions, config layering, DB + logging patterns) and [.github/skills/backend-standards/SKILL.md](.github/skills/backend-standards/SKILL.md): async SQLAlchemy house style, layering, the budget/reservation lifecycle, migrations, config/logging conventions.
-- **Dashboard (`web/`)** → [web/CLAUDE.md](web/CLAUDE.md) (auth/session model, runtime provider management, build + bundled guide, PWA, serving) and [.github/skills/frontend-standards/SKILL.md](.github/skills/frontend-standards/SKILL.md): HeroUI v3, the `--otari-*` design tokens, TanStack Query patterns, and Vitest testing for the admin dashboard.
+- **Backend (`src/gateway/`)** → [src/gateway/AGENTS.md](src/gateway/AGENTS.md) (request lifecycle, budget enforcement, built-in tools, data/sessions, config layering, DB + logging patterns) and [.github/skills/backend-standards/SKILL.md](.github/skills/backend-standards/SKILL.md): async SQLAlchemy house style, layering, the budget/reservation lifecycle, migrations, config/logging conventions.
+- **Dashboard (`web/`)** → [web/AGENTS.md](web/AGENTS.md) (auth/session model, runtime provider management, build + bundled guide, PWA, serving) and [.github/skills/frontend-standards/SKILL.md](.github/skills/frontend-standards/SKILL.md): HeroUI v3, the `--otari-*` design tokens, TanStack Query patterns, and Vitest testing for the admin dashboard.
 - **Reviewing a change** → the path-scoped files in [.github/instructions/](.github/instructions/) auto-apply during Copilot reviews (they carry `applyTo` globs): [security-review](.github/instructions/security-review.instructions.md) (budget/tenant isolation, auth, SSRF, prompt injection) and [performance-review](.github/instructions/performance-review.instructions.md) (N+1, indexes, pagination limits, transaction atomicity) for `src/gateway/`, and [frontend-standards](.github/instructions/frontend-standards.instructions.md) (HeroUI v3, design tokens, TanStack Query) for `web/`.
 
 The `.claude/skills` directory symlinks to `.github/skills`, so the same skills are available to Claude and to GitHub Copilot from one source.
@@ -28,7 +28,7 @@ For the open-core OSS/enterprise seam (ports, adapters, the capability lines, an
 - **Hybrid**: per-request provider credentials are resolved from the platform service (otari.ai); local DB/user/budget management is skipped and usage is reported upstream. `register_routers()` (`src/gateway/api/main.py`) only mounts `chat`, `messages`, `responses`, and `health`; management routers (keys/users/budgets/pricing/usage/etc.) are standalone-only.
 - Hybrid mode spans two trust contexts that this codebase treats identically: a gateway someone self-hosts against otari.ai using a workspace's own (BYO) provider keys, and the gateway mozilla.ai operates as part of otari.ai, which additionally serves mozilla.ai-managed models. The managed-vs-BYO boundary (platform-owned upstream credentials are returned only to mozilla.ai's gateway, never to a self-hosted one) is enforced on the platform side (otari-ai), not here. User-facing explanation lives in `docs/modes.md`; the wire contract in `docs/hybrid-mode-protocol.md`.
 
-The per-request flow (auth → budget → dispatch → reconciliation) spans several files and is documented in [src/gateway/CLAUDE.md](src/gateway/CLAUDE.md). Read it before changing request behavior.
+The per-request flow (auth → budget → dispatch → reconciliation) spans several files and is documented in [src/gateway/AGENTS.md](src/gateway/AGENTS.md). Read it before changing request behavior.
 
 ## Lint / Typecheck
 - Run lint checks with `make lint`; it runs the architecture check and then Ruff. **Ruff alone is not equivalent.**
@@ -58,7 +58,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   workflows regenerate it.
 - Editing anything under `web/src` **or** `docs/dashboard.md` makes the committed dashboard
   bundle (`src/gateway/static/dashboard/`) stale; rebuild and commit it. See
-  [web/CLAUDE.md](web/CLAUDE.md).
+  [web/AGENTS.md](web/AGENTS.md).
 
 ## Repository Conventions
 - Use `TYPE_CHECKING` for type-only imports when helpful (`routes/_helpers.py`).
