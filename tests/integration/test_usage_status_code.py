@@ -234,3 +234,107 @@ def test_summary_taxonomy_excludes_successful_requests(
     assert summary["errors_by_status_code"] == [
         {"status_code": 429, "error_class": "rate_limit", "requests": 1}
     ]
+
+
+def test_bare_status_code_filter_returns_only_failures(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    """``status_code`` alone is an error-scoped filter, so a code can never pull a
+    success row in: the column belongs to failures, and the query says so instead
+    of trusting every caller to add ``status=error`` (and every future write path
+    to leave the column NULL on success)."""
+    with _upstream_succeeds():
+        assert _chat(client, api_key_header) == 200
+    with _upstream_fails(_StatusError(429)):
+        _chat(client, api_key_header)
+
+    rows = client.get("/v1/usage", params={"status_code": 429}, headers=master_key_header).json()
+    assert [(row["status"], row["status_code"]) for row in rows] == [("error", 429)]
+
+    count = client.get("/v1/usage/count", params={"status_code": 429}, headers=master_key_header).json()
+    assert count["total"] == 1
+
+    # An explicit status still wins, so the filter stays literal rather than
+    # quietly overriding what the caller asked for.
+    contradictory = client.get(
+        "/v1/usage", params={"status": "success", "status_code": 429}, headers=master_key_header
+    ).json()
+    assert contradictory == []
+
+
+def test_passthrough_provider_failure_records_the_upstream_status(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    """The pass-through scaffold (embeddings, images, rerank, audio) classifies its
+    provider failures too.
+
+    These routes settle through their own error row in ``_passthrough.py`` rather
+    than through the chat pipeline, so without this the whole non-chat half of
+    billable traffic could stop recording a code and every other test would still
+    pass.
+    """
+    with patch(
+        "gateway.api.routes.embeddings.aembedding",
+        new_callable=AsyncMock,
+        side_effect=_StatusError(429),
+    ):
+        response = client.post(
+            "/v1/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hi"},
+            headers=api_key_header,
+        )
+    # The caller sees the deliberately generic provider error, not the upstream 429.
+    assert response.status_code == 502
+    assert "SECRET" not in response.text
+
+    rows = _error_rows(client, master_key_header, endpoint="/v1/embeddings")
+    assert len(rows) == 1
+    assert rows[0]["status_code"] == 429
+
+
+def test_batch_create_failure_records_the_upstream_status(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    """``POST /v1/batches`` classifies its provider failure on its own error row.
+
+    Batches write usage through ``log_batch_usage`` instead of the chat pipeline's
+    writer, so this is the second independent stamp that a refactor could drop
+    silently.
+    """
+
+    class _SupportsBatch:
+        SUPPORTS_BATCH = True
+
+    body = {
+        "model": "openai:gpt-4o-mini",
+        "requests": [{"custom_id": "req-1", "body": {"messages": _MESSAGES, "max_tokens": 16}}],
+    }
+    with (
+        patch(
+            "gateway.api.routes.batches.acreate_batch",
+            new_callable=AsyncMock,
+            side_effect=_StatusError(503),
+        ),
+        patch("gateway.api.routes.batches.AnyLLM.get_provider_class", return_value=_SupportsBatch),
+    ):
+        response = client.post("/v1/batches", json=body, headers=api_key_header)
+    assert response.status_code == 502
+    assert "SECRET" not in response.text
+
+    rows = _error_rows(client, master_key_header, endpoint="/v1/batches")
+    assert len(rows) == 1
+    assert rows[0]["status_code"] == 503
+    # And it reaches the taxonomy as a provider fault rather than as "unknown".
+    summary = client.get("/v1/usage/summary", headers=master_key_header).json()
+    assert summary["errors_by_status_code"] == [
+        {"status_code": 503, "error_class": "provider_error", "requests": 1}
+    ]
