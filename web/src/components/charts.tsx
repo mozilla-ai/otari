@@ -1,13 +1,28 @@
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Bar, BarChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { Bar, BarChart, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 // Shared chart primitives for the dashboard, built on recharts. Pages compose
-// these instead of hand-rolling SVG, so tooltips, responsive sizing, and axis
-// handling come from one place. Every chart here is single-series and single
-// color (the brand token): nothing is encoded by hue alone, and the surrounding
-// data tables / captions stay the accessible source of truth.
+// these instead of hand-rolling SVG, so tooltips, responsive sizing, axis
+// handling, and the drag-to-select interaction come from one place. Identity is
+// never encoded by hue alone: every multi-series chart renders a legend, and
+// the surrounding tables / captions stay the accessible source of truth.
 
 const BRAND = "var(--otari-brand)";
+
+// One series of a (possibly stacked) trend chart. `color` is a CSS color,
+// normally one of the fixed `--otari-cat-*` palette slots (validated for CVD
+// separation and surface contrast in globals.css) or a semantic token like
+// `--otari-danger`. Assign palette slots in fixed order, never cycled.
+export interface SeriesDef {
+  key: string;
+  label: string;
+  color: string;
+}
+
+// One x-axis bucket. `x` is the bucket identity (ISO instant for time series);
+// series values live under their `SeriesDef.key`.
+export type StackedPoint = { x: string } & Record<string, number | string>;
 
 // One point in a single-series trend: an x-axis/tooltip label and its value.
 export interface ChartPoint {
@@ -16,62 +31,239 @@ export interface ChartPoint {
 }
 
 // Tooltip body. recharts clones this element and injects `active`, `payload`,
-// and `label` at render time, so only `formatValue` is passed by the caller.
-// Exported for direct branch testing (active/inactive, the zero-value case, and
-// the non-number guard) since recharts hover is impractical to drive in jsdom.
+// and `label` at render time, so only the format props are passed by the
+// caller. For a single series it shows one value row; for a stack it shows one
+// row per non-zero series (marker + label + value) plus a total. Exported for
+// direct branch testing since recharts hover is impractical to drive in jsdom.
 export function ChartTooltip({
   active,
   label,
   payload,
   formatValue,
+  formatLabel,
+  showTotal = false,
 }: {
   active?: boolean;
   label?: ReactNode;
   // recharts types a datum's value as `number | string`; guard before formatting.
-  payload?: readonly { value?: number | string }[];
+  payload?: readonly { value?: number | string; name?: ReactNode; color?: string }[];
   formatValue: (value: number) => string;
+  formatLabel?: (label: string) => string;
+  showTotal?: boolean;
 }) {
-  const value = payload?.[0]?.value;
-  if (!active || typeof value !== "number") {
+  const rows = (payload ?? []).filter((entry) => typeof entry.value === "number");
+  if (!active || rows.length === 0) {
     return null;
   }
+  const heading = typeof label === "string" && formatLabel ? formatLabel(label) : label;
+  // A stack hides its zero series (the row list stays scannable); a single
+  // series keeps its zero row so hovering an empty bucket still reads a value.
+  const visible = rows.length > 1 ? rows.filter((entry) => (entry.value as number) > 0) : rows;
+  const total = rows.reduce((sum, entry) => sum + (entry.value as number), 0);
   return (
-    <div className="rounded-md border border-[var(--otari-line)] bg-[var(--otari-surface)] px-2 py-1 text-xs shadow-sm">
-      <div className="text-[var(--otari-muted)]">{label}</div>
-      <div className="font-medium tabular-nums text-[var(--otari-ink)]">{formatValue(value)}</div>
+    <div className="rounded-md border border-[var(--otari-line)] bg-[var(--otari-surface)] px-2.5 py-1.5 text-xs shadow-sm">
+      <div className="text-[var(--otari-muted)]">{heading}</div>
+      <div className="mt-0.5 flex flex-col gap-0.5">
+        {visible.map((entry, index) => (
+          <div key={index} className="flex items-center justify-between gap-4">
+            <span className="flex items-center gap-1.5 text-[var(--otari-muted)]">
+              {rows.length > 1 ? (
+                <span aria-hidden className="h-2 w-2 rounded-sm" style={{ backgroundColor: entry.color }} />
+              ) : null}
+              {entry.name}
+            </span>
+            <span className="font-medium tabular-nums text-[var(--otari-ink)]">
+              {formatValue(entry.value as number)}
+            </span>
+          </div>
+        ))}
+      </div>
+      {showTotal && rows.length > 1 ? (
+        <div className="mt-1 flex items-center justify-between gap-4 border-t border-[var(--otari-line)] pt-1">
+          <span className="text-[var(--otari-muted)]">Total</span>
+          <span className="font-semibold tabular-nums text-[var(--otari-ink)]">{formatValue(total)}</span>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-// A single-series bar chart of one metric over time. Responsive width, fixed
-// height; the y-axis is omitted (the caller's caption carries the peak) and the
-// x-axis auto-thins its ticks so labels never collide. The tooltip shows the
-// formatted value for the hovered bucket.
-export function BarTrendChart({
+// Legend chips for a multi-series chart: marker + label in text ink (identity
+// rides the marker, never colored text). Single-series charts render no legend;
+// their title names the series.
+export function ChartLegend({ series }: { series: SeriesDef[] }) {
+  if (series.length < 2) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      {series.map((s) => (
+        <span key={s.key} className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+          <span aria-hidden className="h-2 w-2 rounded-sm" style={{ backgroundColor: s.color }} />
+          {s.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// The payload recharts hands to chart-level mouse handlers; only the active
+// bucket index is consumed. It can arrive as a number or numeric string.
+interface ChartMouseState {
+  activeTooltipIndex?: number | string | null;
+}
+
+function toIndex(state: ChartMouseState | null | undefined): number | null {
+  const raw = state?.activeTooltipIndex;
+  const index = typeof raw === "string" ? Number(raw) : raw;
+  return typeof index === "number" && Number.isFinite(index) ? index : null;
+}
+
+// A single-or-stacked bar trend over time with the industry-standard time
+// selection: press and drag across the plot to select a bucket range (a live
+// highlight tracks the pointer via recharts' own event coordinates, so axis
+// margins never need pixel math), release to commit. A drag that never leaves
+// its starting bucket is treated as a click and ignored, so hovering and
+// clicking never zoom by accident. Releasing outside the plot commits the
+// selection dragged so far.
+//
+// The y-axis is optional (the compact Activity strip omits it; the caller's
+// caption carries the peak); stacked segments get a hairline surface stroke so
+// adjacent fills always show their boundary. `window` dims buckets outside the
+// active sub-window in place, which is how the Activity strip shows a zoomed
+// selection inside its full extent.
+export function TrendChart({
   data,
+  series,
   formatValue,
+  formatXTick,
   ariaLabel,
   height = 200,
+  showYAxis = false,
+  showTotal,
+  onSelectRange,
+  window: windowRange,
 }: {
-  data: ChartPoint[];
+  data: StackedPoint[];
+  series: SeriesDef[];
   formatValue: (value: number) => string;
+  formatXTick?: (x: string) => string;
   ariaLabel: string;
   height?: number;
+  showYAxis?: boolean;
+  showTotal?: boolean;
+  onSelectRange?: (startIndex: number, endIndex: number) => void;
+  window?: { startIndex: number; endIndex: number } | null;
 }) {
+  const [drag, setDrag] = useState<{ start: number; end: number } | null>(null);
+  // Mirror for the commit handlers: mouseup can fire before the last
+  // mousemove's setState has re-rendered, and committing from the stale closure
+  // would snap to the previous bucket.
+  const dragRef = useRef(drag);
+  const setDragBoth = (next: { start: number; end: number } | null) => {
+    dragRef.current = next;
+    setDrag(next);
+  };
+
+  const commit = () => {
+    const range = dragRef.current;
+    setDragBoth(null);
+    if (!range || !onSelectRange || range.start === range.end) return;
+    onSelectRange(Math.min(range.start, range.end), Math.max(range.start, range.end));
+  };
+
+  const selectable = Boolean(onSelectRange) && data.length > 1;
+  const dimmed =
+    windowRange && (windowRange.startIndex > 0 || windowRange.endIndex < data.length - 1) ? windowRange : null;
+
   return (
-    <div role="img" aria-label={ariaLabel} className="w-full">
+    <div
+      role="img"
+      aria-label={ariaLabel}
+      className={`w-full touch-pan-y select-none ${selectable ? "cursor-crosshair" : ""}`}
+    >
       <ResponsiveContainer width="100%" height={height}>
-        <BarChart data={data} margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+        <BarChart
+          data={data}
+          margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
+          onMouseDown={(state) => {
+            if (!selectable) return;
+            const index = toIndex(state);
+            if (index !== null) setDragBoth({ start: index, end: index });
+          }}
+          onMouseMove={(state) => {
+            const index = toIndex(state);
+            if (dragRef.current && index !== null) setDragBoth({ ...dragRef.current, end: index });
+          }}
+          onMouseUp={commit}
+          onMouseLeave={commit}
+        >
           <XAxis
-            dataKey="label"
+            dataKey="x"
             tickLine={false}
             axisLine={false}
             interval="preserveStartEnd"
-            minTickGap={24}
+            minTickGap={40}
+            tickFormatter={formatXTick}
             tick={{ fontSize: 10, fill: "var(--otari-muted)" }}
           />
-          <Tooltip cursor={{ fill: "var(--otari-line)", opacity: 0.35 }} content={<ChartTooltip formatValue={formatValue} />} />
-          <Bar dataKey="value" fill={BRAND} radius={[2, 2, 0, 0]} isAnimationActive={false} />
+          {showYAxis ? (
+            <YAxis
+              width={52}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={(value: number) => formatValue(value)}
+              tick={{ fontSize: 10, fill: "var(--otari-muted)" }}
+            />
+          ) : null}
+          <Tooltip
+            cursor={{ fill: "var(--otari-line)", opacity: 0.35 }}
+            content={<ChartTooltip formatValue={formatValue} formatLabel={formatXTick} showTotal={showTotal} />}
+          />
+          {series.map((s) => (
+            <Bar
+              key={s.key}
+              dataKey={s.key}
+              name={s.label}
+              stackId="stack"
+              fill={s.color}
+              stroke="var(--otari-surface)"
+              strokeWidth={series.length > 1 ? 1 : 0}
+              // Rounded data-ends only when nothing stacks on top; rounding
+              // every stacked segment would fake gaps inside a column.
+              radius={series.length > 1 ? 0 : [2, 2, 0, 0]}
+              isAnimationActive={false}
+            />
+          ))}
+          {/* Out-of-window dimming (start side, then end side), under the drag
+              highlight. ReferenceArea x-bounds are category values, so the
+              shading stays glued to its buckets across resizes. */}
+          {dimmed && dimmed.startIndex > 0 ? (
+            <ReferenceArea
+              x1={data[0].x}
+              x2={data[dimmed.startIndex - 1].x}
+              fill="var(--otari-bg)"
+              fillOpacity={0.75}
+              stroke="none"
+            />
+          ) : null}
+          {dimmed && dimmed.endIndex < data.length - 1 ? (
+            <ReferenceArea
+              x1={data[dimmed.endIndex + 1].x}
+              x2={data[data.length - 1].x}
+              fill="var(--otari-bg)"
+              fillOpacity={0.75}
+              stroke="none"
+            />
+          ) : null}
+          {drag && drag.start !== drag.end ? (
+            <ReferenceArea
+              x1={data[Math.min(drag.start, drag.end)].x}
+              x2={data[Math.max(drag.start, drag.end)].x}
+              fill={BRAND}
+              fillOpacity={0.18}
+              stroke={BRAND}
+              strokeOpacity={0.5}
+            />
+          ) : null}
         </BarChart>
       </ResponsiveContainer>
     </div>

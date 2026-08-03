@@ -52,6 +52,22 @@ function mockApi(body: UsageSummary | null) {
     if (url.includes("/v1/usage/summary")) {
       return jsonResponse(body ?? summary());
     }
+    if (url.includes("/v1/usage/series")) {
+      return jsonResponse({
+        start_date: "2026-06-21T00:00:00Z",
+        end_date: "2026-07-21T00:00:00Z",
+        bucket: "day",
+        group_by: "model",
+        groups: [
+          { key: "gpt-5.6", cost: 820, tokens: 8_000_000, requests: 42_000, is_other: false },
+          { key: null, cost: 420.5, tokens: 4_400_000, requests: 42_000, is_other: true },
+        ],
+        points: [
+          { bucket_start: "2026-07-19T00:00:00Z", key: "gpt-5.6", is_other: false, cost: 400, tokens: 4_000_000, requests: 28_000 },
+          { bucket_start: "2026-07-20T00:00:00Z", key: null, is_other: true, cost: 420.5, tokens: 4_400_000, requests: 42_000 },
+        ],
+      });
+    }
     if (url.includes("/v1/users")) {
       return jsonResponse([{ user_id: "alice", alias: "Alice" }]);
     }
@@ -142,16 +158,90 @@ describe("UsagePage", () => {
     });
   });
 
-  it("shows cache read and write totals as tiles", async () => {
+  it("shows the cache story as a hit rate with read/write volumes", async () => {
     const base = summary();
-    mockApi(summary({ totals: { ...base.totals, cache_read_tokens: 5_100_000, cache_write_tokens: 2_700_000 } }));
+    mockApi(
+      summary({
+        totals: {
+          ...base.totals,
+          cache_read_tokens: 5_100_000,
+          cache_write_tokens: 2_700_000,
+          billed_input_tokens: 10_200_000,
+        },
+      }),
+    );
     renderPage(<UsagePage />);
 
     // Await a value (loads after the query resolves), not the static label.
-    expect(await screen.findByText("5.1M")).toBeInTheDocument();
-    expect(screen.getByText("2.7M")).toBeInTheDocument();
+    // 5.1M reads over 10.2M billed input tokens = a 50.0% hit rate.
+    expect(await screen.findByText("50.0%")).toBeInTheDocument();
+    expect(screen.getByText("Cache hit rate")).toBeInTheDocument();
+    expect(screen.getByText(/5\.1M read · 2\.7M written/)).toBeInTheDocument();
+  });
+
+  it("shows no hit rate when the billed input breakdown is unavailable", async () => {
+    // An older gateway (vite dev against a stale build) omits billed_input_tokens.
+    mockApi(summary());
+    renderPage(<UsagePage />);
+
+    await screen.findByText("$1,240.50");
+    const tile = screen.getByText("Cache hit rate").closest("div")!;
+    expect(within(tile).getByText("—")).toBeInTheDocument();
+  });
+
+  it("groups the chart by a dimension via the grouped series endpoint", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "model");
+
+    // The stack's legend comes from the grouped response: the top group plus
+    // the reconciling fold, which always reads "Other".
+    expect(await screen.findByText("Other")).toBeInTheDocument();
+    const calls = fetchMock.mock.calls.map(([u]) => String(u));
+    expect(calls.some((u) => u.includes("/v1/usage/series") && u.includes("group_by=model"))).toBe(true);
+  });
+
+  it("stacks the billed token composition on the Tokens metric", async () => {
+    const user = userEvent.setup();
+    const base = summary();
+    mockApi(
+      summary({
+        series: base.series.map((p) => ({
+          ...p,
+          input_tokens: 3_000_000,
+          cache_read_tokens: 2_000_000,
+          cache_write_tokens: 500_000,
+          output_tokens: 400_000,
+        })),
+      }),
+    );
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.click(screen.getByRole("button", { name: "Tokens" }));
+
+    // The four billed buckets are legended: the same encoding as the Activity
+    // page's per-row token bar.
+    expect(await screen.findByText("Fresh input")).toBeInTheDocument();
     expect(screen.getByText("Cache read")).toBeInTheDocument();
     expect(screen.getByText("Cache write")).toBeInTheDocument();
+    expect(screen.getByText("Output")).toBeInTheDocument();
+  });
+
+  it("splits requests into succeeded and failed when the window has errors", async () => {
+    const user = userEvent.setup();
+    const base = summary();
+    mockApi(summary({ series: base.series.map((p) => ({ ...p, errors: 100 })) }));
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.click(screen.getByRole("button", { name: "Requests" }));
+
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Succeeded")).toBeInTheDocument();
   });
 
   it("queries the previous period with a bounded end_date for deltas", async () => {
@@ -217,15 +307,17 @@ describe("UsagePage", () => {
     const user = userEvent.setup();
     mockApi(summary());
     renderPage(<UsagePage />);
-    await screen.findByText("alice");
+    await screen.findByText("gpt-5.6");
 
-    // Filter by a model, then drill into a user row. The model constraint must
-    // survive the navigation, not be dropped in favor of only the clicked user.
+    // Filter by a model, then drill into a user row (on the User breakdown
+    // tab). The model constraint must survive the navigation, not be dropped
+    // in favor of only the clicked user.
     const modelInput = screen.getByRole("combobox", { name: "Model" });
     await user.click(modelInput);
     await user.type(modelInput, "gpt");
     await user.click(await screen.findByRole("option", { name: /gpt-5.6/ }));
 
+    await user.click(screen.getByRole("button", { name: "User" }));
     const row = (await screen.findByText("alice")).closest("tr")!;
     await user.click(row);
 
@@ -330,60 +422,20 @@ describe("UsagePage", () => {
     expect(await screen.findByText(/No usage yet/)).toBeInTheDocument();
   });
 
-  it("bulk-deletes imported rows from the Individual requests list", async () => {
-    const importedRow = {
-      id: "imp-1",
-      user_id: "alice",
-      api_key_id: null,
-      timestamp: new Date().toISOString(),
-      model: "claude-sonnet-5",
-      provider: "anthropic",
-      endpoint: "external",
-      prompt_tokens: 100,
-      completion_tokens: 50,
-      total_tokens: 150,
-      cache_read_tokens: null,
-      cache_write_tokens: null,
-      cache_write_1h_tokens: null,
-      billing_meters: null,
-      pricing_breakdown: null,
-      cost: null,
-      status: "success",
-      error_message: null,
-      latency_ms: 120,
-      source: "claude_code",
-      source_label: null,
-      counts_toward_budget: false,
-    };
-    const calls: { url: string; method: string; body: string | undefined }[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
-      calls.push({ url, method, body: typeof init?.body === "string" ? init.body : undefined });
-      if (url.endsWith("/v1/usage") && method === "DELETE") return jsonResponse({ deleted: 1 });
-      if (url.includes("/v1/usage/summary")) return jsonResponse(summary());
-      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 1 });
-      if (url.includes("/v1/users")) return jsonResponse([{ user_id: "alice", alias: "Alice" }]);
-      if (url.includes("/v1/keys")) return jsonResponse([]);
-      if (url.includes("/v1/usage")) return jsonResponse([importedRow]);
-      return jsonResponse([]);
-    });
+  it("hands the current view off to the Activity log instead of duplicating its table", async () => {
     const user = userEvent.setup();
+    mockApi(summary());
     renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
 
-    const row = (await screen.findByText("claude-sonnet-5")).closest("tr")!;
-    await user.click(within(row).getByRole("checkbox"));
+    // The per-request table (and its bulk actions) lives on the Activity page;
+    // Usage carries the whole current view across instead of a second copy.
+    expect(screen.queryByText("Individual requests")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Open activity log" }));
 
-    const bar = (await screen.findByText("1 selected")).closest("div")!;
-    await user.click(within(bar).getByRole("button", { name: "Delete" }));
-    const dialog = await screen.findByRole("alertdialog");
-    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
-
-    await vi.waitFor(() => {
-      const del = calls.find((c) => c.url.endsWith("/v1/usage") && c.method === "DELETE");
-      expect(del).toBeTruthy();
-      expect(del!.body).toContain("imp-1");
-    });
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
+    expect(loc.startsWith("/activity")).toBe(true);
+    expect(loc).toContain("start_date=");
   });
 
   it("keeps the filter pickers behind an 'Add filter' toggle", async () => {

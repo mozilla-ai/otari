@@ -499,6 +499,10 @@ export interface UsageTotals {
   // Requests with no configured price (cost is null), e.g. imported usage for an
   // unpriced model, so a $0 total is not read as free.
   unpriced_requests?: number;
+  // Billed input tokens (fresh input plus both cache buckets), normalized via
+  // each row's billing meters, so cache hit rate (cache_read / billed_input) is
+  // meaningful across providers. Optional: postdates the other totals.
+  billed_input_tokens?: number;
 }
 
 // One breakdown row (a model, a user, or an API key). `key` is null both for the
@@ -512,12 +516,21 @@ export interface UsageGroupRow {
   is_other: boolean;
 }
 
-// One time bucket. `bucket_start` is canonical ISO-8601 UTC (`...Z`).
+// One time bucket. `bucket_start` is canonical ISO-8601 UTC (`...Z`). `tokens`
+// stays the raw provider-reported total; the composition fields are the billed
+// view (input_tokens includes both cache buckets), so fresh input derives as
+// max(0, input - cache_read - cache_write). All optional: they postdate the
+// original series shape, and a `vite dev` session can face an older gateway.
 export interface UsageSeriesPoint {
   bucket_start: string;
   cost: number;
   tokens: number;
   requests: number;
+  errors?: number;
+  input_tokens?: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  output_tokens?: number;
 }
 
 // Aggregated spend/volume for the Usage & analytics page. `start_date`/`end_date`
@@ -535,6 +548,32 @@ export interface UsageSummary {
   // one that omits it, so read it defensively.
   by_source?: UsageGroupRow[];
   series: UsageSeriesPoint[];
+}
+
+// Dimensions the grouped series endpoint can split by.
+export type UsageGroupBy = "model" | "user_id" | "api_key_id" | "source";
+
+// One (time bucket, group) cell of a grouped series. `key`/`is_other` follow the
+// UsageGroupRow convention; `tokens` is the billed total (input incl. cache,
+// plus output), matching the ungrouped composition fields.
+export interface UsageGroupedSeriesPoint {
+  bucket_start: string;
+  key: string | null;
+  is_other: boolean;
+  cost: number;
+  tokens: number;
+  requests: number;
+}
+
+// A per-group time series (from /v1/usage/series) for the stacked charts.
+// `groups` ranks the window's top groups by spend, in stack/legend order.
+export interface UsageGroupedSeries {
+  start_date: string;
+  end_date: string;
+  bucket: UsageBucket;
+  group_by: UsageGroupBy;
+  groups: UsageGroupRow[];
+  points: UsageGroupedSeriesPoint[];
 }
 
 // One per-user budget reset event (the spend that was cleared and when the next

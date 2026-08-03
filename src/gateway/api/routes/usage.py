@@ -12,7 +12,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import ColumnElement, case, func, select
+from sqlalchemy import ColumnElement, case, func, null, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
@@ -44,7 +44,14 @@ _MAX_SUMMARY_SPAN = timedelta(days=366)
 # single synthesized "other" row (so the tables still reconcile with the totals).
 _BREAKDOWN_TOP_N = 100
 
+# How many groups a grouped time series carries before the remainder folds into
+# "other". Eight is the ceiling a stacked chart can keep legible (and the size of
+# the dashboard's fixed categorical palette); the breakdown tables, not the chart,
+# are the place to read a longer tail.
+_SERIES_TOP_N = 8
+
 Bucket = Literal["hour", "day"]
+SeriesGroupBy = Literal["model", "user_id", "api_key_id", "source"]
 
 
 def _utc_iso(value: datetime) -> str:
@@ -353,6 +360,11 @@ class UsageTotals(BaseModel):
     # Rows with no configured price (cost is NULL), e.g. imported usage for an
     # unpriced model. Surfaced so a $0 cost is not mistaken for free usage.
     unpriced_requests: int = 0
+    # Billed input tokens (fresh input plus both cache buckets), normalized via
+    # each row's billing meters where present (see ``_billed_expr``). Unlike
+    # ``prompt_tokens`` this is convention-independent, so cache hit rate
+    # (cache_read_tokens / billed_input_tokens) is meaningful across providers.
+    billed_input_tokens: int = 0
 
 
 class UsageGroupRow(BaseModel):
@@ -373,12 +385,25 @@ class UsageGroupRow(BaseModel):
 
 class UsageSeriesPoint(BaseModel):
     """One time bucket. ``bucket_start`` is canonical ISO-8601 UTC (``...Z``),
-    identical across SQLite and PostgreSQL for the same underlying instant."""
+    identical across SQLite and PostgreSQL for the same underlying instant.
+
+    ``tokens`` stays the raw provider-reported total (the field predates the
+    composition split and external consumers may read it). The billed
+    composition fields are normalized via billing meters (see ``_billed_expr``):
+    ``input_tokens`` includes both cache buckets, so a chart derives fresh input
+    as ``max(0, input_tokens - cache_read_tokens - cache_write_tokens)`` and the
+    billed total as ``fresh + cache_read + cache_write + output``.
+    """
 
     bucket_start: str
     cost: float
     tokens: int
     requests: int
+    errors: int = 0
+    input_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    output_tokens: int = 0
 
 
 class UsageSummary(BaseModel):
@@ -393,6 +418,40 @@ class UsageSummary(BaseModel):
     by_api_key: list[UsageGroupRow]
     by_source: list[UsageGroupRow]
     series: list[UsageSeriesPoint]
+
+
+class UsageGroupedSeriesPoint(BaseModel):
+    """One (time bucket, group) cell of a grouped series.
+
+    ``key``/``is_other`` follow the ``UsageGroupRow`` convention: ``key=None``
+    with ``is_other=True`` is the fold of groups outside the top N, ``key=None``
+    with ``is_other=False`` is a real NULL group (e.g. a deleted user).
+    ``tokens`` is the *billed* total (input including cache, plus output), the
+    same quantity the ungrouped series' composition fields sum to.
+    """
+
+    bucket_start: str
+    key: str | None
+    is_other: bool = False
+    cost: float
+    tokens: int
+    requests: int
+
+
+class UsageGroupedSeries(BaseModel):
+    """A per-group time series for the dashboard's stacked charts.
+
+    ``groups`` ranks the window's top groups by spend (plus the reconciling
+    ``other`` fold), in the order a chart should stack and color them; ``points``
+    is sparse (only populated cells), keyed by canonical UTC ``bucket_start``.
+    """
+
+    start_date: str
+    end_date: str
+    bucket: Bucket
+    group_by: SeriesGroupBy
+    groups: list[UsageGroupRow]
+    points: list[UsageGroupedSeriesPoint]
 
 
 def _resolve_window(start_date: datetime | None, end_date: datetime | None) -> tuple[datetime, datetime]:
@@ -452,6 +511,32 @@ def _dialect_name(db: AsyncSession) -> str:
     return bind.dialect.name
 
 
+def _billed_expr(meter: str, fallback: Any) -> Any:
+    """A per-row billed token meter, as a summable SQL expression.
+
+    Providers disagree on whether cache tokens are counted inside
+    ``prompt_tokens`` (see ``services/metered_pricing.billable_usage``), so raw
+    column sums cannot be split into a billed composition. The pricing writers
+    resolve that into ``billing_meters`` when a row is priced; prefer that, and
+    fall back to the raw column under the subset convention for meterless rows,
+    the same fallback the dashboard's per-row token bar applies. JSON extraction
+    of a missing key and a NULL column both yield NULL, so the fallback chain
+    covers both, ending at 0. ``as_integer`` compiles to the dialect's JSON
+    number cast on SQLite and PostgreSQL alike.
+    """
+    return func.coalesce(UsageLog.billing_meters[meter].as_integer(), fallback, 0)
+
+
+# The billed composition aggregates shared by the summary series, the grand
+# totals, and the grouped series, so all three reconcile by construction.
+def _billed_input_sum() -> Any:
+    return func.coalesce(func.sum(_billed_expr("total_input_tokens", UsageLog.prompt_tokens)), 0)
+
+
+def _billed_output_sum() -> Any:
+    return func.coalesce(func.sum(_billed_expr("completion_tokens", UsageLog.completion_tokens)), 0)
+
+
 async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> UsageTotals:
     row = (
         await db.execute(
@@ -467,6 +552,7 @@ async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> Us
                 func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
                 func.avg(UsageLog.latency_ms),
                 func.coalesce(func.sum(case((UsageLog.cost.is_(None), 1), else_=0)), 0),
+                _billed_input_sum(),
             ).where(*conditions)
         )
     ).one()
@@ -482,6 +568,7 @@ async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> Us
         error_count=int(row[8]),
         avg_latency_ms=float(row[9]) if row[9] is not None else None,
         unpriced_requests=int(row[10]),
+        billed_input_tokens=int(row[11]),
     )
 
 
@@ -495,17 +582,21 @@ async def _breakdown(
 ) -> list[UsageGroupRow]:
     """Spend/tokens/requests grouped by ``column``, biggest spend first.
 
-    When ``limit`` is set, only the top rows are returned and the remainder is
-    folded into a synthesized ``other`` row derived from the grand totals, so the
-    breakdown always reconciles with the tiles. ``limit=None`` returns every group
-    (used by the CSV export, which must not truncate).
+    ``tokens`` is the *billed* total (input including both cache buckets, plus
+    output, via ``_billed_expr``), the same quantity the series composition and
+    the grouped series report, so every analytics surface agrees on what a
+    token count means. When ``limit`` is set, only the top rows are returned and
+    the remainder is folded into a synthesized ``other`` row derived from the
+    grand totals, so the breakdown always reconciles with the tiles.
+    ``limit=None`` returns every group (used by the CSV export, which must not
+    truncate).
     """
     cost_sum = func.coalesce(func.sum(UsageLog.cost), 0.0)
     stmt = (
         select(
             column,
             cost_sum,
-            func.coalesce(func.sum(UsageLog.total_tokens), 0),
+            _billed_input_sum() + _billed_output_sum(),
             func.count(),
         )
         .where(*conditions)
@@ -524,11 +615,12 @@ async def _breakdown(
         # signal that groups were folded; cost/tokens residuals follow from totals.
         residual_requests = totals.request_count - seen_requests
         if residual_requests > 0:
+            billed_total = totals.billed_input_tokens + totals.completion_tokens
             result.append(
                 UsageGroupRow(
                     key=None,
                     cost=totals.cost - sum(r.cost for r in result),
-                    tokens=totals.total_tokens - sum(r.tokens for r in result),
+                    tokens=billed_total - sum(r.tokens for r in result),
                     requests=residual_requests,
                     is_other=True,
                 )
@@ -581,7 +673,7 @@ def _dense_series(
     start: datetime,
     end: datetime,
     bucket: Bucket,
-    rows: list[tuple[str, float, int, int]],
+    populated: dict[str, UsageSeriesPoint],
 ) -> list[UsageSeriesPoint]:
     """Fill every bucket in ``[floor(start), end)`` so the chart's x-axis is linear
     in time. ``GROUP BY`` omits empty buckets, so without this a sparse range (say
@@ -589,9 +681,8 @@ def _dense_series(
     misread the trend. Falls back to the sparse buckets past ``_MAX_SERIES_POINTS``.
     An empty window (no rows at all) returns an empty series, not a wall of zeros.
     """
-    if not rows:
+    if not populated:
         return []
-    populated = {key: (cost, tokens, requests) for key, cost, tokens, requests in rows}
     step = timedelta(hours=1) if bucket == "hour" else timedelta(days=1)
     if bucket == "hour":
         cursor = start.replace(minute=0, second=0, microsecond=0)
@@ -602,13 +693,9 @@ def _dense_series(
     points: list[UsageSeriesPoint] = []
     while cursor < end:
         if len(points) >= _MAX_SERIES_POINTS:
-            return [
-                UsageSeriesPoint(bucket_start=key, cost=cost, tokens=tokens, requests=requests)
-                for key, (cost, tokens, requests) in sorted(populated.items())
-            ]
+            return [populated[key] for key in sorted(populated)]
         key = cursor.strftime(fmt)
-        cost, tokens, requests = populated.get(key, (0.0, 0, 0))
-        points.append(UsageSeriesPoint(bucket_start=key, cost=cost, tokens=tokens, requests=requests))
+        points.append(populated.get(key) or UsageSeriesPoint(bucket_start=key, cost=0.0, tokens=0, requests=0))
         cursor += step
     return points
 
@@ -632,8 +719,10 @@ async def usage_summary(
 
     Range-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``
     list, every aggregate is scoped to a bounded window so it stays served by the
-    timestamp index. Returns grand totals, breakdowns by model / user / API key
-    (top rows plus a reconciling ``other`` fold), and a UTC-bucketed time series.
+    timestamp index. Returns grand totals, breakdowns by model / user / API key /
+    source (top rows plus a reconciling ``other`` fold, billed token counts), and
+    a UTC-bucketed time series carrying each bucket's error count and billed
+    token composition (input incl. cache, cache read/write, output).
     """
     start, end, conditions, totals = await _summary_context(
         db,
@@ -661,13 +750,31 @@ async def usage_summary(
                 func.coalesce(func.sum(UsageLog.cost), 0.0),
                 func.coalesce(func.sum(UsageLog.total_tokens), 0),
                 func.count(),
+                func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
+                _billed_input_sum(),
+                func.coalesce(func.sum(_billed_expr("cache_read_tokens", UsageLog.cache_read_tokens)), 0),
+                func.coalesce(func.sum(_billed_expr("cache_write_tokens", UsageLog.cache_write_tokens)), 0),
+                _billed_output_sum(),
             )
             .where(*conditions)
             .group_by(expr)
         )
     ).all()
     # Zero-fill empty buckets so the chart is time-linear (GROUP BY drops gaps).
-    populated = [(_canonical_bucket(row[0], bucket), float(row[1]), int(row[2]), int(row[3])) for row in series_rows]
+    populated = {
+        _canonical_bucket(row[0], bucket): UsageSeriesPoint(
+            bucket_start=_canonical_bucket(row[0], bucket),
+            cost=float(row[1]),
+            tokens=int(row[2]),
+            requests=int(row[3]),
+            errors=int(row[4]),
+            input_tokens=int(row[5]),
+            cache_read_tokens=int(row[6]),
+            cache_write_tokens=int(row[7]),
+            output_tokens=int(row[8]),
+        )
+        for row in series_rows
+    }
     series = _dense_series(start, end, bucket, populated)
 
     return UsageSummary(
@@ -680,6 +787,108 @@ async def usage_summary(
         by_api_key=by_api_key,
         by_source=by_source,
         series=series,
+    )
+
+
+_GROUP_COLUMNS: dict[str, Any] = {
+    "model": UsageLog.model,
+    "user_id": UsageLog.user_id,
+    "api_key_id": UsageLog.api_key_id,
+    "source": UsageLog.source,
+}
+
+
+@router.get("/series", dependencies=[Depends(verify_master_key)])
+async def usage_series(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    group_by: SeriesGroupBy = Query(description="Dimension to split the series by"),
+    start_date: datetime | None = Query(default=None, description=_START_DESC),
+    end_date: datetime | None = Query(default=None, description=_END_DESC),
+    user_id: str | None = Query(default=None, description=_USER_DESC),
+    status: str | None = Query(default=None, description=_STATUS_DESC),
+    model: str | None = Query(default=None, description=_MODEL_DESC),
+    endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
+    source: str | None = Query(default=None, description=_SOURCE_DESC),
+    api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
+    priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
+) -> UsageGroupedSeries:
+    """Time series split by one dimension, for the dashboard's stacked charts.
+
+    Same filters and window bounds as ``/summary``. The window's top groups by
+    spend are returned as their own series; everything past the top eight folds
+    into a single ``other`` series per bucket, so the stack always reconciles
+    with the summary totals. Points are sparse (populated cells only).
+    """
+    start, end, conditions, totals = await _summary_context(
+        db,
+        start_date=start_date,
+        end_date=end_date,
+        user_id=user_id,
+        status=status,
+        model=model,
+        endpoint=endpoint,
+        source=source,
+        api_key_id=api_key_id,
+        priced=priced,
+        counts_toward_budget=counts_toward_budget,
+    )
+    column = _GROUP_COLUMNS[group_by]
+    groups = await _breakdown(db, column, conditions, totals, limit=_SERIES_TOP_N)
+
+    # One grouped query for the whole grid: groups outside the top N collapse
+    # into the fold in SQL rather than being fetched and folded here, so the row
+    # count stays bounded by buckets × (top N + 2) regardless of cardinality.
+    # The synthesized groups are encoded as (key NULL, fold flag) rather than a
+    # sentinel key string: GROUP BY treats NULLs as equal on both dialects, and
+    # no sentinel can be trusted never to collide with a real key. A NULL column
+    # value never matches ``IN``, so it lands in the CASE's ``else`` arm; the
+    # fold flag then separates a NULL group that ranked in the top N (a real
+    # ``key=None`` series, e.g. a deleted user) from the past-top-N remainder.
+    named = {g.key for g in groups if g.key is not None}
+    keeps_null = any(g.key is None and not g.is_other for g in groups)
+    key_expr = case((column.in_(named), column), else_=null())
+    if keeps_null:
+        fold_expr = case((column.is_(None), 0), (column.in_(named), 0), else_=1)
+    else:
+        fold_expr = case((column.in_(named), 0), else_=1)
+    bucket_expr = _bucket_expr(_dialect_name(db), bucket)
+    rows = (
+        await db.execute(
+            select(
+                bucket_expr,
+                key_expr,
+                fold_expr,
+                func.coalesce(func.sum(UsageLog.cost), 0.0),
+                _billed_input_sum() + _billed_output_sum(),
+                func.count(),
+            )
+            .where(*conditions)
+            .group_by(bucket_expr, key_expr, fold_expr)
+        )
+    ).all()
+
+    points = [
+        UsageGroupedSeriesPoint(
+            bucket_start=_canonical_bucket(row[0], bucket),
+            key=row[1],
+            is_other=bool(row[2]),
+            cost=float(row[3]),
+            tokens=int(row[4]),
+            requests=int(row[5]),
+        )
+        for row in rows
+    ]
+    points.sort(key=lambda p: p.bucket_start)
+
+    return UsageGroupedSeries(
+        start_date=start.isoformat(),
+        end_date=end.isoformat(),
+        bucket=bucket,
+        group_by=group_by,
+        groups=groups,
+        points=points,
     )
 
 
@@ -713,8 +922,10 @@ async def usage_summary_csv(
 
     A dedicated route rather than a ``format=csv`` flag on ``/summary`` so that
     endpoint keeps a single JSON response model and a clean OpenAPI schema. The
-    export is **uncapped** (no top-N fold): finance wants every row. Kept separate
-    from the bare-array ``/v1/usage`` contract, which is untouched.
+    export is **uncapped** (no top-N fold): finance wants every row. ``tokens``
+    is the billed total (fresh input, both cache buckets, and output), matching
+    the dashboard's analytics. Kept separate from the bare-array ``/v1/usage``
+    contract, which is untouched.
     """
     _start, _end, conditions, totals = await _summary_context(
         db,

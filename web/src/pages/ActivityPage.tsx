@@ -536,6 +536,9 @@ export function ActivityPage() {
   const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
     bucketStart: p.bucket_start,
     requests: p.requests,
+    // Failed requests render as a red segment on the strip, so dropped traffic
+    // shows up while browsing, not only after filtering to status=error.
+    errors: p.errors ?? 0,
   }));
 
   const rows = usage.data ?? [];
