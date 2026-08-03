@@ -80,8 +80,9 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
 - Serving: standalone mode serves `index.html` at `/` and hashed assets under `/assets` (`src/gateway/main.py`, `src/gateway/dashboard.py`); the get-started tutorial moved to `/welcome`. Hybrid mode has no local management API, so `/` keeps serving the tutorial. Client-side routing uses react-router's `HashRouter` (routes live under `/#/providers`, `/#/models`, `/#/aliases`, `/#/settings`), so hash routes need no server catch-all and the API/asset paths are never shadowed.
 ## Lint / Typecheck Commands
 - Ruff is configured for linting (rules: `E`, `F`, `I`; line length: 120) in `pyproject.toml`.
-- Run lint checks with `make lint` (or `uv run ruff check src tests scripts`).
-- Ruff is also enforced in CI via `.github/workflows/otari-lint.yml`.
+- Run lint checks with `make lint`; it runs the architecture check and then Ruff (`uv run ruff check src tests scripts`). Ruff alone is not equivalent.
+- The architecture check (`scripts/check_architecture.py`, also runnable via `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, API routes must not import `sqlalchemy.orm`, and repository modules end in `_repository.py`.
+- Both are enforced in CI via `.github/workflows/otari-lint.yml` (it calls `make lint`).
 - Primary static checks present in dev dependencies: `ruff`, `mypy`.
 - mypy is configured `strict` over `src`, `tests`, and `scripts` (`pyproject.toml`).
 - Run type checks with `make typecheck` (or `uv run mypy`).
