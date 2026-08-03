@@ -3,7 +3,9 @@
 These complement :mod:`tests.unit.test_mcp_loop_messages` (which tests the
 Anthropic tool loop in isolation) by exercising the FastAPI route handler:
 tool extraction, mutual-exclusivity validation, error-body mapping to the
-Anthropic shape, and the per-tool dispatch into the right backend.
+Anthropic shape, the per-tool dispatch into the right backend, and the
+prompt-cache contract (``cache_control`` markers reaching the provider
+unchanged, cache usage reaching the client).
 """
 
 from __future__ import annotations
