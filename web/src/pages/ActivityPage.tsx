@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
+  NO_BREAKDOWNS,
   useDeleteUsage,
   useKeys,
   useSetUsagePrice,
@@ -11,7 +12,7 @@ import {
   useUsageSummary,
   useUsers,
 } from "@/api/hooks";
-import type { UsageEntry, UsageFilters, UsageMutationSelection } from "@/api/types";
+import type { SummaryDimension, UsageEntry, UsageFilters, UsageMutationSelection } from "@/api/types";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -100,6 +101,9 @@ const PRICED_OPTIONS: { label: string; value: string }[] = [
 ];
 
 const DEFAULT_PAGE_SIZE = 50;
+
+// The only breakdown this page reads: the in-window models behind the typeahead.
+const MODEL_BREAKDOWN: SummaryDimension[] = ["model"];
 
 // All filter + pagination state, with defaults, kept in the URL.
 const URL_DEFAULTS = {
@@ -365,7 +369,9 @@ export function ActivityPage() {
     }),
     [win, statusFilter, userFilter, apiKeyFilter, sourceFilter, sessionFilter, endpointFilter, providerFilter],
   );
-  const modelSummary = useUsageSummary(modelSuggestFilters, "day");
+  // Only `by_model` is read, so only that breakdown is requested: the typeahead
+  // has no use for the other six GROUP BY passes.
+  const modelSummary = useUsageSummary(modelSuggestFilters, "day", MODEL_BREAKDOWN);
   const modelOptions =
     modelSummary.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
   const keyOptions = (keys.data ?? []).map((k) => ({ value: k.id, label: k.key_name ?? `${k.id.slice(0, 8)}…` }));
@@ -419,7 +425,8 @@ export function ActivityPage() {
       priced,
     ],
   );
-  const contextSummary = useUsageSummary(contextFilters, extentBucket);
+  // The timeline reads `series` only.
+  const contextSummary = useUsageSummary(contextFilters, extentBucket, NO_BREAKDOWNS);
   const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
     bucketStart: p.bucket_start,
     requests: p.requests,

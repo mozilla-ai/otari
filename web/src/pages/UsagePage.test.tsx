@@ -288,6 +288,41 @@ describe("UsagePage", () => {
     expect(screen.getByText("(no session)")).toBeInTheDocument();
   });
 
+  it("marks the active dimension button as pressed", async () => {
+    // The picker's selected state cannot ride on the button variant alone: to
+    // assistive tech that is four identically-named buttons with no indication of
+    // which dimension the table below is showing.
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("project:otari");
+
+    expect(screen.getByRole("button", { name: "Session" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Provider" })).toHaveAttribute("aria-pressed", "false");
+
+    await user.click(screen.getByRole("button", { name: "Provider" }));
+    expect(screen.getByRole("button", { name: "Provider" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Session" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("asks the summary endpoint only for the breakdowns the page renders", async () => {
+    // Each breakdown is its own GROUP BY over the window. The page renders model,
+    // user, and the four picker dimensions; the previous-period and timeline-context
+    // reads use only totals/series, so they must opt out of all of them.
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("project:otari");
+
+    const summaryCalls = fetchMock.mock.calls.map(([u]) => String(u)).filter((u) => u.includes("/v1/usage/summary"));
+    const main = summaryCalls.find((u) => u.includes("dimensions=model") && u.includes("dimensions=user"));
+    expect(main).toBeDefined();
+    expect(main).toContain("dimensions=source_label");
+    expect(main).toContain("dimensions=provider");
+    // No table on this page breaks spend down by API key.
+    expect(main).not.toContain("dimensions=api_key");
+    expect(summaryCalls.some((u) => u.includes("dimensions=none"))).toBe(true);
+  });
+
   it("switches the secondary breakdown between session, endpoint, provider, and source", async () => {
     const user = userEvent.setup();
     mockApi(summary());

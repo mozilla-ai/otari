@@ -531,8 +531,21 @@ export interface UsageSeriesPoint {
   requests: number;
 }
 
+// A breakdown the summary endpoint can compute. Each value names the `by_<value>`
+// field it fills. Every breakdown is its own GROUP BY pass server-side, so a
+// caller lists the ones it actually renders; the rest come back as empty arrays.
+export type SummaryDimension =
+  | "model"
+  | "user"
+  | "api_key"
+  | "source"
+  | "source_label"
+  | "endpoint"
+  | "provider";
+
 // Aggregated spend/volume for the Usage & analytics page. `start_date`/`end_date`
-// echo the (clamped) window the server actually aggregated over.
+// echo the (clamped) window the server actually aggregated over. A breakdown the
+// request did not ask for is present but empty.
 export interface UsageSummary {
   start_date: string;
   end_date: string;

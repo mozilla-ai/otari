@@ -53,6 +53,23 @@ _SESSION_BREAKDOWN_TOP_N = 250
 
 Bucket = Literal["hour", "day"]
 
+# Every breakdown ``/summary`` can compute, mapped to the column it groups by and
+# its top-N cap. A dimension name is the ``by_<name>`` response field it fills, so
+# a caller reads the selector and the payload with one vocabulary.
+_SUMMARY_DIMENSIONS: dict[str, tuple[Any, int]] = {
+    "model": (UsageLog.model, _BREAKDOWN_TOP_N),
+    "user": (UsageLog.user_id, _BREAKDOWN_TOP_N),
+    "api_key": (UsageLog.api_key_id, _BREAKDOWN_TOP_N),
+    "source": (UsageLog.source, _BREAKDOWN_TOP_N),
+    "source_label": (UsageLog.source_label, _SESSION_BREAKDOWN_TOP_N),
+    "endpoint": (UsageLog.endpoint, _BREAKDOWN_TOP_N),
+    "provider": (UsageLog.provider, _BREAKDOWN_TOP_N),
+}
+
+# Keep in step with _SUMMARY_DIMENSIONS; the extra ``none`` is the explicit empty
+# selection (a repeated query param cannot express an empty list on the wire).
+SummaryDimension = Literal["model", "user", "api_key", "source", "source_label", "endpoint", "provider", "none"]
+
 
 def _utc_iso(value: datetime) -> str:
     """Serialize a stored timestamp as unambiguous UTC ISO-8601.
@@ -142,6 +159,12 @@ _PRICED_DESC = "Filter by pricing state: true = only rows with a cost, false = o
 _COUNTS_DESC = (
     "Filter by budget participation: true = only enforced gateway rows, "
     "false = only imported rows that never touch a budget"
+)
+_DIMENSIONS_DESC = (
+    "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the "
+    "'by_<value>' response field it fills. Omit for every breakdown (the default); pass 'none' for a "
+    "totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that "
+    "reads only the tiles or the time series should say so. Fields that were not requested come back empty."
 )
 
 
@@ -409,7 +432,12 @@ class UsageSeriesPoint(BaseModel):
 
 
 class UsageSummary(BaseModel):
-    """Aggregate spend/volume for the Usage & analytics page."""
+    """Aggregate spend/volume for the Usage & analytics page.
+
+    Every breakdown field is always present. One the caller excluded through
+    ``dimensions`` comes back as an empty list, the same shape a window with no
+    matching rows produces, so narrowing the selector never changes the schema.
+    """
 
     start_date: str
     end_date: str
@@ -674,6 +702,7 @@ async def usage_summary(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
+    dimensions: list[SummaryDimension] | None = Query(default=None, description=_DIMENSIONS_DESC),
 ) -> UsageSummary:
     """Aggregate spend, tokens, and request volume for the dashboard Usage page.
 
@@ -682,6 +711,11 @@ async def usage_summary(
     timestamp index. Returns grand totals, breakdowns by model / user / API key /
     source / session (``source_label``) / endpoint / provider (top rows plus a
     reconciling ``other`` fold), and a UTC-bucketed time series.
+
+    Each breakdown is its own ``GROUP BY`` pass, so a caller that reads only the
+    totals or the series should narrow ``dimensions`` rather than pay for all seven
+    (the dashboard's tiles, timeline context, and model typeahead all do). Omitting
+    the parameter keeps the full set.
     """
     start, end, conditions, totals = await _summary_context(
         db,
@@ -698,13 +732,14 @@ async def usage_summary(
         priced=priced,
         counts_toward_budget=counts_toward_budget,
     )
-    by_model = await _breakdown(db, UsageLog.model, conditions, totals, limit=_BREAKDOWN_TOP_N)
-    by_user = await _breakdown(db, UsageLog.user_id, conditions, totals, limit=_BREAKDOWN_TOP_N)
-    by_api_key = await _breakdown(db, UsageLog.api_key_id, conditions, totals, limit=_BREAKDOWN_TOP_N)
-    by_source = await _breakdown(db, UsageLog.source, conditions, totals, limit=_BREAKDOWN_TOP_N)
-    by_source_label = await _breakdown(db, UsageLog.source_label, conditions, totals, limit=_SESSION_BREAKDOWN_TOP_N)
-    by_endpoint = await _breakdown(db, UsageLog.endpoint, conditions, totals, limit=_BREAKDOWN_TOP_N)
-    by_provider = await _breakdown(db, UsageLog.provider, conditions, totals, limit=_BREAKDOWN_TOP_N)
+    # ``none`` is dropped rather than rejected: it exists only so a caller can send
+    # an empty selection, and it never contributes a dimension of its own.
+    requested: set[str] = set(_SUMMARY_DIMENSIONS) if dimensions is None else {d for d in dimensions if d != "none"}
+    breakdowns = {
+        name: await _breakdown(db, column, conditions, totals, limit=cap)
+        for name, (column, cap) in _SUMMARY_DIMENSIONS.items()
+        if name in requested
+    }
 
     expr = _bucket_expr(_dialect_name(db), bucket)
     series_rows = (
@@ -728,13 +763,13 @@ async def usage_summary(
         end_date=end.isoformat(),
         bucket=bucket,
         totals=totals,
-        by_model=by_model,
-        by_user=by_user,
-        by_api_key=by_api_key,
-        by_source=by_source,
-        by_source_label=by_source_label,
-        by_endpoint=by_endpoint,
-        by_provider=by_provider,
+        by_model=breakdowns.get("model", []),
+        by_user=breakdowns.get("user", []),
+        by_api_key=breakdowns.get("api_key", []),
+        by_source=breakdowns.get("source", []),
+        by_source_label=breakdowns.get("source_label", []),
+        by_endpoint=breakdowns.get("endpoint", []),
+        by_provider=breakdowns.get("provider", []),
         series=series,
     )
 
@@ -743,6 +778,10 @@ async def usage_summary(
 # with one is prefixed with a single quote so opening the CSV in Excel/Sheets can
 # never execute attacker-influenced text (model / user ids are caller-supplied).
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+# The export names a dimension the way an operator reads it where that differs from
+# the column name the API selector uses.
+_CSV_DIMENSION_LABELS = {"source_label": "session"}
 
 
 def _csv_safe(value: str) -> str:
@@ -791,15 +830,12 @@ async def usage_summary_csv(
         priced=priced,
         counts_toward_budget=counts_toward_budget,
     )
-    dimensions = (
-        ("model", await _breakdown(db, UsageLog.model, conditions, totals, limit=None)),
-        ("user", await _breakdown(db, UsageLog.user_id, conditions, totals, limit=None)),
-        ("api_key", await _breakdown(db, UsageLog.api_key_id, conditions, totals, limit=None)),
-        ("source", await _breakdown(db, UsageLog.source, conditions, totals, limit=None)),
-        ("session", await _breakdown(db, UsageLog.source_label, conditions, totals, limit=None)),
-        ("endpoint", await _breakdown(db, UsageLog.endpoint, conditions, totals, limit=None)),
-        ("provider", await _breakdown(db, UsageLog.provider, conditions, totals, limit=None)),
-    )
+    # Driven off the same dimension table as ``/summary`` so a new breakdown lands
+    # in the export without a second edit here.
+    dimensions = [
+        (_CSV_DIMENSION_LABELS.get(name, name), await _breakdown(db, column, conditions, totals, limit=None))
+        for name, (column, _cap) in _SUMMARY_DIMENSIONS.items()
+    ]
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)

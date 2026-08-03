@@ -287,6 +287,75 @@ def test_summary_session_breakdown_has_a_deeper_top_n(
     assert body["by_model"][-1]["is_other"] is True
 
 
+_BREAKDOWN_FIELDS = (
+    "by_model",
+    "by_user",
+    "by_api_key",
+    "by_source",
+    "by_source_label",
+    "by_endpoint",
+    "by_provider",
+)
+
+
+def test_summary_computes_every_breakdown_by_default(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # Omitting `dimensions` is the pre-selector behavior and must stay that way:
+    # existing consumers never learned to ask for a breakdown.
+    _make_log(db_session, user_id="dims", timestamp=datetime.now(UTC) - timedelta(hours=1), api_key_id=None)
+    db_session.commit()
+
+    body = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "dims"}).json()
+    assert all(body[field] for field in _BREAKDOWN_FIELDS)
+
+
+def test_summary_dimensions_selects_only_the_requested_breakdowns(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # Each breakdown is its own GROUP BY pass, so a caller that reads one table
+    # asks for one dimension. The excluded fields stay present but empty, so a
+    # narrowed request cannot change the response schema.
+    _make_log(db_session, user_id="pick", timestamp=datetime.now(UTC) - timedelta(hours=1))
+    db_session.commit()
+
+    resp = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": "pick", "dimensions": ["model", "provider"]}
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [row["key"] for row in body["by_model"]] == ["gpt-4"]
+    assert [row["key"] for row in body["by_provider"]] == ["openai"]
+    assert body["by_user"] == []
+    assert body["by_source_label"] == []
+    assert body["by_endpoint"] == []
+    # Totals and the series are never gated by the selector: they are what the
+    # narrowed callers (tiles, timeline context) are asking for.
+    assert body["totals"]["request_count"] == 1
+    assert len(body["series"]) >= 1
+
+
+def test_summary_dimensions_none_skips_every_breakdown(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # "none" is how a totals/series-only caller expresses an empty selection, since
+    # a repeated query param has no empty-list form.
+    _make_log(db_session, user_id="bare", timestamp=datetime.now(UTC) - timedelta(hours=1), cost=0.25)
+    db_session.commit()
+
+    body = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": "bare", "dimensions": "none"}
+    ).json()
+    assert all(body[field] == [] for field in _BREAKDOWN_FIELDS)
+    assert body["totals"]["cost"] == pytest.approx(0.25)
+    assert body["series"]
+
+
+def test_summary_rejects_unknown_dimension(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = client.get(SUMMARY_PATH, headers=master_key_header, params={"dimensions": "cost_center"})
+    assert resp.status_code == 422
+
+
 def test_summary_filters_by_session_endpoint_and_provider(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:

@@ -27,6 +27,7 @@ import type {
   RotateMasterKeyResponse,
   SetPricingRequest,
   StoredProvider,
+  SummaryDimension,
   TestProviderResult,
   TestServiceResponse,
   ToolSettingsResponse,
@@ -755,18 +756,40 @@ export function useSetUsagePrice() {
 
 // ---------- usage analytics summary ----------
 
+// Pass this as `dimensions` to read only `totals` / `series`. Named rather than a
+// bare `[]` at each call site so it is clear the omission is deliberate.
+export const NO_BREAKDOWNS: SummaryDimension[] = [];
+
 // Aggregated spend/tokens/requests for the Usage page. Shares the activity
 // filter serialization and adds the time-series bucket. `enabled` lets a caller
 // skip the request (e.g. the previous-period query when the range is unbounded,
 // so there is nothing to compare against). staleTime is longer than the live
 // Activity log's: an aggregate over days moves slowly and need not refetch on
 // every focus.
-export function useUsageSummary(filters: UsageFilters, bucket: UsageBucket, enabled = true) {
+//
+// `dimensions` names the breakdowns to compute. Each one costs the server a
+// separate GROUP BY over the window, and several callers here read only `totals`
+// or `series` (tiles, timeline context, the previous-period comparison), so they
+// pass `[]` and skip all of them. Omitting the argument keeps the server default
+// (every breakdown).
+export function useUsageSummary(
+  filters: UsageFilters,
+  bucket: UsageBucket,
+  dimensions?: SummaryDimension[],
+  enabled = true,
+) {
   return useQuery({
-    queryKey: [USAGE, "summary", filters, bucket],
+    queryKey: [USAGE, "summary", filters, bucket, dimensions ?? "all"],
     queryFn: () => {
       const params = usageParams(filters);
       params.set("bucket", bucket);
+      // A repeated query param has no empty-list form, so an empty selection goes
+      // on the wire as the server's `none` sentinel.
+      if (dimensions) {
+        for (const dimension of dimensions.length > 0 ? dimensions : ["none"]) {
+          params.append("dimensions", dimension);
+        }
+      }
       return apiFetch<UsageSummary>(`/v1/usage/summary?${params.toString()}`);
     },
     enabled,

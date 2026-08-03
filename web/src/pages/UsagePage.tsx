@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import {
+  NO_BREAKDOWNS,
   useDeleteUsage,
   useKeys,
   useSetUsagePrice,
@@ -13,6 +14,7 @@ import {
   useUsers,
 } from "@/api/hooks";
 import type {
+  SummaryDimension,
   UsageBucket,
   UsageEntry,
   UsageFilters,
@@ -184,6 +186,16 @@ const DIMENSION_TABS: { key: BreakdownDimension; label: string; unknownLabel: st
   { key: "provider", label: "Provider", unknownLabel: "(unknown)" },
   { key: "source", label: "Source", unknownLabel: "(unknown)" },
 ];
+
+// The breakdowns this page renders, and only those: the two fixed tables plus
+// every dimension the picker can switch to. All four picker dimensions ship in one
+// response so flipping tabs is instant instead of another round trip, while
+// `api_key` stays out because no table here shows it. Derived from the tab list, so
+// a new tab is requested automatically.
+const PAGE_BREAKDOWNS: SummaryDimension[] = ["model", "user", ...DIMENSION_TABS.map((tab) => tab.key)];
+
+// The typeahead's own summary drops the model filter, so it only needs by_model.
+const MODEL_BREAKDOWN: SummaryDimension[] = ["model"];
 
 function dimensionRows(data: UsageSummary | undefined, dimension: BreakdownDimension): UsageGroupRow[] {
   if (!data) return [];
@@ -500,8 +512,9 @@ export function UsagePage() {
     };
   }, [customMode, winStart, winEnd, filters, preset.seconds, startDate]);
 
-  const summary = useUsageSummary(filters, bucket);
-  const previous = useUsageSummary(previousFilters ?? filters, bucket, previousFilters !== null);
+  const summary = useUsageSummary(filters, bucket, PAGE_BREAKDOWNS);
+  // Deltas read `totals` only, so this second window skips every breakdown.
+  const previous = useUsageSummary(previousFilters ?? filters, bucket, NO_BREAKDOWNS, previousFilters !== null);
 
   // The timeline histogram spans the whole preset *extent* (independent of the
   // brushed sub-window), so the brush always has context to zoom back out into.
@@ -516,7 +529,8 @@ export function UsagePage() {
     }),
     [startDate, modelFilter, userFilter, apiKeyFilter],
   );
-  const contextSummary = useUsageSummary(contextFilters, preset.bucket);
+  // The histogram reads `series` only.
+  const contextSummary = useUsageSummary(contextFilters, preset.bucket, NO_BREAKDOWNS);
   const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
     bucketStart: p.bucket_start,
     requests: p.requests,
@@ -531,7 +545,7 @@ export function UsagePage() {
   // omits the model filter, so the list stays complete when a model is selected,
   // and derived directly from query data rather than mirrored into state.
   const modelSuggestFilters: UsageFilters = useMemo(() => ({ ...filters, model: undefined }), [filters]);
-  const modelSuggest = useUsageSummary(modelSuggestFilters, bucket);
+  const modelSuggest = useUsageSummary(modelSuggestFilters, bucket, MODEL_BREAKDOWN);
   const modelOptions =
     modelSuggest.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
 
@@ -809,12 +823,16 @@ export function UsagePage() {
             }
             loading={summary.isLoading}
             action={
+              // aria-pressed, not just the variant: without it a screen reader
+              // hears four identically-named buttons and nothing about which
+              // dimension the table below is showing.
               <div className="inline-flex gap-1.5">
                 {DIMENSION_TABS.map((tab) => (
                   <Button
                     key={tab.key}
                     size="sm"
                     variant={dimension === tab.key ? "primary" : "outline"}
+                    aria-pressed={dimension === tab.key}
                     onPress={() => setDimension(tab.key)}
                   >
                     {tab.label}
@@ -837,6 +855,7 @@ export function UsagePage() {
                     key={tab.key}
                     size="sm"
                     variant={metric === tab.key ? "primary" : "outline"}
+                    aria-pressed={metric === tab.key}
                     onPress={() => setMetric(tab.key)}
                   >
                     {tab.label}

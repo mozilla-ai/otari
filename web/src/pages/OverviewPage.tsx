@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 
 import {
+  NO_BREAKDOWNS,
   useBudgets,
   useKeys,
   useProviderHealth,
@@ -90,9 +91,12 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
   // Bounded previous window ([-60d, -30d)) so it does not overlap the current one.
   const prevFilters = useMemo(() => ({ start_date: w.prevStart, end_date: w.periodStart }), [w]);
 
-  const today = useUsageSummary(todayFilters, "hour");
-  const period = useUsageSummary(periodFilters, "day");
-  const previous = useUsageSummary(prevFilters, "day");
+  // Tiles and the sparkline read only `totals` and `series`, so all three windows
+  // opt out of every breakdown rather than making the server run a GROUP BY per
+  // dimension three times over for numbers this page never shows.
+  const today = useUsageSummary(todayFilters, "hour", NO_BREAKDOWNS);
+  const period = useUsageSummary(periodFilters, "day", NO_BREAKDOWNS);
+  const previous = useUsageSummary(prevFilters, "day", NO_BREAKDOWNS);
   const health = useProviderHealth();
   const budgets = useBudgets();
   const keys = useKeys();
