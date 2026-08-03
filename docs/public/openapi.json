@@ -10028,7 +10028,7 @@
             }
           },
           {
-            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
             "in": "query",
             "name": "status_code",
             "required": false,
@@ -10041,7 +10041,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
               "title": "Status Code"
             }
           },
@@ -10333,7 +10333,7 @@
             }
           },
           {
-            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
             "in": "query",
             "name": "status_code",
             "required": false,
@@ -10346,7 +10346,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
               "title": "Status Code"
             }
           },
@@ -10711,7 +10711,7 @@
             }
           },
           {
-            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
             "in": "query",
             "name": "status_code",
             "required": false,
@@ -10724,7 +10724,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
               "title": "Status Code"
             }
           },
@@ -11037,7 +11037,7 @@
             }
           },
           {
-            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
             "in": "query",
             "name": "status_code",
             "required": false,
@@ -11050,7 +11050,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
               "title": "Status Code"
             }
           },

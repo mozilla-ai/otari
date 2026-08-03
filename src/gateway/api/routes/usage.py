@@ -168,7 +168,8 @@ _USER_DESC = "Filter to a single user"
 _STATUS_DESC = "Filter to a single status (e.g. 'success' or 'error')"
 _STATUS_CODE_DESC = (
     "Filter to a single failure status code (e.g. 429 for provider rate limits, "
-    "402 for missing-pricing rejections). Only error rows carry one"
+    "402 for missing-pricing rejections). Only error rows carry one, so this "
+    "filter also restricts to status='error' unless 'status' is given explicitly"
 )
 _MODEL_DESC = "Filter to a single model"
 _ENDPOINT_DESC = "Filter to a single endpoint (e.g. '/v1/chat/completions')"
@@ -222,6 +223,15 @@ def _usage_filters(
         conditions.append(UsageLog.status == status)
     if status_code is not None:
         conditions.append(UsageLog.status_code == status_code)
+        if status is None:
+            # Only a failure carries a status code (see ``UsageLog.status_code``),
+            # so a bare code filter means "these failures" rather than "whatever
+            # rows happen to hold this code": it stays error-scoped even if a
+            # future write path starts stamping a code on a non-error row, and it
+            # is served by the (status, timestamp) index instead of scanning the
+            # window. An explicit ``status`` wins, so the combination stays a
+            # literal query rather than a silently contradictory one.
+            conditions.append(UsageLog.status == "error")
     if model is not None:
         conditions.append(UsageLog.model == model)
     if endpoint is not None:
@@ -660,9 +670,14 @@ def error_class_for(status_code: int | None) -> ErrorClass:
     """Coarse display bucket for a failure's HTTP status code.
 
     401 and 403 read as ``auth`` rather than as a budget denial because the codes
-    that actually reach this column come from upstream: a provider rejecting the
+    that reach this column today come from upstream: a provider rejecting the
     gateway's credentials. Budget and blocked-user rejections are refused before
-    anything is logged, so they have no row here to classify (see #317).
+    the provider call and currently write no row at all (see #317), so they have
+    nothing here to classify. Once #465 starts recording them they arrive with no
+    status code and land in ``unknown``; whichever change stamps a code on those
+    rows owns the decision of what they should read as, because a blocked or
+    over-budget user is refused with 403 and would otherwise be filed under
+    ``auth`` alongside a genuine credential fault.
     """
     if status_code is None:
         return "unknown"

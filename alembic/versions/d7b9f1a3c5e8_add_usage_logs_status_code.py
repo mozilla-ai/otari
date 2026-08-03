@@ -22,6 +22,14 @@ def upgrade() -> None:
     """Upgrade schema."""
     # Nullable: historical rows predate the column, a successful request has no
     # failure to classify, and some failures carry no HTTP status at all.
+    #
+    # Deliberately unindexed. Filtering on a code implies status='error' (see
+    # ``_usage_filters``) and every aggregate over it is range-bounded, so the
+    # existing (status, timestamp) index already narrows to the error rows in the
+    # window before the code is applied. usage_logs is append-heavy on the request
+    # path, so a further (status, status_code) index would tax every write to save
+    # a scan over one window's failures; add it if error volume ever makes that
+    # scan the bottleneck.
     op.add_column("usage_logs", sa.Column("status_code", sa.Integer(), nullable=True))
 
 

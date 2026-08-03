@@ -2245,7 +2245,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
                   "disabled": true,
                   "key": "status_code",
                   "value": ""
@@ -2374,7 +2374,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
                   "disabled": true,
                   "key": "status_code",
                   "value": ""
@@ -2539,7 +2539,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
                   "disabled": true,
                   "key": "status_code",
                   "value": ""
@@ -2650,7 +2650,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one",
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
                   "disabled": true,
                   "key": "status_code",
                   "value": ""
