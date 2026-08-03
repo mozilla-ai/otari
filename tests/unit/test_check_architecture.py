@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "check_architecture.py"
 
 
@@ -45,6 +47,41 @@ def test_service_importing_api_via_from_gateway_is_flagged(tmp_path: Path) -> No
 def test_service_relative_import_of_api_is_flagged(tmp_path: Path) -> None:
     file_path = _write(tmp_path, "gateway/services/thing.py", "from ..api import deps\n")
     assert check.check_file(file_path, tmp_path) == [(1, "gateway.api", "Forbidden import in Services")]
+
+
+def test_relative_import_above_src_root_is_ignored(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "gateway/services/thing.py", "from ... import something\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_nested_and_enclosing_layer_rules_both_apply(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A broader gateway/api rule declared first must neither shadow the nested
+    # routes rule nor stop applying to files under it, whatever the order.
+    broadened = {
+        "gateway/api": {"allowed": [], "forbidden": ["gateway.db"], "description": "API"},
+        **check.RULES,
+    }
+    monkeypatch.setattr(check, "RULES", broadened)
+    file_path = _write(
+        tmp_path,
+        "gateway/api/routes/users.py",
+        "from gateway.db import engine\nfrom sqlalchemy.orm import Session\n",
+    )
+    assert check.check_file(file_path, tmp_path) == [
+        (1, "gateway.db", "Forbidden import in API"),
+        (2, "sqlalchemy.orm", "Forbidden import in API routes"),
+    ]
+
+
+def test_violation_is_attributed_to_the_closest_layer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Both layers forbid it; the nested layer owns the message.
+    broadened = {
+        "gateway/api": {"allowed": [], "forbidden": ["sqlalchemy.orm"], "description": "API"},
+        **check.RULES,
+    }
+    monkeypatch.setattr(check, "RULES", broadened)
+    file_path = _write(tmp_path, "gateway/api/routes/users.py", "from sqlalchemy.orm import Session\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "sqlalchemy.orm", "Forbidden import in API routes")]
 
 
 def test_forbidden_prefix_requires_a_module_boundary(tmp_path: Path) -> None:
