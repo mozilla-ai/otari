@@ -240,6 +240,8 @@ def _build_event(
     # against 1.25x for a 5m one, so booking the base bucket keeps an imported estimate
     # from ever reading above true cost. Callers holding the real split use
     # POST /v1/usage/external-events, which takes cache_write_1h_tokens directly.
+    # No branch below reassigns this today: it stays a variable rather than a literal at
+    # the construction site as the seam for an emitter that does report the split.
     cache_write_1h = 0
     event_name = attrs.get("event.name")
     if event_name == "api_request":
