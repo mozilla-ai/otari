@@ -38,7 +38,10 @@ def _parse_snapshot(raw_snapshot: str) -> list[Provider]:
     The helper is private upstream, but the v2 feed needs its normalization and
     ``UpdatePrices.fetch`` cannot parse an already-persisted payload.
     """
-    return _providers_from_raw(json.loads(raw_snapshot))
+    try:
+        return _providers_from_raw(json.loads(raw_snapshot))
+    except Exception as exc:
+        raise ValueError("Invalid genai-prices snapshot") from exc
 
 
 @dataclass(frozen=True)
