@@ -341,6 +341,24 @@ describe("ActivityPage", () => {
     expect(select).toHaveValue("codex");
   });
 
+  it("surfaces a timeline summary failure instead of an empty strip", async () => {
+    // If the series query fails, "No activity in this range" would misread as a
+    // quiet gateway; the error banner must carry the failure.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({ detail: "summary exploded" }, 500);
+      }
+      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 1 });
+      if (url.includes("/v1/usage")) return jsonResponse([entry()]);
+      return jsonResponse([]);
+    });
+    renderPage(<ActivityPage />);
+    await screen.findByText("gpt-4o");
+
+    expect(await screen.findByText(/summary exploded/)).toBeInTheDocument();
+  });
+
   it("hides the source picker while only one source exists", async () => {
     // Most gateways only ever see their own traffic; a provenance select with a
     // single option is noise, so it only appears once a second source shows up.

@@ -807,7 +807,9 @@ export function ActivityPage() {
         description="A per-request log of what the gateway served: tokens, cost, latency, and failures. No request or response content is stored."
       />
 
-      <ErrorBanner error={usage.error ?? count.error} />
+      {/* The timeline's summary error is included so a failed series request
+          reads as a failure, not as an empty "No activity in this range" strip. */}
+      <ErrorBanner error={usage.error ?? count.error ?? contextSummary.error} />
 
       <div className="flex flex-col gap-3">
         <ActivityTimeline
