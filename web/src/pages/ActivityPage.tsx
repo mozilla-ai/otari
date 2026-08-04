@@ -316,6 +316,18 @@ function DetailField({
   );
 }
 
+// The pricing key a usage row bills against. A row stores the instance and the
+// bare model separately (`log_usage` is called with `provider=resolved.instance,
+// model=resolved.model`, and a gateway rejection logs the same pair), while
+// pricing is looked up as `instance:model` (`find_model_pricing`), so the key has
+// to be rebuilt from both: `entry.model` alone is prefix-less and would store a
+// price nothing ever reads. A row whose selector never resolved carries no
+// provider and its model is the raw selector, so that is used as-is.
+function pricingSelectorOf(entry: UsageEntry): string {
+  if (!entry.provider) return entry.model;
+  return entry.model.startsWith(`${entry.provider}:`) ? entry.model : `${entry.provider}:${entry.model}`;
+}
+
 // The detail panel for one request: the failure diagnostic plus the metadata
 // that does not fit the row. The dashboard is master-key admin-only, so the
 // stored `error_message` is shown verbatim; it is source-neutral by nature,
@@ -323,11 +335,14 @@ function DetailField({
 // under `require_pricing`) or the raw upstream provider error, so the heading
 // stays "Error" rather than blaming the provider for every failure.
 function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceModel: (model: string) => void }) {
-  // A row with no cost is either a model the gateway has no price for or a
-  // request that was refused before it could be billed. Both are the same fix,
-  // and the row already holds the exact selector the caller sent, which a
-  // provider without model discovery would never have put in the catalogue.
-  const uncosted = !entry.cost;
+  // A row with no cost (cost IS NULL, the same test the "Priced?" filter uses)
+  // is either a model the gateway has no price for or a request refused before
+  // it could be billed. Both are the same fix, and the row holds what the
+  // selector was, which a provider without model discovery would never have put
+  // in the catalogue. A $0 cost is a real price, so it is deliberately not
+  // treated as uncosted.
+  const uncosted = entry.cost === null;
+  const pricingKey = pricingSelectorOf(entry);
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
       {entry.error_message ? (
@@ -367,11 +382,11 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
       </div>
       {uncosted ? (
         <div className="flex flex-wrap items-center gap-3">
-          <Button size="sm" variant="outline" onPress={() => onPriceModel(entry.model)}>
+          <Button size="sm" variant="outline" onPress={() => onPriceModel(pricingKey)}>
             Price this model
           </Button>
           <span className="text-xs text-[var(--otari-muted)]">
-            This request carries no cost. Set a price for <code className="break-all">{entry.model}</code> so later
+            This request carries no cost. Set a price for <code className="break-all">{pricingKey}</code> so later
             requests are metered and count against budgets. Rows already logged keep the cost they were served with.
           </span>
         </div>

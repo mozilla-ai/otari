@@ -732,10 +732,15 @@ describe("ActivityPage", () => {
 
   it("prices the model from a request that carried no cost", async () => {
     const user = userEvent.setup();
-    const { calls } = mockApi({ rows: [entry({ id: "free", model: "vllm:mistral-small", cost: null })] });
+    // A row stores the instance and the bare model separately, so the pricing
+    // key has to be rebuilt from both: the model alone is prefix-less and the
+    // dialog would (rightly) refuse it.
+    const { calls } = mockApi({
+      rows: [entry({ id: "free", model: "mistral-small", provider: "vllm", cost: null })],
+    });
     renderPage(<ActivityPage />);
 
-    const row = (await screen.findByText("vllm:mistral-small")).closest("tr")!;
+    const row = (await screen.findByText("mistral-small")).closest("tr")!;
     await user.click(row);
     await user.click(screen.getByRole("button", { name: "Price this model" }));
 
@@ -760,14 +765,45 @@ describe("ActivityPage", () => {
 
   it("does not offer model pricing on a request that was costed", async () => {
     const user = userEvent.setup();
-    mockApi({ rows: [entry({ id: "paid", model: "openai:gpt-4o", cost: 0.5 })] });
+    mockApi({ rows: [entry({ id: "paid", model: "gpt-4o", provider: "openai", cost: 0.5 })] });
     renderPage(<ActivityPage />);
 
-    const row = (await screen.findByText("openai:gpt-4o")).closest("tr")!;
+    const row = (await screen.findByText("gpt-4o")).closest("tr")!;
     await user.click(row);
 
     expect(screen.getByText("Request detail")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Price this model" })).not.toBeInTheDocument();
+  });
+
+  it("treats a $0 cost as priced, not as a model needing a price", async () => {
+    // cost=0 is a real price (a model priced at zero), which is why the backend
+    // marks a row unpriced on cost IS NULL rather than on falsiness.
+    const user = userEvent.setup();
+    mockApi({ rows: [entry({ id: "free-model", model: "mistral-small", provider: "vllm", cost: 0 })] });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("mistral-small")).closest("tr")!;
+    await user.click(row);
+
+    expect(screen.getByText("Request detail")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Price this model" })).not.toBeInTheDocument();
+  });
+
+  it("prices a selector that never resolved from the row's model alone", async () => {
+    // A selector the gateway could not resolve is logged with no provider and
+    // the raw selector as the model, so it is already the key to price.
+    const user = userEvent.setup();
+    mockApi({
+      rows: [entry({ id: "unresolved", model: "vllm:mistral-small", provider: null, cost: null })],
+    });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("vllm:mistral-small")).closest("tr")!;
+    await user.click(row);
+    await user.click(screen.getByRole("button", { name: "Price this model" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByLabelText("Model key")).toHaveValue("vllm:mistral-small");
   });
 
   it("keeps the filter pickers behind an 'Add filter' toggle", async () => {
