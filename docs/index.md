@@ -45,7 +45,8 @@ Calling the gateway from your own code.
 - [Files](files.md): file uploads and document understanding for local models.
 - [Guardrails](guardrails.md): request-level checks like prompt-injection detection.
 - [Use with Claude Code](use-with-claude-code.md): point the Claude Code CLI at Otari.
-- [Use with Codex](use-with-codex.md): point the Codex CLI at Otari.
+- [Use with Codex CLI](use-with-codex-cli.md): route the Codex CLI through Otari over the Responses API.
+- [Use with Codex](use-with-codex.md): import Codex usage into Otari without routing through it.
 - [Use with opencode](use-with-opencode.md): point the opencode CLI at Otari.
 - [Use with a ChatGPT subscription](chatgpt-subscription.md): route Otari at ChatGPT Plus/Pro models through a local Codex-OAuth proxy.
 - [Importing external usage](external-usage.md): bring subscription-backed usage (Claude Code, Codex, any OTLP app) into your analytics.

@@ -17,7 +17,8 @@ and budget-exempt rules; this page is just the Codex setup.
 > telemetry to it, every call lands twice: once as `source = gateway` (enforced,
 > counts toward budget) and once as `source = codex` (exempt observability). The two
 > rows are not correlated, so budgets and `spend` stay correct, but cost analytics
-> count the same traffic twice. Pick one path per session.
+> count the same traffic twice. Pick one path per session. To route Codex through
+> Otari instead of exporting telemetry, see [Use with Codex CLI](use-with-codex-cli.md).
 
 ## 1. Get a budget-exempt import key (admin, once)
 
@@ -74,5 +75,6 @@ to scope it to your importer key.
 ## See also
 
 - [Importing external usage](external-usage.md) for the ingestion contract, pricing, and budget behavior
+- [Use with Codex CLI](use-with-codex-cli.md) for routing Codex through Otari over the Responses API
 - [Use with Claude Code](use-with-claude-code.md) for the equivalent Claude Code setup
 - [API reference](api-reference.md)

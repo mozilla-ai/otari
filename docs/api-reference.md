@@ -67,6 +67,8 @@ For a full client setup example, see [Use with Claude Code](use-with-claude-code
 |--------|------|-------------|------|
 | `POST` | `/v1/responses` | OpenAI Responses API-compatible endpoint. Supports streaming. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 
+Not every provider implements the Responses API; one that does not is rejected with `400 Provider '<name>' does not support the Responses API`. For a full client setup example, see [Use with Codex CLI](use-with-codex-cli.md).
+
 ## Standalone-only endpoints
 
 ### Embeddings
