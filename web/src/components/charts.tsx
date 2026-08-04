@@ -30,6 +30,17 @@ export interface ChartPoint {
   value: number;
 }
 
+// A series identity swatch. An SVG fill (which accepts var(--otari-*) tokens)
+// rather than an inline background-color style, per the dashboard's no-inline-
+// styles convention.
+function SeriesMarker({ color }: { color: string }) {
+  return (
+    <svg aria-hidden viewBox="0 0 8 8" className="h-2 w-2 shrink-0">
+      <rect width="8" height="8" rx="1.5" fill={color} />
+    </svg>
+  );
+}
+
 // Tooltip body. recharts clones this element and injects `active`, `payload`,
 // and `label` at render time, so only the format props are passed by the
 // caller. For a single series it shows one value row; for a stack it shows one
@@ -67,9 +78,7 @@ export function ChartTooltip({
         {visible.map((entry, index) => (
           <div key={index} className="flex items-center justify-between gap-4">
             <span className="flex items-center gap-1.5 text-[var(--otari-muted)]">
-              {rows.length > 1 ? (
-                <span aria-hidden className="h-2 w-2 rounded-sm" style={{ backgroundColor: entry.color }} />
-              ) : null}
+              {rows.length > 1 && entry.color ? <SeriesMarker color={entry.color} /> : null}
               {entry.name}
             </span>
             <span className="font-medium tabular-nums text-[var(--otari-ink)]">
@@ -97,7 +106,7 @@ export function ChartLegend({ series }: { series: SeriesDef[] }) {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       {series.map((s) => (
         <span key={s.key} className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
-          <span aria-hidden className="h-2 w-2 rounded-sm" style={{ backgroundColor: s.color }} />
+          <SeriesMarker color={s.color} />
           {s.label}
         </span>
       ))}
