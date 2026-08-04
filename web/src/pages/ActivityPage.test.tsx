@@ -28,6 +28,7 @@ function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
     cost: 0.0123,
     status: "success",
     error_message: null,
+    status_code: null,
     latency_ms: 842,
     source: "gateway",
     source_label: null,
@@ -242,19 +243,35 @@ describe("ActivityPage", () => {
     expect(within(batch).getByText("—")).toBeInTheDocument();
   });
 
-  it("opens an error row's detail without exposing provider diagnostics", async () => {
+  it("opens an error row's detail and shows the diagnostic with its status code", async () => {
     const user = userEvent.setup();
-    mockApi({ rows: [entry({ status: "error", error_message: "provider exploded: quota exceeded" })] });
+    mockApi({
+      rows: [entry({ status: "error", error_message: "provider exploded: quota exceeded", status_code: 502 })],
+    });
     renderPage(<ActivityPage />);
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!;
     expect(within(row).getByText("error")).toBeInTheDocument();
 
     await user.click(row);
-    // Source-neutral: gateway-side rejections land in this list too, so the
-    // summary must not blame the provider for every failure.
-    expect(screen.getByText("This request failed. Inspect gateway logs for details.")).toBeInTheDocument();
-    expect(screen.queryByText("provider exploded: quota exceeded")).not.toBeInTheDocument();
+    // The dashboard is admin-only, so the stored error text is shown verbatim,
+    // with the classifying HTTP status alongside the "Error" heading.
+    expect(screen.getByText("provider exploded: quota exceeded")).toBeInTheDocument();
+    expect(screen.getByText("Error (502)")).toBeInTheDocument();
+  });
+
+  it("omits the status code from the error heading when none was recorded", async () => {
+    const user = userEvent.setup();
+    mockApi({ rows: [entry({ status: "error", error_message: "stream completed without usage data", status_code: null })] });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("gpt-4o")).closest("tr")!;
+    await user.click(row);
+    expect(screen.getByText("stream completed without usage data")).toBeInTheDocument();
+    // Bare heading, no "(code)" suffix; scope to a span so the status filter's
+    // <option>Error</option> does not match.
+    expect(screen.getByText("Error", { selector: "span" })).toBeInTheDocument();
+    expect(screen.queryByText(/Error \(/)).not.toBeInTheDocument();
   });
 
   it("copies a request id out of the detail panel", async () => {

@@ -315,19 +315,22 @@ function DetailField({
   );
 }
 
-// The detail panel for one request: a safe error summary plus the metadata that
-// does not fit the row. Provider diagnostics stay server-side. The summary is
-// deliberately source-neutral: failures here include requests the gateway itself
-// refused (e.g. a model with no pricing under `require_pricing`), so it must not
-// attribute every one of them to the provider.
+// The detail panel for one request: the failure diagnostic plus the metadata
+// that does not fit the row. The dashboard is master-key admin-only, so the
+// stored `error_message` is shown verbatim; it is source-neutral by nature,
+// carrying either a fixed gateway rejection string (e.g. a model with no pricing
+// under `require_pricing`) or the raw upstream provider error, so the heading
+// stays "Error" rather than blaming the provider for every failure.
 function RequestDetail({ entry }: { entry: UsageEntry }) {
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
       {entry.error_message ? (
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">Error</span>
+          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+            Error{entry.status_code !== null ? ` (${entry.status_code})` : ""}
+          </span>
           <pre className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-red-50 p-3 text-xs whitespace-pre-wrap break-all text-red-700">
-            This request failed. Inspect gateway logs for details.
+            {entry.error_message}
           </pre>
         </div>
       ) : null}

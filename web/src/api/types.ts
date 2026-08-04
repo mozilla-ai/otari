@@ -409,6 +409,10 @@ export interface UsageEntry {
   cost: number | null;
   status: string;
   error_message: string | null;
+  // HTTP status that classified the failure (402 no-pricing/over-budget, 403
+  // forbidden user, 400 bad request, 502 upstream, ...); null when nothing was
+  // rejected over HTTP. Only meaningful on error rows.
+  status_code: number | null;
   // Total server-side request duration in ms; null for historical rows and for
   // write paths with no synchronous duration (e.g. batch jobs).
   latency_ms: number | null;

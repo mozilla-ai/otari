@@ -63,3 +63,5 @@ provider and records usage and cost for it the same way as any other client.
 
 - [Use with Claude Code](use-with-claude-code.md): drive the Claude Code CLI
   through the same Otari via the Anthropic Messages API.
+- [Use with Codex](use-with-codex.md): drive the Codex CLI through the
+  same Otari via the OpenAI Responses API.
