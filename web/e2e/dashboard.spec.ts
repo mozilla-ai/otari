@@ -75,7 +75,9 @@ test.describe("dashboard core flows", () => {
     // header action, not the empty-state button. It is removed when the form opens,
     // leaving the form's own "Create user" as the only match.
     await page.getByRole("button", { name: "Create user" }).click();
-    await page.getByLabel("User ID").fill("alice@example.com");
+    // Role-scoped: the rows behind this form carry "Copy user id" controls, whose
+    // accessible names also contain "user id".
+    await page.getByRole("textbox", { name: /User ID/ }).fill("alice@example.com");
     // The budget created by the prior test is the only non-default option.
     await page.getByLabel("Budget").selectOption({ index: 1 });
     await page.getByRole("button", { name: "Create user" }).click();
@@ -111,7 +113,9 @@ test.describe("dashboard core flows", () => {
     await login(page);
     await nav(page).getByRole("link", { name: "Aliases" }).click();
     await page.getByRole("button", { name: "New alias" }).click();
-    await page.getByLabel("Alias name").fill("fast");
+    // Role-scoped for the same reason as the user form: alias rows carry a
+    // "Copy alias name" control.
+    await page.getByRole("textbox", { name: /Alias name/ }).fill("fast");
     // Target is a model combobox (allows custom values); type the selector, then
     // close the popover so it does not aria-hide the submit button.
     await page.getByRole("combobox", { name: /Target/ }).fill("openai:gpt-4o");

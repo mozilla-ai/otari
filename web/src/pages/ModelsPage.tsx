@@ -17,7 +17,15 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
 import { TablePagination } from "@/components/TablePagination";
-import { ConfirmButton, ErrorBanner, errorMessage, FilterSelect, InfoBanner, PageHeader } from "@/components/ui";
+import {
+  ConfirmButton,
+  CopyableValue,
+  ErrorBanner,
+  errorMessage,
+  FilterSelect,
+  InfoBanner,
+  PageHeader,
+} from "@/components/ui";
 import { formatContext, formatCost, formatReleaseDate } from "@/lib/format";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
@@ -571,7 +579,10 @@ function ModelDetailPanel({
               ) : null}
             </div>
             <p className="mt-1 text-xs break-all text-[var(--otari-muted)]">
-              Selector: <code>{row.key}</code>
+              Selector:{" "}
+              <CopyableValue value={row.key} label="model id">
+                <code>{row.key}</code>
+              </CopyableValue>
             </p>
             {metadata?.family ? <p className="text-xs text-[var(--otari-muted)]">{metadata.family}</p> : null}
           </div>
@@ -904,11 +915,13 @@ function ModelTable({
       header: "Model",
       isRowHeader: true,
       allowsSorting: true,
+      // The copy yields the provider-qualified key, which is what a caller sends
+      // as `model`; the visible text drops the provider prefix.
       cell: (row) => (
-        <span className="font-medium break-all">
+        <CopyableValue value={row.key} label="model id" className="font-medium break-all">
           {row.model}
           <span className="sr-only">{row.key}</span>
-        </span>
+        </CopyableValue>
       ),
     },
     { id: "provider", header: "Provider", cell: (row) => <span className="text-[var(--otari-muted)]">{row.provider}</span> },

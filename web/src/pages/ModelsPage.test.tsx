@@ -261,6 +261,21 @@ describe("ModelsPage", () => {
 
   // -- model list ----------------------------------------------------------
 
+  it("copies the provider-qualified model id, which the visible name omits", async () => {
+    // The Model column drops the provider prefix, and a selectable row cannot be
+    // highlighted, so the id a caller sends as `model` is otherwise unreachable
+    // from this table (#478).
+    mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    await user.click(within(tableRow("openai:gpt-4o")).getByRole("button", { name: "Copy model id" }));
+
+    expect(await navigator.clipboard.readText()).toBe("openai:gpt-4o");
+  });
+
   it("does not show a context column in the model table", async () => {
     mockApi();
 

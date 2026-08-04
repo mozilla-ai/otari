@@ -118,6 +118,18 @@ describe("UsersPage", () => {
     expect(screen.queryByRole("grid", { name: "Users" })).not.toBeInTheDocument();
   });
 
+  it("copies a user id, the value callers send and every filter takes", async () => {
+    mockApi({ users: [user({ user_id: "alice@example.com" })] });
+    // `user` is the row fixture in this file, so the actor is `user_`.
+    const user_ = userEvent.setup();
+    renderPage(<UsersPage />);
+
+    const row = (await screen.findByText("alice@example.com")).closest("tr")!;
+    await user_.click(within(row).getByRole("button", { name: "Copy user id" }));
+
+    expect(await navigator.clipboard.readText()).toBe("alice@example.com");
+  });
+
   it("lists a user with status, assigned budget name, spend, and access", async () => {
     mockApi({
       users: [user({ user_id: "alice", budget_id: "bud-1111-2222", spend: 12.5, allowed_models: ["openai:*"] })],

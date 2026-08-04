@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import type { Selection, SortDescriptor } from "react-aria-components";
@@ -55,6 +55,56 @@ describe("DataTable", () => {
     render(<DataTable {...base({ onRowAction })} />);
     await user.click(screen.getByRole("row", { name: /Bravo/ }));
     expect(onRowAction).toHaveBeenCalledWith("b");
+  });
+
+  // The press sequence is dispatched raw rather than through userEvent.click,
+  // which collapses the document selection on pointer down (as a browser does
+  // when a click *starts* a new selection) and so cannot model the click that
+  // *ends* a drag, which is the case these tests are about.
+  const pressRaw = (element: Element) => {
+    fireEvent.pointerDown(element, { pointerId: 1, pointerType: "mouse", button: 0 });
+    fireEvent.pointerUp(element, { pointerId: 1, pointerType: "mouse", button: 0 });
+    fireEvent.click(element);
+  };
+
+  const selectContentsOf = (element: Element) => {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    document.getSelection()?.removeAllRanges();
+    document.getSelection()?.addRange(range);
+  };
+
+  it("does not drill in on the click that finished a text selection in a row", async () => {
+    // Cells are deliberately selectable (globals.css lets an id be highlighted
+    // by hand), so the click that ends a highlight must not also open the
+    // detail panel and throw the selection away.
+    const onRowAction = vi.fn();
+    render(<DataTable {...base({ onRowAction })} />);
+
+    selectContentsOf(screen.getByText("Bravo"));
+    pressRaw(screen.getByText("Bravo"));
+    expect(onRowAction).not.toHaveBeenCalled();
+
+    // A plain click with nothing selected still activates the row.
+    document.getSelection()?.removeAllRanges();
+    pressRaw(screen.getByText("Charlie"));
+    expect(onRowAction).toHaveBeenCalledWith("c");
+  });
+
+  it("still drills in when the text selection is outside the table", () => {
+    const onRowAction = vi.fn();
+    render(
+      <>
+        <p>unrelated prose</p>
+        <DataTable {...base({ onRowAction })} />
+      </>,
+    );
+
+    selectContentsOf(screen.getByText("unrelated prose"));
+    pressRaw(screen.getByText("Bravo"));
+
+    expect(onRowAction).toHaveBeenCalledWith("b");
+    document.getSelection()?.removeAllRanges();
   });
 
   it("selects rows via checkboxes and reports the selected keys", async () => {

@@ -171,15 +171,33 @@ gateway.
   endpoint, provider, or source. Clicking any row opens the Activity log scoped
   to that group, so "spend went up" leads straight to the requests behind it.
 
+### Copying ids
+
+Identifiers you have to paste somewhere else (a model id, an alias target, a
+user id, a budget id, a request id) can be taken two ways: highlight the text
+with the mouse as usual, or press the copy control beside it, which confirms with
+a brief "Copied!" over the icon. The copy is the reliable one where the displayed
+text is not the whole value: the Models table shows a name with the provider
+prefix stripped, and the Budgets table shows only the first characters of a
+budget id.
+
+Copying works over plain HTTP, which is how a self-hosted dashboard is usually
+reached. If a browser blocks the clipboard outright, the control says so rather
+than reporting a copy that did not happen, and the text is still selectable by
+hand.
+
 ### Catalog
 
 - **Providers**: add, edit, test, and delete provider credentials at runtime
   (standalone only). Stored keys are encrypted with `OTARI_SECRET_KEY`; config
   providers appear read-only. See the first-run walkthrough above.
 - **Models**: browse the model catalogue and set per-model pricing, with specs
-  and modality metadata where available (from models.dev).
+  and modality metadata where available (from models.dev). The copy control next
+  to a model puts its full `provider:model` id on your clipboard, which is what
+  a caller sends as `model`; the name in the table drops the provider prefix.
 - **Aliases**: friendly names that resolve to a real provider model. Callers
-  use the alias; the underlying model stays private to the gateway. "Applies to"
+  use the alias; the underlying model stays private to the gateway. The copy
+  controls in a row copy the alias name and its target id. "Applies to"
   is the scope: an alias for every caller, or one scoped to a single user, which
   lets the same name resolve to a different model per person and takes precedence
   over a global alias of that name. See [Model aliases](models.md#model-aliases).

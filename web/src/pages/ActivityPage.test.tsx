@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { UsageEntry } from "@/api/types";
-import { ActivityPage, copyToClipboard } from "@/pages/ActivityPage";
+import { ActivityPage } from "@/pages/ActivityPage";
 
 function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
   return {
@@ -257,6 +257,19 @@ describe("ActivityPage", () => {
     expect(screen.queryByText("provider exploded: quota exceeded")).not.toBeInTheDocument();
   });
 
+  it("copies a request id out of the detail panel", async () => {
+    // The id an operator pastes into a log search or a support thread, where a
+    // mistyped character makes it useless.
+    const user = userEvent.setup();
+    mockApi({ rows: [entry({ id: "3ba12b77-8841-42a5-b776-a0a1aacb347f" })] });
+    renderPage(<ActivityPage />);
+
+    await user.click((await screen.findByText("gpt-4o")).closest("tr")!);
+    await user.click(screen.getByRole("button", { name: "Copy request id" }));
+
+    expect(await navigator.clipboard.readText()).toBe("3ba12b77-8841-42a5-b776-a0a1aacb347f");
+  });
+
   it("opens the detail inline directly under the clicked row, and Close collapses it", async () => {
     // Regression: the shared-table migration rendered the detail below the
     // whole table, so on a full page a row click looked like it did nothing.
@@ -273,20 +286,6 @@ describe("ActivityPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Close" }));
     expect(screen.queryByText("Request detail")).not.toBeInTheDocument();
-  });
-
-  it("reports copying only after the clipboard write succeeds", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    const copied = await copyToClipboard("provider exploded", { writeText });
-    expect(writeText).toHaveBeenCalledWith("provider exploded");
-    expect(copied).toBe(true);
-  });
-
-  it("does not report success when the clipboard write fails", async () => {
-    const writeText = vi.fn().mockRejectedValue(new Error("clipboard denied"));
-    const copied = await copyToClipboard("provider exploded", { writeText });
-    expect(writeText).toHaveBeenCalledWith("provider exploded");
-    expect(copied).toBe(false);
   });
 
   it("sends the status filter to the API", async () => {

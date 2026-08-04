@@ -93,6 +93,26 @@
   background-color: var(--otari-bg);
 }
 
+/* Let the text in a row be highlighted with the mouse (issue #478). Two things
+   block it out of the box: the row carries `user-select: none` (HeroUI's styling
+   for a selectable row), and react-aria's usePress sets the same inline on the row
+   for the duration of a press, since useSelectableItem never passes
+   `allowTextSelectionOnPress`. Because `user-select: auto` on a cell resolves to
+   its parent's behavior, the value inside inherits "not selectable" and a drag
+   across an id selects nothing at all. `!important` is what outranks the inline
+   style, so it is deliberate here. Scoped to the body cells, leaving the header's
+   sort buttons and the selection checkboxes untouched.
+
+   CSS alone is not enough: the press also toggles the row's selection on pointer
+   down, and that re-render discards the browser's nascent selection. See
+   CopyableValue (which keeps the press off the value) and DataTable (which owns
+   pointer events on data cells where rows have a drill-in action). */
+.otari-table .table__row,
+.otari-table .table__row .table__cell {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
 /* Inline row detail (DataTable detailKey/renderDetail). The host <tr> lives
    outside react-aria's collection (see DataTable.tsx), so it is styled here
    rather than through the table variant. The reveal animates the CSS grid

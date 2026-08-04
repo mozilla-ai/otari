@@ -20,7 +20,7 @@ import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { FilterChips, type FilterChip } from "@/components/FilterChips";
 import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
 import { PAGE_SIZE_OPTIONS, TablePagination } from "@/components/TablePagination";
-import { ErrorBanner, FilterComboBox, FilterSelect, PageHeader, RefreshButton } from "@/components/ui";
+import { CopyableValue, ErrorBanner, FilterComboBox, FilterSelect, PageHeader, RefreshButton } from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 import {
   ACTIVITY_DEFAULT_KEY,
@@ -285,24 +285,28 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
   );
 }
 
-export async function copyToClipboard(
-  text: string,
-  clipboard: Pick<Clipboard, "writeText"> | undefined = navigator.clipboard,
-): Promise<boolean> {
-  if (!clipboard) return false;
-  try {
-    await clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function DetailField({ label, children }: { label: string; children: ReactNode }) {
+// `copyValue` adds a copy control for the fields that hold an opaque identifier
+// (a request id, an api key id): they are what an operator pastes into a log
+// search or a support thread, and a mistyped character makes them useless.
+function DetailField({
+  label,
+  copyValue,
+  children,
+}: {
+  label: string;
+  copyValue?: string | null;
+  children: ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">{label}</span>
-      <span className="text-sm text-[var(--otari-ink)] break-all">{children}</span>
+      {copyValue ? (
+        <CopyableValue value={copyValue} label={label.toLowerCase()} className="text-sm text-[var(--otari-ink)] break-all">
+          {children}
+        </CopyableValue>
+      ) : (
+        <span className="text-sm text-[var(--otari-ink)] break-all">{children}</span>
+      )}
     </div>
   );
 }
@@ -328,8 +332,8 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
         <DetailField label="Endpoint">{entry.endpoint}</DetailField>
         <DetailField label="Source">{sourceLabel(entry.source)}</DetailField>
         {entry.source_label ? <DetailField label="Session">{entry.source_label}</DetailField> : null}
-        <DetailField label="User">{entry.user_id ?? "—"}</DetailField>
-        <DetailField label="API key">{entry.api_key_id ?? "—"}</DetailField>
+        <DetailField label="User" copyValue={entry.user_id}>{entry.user_id ?? "—"}</DetailField>
+        <DetailField label="API key" copyValue={entry.api_key_id}>{entry.api_key_id ?? "—"}</DetailField>
         <DetailField label="Prompt tokens">{formatTokens(entry.prompt_tokens)}</DetailField>
         <DetailField label="Completion tokens">{formatTokens(entry.completion_tokens)}</DetailField>
         <DetailField label="Total tokens">{formatTokens(entry.total_tokens)}</DetailField>
@@ -346,7 +350,7 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
         <DetailField label="Cache write tokens">{formatTokens(entry.cache_write_tokens)}</DetailField>
         <DetailField label="1h cache writes">{formatTokens(entry.cache_write_1h_tokens ?? null)}</DetailField>
         <DetailField label="Total time">{formatLatency(entry.latency_ms)}</DetailField>
-        <DetailField label="Request ID">{entry.id}</DetailField>
+        <DetailField label="Request ID" copyValue={entry.id}>{entry.id}</DetailField>
       </div>
       {entry.pricing_breakdown?.length ? (
         <div className="flex flex-col gap-2">

@@ -15,7 +15,7 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { Field } from "@/components/Field";
-import { EmptyState, ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
+import { CopyableValue, EmptyState, ErrorBanner, InfoBanner, PageHeader } from "@/components/ui";
 import { UserMultiSelect } from "@/components/UserMultiSelect";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
@@ -446,9 +446,13 @@ export function BudgetsPage() {
           <span className="font-medium text-[var(--otari-ink)]">
             {b.name ?? <span className="text-[var(--otari-muted)]">(unnamed)</span>}
           </span>
-          <code className="text-[11px] text-[var(--otari-muted)]" title={b.budget_id}>
-            {shortId(b.budget_id)}
-          </code>
+          {/* Only a prefix is rendered, so the id an API call needs is not on the
+              page in full; the copy hands over the whole thing. */}
+          <CopyableValue value={b.budget_id} label="budget id">
+            <code className="text-[11px] text-[var(--otari-muted)]" title={b.budget_id}>
+              {shortId(b.budget_id)}
+            </code>
+          </CopyableValue>
         </div>
       ),
     },

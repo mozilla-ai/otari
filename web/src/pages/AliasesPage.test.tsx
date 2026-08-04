@@ -90,6 +90,22 @@ describe("AliasesPage", () => {
     expect(within(storedRow).getByRole("button", { name: "Delete" })).toBeInTheDocument();
   });
 
+  it("copies an alias name and its target model id out of the row", async () => {
+    // Table rows own click-drag for selection, so neither id can be highlighted
+    // by hand; the per-cell copy control is the only way to get one out (#478).
+    mockApi([stored("smart", "anthropic:claude-opus-4")]);
+    const user = userEvent.setup();
+    renderPage(<AliasesPage />);
+
+    const row = (await screen.findByText("smart")).closest("tr")!;
+
+    await user.click(within(row).getByRole("button", { name: "Copy target model id" }));
+    expect(await navigator.clipboard.readText()).toBe("anthropic:claude-opus-4");
+
+    await user.click(within(row).getByRole("button", { name: "Copy alias name" }));
+    expect(await navigator.clipboard.readText()).toBe("smart");
+  });
+
   it("creates a stored alias", async () => {
     const fetchMock = mockApi([]);
     const user = userEvent.setup();

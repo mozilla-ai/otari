@@ -10,7 +10,7 @@ import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { Field } from "@/components/Field";
 import { ModelComboBox } from "@/components/ModelComboBox";
 import { UserComboBox } from "@/components/UserComboBox";
-import { ConfirmButton, ErrorBanner, PageHeader } from "@/components/ui";
+import { ConfirmButton, CopyableValue, ErrorBanner, PageHeader } from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // Stable row-key getter so DataTable's per-row cache holds across re-renders.
@@ -249,15 +249,25 @@ export function AliasesPage() {
       id: "alias",
       header: "Alias",
       isRowHeader: true,
-      cell: (a) => <span className="font-medium break-all text-[var(--otari-ink)]">{a.name}</span>,
+      cell: (a) => (
+        <CopyableValue value={a.name} label="alias name" className="font-medium break-all text-[var(--otari-ink)]" />
+      ),
     },
-    { id: "target", header: "Target", cell: (a) => <span className="break-all text-[var(--otari-muted)]">{a.target}</span> },
+    {
+      id: "target",
+      header: "Target",
+      cell: (a) => (
+        <CopyableValue value={a.target} label="target model id" className="break-all text-[var(--otari-muted)]" />
+      ),
+    },
     {
       id: "scope",
       header: "Applies to",
       cell: (a) =>
         a.user_id ? (
-          <code className="break-all text-xs text-[var(--otari-ink)]">{a.user_id}</code>
+          <CopyableValue value={a.user_id} label="user id">
+            <code className="break-all text-xs text-[var(--otari-ink)]">{a.user_id}</code>
+          </CopyableValue>
         ) : (
           <span className="text-xs text-[var(--otari-muted)]">Every caller</span>
         ),

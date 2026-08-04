@@ -1,9 +1,10 @@
-import { Button, Card, ComboBox, Input, Label, ListBox, ListBoxItem, Spinner } from "@heroui/react";
-import { useEffect, useId, useState } from "react";
+import { Button, Card, ComboBox, Input, Label, ListBox, ListBoxItem, Spinner, Tooltip } from "@heroui/react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
+import { copyToClipboard } from "@/lib/clipboard";
 import { formatPct, formatRelative } from "@/lib/format";
 
 // A tile's attention status. Colors mirror the banner precedent (ErrorBanner
@@ -207,6 +208,96 @@ export function RefreshButton({
         </svg>
       </Button>
     </span>
+  );
+}
+
+// An identifier the operator needs verbatim (a model id, an alias target, a
+// request id), rendered so it can be taken either way: highlighted with the mouse
+// like ordinary text, or copied in one press.
+//
+// Highlighting is what needs the help. Inside a react-aria table the row is a
+// press target, and a press on it both toggles the row's selection and sets
+// `user-select: none` on the row for the duration; the re-render that selection
+// causes lands mid-drag and discards the selection the browser had started, so
+// dragging across an id used to select nothing at all (issue #478). Keeping the
+// press from starting on the value itself is the fix: the pointer sequence stays
+// with the browser, which selects text with it. `select-text` then beats the
+// inherited `none` from any press elsewhere in the row (an own declaration
+// outranks inheritance, so no `!important` is needed). The rest of the row keeps
+// its behavior: DataTable still opens a drill-in for a plain click, including one
+// on this value, and skips it for the click that ends a drag.
+export function CopyableValue({
+  value,
+  label,
+  className,
+  children,
+}: {
+  /** The exact text a copy yields, which is not always what is rendered. */
+  value: string;
+  label: string;
+  className?: string;
+  /** Defaults to `value`; pass children when the display form differs. */
+  children?: ReactNode;
+}) {
+  const keepPressFromRow = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        // Focusable, but not tabbable: pressing here focuses the value itself
+        // instead of the react-aria table cell, whose focus bookkeeping re-renders
+        // the row and (again) discards a drag that has only just begun. Without
+        // this, the first drag in a freshly loaded table selected nothing and only
+        // subsequent ones worked.
+        tabIndex={-1}
+        className={`select-text outline-none ${className ?? ""}`}
+        onPointerDown={keepPressFromRow}
+        onMouseDown={keepPressFromRow}
+      >
+        {children ?? value}
+      </span>
+      <CopyButton value={value} label={label} />
+    </span>
+  );
+}
+
+// A compact copy control for an identifier an operator has to paste elsewhere (a
+// model id, an alias target). Table rows own click-drag for selection, so the
+// text in a cell cannot be highlighted by hand (issue #478); this is how it gets
+// out. copyToClipboard covers the plain-HTTP origins this dashboard is routinely
+// served from, where the async Clipboard API does not exist; if even the legacy
+// path fails, this says so rather than claiming a copy it did not make (the same
+// rule as the Keys page's CopyField).
+// The acknowledgement is a tooltip over the icon that was pressed, so the answer
+// appears where the operator is looking in a column of identical buttons. It is
+// controlled (never hover-opened) because it reports an event, not a hint, and it
+// renders in an overlay so it is not clipped by the table's scroll container and
+// does not reflow the row it reports on.
+export function CopyButton({ value, label }: { value: string; label: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(resetTimer.current), []);
+
+  const copy = async () => {
+    const copied = await copyToClipboard(value);
+    setState(copied ? "copied" : "failed");
+    clearTimeout(resetTimer.current);
+    // A failure has something to read and act on, so it lingers longer.
+    resetTimer.current = setTimeout(() => setState("idle"), copied ? 1_500 : 5_000);
+  };
+
+  return (
+    <Tooltip.Root isOpen={state !== "idle"}>
+      <Button size="sm" variant="ghost" isIconOnly aria-label={`Copy ${label}`} onPress={copy}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2" />
+          <path d="M5 15V5a2 2 0 0 1 2-2h8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </Button>
+      <Tooltip.Content placement="top" showArrow>
+        {state === "failed" ? "Copy blocked, press Ctrl/Cmd-C" : "Copied!"}
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 

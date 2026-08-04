@@ -132,6 +132,17 @@ export interface DataTableProps<Row> {
 
 const SELECTION_COLUMN_WIDTH = 44;
 
+// Whether the document's text selection is a real (non-empty) one anchored inside
+// `root`. Used to tell "the operator was highlighting an id" from "the operator
+// clicked the row": a plain click leaves a collapsed selection, and a selection
+// made elsewhere on the page is not anchored here.
+function hasTextSelectionIn(root: HTMLElement | null): boolean {
+  if (!root) return false;
+  const selection = document.getSelection();
+  if (!selection || selection.isCollapsed || selection.toString().trim() === "") return false;
+  return selection.anchorNode !== null && root.contains(selection.anchorNode);
+}
+
 // HeroUI's Table.Root is itself a card. Rather than wrap it in a second card
 // (which left two mismatched radii and an inset gap), the `.otari-table` class
 // owns the whole container's styling in globals.css: our surface + border +
@@ -225,6 +236,11 @@ export function DataTable<Row extends object>({
   const fireRowAction = useCallback(
     (key: string) => {
       if (!onRowAction) return;
+      // A click that ended a text drag inside the table is a selection, not an
+      // activation. Cells are selectable by design (see globals.css), and
+      // drilling in mid-highlight both loses the selection and moves the page
+      // under the operator, so the action is skipped for that click only.
+      if (hasTextSelectionIn(rootRef.current)) return;
       if (renderDetail && key !== detailKey) {
         const target = rootRef.current?.querySelector(`tbody tr[data-key="${CSS.escape(key)}"]`);
         target?.classList.add("otari-detail-opening");
@@ -235,26 +251,39 @@ export function DataTable<Row extends object>({
     [onRowAction, renderDetail, detailKey],
   );
 
-  // react-aria's toggle selection behavior repurposes row clicks once the
-  // selection is non-empty: they extend the selection instead of firing the
-  // row action (useSelectableItem's hasPrimaryAction requires an empty
-  // selection manager). For these tables the checkbox owns selection and a row
-  // click must keep opening the drill-in (the Gmail convention), so while a
-  // selection exists, clicks on ordinary data cells are intercepted before the
-  // row's press handler sees them and routed to the row action instead.
-  // Checkboxes, buttons, links, inputs, and the detail panel pass through.
-  const interceptedRowKey = useCallback(
+  // The row key for an event on an ordinary data cell, or null when the event
+  // belongs to something else: checkboxes, buttons, links, inputs, and the detail
+  // panel pass through untouched. Only meaningful for tables with a row action.
+  const dataCellRowKey = useCallback(
     (e: { target: EventTarget | null }): string | null => {
       if (!onRowAction) return null;
-      const hasSelection = selectedKeys === "all" || (selectedKeys instanceof Set && selectedKeys.size > 0);
-      if (!hasSelection) return null;
       const target = e.target instanceof Element ? e.target : null;
       if (!target) return null;
       if (target.closest("label[slot=selection], button, a, input, select, textarea, .otari-detail-row")) return null;
       return target.closest("tbody tr[data-key]")?.getAttribute("data-key") ?? null;
     },
-    [onRowAction, selectedKeys],
+    [onRowAction],
   );
+
+  // Where rows have a drill-in action, this component owns the pointer sequence on
+  // data cells instead of react-aria's row press, for three reasons:
+  //
+  //   1. Its toggle selection behavior repurposes row clicks once the selection is
+  //      non-empty: they extend the selection instead of firing the action
+  //      (useSelectableItem's hasPrimaryAction requires an empty selection
+  //      manager). For these tables the checkbox owns selection and a row click
+  //      keeps opening the drill-in (the Gmail convention).
+  //   2. The press toggles selection on pointer *down*, and the re-render that
+  //      causes lands mid-drag and discards a nascent text selection, so no id in
+  //      a row could be highlighted by hand (issue #478).
+  //   3. Taking pointer down and the click together keeps the action firing
+  //      exactly once: react-aria never sees a press to fire it a second time.
+  //
+  // Checkboxes, buttons, links, inputs, and the detail panel pass through, so
+  // selection, row actions, and the panel's own controls behave normally.
+  // Keyboard activation is untouched: Enter still routes through Table.Content's
+  // onRowAction. Tables with no row action keep react-aria's press as-is; there,
+  // only a CopyableValue (which stops the press on itself) is drag-selectable.
 
   // Rows render through react-aria's items-collection path so each row element
   // is cached per row object: a selection toggle re-renders only the affected
@@ -290,15 +319,15 @@ export function DataTable<Row extends object>({
       <Container
         className="overflow-x-auto"
         onPointerDownCapture={(e: ReactPointerEvent) => {
-          if (interceptedRowKey(e) != null) e.stopPropagation();
+          if (dataCellRowKey(e) != null) e.stopPropagation();
         }}
         onMouseDownCapture={(e: ReactMouseEvent) => {
           // react-aria falls back to mouse events where PointerEvent is
           // unavailable; the press (and its selection toggle) starts here.
-          if (interceptedRowKey(e) != null) e.stopPropagation();
+          if (dataCellRowKey(e) != null) e.stopPropagation();
         }}
         onClickCapture={(e: ReactMouseEvent) => {
-          const key = interceptedRowKey(e);
+          const key = dataCellRowKey(e);
           if (key != null) {
             e.stopPropagation();
             fireRowAction(key);

@@ -130,6 +130,17 @@ describe("BudgetsPage", () => {
     expect(screen.queryByRole("grid", { name: "Budgets" })).not.toBeInTheDocument();
   });
 
+  it("copies the full budget id, of which the table shows only a prefix", async () => {
+    mockApi({ budgets: [budget({ budget_id: "11111111-2222-3333-4444-555555555555" })] });
+    const user = userEvent.setup();
+    renderPage(<BudgetsPage />);
+
+    const row = (await screen.findByText("11111111")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Copy budget id" }));
+
+    expect(await navigator.clipboard.readText()).toBe("11111111-2222-3333-4444-555555555555");
+  });
+
   it("lists a budget with its limit and humanized reset period", async () => {
     mockApi({ budgets: [budget({ max_budget: 100, budget_duration_sec: 604_800 })] });
     renderPage(<BudgetsPage />);

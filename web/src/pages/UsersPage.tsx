@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { Field } from "@/components/Field";
 import { accessLabel, ModelScopeControl } from "@/components/ModelScopeControl";
-import { EmptyState, ErrorBanner, FilterSelect, PageHeader } from "@/components/ui";
+import { CopyableValue, EmptyState, ErrorBanner, FilterSelect, PageHeader } from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 
 // ---------- formatting ----------
@@ -383,7 +383,11 @@ export function UsersPage() {
       cell: (u) => (
         <div className="flex flex-col gap-0.5">
           <span className="inline-flex items-center gap-1.5">
-            <code className="text-xs font-medium text-[var(--otari-ink)]">{u.user_id}</code>
+            {/* The `user` field callers send, and the user_id every management
+                endpoint and usage filter takes. */}
+            <CopyableValue value={u.user_id} label="user id">
+              <code className="text-xs font-medium text-[var(--otari-ink)]">{u.user_id}</code>
+            </CopyableValue>
             {isVirtualUser(u.user_id) ? (
               <Chip size="sm" color="default">
                 virtual
