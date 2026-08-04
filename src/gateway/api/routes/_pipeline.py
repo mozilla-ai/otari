@@ -260,8 +260,9 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
         return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
     if status_code is None:
         return None
-    # Account billing exhaustion, which several providers report as a 400/402/422
-    # rather than a 402. Like a rejected credential this is a gateway-side account
+    # Account billing exhaustion, which several providers report as a 400/422
+    # rather than the 402 the condition deserves (and DeepSeek does report as a
+    # 402). Like a rejected credential this is a gateway-side account
     # fault rather than anything wrong with the caller's request, so it surfaces as
     # a 502 and never as a client-facing 400: telling the caller to "check the model
     # name and parameters" for an empty wallet sends operators debugging the wrong

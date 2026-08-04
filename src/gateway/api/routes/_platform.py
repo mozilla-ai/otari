@@ -60,9 +60,9 @@ _USAGE_NON_RETRYABLE_STATUS_CODES = {401, 402, 404, 409, 422}
 # distinct from 400/422, which mean the request itself is malformed and would be
 # rejected by every provider, so falling through on those just wastes attempts.
 # The one exception is a provider that reports account billing exhaustion as a
-# 400/402/422 rather than a 402: that is an account condition, not a malformed
-# request, and the next provider would serve it fine. See
-# :func:`is_provider_billing_error`.
+# 400/422 rather than the 402 the condition deserves: that is an account
+# condition, not a malformed request, and the next provider would serve it fine.
+# See :func:`is_provider_billing_error`.
 _FALLBACK_RETRYABLE_STATUS_CODES = {401, 403, 404, 405, 408, 409, 410, 429, 500, 502, 503, 504}
 _FALLBACK_NON_RETRYABLE_STATUS_CODES = {400, 422}
 
@@ -82,7 +82,7 @@ _BILLING_CANDIDATE_STATUS_CODES = {400, 402, 422}
 # describe a malformed request. Best-effort against current provider phrasing; a
 # reworded message degrades safely to the generic bad-request handling rather
 # than misclassifying.
-_BILLING_MESSAGE_PROBES = (
+_BILLING_MESSAGE_PROBES: tuple[str, ...] = (
     "credit balance is too low",  # anthropic
     "purchase credits",  # anthropic
     "plans & billing",  # anthropic
@@ -91,8 +91,16 @@ _BILLING_MESSAGE_PROBES = (
     "insufficient_quota",  # openai (error code, echoed in some messages)
     "exceeded your current quota",  # openai
     "insufficient credits",  # openrouter, together
-    "payment required",  # generic 402 bodies
 )
+
+# Phrases accepted only on a 402, whose reason phrase ("Payment Required") is
+# itself the billing signal. httpx stringifies any 402 as "Client error '402
+# Payment Required' for url ...", so on a 402 this probe is really a
+# status-code check with a phrase-shaped spelling. It is kept out of
+# :data:`_BILLING_MESSAGE_PROBES` because a 400/422 that merely echoes a
+# caller-supplied "payment required" string back in its message is a malformed
+# request, not an empty wallet.
+_BILLING_402_MESSAGE_PROBES = ("payment required",)
 
 # Streaming first-chunk timeouts (hybrid-mode fallback). Plain LLM streams
 # rarely take long to produce a first token, so a tight cap keeps failed-
@@ -666,14 +674,19 @@ def is_provider_billing_error(exc: BaseException) -> bool:
 
     Gated on :data:`_BILLING_CANDIDATE_STATUS_CODES` so the probe can only ever
     reinterpret a status that is otherwise a dead end, and matched against the
-    narrow :data:`_BILLING_MESSAGE_PROBES` so an unrecognized phrasing falls
-    through to the existing generic handling instead of being misclassified.
+    narrow :data:`_BILLING_MESSAGE_PROBES` (plus
+    :data:`_BILLING_402_MESSAGE_PROBES` on a 402) so an unrecognized phrasing
+    falls through to the existing generic handling instead of being
+    misclassified.
     """
     _kind, status_code = upstream_exception_shape(exc)
     if status_code not in _BILLING_CANDIDATE_STATUS_CODES:
         return False
+    probes = _BILLING_MESSAGE_PROBES
+    if status_code == 402:
+        probes += _BILLING_402_MESSAGE_PROBES
     message = upstream_error_message(exc).lower()
-    return any(probe in message for probe in _BILLING_MESSAGE_PROBES)
+    return any(probe in message for probe in probes)
 
 
 def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:

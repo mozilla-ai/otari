@@ -242,3 +242,19 @@ def test_billing_probe_does_not_reinterpret_other_statuses() -> None:
     dead end."""
     assert _classify_upstream_error(_MessageStatusError(503, _ANTHROPIC_BILLING_MSG)) == (True, "http_503")
     assert _classify_upstream_error(_MessageStatusError(429, "insufficient_quota")) == (True, "http_429")
+
+
+def test_payment_required_phrase_only_counts_on_a_402() -> None:
+    """The words "payment required" are the 402 reason phrase, which httpx puts in
+    every stringified 402, so they are a status signal rather than a provider
+    phrase. On a 400/422 the same words are far more likely to be a
+    caller-supplied value the provider echoed back, which must stay a terminal
+    malformed request."""
+    request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
+    response = httpx.Response(402, request=request, json={"error": {"message": "out of funds"}})
+    with pytest.raises(httpx.HTTPStatusError) as raised:
+        response.raise_for_status()
+    assert _classify_upstream_error(raised.value) == (True, "http_402_billing")
+
+    echoed = _MessageStatusError(400, "Invalid value: 'payment required'. Supported values are: 'none', 'auto'.")
+    assert _classify_upstream_error(echoed) == (False, "http_400")

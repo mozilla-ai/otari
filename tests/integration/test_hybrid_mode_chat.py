@@ -439,6 +439,114 @@ def test_hybrid_mode_falls_through_on_sdk_wrapped_connection_error(
     assert error_reports[0]["error_class"] == "conn_err"
 
 
+def test_hybrid_mode_falls_through_when_a_provider_account_is_out_of_credit(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first attempt's provider account has no credit left, which Anthropic
+    reports as a 400 ``invalid_request_error`` rather than a 402. An empty wallet
+    is a condition on that one provider, so the route must fall through to the
+    next attempt instead of treating the 400 as a malformed request every
+    provider would reject. Regression test for the whole point of the billing
+    classification: without it the request dies on attempt 1 with "check the
+    model name and parameters" while a funded provider sits unused.
+    """
+    import openai
+
+    usage_reports: list[dict[str, Any]] = []
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "billing-req-1",
+                    "fallback_enabled": True,
+                    "attempts": [
+                        {
+                            "attempt_id": "billing-att-dry",
+                            "position": 0,
+                            "provider": "anthropic",
+                            "model": "claude-haiku-4-5",
+                            "api_key": "sk-dry",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                        {
+                            "attempt_id": "billing-att-funded",
+                            "position": 1,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-funded",
+                            "api_base": None,
+                            "managed": False,
+                        },
+                    ],
+                },
+            )
+        usage_reports.append(body)
+        return httpx.Response(204)
+
+    calls: list[str] = []
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        if kwargs["api_key"] == "sk-dry":
+            request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+            body = {
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "message": (
+                        "Your credit balance is too low to access the Anthropic API. "
+                        "Please go to Plans & Billing to upgrade or purchase credits."
+                    ),
+                },
+            }
+            raise openai.BadRequestError(
+                f"Error code: 400 - {body}",
+                response=httpx.Response(400, request=request, json=body),
+                body=body["error"],
+            )
+        return ChatCompletion(
+            id="chatcmpl-billing-fallback",
+            object="chat.completion",
+            created=1700000000,
+            model="gpt-4o-mini",
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="hello"),
+                    finish_reason="stop",
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=5, completion_tokens=1, total_tokens=6),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={"model": "anything", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"] == "billing-att-funded"
+    assert calls == ["anthropic:claude-haiku-4-5", "openai:gpt-4o-mini"]
+
+    error_reports = [r for r in usage_reports if r.get("status") == "error"]
+    assert len(error_reports) == 1
+    assert error_reports[0]["correlation_id"] == "billing-att-dry"
+    assert error_reports[0]["error_class"] == "http_400_billing"
+
+
 def test_hybrid_mode_propagates_resolve_rate_limit_retry_after(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
