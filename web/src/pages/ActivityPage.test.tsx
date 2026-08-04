@@ -88,6 +88,13 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number } = {}) {
         by_model: models.map((m) => ({ key: m, cost: 0, tokens: 0, requests: 0, is_other: false })),
         by_user: [],
         by_api_key: [],
+        by_source: Array.from(new Set(rows.map((r) => r.source))).map((s) => ({
+          key: s,
+          cost: 0,
+          tokens: 0,
+          requests: 0,
+          is_other: false,
+        })),
         series: [],
       });
     }
@@ -319,6 +326,220 @@ describe("ActivityPage", () => {
     await user.selectOptions(screen.getByLabelText("Priced?"), "false");
 
     await waitFor(() => expect(listCalls(calls).at(-1)).toContain("priced=false"));
+  });
+
+  it("offers the sources seen in the window and sends the picked one to the API", async () => {
+    const { calls } = mockApi({
+      rows: [entry(), entry({ id: "imp", model: "claude-sonnet-4", source: "claude_code", counts_toward_budget: false })],
+    });
+    const user = userEvent.setup();
+    renderPage(<ActivityPage />);
+    await screen.findByText("gpt-4o");
+
+    // Options come from the log itself (the summary's provenance breakdown), with
+    // friendly labels for the sources the page knows about.
+    const select = screen.getByLabelText("Source");
+    await waitFor(() => expect(within(select).getByRole("option", { name: "Claude Code" })).toBeInTheDocument());
+    expect(within(select).getByRole("option", { name: "Gateway" })).toBeInTheDocument();
+
+    await user.selectOptions(select, "claude_code");
+    await waitFor(() => expect(listCalls(calls).at(-1)).toContain("source=claude_code"));
+  });
+
+  it("keeps a drill-down source listed even when the window holds none of its rows", async () => {
+    // The select must show the filter that is actually applied, or the operator
+    // sees a chip they cannot find in the picker.
+    mockApi({ rows: [entry({ source: "gateway" })] });
+    renderPage(<ActivityPage />, "/activity?source=codex");
+    await screen.findByText("gpt-4o");
+
+    const select = screen.getByLabelText("Source");
+    expect(within(select).getByRole("option", { name: "Codex" })).toBeInTheDocument();
+    expect(select).toHaveValue("codex");
+  });
+
+  it("surfaces a timeline summary failure instead of an empty strip", async () => {
+    // If the series query fails, "No activity in this range" would misread as a
+    // quiet gateway; the error banner must carry the failure.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({ detail: "summary exploded" }, 500);
+      }
+      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 1 });
+      if (url.includes("/v1/usage")) return jsonResponse([entry()]);
+      return jsonResponse([]);
+    });
+    renderPage(<ActivityPage />);
+    await screen.findByText("gpt-4o");
+
+    expect(await screen.findByText(/summary exploded/)).toBeInTheDocument();
+  });
+
+  it("hides the source picker while only one source exists", async () => {
+    // Most gateways only ever see their own traffic; a provenance select with a
+    // single option is noise, so it only appears once a second source shows up.
+    mockApi({ rows: [entry(), entry({ id: "b" })] });
+    renderPage(<ActivityPage />);
+    await screen.findAllByText("gpt-4o");
+
+    await waitFor(() => expect(screen.queryByLabelText("Source")).not.toBeInTheDocument());
+  });
+
+  it("shows a row's token composition rather than one uninformative total", async () => {
+    // A cached agent request: the total is ~98% cache read, so the total alone
+    // makes every row look alike. The bar carries the split.
+    mockApi({
+      rows: [
+        entry({
+          prompt_tokens: 100_000,
+          completion_tokens: 500,
+          total_tokens: 100_500,
+          cache_read_tokens: 98_000,
+          cache_write_tokens: 1_500,
+          billing_meters: {
+            total_input_tokens: 100_000,
+            fresh_input_tokens: 500,
+            cache_read_tokens: 98_000,
+            cache_write_tokens: 1_500,
+            cache_write_1h_tokens: 0,
+            completion_tokens: 500,
+          },
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("gpt-4o")).closest("tr")!;
+    expect(within(row).getByText("100,500")).toBeInTheDocument();
+    const bar = within(row).getByRole("img", { name: /Token composition/ });
+    expect(bar).toHaveAccessibleName(
+      "Token composition: Fresh input 500, Cache read 98,000, Cache write 1,500, Output 500",
+    );
+
+    // Four segments, widest being the cache read, so the shape is what the eye
+    // compares between rows.
+    const widths = [...bar.querySelectorAll("rect")].map((r) => Number(r.getAttribute("width")));
+    expect(widths).toHaveLength(4);
+    expect(Math.max(...widths)).toBeCloseTo((98_000 / 100_500) * 100, 5);
+    expect(widths.reduce((a, b) => a + b, 0)).toBeCloseTo(100, 5);
+  });
+
+  it("explains the column's total in the detail panel when it exceeds the raw one", async () => {
+    // An additive-convention row reports its cache buckets outside the prompt, so
+    // the billed total the column shows is far above the stored `total_tokens`.
+    // Both are spelled out, or the two numbers look like a bug.
+    const user = userEvent.setup();
+    mockApi({
+      rows: [
+        entry({
+          prompt_tokens: 1_000,
+          completion_tokens: 200,
+          total_tokens: 1_200,
+          cache_read_tokens: 98_000,
+          cache_write_tokens: 1_500,
+          billing_meters: {
+            total_input_tokens: 100_500,
+            fresh_input_tokens: 1_000,
+            cache_read_tokens: 98_000,
+            cache_write_tokens: 1_500,
+            cache_write_1h_tokens: 0,
+            completion_tokens: 200,
+          },
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("gpt-4o")).closest("tr")!;
+    await user.click(row);
+
+    const field = (label: string): string => screen.getByText(label).parentElement!.textContent ?? "";
+    expect(field("Total tokens")).toContain("1,200");
+    expect(field("Billed tokens")).toContain("100,700");
+    // Which is the number the row itself shows.
+    expect(within(row).getByText("100,700")).toBeInTheDocument();
+  });
+
+  it("splits an unmetered row from its raw columns, and shows no bar without usage", async () => {
+    // An unpriced row carries no billing meters, so the composition falls back to
+    // the raw columns (cache read counted inside the prompt).
+    mockApi({
+      rows: [
+        entry({
+          id: "unpriced",
+          model: "unpriced-model",
+          prompt_tokens: 1_000,
+          completion_tokens: 200,
+          total_tokens: 1_200,
+          cache_read_tokens: 400,
+          billing_meters: null,
+          cost: null,
+        }),
+        entry({ id: "failed", model: "failed-model", status: "error", prompt_tokens: null, completion_tokens: null, total_tokens: null }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    const unpriced = (await screen.findByText("unpriced-model")).closest("tr")!;
+    expect(within(unpriced).getByRole("img", { name: /Token composition/ })).toHaveAccessibleName(
+      "Token composition: Fresh input 600, Cache read 400, Output 200",
+    );
+
+    // A request that failed before the provider reported usage has nothing to
+    // compose, so the cell stays an em-dash instead of drawing an empty bar.
+    const failed = screen.getByText("failed-model").closest("tr")!;
+    expect(within(failed).queryByRole("img", { name: /Token composition/ })).not.toBeInTheDocument();
+    expect(within(failed).getByText("—")).toBeInTheDocument();
+  });
+
+  it("opens a bookmarked deep page on that page", async () => {
+    // The URL is the source of truth for `page`, but the mount effect used to
+    // re-anchor the rolling window a few milliseconds later, which changed the
+    // filter set and reset the page: every shared `?page=3` link opened on page 1.
+    const { calls } = mockApi({ rows: Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })), total: 500 });
+    renderPage(<ActivityPage />, "/activity?page=2");
+
+    await screen.findAllByText("gpt-4o");
+    expect(await screen.findByText("101–150 of 500")).toBeInTheDocument();
+    expect(listCalls(calls).every((url) => url.includes("skip=100"))).toBe(true);
+  });
+
+  it("keeps the current page when refreshing", async () => {
+    // Refresh used to re-anchor the rolling window, which changed the filter set,
+    // which reset the page: pressing it on page 3 dropped you back to page 1.
+    const { calls } = mockApi({ rows: Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })), total: 500 });
+    const user = userEvent.setup();
+    renderPage(<ActivityPage />, "/activity?page=2");
+    await screen.findAllByText("gpt-4o");
+    expect(await screen.findByText("101–150 of 500")).toBeInTheDocument();
+
+    const before = listCalls(calls).length;
+    const button = screen.getByRole("button", { name: "Refresh" });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+
+    // The list is refetched, and every fetch stays on the third page's offset.
+    await waitFor(() => expect(listCalls(calls).length).toBeGreaterThan(before));
+    expect(listCalls(calls).every((url) => url.includes("skip=100"))).toBe(true);
+    expect(screen.getByText("101–150 of 500")).toBeInTheDocument();
+  });
+
+  it("re-anchors a rolling window when its preset is re-picked", async () => {
+    // Refresh no longer moves the window, so re-selecting the active preset is the
+    // gesture that advances a rolling range to "now".
+    const { calls } = mockApi({ rows: [entry()] });
+    const user = userEvent.setup();
+    renderPage(<ActivityPage />);
+    await screen.findByText("gpt-4o");
+
+    const startOf = (url: string): string | null => new URL(url, "http://x").searchParams.get("start_date");
+    const before = startOf(listCalls(calls).at(-1)!);
+    expect(before).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "24h" }));
+
+    await waitFor(() => expect(startOf(listCalls(calls).at(-1)!)).not.toBe(before));
   });
 
   it("distinguishes filtered-empty from never-used", async () => {

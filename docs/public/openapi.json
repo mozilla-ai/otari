@@ -5612,6 +5612,107 @@
         "title": "UsageGroupRow",
         "type": "object"
       },
+      "UsageGroupedSeries": {
+        "description": "A per-group time series for the dashboard's stacked charts.\n\n``groups`` ranks the window's top groups by spend (plus the reconciling\n``other`` fold), in the order a chart should stack and color them; ``points``\nis sparse (only populated cells), keyed by canonical UTC ``bucket_start``.",
+        "properties": {
+          "bucket": {
+            "enum": [
+              "hour",
+              "day"
+            ],
+            "title": "Bucket",
+            "type": "string"
+          },
+          "end_date": {
+            "title": "End Date",
+            "type": "string"
+          },
+          "group_by": {
+            "enum": [
+              "model",
+              "user_id",
+              "api_key_id",
+              "source"
+            ],
+            "title": "Group By",
+            "type": "string"
+          },
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupRow"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/UsageGroupedSeriesPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "start_date": {
+            "title": "Start Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start_date",
+          "end_date",
+          "bucket",
+          "group_by",
+          "groups",
+          "points"
+        ],
+        "title": "UsageGroupedSeries",
+        "type": "object"
+      },
+      "UsageGroupedSeriesPoint": {
+        "description": "One (time bucket, group) cell of a grouped series.\n\n``key``/``is_other`` follow the ``UsageGroupRow`` convention: ``key=None``\nwith ``is_other=True`` is the fold of groups outside the top N, ``key=None``\nwith ``is_other=False`` is a real NULL group (e.g. a deleted user).\n``tokens`` is the *billed* total (input including cache, plus output), the\nsame quantity the ungrouped series' composition fields sum to.",
+        "properties": {
+          "bucket_start": {
+            "title": "Bucket Start",
+            "type": "string"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "is_other": {
+            "default": false,
+            "title": "Is Other",
+            "type": "boolean"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bucket_start",
+          "key",
+          "cost",
+          "tokens",
+          "requests"
+        ],
+        "title": "UsageGroupedSeriesPoint",
+        "type": "object"
+      },
       "UsageLogResponse": {
         "description": "Response model for usage log.",
         "properties": {
@@ -5755,15 +5856,40 @@
         "type": "object"
       },
       "UsageSeriesPoint": {
-        "description": "One time bucket. ``bucket_start`` is canonical ISO-8601 UTC (``...Z``),\nidentical across SQLite and PostgreSQL for the same underlying instant.",
+        "description": "One time bucket. ``bucket_start`` is canonical ISO-8601 UTC (``...Z``),\nidentical across SQLite and PostgreSQL for the same underlying instant.\n\n``tokens`` stays the raw provider-reported total (the field predates the\ncomposition split and external consumers may read it). The billed\ncomposition fields are normalized via billing meters (see ``_billed_expr``):\n``input_tokens`` includes both cache buckets, so a chart derives fresh input\nas ``max(0, input_tokens - cache_read_tokens - cache_write_tokens)`` and the\nbilled total as ``fresh + cache_read + cache_write + output``.",
         "properties": {
           "bucket_start": {
             "title": "Bucket Start",
             "type": "string"
           },
+          "cache_read_tokens": {
+            "default": 0,
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "default": 0,
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
           "cost": {
             "title": "Cost",
             "type": "number"
+          },
+          "errors": {
+            "default": 0,
+            "title": "Errors",
+            "type": "integer"
+          },
+          "input_tokens": {
+            "default": 0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "default": 0,
+            "title": "Output Tokens",
+            "type": "integer"
           },
           "requests": {
             "title": "Requests",
@@ -6110,6 +6236,16 @@
               }
             ],
             "title": "Avg Latency Ms"
+          },
+          "billed_input_tokens": {
+            "default": 0,
+            "title": "Billed Input Tokens",
+            "type": "integer"
+          },
+          "billed_output_tokens": {
+            "default": 0,
+            "title": "Billed Output Tokens",
+            "type": "integer"
           },
           "cache_read_tokens": {
             "title": "Cache Read Tokens",
@@ -10581,6 +10717,317 @@
         ]
       }
     },
+    "/v1/usage/series": {
+      "get": {
+        "description": "Time series split by one dimension, for the dashboard's stacked charts.\n\nSame filters and window bounds as ``/summary`` (kept in lockstep: the\ndashboard serializes one filter object for both, and a filter this endpoint\nsilently ignored would make the stacked chart disagree with the tiles beside\nit). The window's top groups by spend are returned as their own series;\neverything past the top eight folds into a single ``other`` series per\nbucket, so the stack always reconciles with the summary totals. Points are\nsparse (populated cells only); the bucket grid is bounded like ``/summary``'s\nseries, so an hourly bucket over a too-wide window is rejected rather than\nballooning the payload.",
+        "operationId": "usage_series_v1_usage_series_get",
+        "parameters": [
+          {
+            "description": "Dimension to split the series by",
+            "in": "query",
+            "name": "group_by",
+            "required": true,
+            "schema": {
+              "description": "Dimension to split the series by",
+              "enum": [
+                "model",
+                "user_id",
+                "api_key_id",
+                "source"
+              ],
+              "title": "Group By",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+              "title": "Start Date"
+            }
+          },
+          {
+            "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+              "title": "End Date"
+            }
+          },
+          {
+            "description": "Filter to a single user",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single user",
+              "title": "User Id"
+            }
+          },
+          {
+            "description": "Filter to a single status (e.g. 'success' or 'error')",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single status (e.g. 'success' or 'error')",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+              "title": "Status Code"
+            }
+          },
+          {
+            "description": "Filter to a single model",
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single model",
+              "title": "Model"
+            }
+          },
+          {
+            "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+            "in": "query",
+            "name": "endpoint",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+              "title": "Endpoint"
+            }
+          },
+          {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
+            "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+              "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "title": "Source Label"
+            }
+          },
+          {
+            "description": "Filter to a single API key id",
+            "in": "query",
+            "name": "api_key_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single API key id",
+              "title": "Api Key Id"
+            }
+          },
+          {
+            "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+            "in": "query",
+            "name": "priced",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+              "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+            "in": "query",
+            "name": "counts_toward_budget",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+              "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Time-series granularity: 'hour' or 'day'",
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "default": "day",
+              "description": "Time-series granularity: 'hour' or 'day'",
+              "enum": [
+                "hour",
+                "day"
+              ],
+              "title": "Bucket",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageGroupedSeries"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Usage Series",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
     "/v1/usage/set-price": {
       "post": {
         "description": "Set the cost of imported usage rows from manual per-1M rates (standalone).\n\nTarget either the current selection (``ids``) or everything matching a filter\n(``by_filter: true``). Cost / billing meters / pricing breakdown are recomputed\nfrom each row's own token counts at the supplied ``input`` / ``output`` /\n``cache_read`` / ``cache_write`` per-1M rates (manual rates, not a recompute from\nconfigured pricing). Only imported rows (``counts_toward_budget = false``) are\ntouched, so ``users.spend`` is never affected. Master-key only.",
@@ -10633,7 +11080,7 @@
     },
     "/v1/usage/summary": {
       "get": {
-        "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold), the error taxonomy grouped by failure status code,\nand a UTC-bucketed time series.\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
+        "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold, billed token counts), the error taxonomy grouped\nby failure status code, and a UTC-bucketed time series carrying each bucket's\nerror count and billed token composition (input incl. cache, cache read/write,\noutput).\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
         "operationId": "usage_summary_v1_usage_summary_get",
         "parameters": [
           {
@@ -10959,7 +11406,7 @@
     },
     "/v1/usage/summary.csv": {
       "get": {
-        "description": "Download every breakdown the summary reports, as one CSV.\n\nOne row per (dimension, key): model, user, API key, source, session\n(``source_label``), endpoint, and provider. A dedicated route rather than a\n``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON\nresponse model and a clean OpenAPI schema. The export is **uncapped** (no\ntop-N fold): finance wants every row. Kept separate from the bare-array\n``/v1/usage`` contract, which is untouched.",
+        "description": "Download every breakdown the summary reports, as one CSV.\n\nOne row per (dimension, key): model, user, API key, source, session\n(``source_label``), endpoint, and provider. A dedicated route rather than a\n``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON\nresponse model and a clean OpenAPI schema. The export is **uncapped** (no\ntop-N fold): finance wants every row. ``tokens`` is the billed total (fresh\ninput, both cache buckets, and output), matching the dashboard's analytics.\nKept separate from the bare-array ``/v1/usage`` contract, which is untouched.",
         "operationId": "usage_summary_csv_v1_usage_summary_csv_get",
         "parameters": [
           {

@@ -1,40 +1,41 @@
 import { Button, Spinner } from "@heroui/react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import {
-  NO_BREAKDOWNS,
-  useDeleteUsage,
-  useKeys,
-  useSetUsagePrice,
-  useUsageCount,
-  useUsageLogs,
-  useUsageSummary,
-  useUsers,
-} from "@/api/hooks";
+import { ApiError } from "@/api/client";
+import { NO_BREAKDOWNS, useKeys, useUsageGroupedSeries, useUsageSummary, useUsers } from "@/api/hooks";
 import type {
   SummaryDimension,
   UsageBucket,
-  UsageEntry,
   UsageFilters,
+  UsageGroupBy,
   UsageGroupRow,
-  UsageMutationSelection,
   UsageSeriesPoint,
-  UsageSummary,
 } from "@/api/types";
-import { ActivityTimeline } from "@/components/ActivityTimeline";
-import { BulkActionBar } from "@/components/BulkActionBar";
-import { BarTrendChart, Sparkline } from "@/components/charts";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ChartLegend, Sparkline, TrendChart, type SeriesDef, type StackedPoint } from "@/components/charts";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { FilterChips, type FilterChip } from "@/components/FilterChips";
-import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
-import { TablePagination } from "@/components/TablePagination";
-import { DeltaHint, EmptyState, ErrorBanner, FilterComboBox, PageHeader, RefreshButton, StatCard } from "@/components/ui";
+import {
+  DeltaHint,
+  EmptyState,
+  ErrorBanner,
+  FilterComboBox,
+  FilterSelect,
+  PageHeader,
+  RefreshButton,
+  StatCard,
+} from "@/components/ui";
 import { deltaFraction, formatPct, formatTokens, formatUsd } from "@/lib/format";
-import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
-import { bucketForWindow, findPreset, isoAgo, type RangePreset, USAGE_DEFAULT_KEY, USAGE_PRESETS } from "@/lib/timeRange";
+import {
+  bucketForWindow,
+  findPreset,
+  formatWindowLabel,
+  isoAgo,
+  rangeFromBuckets,
+  type RangePreset,
+  USAGE_DEFAULT_KEY,
+  USAGE_PRESETS,
+} from "@/lib/timeRange";
 
 // ---------- formatting ----------
 
@@ -52,50 +53,115 @@ function formatLatency(ms: number | null): string {
   return `${(ms / 1000).toFixed(2)} s`;
 }
 
-// ---------- filter option sets ----------
+function formatBucketLabel(iso: string, bucket: UsageBucket): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  if (bucket === "hour") {
+    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  }
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+// ---------- window presets ----------
 //
 // The time presets and window math live in `@/lib/timeRange` and are shared
-// with the Activity page via the ActivityTimeline selector.
+// with the Activity page. 30d default: a spend investigation is usually monthly.
 
-// 30d: a spend investigation is usually monthly.
 const DEFAULT_PRESET = findPreset(USAGE_PRESETS, USAGE_DEFAULT_KEY) as RangePreset;
 
 const TABLE_TOP_N = 15;
 
-// ---------- breakdown table ----------
+// ---------- the analytics chart: metric × group-by ----------
+//
+// The model every major usage dashboard converged on (OpenAI's usage page,
+// the Anthropic console, Grafana-style tooling): one main time-series chart, a
+// metric selector, and a group-by dimension that splits the series into stacked
+// bars. Ungrouped views use the richest encoding each metric has: tokens stack
+// their billed composition (the same encoding as the Activity token bar),
+// requests split success/error. Dragging across the chart zooms the window.
+
+type ChartMetric = "cost" | "tokens" | "requests";
+
+const METRIC_TABS: { key: ChartMetric; label: string }[] = [
+  { key: "cost", label: "Cost" },
+  { key: "tokens", label: "Tokens" },
+  { key: "requests", label: "Requests" },
+];
+
+const GROUP_OPTIONS: { value: "" | UsageGroupBy; label: string }[] = [
+  { value: "", label: "None" },
+  { value: "model", label: "Model" },
+  { value: "user_id", label: "User" },
+  { value: "api_key_id", label: "API key" },
+  { value: "source", label: "Source" },
+];
+
+// Billed token composition, bottom-up: input side first (fresh, then the two
+// cache buckets), then output. One hue at four lightnesses — the same encoding,
+// same order, and same tokens as the Activity page's per-row bar, so the two
+// surfaces read as one system.
+const COMPOSITION_SERIES: SeriesDef[] = [
+  { key: "fresh", label: "Fresh input", color: "var(--otari-ink)" },
+  { key: "cache_read", label: "Cache read", color: "var(--otari-brand)" },
+  { key: "cache_write", label: "Cache write", color: "var(--otari-brand-soft)" },
+  { key: "output", label: "Output", color: "var(--otari-brand-dark)" },
+];
+
+const REQUEST_SERIES: SeriesDef[] = [
+  { key: "success", label: "Succeeded", color: "var(--otari-brand)" },
+  { key: "errors", label: "Failed", color: "var(--otari-danger)" },
+];
+
+// The fixed categorical palette for grouped series (validated in globals.css);
+// slot order is the CVD-safety mechanism, so groups take slots in server rank
+// order and the fold always wears the neutral.
+const CAT_COLORS = [
+  "var(--otari-cat-1)",
+  "var(--otari-cat-2)",
+  "var(--otari-cat-3)",
+  "var(--otari-cat-4)",
+  "var(--otari-cat-5)",
+  "var(--otari-cat-6)",
+  "var(--otari-cat-7)",
+  "var(--otari-cat-8)",
+];
+const OTHER_COLOR = "var(--otari-cat-other)";
+
+function metricFormatter(metric: ChartMetric): (value: number) => string {
+  return metric === "cost" ? formatUsd : metric === "tokens" ? formatTokens : formatCount;
+}
+
+// ---------- breakdown table (tabbed by dimension) ----------
 
 interface BreakdownProps {
-  title: string;
+  dimensionLabel: string;
   rows: UsageGroupRow[];
   totalCost: number;
   emptyLabel: string;
-  // Turns a row key into the Activity-page filter to drill into (model vs user).
-  onDrill: (key: string) => void;
-  loading: boolean;
   // How a real group whose column was NULL reads. The default suits an id that
   // has gone missing (a deleted user); a dimension where NULL is a normal state
   // (gateway rows carry no session label) passes its own wording.
   unknownLabel?: string;
-  // Optional control rendered beside the heading (the dimension picker).
-  action?: ReactNode;
+  // Turns a row key into the Activity-page filter to drill into.
+  onDrill: (key: string) => void;
+  loading: boolean;
 }
 
-// One breakdown (by model / by user). Rows are spend-ranked with an inline
-// share-of-total bar; clicking a named row drills into the Activity log filtered
-// to that dimension. The synthesized "other" fold row (null key) is shown but not
+// One breakdown dimension. Rows are spend-ranked with an inline share-of-total
+// bar; clicking a named row drills into the Activity log filtered to that
+// dimension. The synthesized "other" fold row (null key) is shown but not
 // clickable, so the visible spend still reconciles with the total-spend tile.
 const OTHER_KEY = "__other__";
 const UNKNOWN_KEY = "__unknown__";
 
 function BreakdownTable({
-  title,
+  dimensionLabel,
   rows,
   totalCost,
   emptyLabel,
+  unknownLabel = "(unknown)",
   onDrill,
   loading,
-  unknownLabel = "(unknown)",
-  action,
 }: BreakdownProps) {
   const [showAll, setShowAll] = useState(false);
   const visible = showAll ? rows : rows.slice(0, TABLE_TOP_N);
@@ -108,7 +174,7 @@ function BreakdownTable({
   const columns: DataTableColumn<UsageGroupRow>[] = [
     {
       id: "name",
-      header: title.replace("Spend by ", ""),
+      header: dimensionLabel,
       isRowHeader: true,
       cell: (row) => {
         const share = totalCost > 0 ? row.cost / totalCost : 0;
@@ -132,17 +198,14 @@ function BreakdownTable({
       },
     },
     { id: "requests", header: "Requests", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatCount(row.requests)}</span> },
+    { id: "tokens", header: "Tokens", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatTokens(row.tokens)}</span> },
     { id: "spend", header: "Spend", align: "end", cell: (row) => <span className="text-[var(--otari-ink)]">{formatUsd(row.cost)}</span> },
   ];
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-[var(--otari-ink)]">{title}</h2>
-        {action}
-      </div>
       <DataTable
-        ariaLabel={title}
+        ariaLabel={`Spend by ${dimensionLabel.toLowerCase()}`}
         columns={columns}
         rows={visible}
         getRowKey={rowKey}
@@ -169,284 +232,29 @@ function BreakdownTable({
   );
 }
 
-// ---------- secondary breakdown dimensions ----------
+// ---------- which breakdowns the page asks for ----------
 
-// Model and user get their own always-visible tables (the two questions asked on
-// every visit). The rest share one panel behind a picker: each answers a real
-// question, but only one at a time, and six stacked tables would bury the trend.
-// Every key doubles as the Activity-log filter to drill into, so a picked row
-// scopes the request log to exactly the group that was clicked.
-type BreakdownDimension = "source_label" | "endpoint" | "provider" | "source";
-
-const DIMENSION_TABS: { key: BreakdownDimension; label: string; unknownLabel: string }[] = [
-  // Sessions first: for agent traffic a few long-running sessions carry most of
-  // the spend, so this is usually the row that explains a bill.
-  { key: "source_label", label: "Session", unknownLabel: "(no session)" },
-  { key: "endpoint", label: "Endpoint", unknownLabel: "(unknown)" },
-  { key: "provider", label: "Provider", unknownLabel: "(unknown)" },
-  { key: "source", label: "Source", unknownLabel: "(unknown)" },
-];
-
-// The breakdowns this page renders, and only those: the two fixed tables plus
-// every dimension the picker can switch to. All four picker dimensions ship in one
-// response so flipping tabs is instant instead of another round trip, while
-// `api_key` stays out because no table here shows it. Derived from the tab list, so
-// a new tab is requested automatically.
-const PAGE_BREAKDOWNS: SummaryDimension[] = ["model", "user", ...DIMENSION_TABS.map((tab) => tab.key)];
+// Every breakdown the page renders, and nothing more (each one is a GROUP BY
+// over the window server-side; tile-only queries pass NO_BREAKDOWNS instead). There is deliberately no API-key spend table:
+// keys identify callers, not workloads, and the User table already answers
+// "who". The chart's group-by can still split by key via /v1/usage/series.
+const PAGE_BREAKDOWNS: SummaryDimension[] = ["model", "user", "source_label", "endpoint", "provider", "source"];
 
 // The typeahead's own summary drops the model filter, so it only needs by_model.
 const MODEL_BREAKDOWN: SummaryDimension[] = ["model"];
 
-function dimensionRows(data: UsageSummary | undefined, dimension: BreakdownDimension): UsageGroupRow[] {
-  if (!data) return [];
-  return dimension === "source_label"
-    ? data.by_source_label
-    : dimension === "endpoint"
-      ? data.by_endpoint
-      : dimension === "provider"
-        ? data.by_provider
-        : data.by_source;
-}
+// ---------- breakdown dimensions ----------
 
-// ---------- chart ----------
-
-type ChartMetric = "cost" | "tokens" | "requests";
-
-const METRIC_TABS: { key: ChartMetric; label: string }[] = [
-  { key: "cost", label: "Cost" },
-  { key: "tokens", label: "Tokens" },
-  { key: "requests", label: "Requests" },
-];
-
-function metricValue(point: UsageSeriesPoint, metric: ChartMetric): number {
-  return metric === "cost" ? point.cost : metric === "tokens" ? point.tokens : point.requests;
-}
-
-function formatMetric(value: number, metric: ChartMetric): string {
-  return metric === "cost" ? formatUsd(value) : metric === "tokens" ? formatTokens(value) : formatCount(value);
-}
-
-function formatBucketLabel(iso: string, bucket: UsageBucket): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  if (bucket === "hour") {
-    return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
-  }
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
-}
-
-// The selected metric's series shaped for the shared trend chart, plus the true
-// peak and count for the caption. The peak is the real data max (0 for an
-// all-zero window), so the caption and the chart's auto-scaled bars agree; the
-// chart is only rendered for a non-empty series, so the empty guard is defensive.
-function trendData(series: UsageSeriesPoint[], metric: ChartMetric, bucket: UsageBucket) {
-  const points = series.map((point) => ({
-    label: formatBucketLabel(point.bucket_start, bucket),
-    value: metricValue(point, metric),
-  }));
-  const peak = points.length ? Math.max(...points.map((p) => p.value)) : 0;
-  return { points, peak, count: series.length };
-}
-
-// ---------- individual requests (raw rows under the breakdowns) ----------
-
-const REQUESTS_PAGE_SIZE = 50;
-
-function requestTimeAgo(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return iso;
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
-}
-
-function RequestStatusPill({ status }: { status: string }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
-        status === "error"
-          ? "border-red-200 bg-red-50 text-red-700"
-          : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
-      }`}
-    >
-      {status}
-    </span>
-  );
-}
-
-// Column definitions and the row-key getter live at module scope so their
-// identity is stable across renders: DataTable caches rendered rows on them,
-// and a new array each render would rebuild every row on each selection click.
-const REQUEST_COLUMNS: DataTableColumn<UsageEntry>[] = [
-  {
-    id: "time",
-    header: "Time",
-    isRowHeader: true,
-    cell: (e) => (
-      <span className="text-[var(--otari-muted)]" title={new Date(e.timestamp).toLocaleString()}>
-        {requestTimeAgo(e.timestamp)}
-      </span>
-    ),
-  },
-  { id: "model", header: "Model", cell: (e) => <span className="text-[var(--otari-ink)]">{e.model}</span> },
-  { id: "user", header: "User", cell: (e) => <span className="text-[var(--otari-muted)]">{e.user_id ?? "—"}</span> },
-  { id: "tokens", header: "Tokens", align: "end", cell: (e) => (e.total_tokens === null ? "—" : e.total_tokens.toLocaleString()) },
-  { id: "cost", header: "Cost", align: "end", cell: (e) => (e.cost === null ? "—" : formatUsd(e.cost)) },
-  { id: "status", header: "Status", cell: (e) => <RequestStatusPill status={e.status} /> },
-];
-
-const getRequestRowKey = (e: UsageEntry): string => e.id;
-
-// The raw usage rows for the current filter window, paginated, with selection
-// and the imported-row bulk actions (Delete, Set price). Only imported rows are
-// selectable; enforced gateway rows are disabled so bulk ops never touch them.
-function UsageRequests({ filters, anyFilter }: { filters: UsageFilters; anyFilter: boolean }) {
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(REQUESTS_PAGE_SIZE);
-  const selection = useTableSelection();
-  const deleteUsage = useDeleteUsage();
-  const setPrice = useSetUsagePrice();
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [priceOpen, setPriceOpen] = useState(false);
-
-  const filtersKey = JSON.stringify(filters);
-  const prevFiltersKey = useRef(filtersKey);
-  useEffect(() => {
-    if (prevFiltersKey.current !== filtersKey) {
-      prevFiltersKey.current = filtersKey;
-      setPage(0);
-      selection.clear();
-    }
-  }, [filtersKey, selection]);
-
-  const usage = useUsageLogs(filters, page, pageSize);
-  const count = useUsageCount(filters);
-  const rows = usage.data ?? [];
-  const totalIsExact = count.isSuccess && !count.isPlaceholderData;
-  const total = totalIsExact ? (count.data?.total ?? 0) : null;
-
-  const selectableKeys = rows.filter((r) => !r.counts_toward_budget).map((r) => r.id);
-  const disabledKeys = rows.filter((r) => r.counts_toward_budget).map((r) => r.id);
-  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
-  const pageSelectedCount = selectedIds.length;
-  const hasSelection = selection.allMatching || pageSelectedCount > 0;
-
-  const importedFilters = useMemo<UsageFilters>(() => ({ ...filters, counts_toward_budget: false }), [filters]);
-  const importedCount = useUsageCount(importedFilters, hasSelection);
-  const matchingTotal = importedCount.isSuccess ? (importedCount.data?.total ?? null) : null;
-  const allPageSelected = selectableKeys.length > 0 && pageSelectedCount === selectableKeys.length;
-  const canSelectAllMatching = allPageSelected && matchingTotal != null && matchingTotal > pageSelectedCount;
-  const effectiveCount = selection.allMatching ? (matchingTotal ?? pageSelectedCount) : pageSelectedCount;
-
-  const selectionBody = (): UsageMutationSelection =>
-    selection.allMatching
-      ? {
-          by_filter: true,
-          model: filters.model,
-          user_id: filters.user_id,
-          api_key_id: filters.api_key_id,
-          start_date: filters.start_date,
-          end_date: filters.end_date,
-          priced: filters.priced,
-        }
-      : { ids: selectedIds };
-
-  const onDeleteConfirm = () =>
-    deleteUsage.mutate(selectionBody(), {
-      onSuccess: () => {
-        setDeleteOpen(false);
-        selection.clear();
-      },
-    });
-
-  const onSetPrice = (rates: ManualRates) =>
-    setPrice.mutate(
-      { ...selectionBody(), ...rates },
-      {
-        onSuccess: () => {
-          setPriceOpen(false);
-          selection.clear();
-        },
-      },
-    );
-
-  return (
-    <div className="flex flex-col gap-3">
-      <h2 className="text-sm font-semibold text-[var(--otari-ink)]">Individual requests</h2>
-      <ErrorBanner error={usage.error ?? count.error} />
-
-      {hasSelection ? (
-        <BulkActionBar
-          selectedCount={effectiveCount}
-          allMatching={selection.allMatching}
-          matchingTotal={matchingTotal}
-          canSelectAllMatching={canSelectAllMatching}
-          onSelectAllMatching={selection.enableAllMatching}
-          onClear={selection.clear}
-        >
-          <Button size="sm" variant="primary" onPress={() => setPriceOpen(true)}>
-            Set price
-          </Button>
-          <Button size="sm" variant="danger" onPress={() => setDeleteOpen(true)}>
-            Delete
-          </Button>
-        </BulkActionBar>
-      ) : null}
-
-      <DataTable
-        ariaLabel="Individual requests"
-        columns={REQUEST_COLUMNS}
-        rows={rows}
-        getRowKey={getRequestRowKey}
-        isLoading={usage.isLoading}
-        emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
-        selectionMode="multiple"
-        selectedKeys={selection.selectedKeys}
-        onSelectionChange={selection.onSelectionChange}
-        disabledKeys={disabledKeys}
-      />
-
-      <TablePagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        rowsOnPage={rows.length}
-        onPageChange={setPage}
-        onPageSizeChange={(size) => {
-          setPageSize(size);
-          setPage(0);
-        }}
-        isFetching={usage.isFetching}
-        hasNextFallback={rows.length === pageSize}
-      />
-
-      <ConfirmDialog
-        isOpen={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        heading="Delete usage rows"
-        body={`Delete ${effectiveCount.toLocaleString()} imported ${
-          effectiveCount === 1 ? "row" : "rows"
-        }? Only imported rows are removed, and this cannot be undone.`}
-        confirmLabel="Delete"
-        isPending={deleteUsage.isPending}
-        error={deleteUsage.error}
-        onConfirm={onDeleteConfirm}
-      />
-
-      <SetPriceDialog
-        isOpen={priceOpen}
-        onOpenChange={setPriceOpen}
-        targetCount={effectiveCount}
-        isPending={setPrice.isPending}
-        error={setPrice.error}
-        onSubmit={onSetPrice}
-      />
-    </div>
-  );
+// One breakdown tab. Model and user are the two questions asked on every visit;
+// the rest answer a real question each, so they share the same tab strip rather
+// than stacking seven tables.
+interface BreakdownDimensionDef {
+  key: SummaryDimension;
+  label: string;
+  rows: UsageGroupRow[];
+  // How a group whose column was NULL reads (see BreakdownTable.unknownLabel).
+  unknownLabel?: string;
+  drill: (key: string) => void;
 }
 
 // ---------- page ----------
@@ -461,9 +269,9 @@ export function UsagePage() {
   // not recompute "now" and churn the query key. Re-anchored on preset change
   // and on refresh. Usage presets are all bounded, so this is always set.
   const [startDate, setStartDate] = useState<string>(() => isoAgo(DEFAULT_PRESET.seconds ?? 0));
-  // Custom range: an explicit UTC-bucket window selected on the timeline
-  // (handles, pan, or step zoom). When active it overrides the preset window.
-  // The selection always yields both bounds, so there is no half-filled window.
+  // Custom range: an explicit UTC-bucket window selected by dragging across the
+  // analytics chart. When active it overrides the preset window. The selection
+  // always yields both bounds, so there is no half-filled window.
   const [customMode, setCustomMode] = useState(false);
   const [customStart, setCustomStart] = useState<string | undefined>();
   const [customEnd, setCustomEnd] = useState<string | undefined>();
@@ -471,7 +279,7 @@ export function UsagePage() {
   const [userFilter, setUserFilter] = useState("");
   const [apiKeyFilter, setApiKeyFilter] = useState("");
   const [metric, setMetric] = useState<ChartMetric>("cost");
-  const [dimension, setDimension] = useState<BreakdownDimension>("source_label");
+  const [groupBy, setGroupBy] = useState<"" | UsageGroupBy>("");
 
   const winStart = customMode ? customStart : startDate;
   const winEnd = customMode ? customEnd : undefined;
@@ -495,7 +303,7 @@ export function UsagePage() {
   );
 
   // The immediately-preceding window of equal length, for period-over-period
-  // deltas. Every preset is now bounded, so a comparison always exists.
+  // deltas. Every preset is bounded, so a comparison always exists.
   const previousFilters: UsageFilters | null = useMemo(() => {
     if (customMode) {
       if (!winStart || !winEnd) return null;
@@ -513,28 +321,16 @@ export function UsagePage() {
   }, [customMode, winStart, winEnd, filters, preset.seconds, startDate]);
 
   const summary = useUsageSummary(filters, bucket, PAGE_BREAKDOWNS);
-  // Deltas read `totals` only, so this second window skips every breakdown.
+  // Deltas read `totals` only, so the previous window skips every breakdown.
   const previous = useUsageSummary(previousFilters ?? filters, bucket, NO_BREAKDOWNS, previousFilters !== null);
-
-  // The timeline histogram spans the whole preset *extent* (independent of the
-  // brushed sub-window), so the brush always has context to zoom back out into.
-  // When the brush is full this is the same query as `summary` (deduped); a
-  // sub-window makes them diverge by one query.
-  const contextFilters: UsageFilters = useMemo(
-    () => ({
-      start_date: startDate,
-      model: modelFilter.trim() || undefined,
-      user_id: userFilter || undefined,
-      api_key_id: apiKeyFilter || undefined,
-    }),
-    [startDate, modelFilter, userFilter, apiKeyFilter],
-  );
-  // The histogram reads `series` only.
-  const contextSummary = useUsageSummary(contextFilters, preset.bucket, NO_BREAKDOWNS);
-  const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
-    bucketStart: p.bucket_start,
-    requests: p.requests,
-  }));
+  // The per-group stack, fetched only while a dimension is selected.
+  const grouped = useUsageGroupedSeries(filters, bucket, groupBy || null);
+  // A 404 from the grouped endpoint is version skew: a gateway older than this
+  // dashboard (most often one not yet restarted onto the build that ships it).
+  // Fall back to the ungrouped view with a notice instead of a bare error.
+  const groupingUnsupported =
+    groupBy !== "" && grouped.error instanceof ApiError && grouped.error.status === 404;
+  const effectiveGroupBy = groupingUnsupported ? "" : groupBy;
 
   const data = summary.data;
   const totals = data?.totals;
@@ -545,6 +341,7 @@ export function UsagePage() {
   // omits the model filter, so the list stays complete when a model is selected,
   // and derived directly from query data rather than mirrored into state.
   const modelSuggestFilters: UsageFilters = useMemo(() => ({ ...filters, model: undefined }), [filters]);
+  // The typeahead reads only the model breakdown, so only it is requested.
   const modelSuggest = useUsageSummary(modelSuggestFilters, bucket, MODEL_BREAKDOWN);
   const modelOptions =
     modelSuggest.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
@@ -558,6 +355,7 @@ export function UsagePage() {
     value: k.id,
     label: k.key_name ?? `${k.id.slice(0, 8)}…`,
   }));
+  const keyLabel = (id: string) => keyOptions.find((o) => o.value === id)?.label ?? id;
   // Keep a selected-but-not-in-list model visible (e.g. seeded from elsewhere).
   const modelOptionList = (
     modelFilter && !modelOptions.includes(modelFilter) ? [modelFilter, ...modelOptions] : modelOptions
@@ -569,8 +367,8 @@ export function UsagePage() {
   const timeFiltered = customMode || preset.key !== USAGE_DEFAULT_KEY;
   const anyFilter = Boolean(modelFilter.trim() || userFilter || apiKeyFilter || timeFiltered);
 
-  // Active entity filters as removable chips (time is driven by the timeline, so
-  // it is not a chip). Values show the human label where one exists.
+  // Active entity filters as removable chips (time is driven by the presets and
+  // the chart selection, so it is not a chip). Values show the human label.
   const labelFor = (options: { value: string; label: string }[], value: string) =>
     options.find((o) => o.value === value)?.label ?? value;
   const clearEntityFilters = () => {
@@ -610,17 +408,19 @@ export function UsagePage() {
 
   // Refetch every window-scoped query, not just the headline summary: in custom
   // mode the query keys do not change, so anything left out would silently stay
-  // on cached data after an explicit refresh. `previous` is guarded because
-  // refetch() ignores `enabled` and would fire a pointless request.
+  // on cached data after an explicit refresh. The conditional queries are
+  // guarded because refetch() ignores `enabled` and would fire pointlessly.
   const refresh = () => {
     if (!customMode) {
       setStartDate(isoAgo(preset.seconds ?? 0));
     }
     void summary.refetch();
-    void contextSummary.refetch();
     void modelSuggest.refetch();
     if (previousFilters !== null) {
       void previous.refetch();
+    }
+    if (groupBy) {
+      void grouped.refetch();
     }
   };
 
@@ -639,46 +439,252 @@ export function UsagePage() {
 
   const errorRate = totals && totals.request_count > 0 ? totals.error_count / totals.request_count : 0;
 
-  const activeDimension = DIMENSION_TABS.find((t) => t.key === dimension) ?? DIMENSION_TABS[0];
+  // Provenance only earns UI (a group-by option, a breakdown tab) once the
+  // window actually has more than one source: most gateways see only their own
+  // traffic, and a single-option dimension is noise. Kept while it is the
+  // active grouping so switching windows never strands the selection.
+  const multiSource = (data?.by_source ?? []).filter((r) => !r.is_other).length > 1;
+  const showSource = multiSource || groupBy === "source";
 
-  // The bucketed series is already on the wire; reuse it for tile sparklines. A
-  // single point has no trend to draw, so sparklines only appear with 2+ buckets.
+  // ---------- derived analytics ----------
+
   const series = data?.series ?? [];
   const hasTrend = series.length > 1;
-  const trend = trendData(series, metric, bucket);
+
+  // Billed token view: input (incl. cache) + output, with the raw provider total
+  // as the fallback when the composition fields are absent (an older gateway
+  // behind `vite dev`). Cache hit rate = reads / billed input.
+  const billedInput = totals?.billed_input_tokens;
+  const billedTotal =
+    totals === undefined
+      ? null
+      : billedInput !== undefined
+        ? billedInput + (totals.billed_output_tokens ?? totals.completion_tokens)
+        : totals.total_tokens;
+  const prevBilledTotal =
+    prevTotals === undefined
+      ? null
+      : prevTotals.billed_input_tokens !== undefined
+        ? prevTotals.billed_input_tokens + (prevTotals.billed_output_tokens ?? prevTotals.completion_tokens)
+        : prevTotals.total_tokens;
+  // Cache sums from the series composition rather than the raw totals columns:
+  // the raw sums follow each provider's reporting convention, while the series
+  // is meter-normalized, and the tile's own sparkline reads the series. One
+  // source keeps the headline, its trendline, and the hint in agreement.
+  const cacheSums = (points: UsageSeriesPoint[]) => {
+    let input = 0;
+    let read = 0;
+    let write = 0;
+    for (const p of points) {
+      input += p.input_tokens ?? 0;
+      read += p.cache_read_tokens ?? 0;
+      write += p.cache_write_tokens ?? 0;
+    }
+    return { input, read, write };
+  };
+  const cache = cacheSums(series);
+  const cacheHitRate = cache.input > 0 ? cache.read / cache.input : null;
+  const prevCache = cacheSums(previousFilters !== null ? (previous.data?.series ?? []) : []);
+  const prevCacheHitRate = prevCache.input > 0 ? prevCache.read / prevCache.input : undefined;
+
+  const pointBilled = (p: UsageSeriesPoint) =>
+    p.input_tokens !== undefined ? p.input_tokens + (p.output_tokens ?? 0) : p.tokens;
+  const hasComposition = series.some((p) => (p.input_tokens ?? 0) > 0);
+  const hasErrors = series.some((p) => (p.errors ?? 0) > 0);
+
+  // The main chart's series + data for the current metric × group-by. All the
+  // pivoting happens here so the chart component stays dumb.
+  const chart = useMemo((): { series: SeriesDef[]; data: StackedPoint[] } => {
+    const buckets = series.map((p) => p.bucket_start);
+    if (effectiveGroupBy) {
+      const g = grouped.data;
+      if (!g) return { series: [], data: [] };
+      const defs = g.groups.map((row, index) => ({
+        key: `g${index}`,
+        label: row.is_other
+          ? "Other"
+          : row.key === null
+            ? "(unknown)"
+            : effectiveGroupBy === "api_key_id"
+              ? keyLabel(row.key)
+              : row.key,
+        color: row.is_other ? OTHER_COLOR : CAT_COLORS[index % CAT_COLORS.length],
+      }));
+      const seriesKey = new Map(g.groups.map((row, index) => [`${row.is_other}|${row.key}`, `g${index}`]));
+      const byBucket = new Map<string, StackedPoint>(
+        buckets.map((b) => [b, { x: b, ...Object.fromEntries(defs.map((d) => [d.key, 0])) }]),
+      );
+      for (const point of g.points) {
+        const key = seriesKey.get(`${point.is_other}|${point.key}`);
+        const row = byBucket.get(point.bucket_start);
+        if (!key || !row) continue;
+        row[key] = metric === "cost" ? point.cost : metric === "tokens" ? point.tokens : point.requests;
+      }
+      return { series: defs, data: [...byBucket.values()] };
+    }
+    if (metric === "tokens" && hasComposition) {
+      return {
+        series: COMPOSITION_SERIES,
+        data: series.map((p) => {
+          const input = p.input_tokens ?? 0;
+          const read = p.cache_read_tokens ?? 0;
+          const write = p.cache_write_tokens ?? 0;
+          return {
+            x: p.bucket_start,
+            fresh: Math.max(0, input - read - write),
+            cache_read: read,
+            cache_write: write,
+            output: p.output_tokens ?? 0,
+          };
+        }),
+      };
+    }
+    if (metric === "requests" && hasErrors) {
+      return {
+        series: REQUEST_SERIES,
+        data: series.map((p) => {
+          const errors = Math.min(p.errors ?? 0, p.requests);
+          return { x: p.bucket_start, success: p.requests - errors, errors };
+        }),
+      };
+    }
+    const single: SeriesDef = {
+      key: metric,
+      label: METRIC_TABS.find((t) => t.key === metric)?.label ?? metric,
+      color: "var(--otari-brand)",
+    };
+    return {
+      series: [single],
+      data: series.map((p) => ({
+        x: p.bucket_start,
+        [metric]: metric === "cost" ? p.cost : metric === "tokens" ? pointBilled(p) : p.requests,
+      })),
+    };
+    // keyLabel is derived from query data; keys.data is the stable input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [series, effectiveGroupBy, grouped.data, metric, hasComposition, hasErrors, keys.data]);
+
+  const formatValue = metricFormatter(metric);
+  const chartLoading = summary.isLoading || (Boolean(effectiveGroupBy) && grouped.isLoading);
+  const peak = chart.data.length
+    ? Math.max(
+        ...chart.data.map((row) => chart.series.reduce((sum, s) => sum + (typeof row[s.key] === "number" ? (row[s.key] as number) : 0), 0)),
+      )
+    : 0;
+
+  // Dragging across the chart zooms into the selected buckets (the same
+  // interaction as the Activity strip and every mainstream metrics tool).
+  const chartBuckets = series.map((p) => p.bucket_start);
+  const onChartSelect = (startIndex: number, endIndex: number) => {
+    const range = rangeFromBuckets(chartBuckets, startIndex, endIndex, bucket);
+    if (range) pickCustom(range.startIso, range.endIso);
+  };
+
+  // ---------- breakdown tabs ----------
+
+  const dimensions: BreakdownDimensionDef[] = [
+    {
+      key: "model",
+      label: "Model",
+      rows: data?.by_model ?? [],
+      drill: (key) => drillTo({ model: key, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+    },
+    {
+      key: "user",
+      label: "User",
+      rows: data?.by_user ?? [],
+      drill: (key) =>
+        drillTo({ user_id: key, model: modelFilter.trim() || undefined, api_key_id: apiKeyFilter || undefined }),
+    },
+  ];
+
+  // The secondary breakdown answers "what ran", complementing the primary's
+  // "on what / for whom". Sessions first: for agent traffic a few long-running
+  // sessions carry most of the spend, so this is usually the row that explains
+  // a bill.
+  const secondaryDimensions: BreakdownDimensionDef[] = [
+    {
+      key: "source_label",
+      label: "Session",
+      rows: data?.by_source_label ?? [],
+      unknownLabel: "(no session)",
+      drill: (key) =>
+        drillTo({ source_label: key, model: modelFilter.trim() || undefined, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+    },
+    {
+      key: "endpoint",
+      label: "Endpoint",
+      rows: data?.by_endpoint ?? [],
+      drill: (key) =>
+        drillTo({ endpoint: key, model: modelFilter.trim() || undefined, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+    },
+    {
+      key: "provider",
+      label: "Provider",
+      rows: data?.by_provider ?? [],
+      drill: (key) =>
+        drillTo({ provider: key, model: modelFilter.trim() || undefined, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+    },
+    {
+      key: "source",
+      label: "Source",
+      rows: data?.by_source ?? [],
+      drill: (key) =>
+        drillTo({
+          source: key,
+          model: modelFilter.trim() || undefined,
+          user_id: userFilter || undefined,
+          api_key_id: apiKeyFilter || undefined,
+        }),
+    },
+  ];
+  const [primaryDim, setPrimaryDim] = useState<SummaryDimension>("model");
+  const [secondaryDim, setSecondaryDim] = useState<SummaryDimension>("source_label");
+  const activePrimary = dimensions.find((d) => d.key === primaryDim) ?? dimensions[0];
+  const visibleSecondary = secondaryDimensions.filter(
+    (d) => d.key !== "source" || multiSource || secondaryDim === "source",
+  );
+  const activeSecondary = visibleSecondary.find((d) => d.key === secondaryDim) ?? visibleSecondary[0];
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Usage & analytics"
-        description="Aggregate spend, tokens, and request volume over time. Click a model or user to drill into the request log."
+        description="Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."
       />
 
-      <ErrorBanner error={summary.error} />
+      <ErrorBanner error={summary.error ?? (groupBy !== "" && !groupingUnsupported ? grouped.error : null)} />
 
-      {/* Filters: the timeline picks the window; chips carry entity filters. The
-          refresh control rides the timeline's preset row to save vertical space. */}
-      <div className="flex flex-col gap-3">
-        <ActivityTimeline
-          presets={USAGE_PRESETS}
-          extentKey={preset.key}
-          onPreset={pickPreset}
-          onSelectRange={pickCustom}
-          onSelectFull={() => pickPreset(preset)}
-          series={timelineSeries}
-          bucket={preset.bucket}
-          windowStart={effectiveStart}
-          windowEnd={effectiveEnd}
-          loading={contextSummary.isLoading}
-          ariaLabel="Usage request volume over the selected window"
-          action={<RefreshButton onRefresh={refresh} isFetching={summary.isFetching} updatedAt={summary.dataUpdatedAt} />}
-        />
-        <FilterChips chips={filterChips} onClearAll={clearEntityFilters}>
-          <FilterComboBox label="User" value={userFilter} onChange={setUserFilter} options={userOptions} placeholder="All users" />
-          <FilterComboBox label="Model" value={modelFilter} onChange={setModelFilter} options={modelOptionList} placeholder="All models" />
-          <FilterComboBox label="API key" value={apiKeyFilter} onChange={setApiKeyFilter} options={keyOptions} placeholder="All keys" />
-        </FilterChips>
-      </div>
+      {/* Window + filter row: presets anchor the rolling window (dragging on the
+          chart below selects an explicit sub-window), the Add filter toggle and
+          its chips share the same line, and the caption + refresh sit at the
+          right edge. */}
+      <FilterChips
+        chips={filterChips}
+        onClearAll={clearEntityFilters}
+        start={USAGE_PRESETS.map((p) => (
+          <Button
+            key={p.key}
+            size="sm"
+            variant={!customMode && preset.key === p.key ? "primary" : "outline"}
+            onPress={() => pickPreset(p)}
+          >
+            {p.label}
+          </Button>
+        ))}
+        end={
+          <>
+            <span className="text-xs text-[var(--otari-muted)]">
+              Showing {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
+            </span>
+            <RefreshButton onRefresh={refresh} isFetching={summary.isFetching} updatedAt={summary.dataUpdatedAt} />
+          </>
+        }
+      >
+        <FilterComboBox label="User" value={userFilter} onChange={setUserFilter} options={userOptions} placeholder="All users" />
+        <FilterComboBox label="Model" value={modelFilter} onChange={setModelFilter} options={modelOptionList} placeholder="All models" />
+        <FilterComboBox label="API key" value={apiKeyFilter} onChange={setApiKeyFilter} options={keyOptions} placeholder="All keys" />
+      </FilterChips>
 
       {isEmptyEver ? (
         <EmptyState
@@ -687,11 +693,10 @@ export function UsagePage() {
         />
       ) : (
         <>
-          {/* Tiles. A responsive grid, matching OverviewPage: StatCard is
-              flex-1/min-w-0 (sized by its track), so a wrapping flex row lets
-              all seven tiles shrink onto one unusable line on phones instead
-              of wrapping. */}
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+          {/* KPI tiles. Cache tells one story (hit rate + volumes) instead of
+              three raw counters; tokens are the billed total, matching the
+              chart's composition and the Activity page. */}
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
             <StatCard
               label="Tracked cost"
               value={totals ? formatUsd(totals.cost) : "—"}
@@ -730,125 +735,52 @@ export function UsagePage() {
               }
             />
             <StatCard
-              label="Tokens"
-              value={totals ? formatTokens(totals.total_tokens) : "—"}
-              hint={totals ? <DeltaHint fraction={deltaFraction(totals.total_tokens, prevTotals?.total_tokens)} /> : null}
-              chart={hasTrend ? <Sparkline values={series.map((p) => p.tokens)} ariaLabel="Token usage trend over the selected window" /> : undefined}
-            />
-            <StatCard
-              label="Cache read"
-              value={totals ? formatTokens(totals.cache_read_tokens) : "—"}
+              label="Tokens (billed)"
+              value={billedTotal !== null ? formatTokens(billedTotal) : "—"}
               hint={
-                totals ? (
-                  <DeltaHint fraction={deltaFraction(totals.cache_read_tokens, prevTotals?.cache_read_tokens)} />
+                billedTotal !== null ? (
+                  <DeltaHint fraction={deltaFraction(billedTotal, prevBilledTotal ?? undefined)} />
                 ) : null
+              }
+              chart={
+                hasTrend ? (
+                  <Sparkline values={series.map(pointBilled)} ariaLabel="Billed token trend over the selected window" />
+                ) : undefined
               }
             />
             <StatCard
-              label="Cache write"
-              value={totals ? formatTokens(totals.cache_write_tokens) : "—"}
+              label="Cache hit rate"
+              value={cacheHitRate !== null ? formatPct(cacheHitRate) : "—"}
               hint={
                 totals ? (
-                  <DeltaHint fraction={deltaFraction(totals.cache_write_tokens, prevTotals?.cache_write_tokens)} />
+                  <span className="text-[var(--otari-muted)]">
+                    {cacheHitRate !== null && prevCacheHitRate !== undefined ? (
+                      <>
+                        <DeltaHint fraction={deltaFraction(cacheHitRate, prevCacheHitRate)} />
+                        {" · "}
+                      </>
+                    ) : null}
+                    {formatTokens(cache.read)} read · {formatTokens(cache.write)} written
+                  </span>
                 ) : null
               }
-            />
-            <StatCard
-              label="1h cache write"
-              value={totals ? formatTokens(totals.cache_write_1h_tokens ?? 0) : "—"}
-              hint={
-                totals ? (
-                  <DeltaHint
-                    fraction={deltaFraction(totals.cache_write_1h_tokens ?? 0, prevTotals?.cache_write_1h_tokens ?? 0)}
+              chart={
+                hasTrend && hasComposition ? (
+                  <Sparkline
+                    values={series.map((p) =>
+                      (p.input_tokens ?? 0) > 0 ? (p.cache_read_tokens ?? 0) / (p.input_tokens ?? 1) : 0,
+                    )}
+                    ariaLabel="Cache hit rate trend over the selected window"
                   />
-                ) : null
+                ) : undefined
               }
             />
             <StatCard label="Avg latency" value={totals ? formatLatency(totals.avg_latency_ms) : "—"} />
           </div>
 
-          {/* Breakdowns: the answer to "where is my money going?", above the trend. */}
-          <div className="grid gap-6 lg:grid-cols-2">
-            <BreakdownTable
-              title="Spend by model"
-              rows={data?.by_model ?? []}
-              totalCost={totals?.cost ?? 0}
-              emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
-              // Drilling into a model keeps the other active filters (user, API key),
-              // so the log stays scoped to them instead of showing every request for
-              // the model.
-              onDrill={(key) =>
-                drillTo({ model: key, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined })
-              }
-              loading={summary.isLoading}
-            />
-            <BreakdownTable
-              title="Spend by user"
-              rows={data?.by_user ?? []}
-              totalCost={totals?.cost ?? 0}
-              emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
-              // Likewise, drilling into a user keeps the other active filters (model,
-              // API key).
-              onDrill={(key) =>
-                drillTo({
-                  user_id: key,
-                  model: modelFilter.trim() || undefined,
-                  api_key_id: apiKeyFilter || undefined,
-                })
-              }
-              loading={summary.isLoading}
-            />
-          </div>
-
-          {/* The remaining dimensions, one at a time behind a picker. Session is
-              the default: it is the grouping that names the work behind a bill. */}
-          <BreakdownTable
-            // Remount per dimension so an expanded "show all" does not carry over:
-            // sessions can run to 250 rows, and inheriting that on Provider reads
-            // as a broken table rather than a deliberate expansion.
-            key={dimension}
-            title={`Spend by ${activeDimension.label.toLowerCase()}`}
-            rows={dimensionRows(data, dimension)}
-            totalCost={totals?.cost ?? 0}
-            emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
-            unknownLabel={activeDimension.unknownLabel}
-            // Drilling keeps the entity filters, like the model/user tables do.
-            onDrill={(key) =>
-              drillTo({
-                [dimension]: key,
-                model: modelFilter.trim() || undefined,
-                user_id: userFilter || undefined,
-                api_key_id: apiKeyFilter || undefined,
-              })
-            }
-            loading={summary.isLoading}
-            action={
-              // aria-pressed, not just the variant: without it a screen reader
-              // hears four identically-named buttons and nothing about which
-              // dimension the table below is showing.
-              <div className="inline-flex gap-1.5">
-                {DIMENSION_TABS.map((tab) => (
-                  <Button
-                    key={tab.key}
-                    size="sm"
-                    variant={dimension === tab.key ? "primary" : "outline"}
-                    aria-pressed={dimension === tab.key}
-                    onPress={() => setDimension(tab.key)}
-                  >
-                    {tab.label}
-                  </Button>
-                ))}
-              </div>
-            }
-          />
-
-          {/* Raw rows for the same window, with the imported-row bulk actions. */}
-          <UsageRequests filters={filters} anyFilter={anyFilter} />
-
-          {/* Trend */}
+          {/* The analytics chart: metric × group-by, brushable. */}
           <div className="flex flex-col gap-3 rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)] p-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold text-[var(--otari-ink)]">Over time</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="inline-flex gap-1.5">
                 {METRIC_TABS.map((tab) => (
                   <Button
@@ -861,31 +793,124 @@ export function UsagePage() {
                     {tab.label}
                   </Button>
                 ))}
-                {summary.isFetching ? <Spinner size="sm" /> : null}
+              </div>
+              <div className="flex items-center gap-2">
+                {customMode ? (
+                  <Button size="sm" variant="ghost" onPress={() => pickPreset(preset)}>
+                    Reset zoom
+                  </Button>
+                ) : null}
+                {summary.isFetching || (effectiveGroupBy && grouped.isFetching) ? <Spinner size="sm" /> : null}
+                <FilterSelect
+                  ariaLabel="Group by"
+                  value={groupBy}
+                  onChange={(value) => setGroupBy(value as "" | UsageGroupBy)}
+                  options={GROUP_OPTIONS.filter((o) => o.value !== "source" || showSource).map((o) => ({
+                    value: o.value,
+                    label: o.value ? `By ${o.label.toLowerCase()}` : "No grouping",
+                  }))}
+                />
               </div>
             </div>
-            {summary.isLoading ? (
-              <div className="flex h-48 items-center justify-center">
+            {groupingUnsupported ? (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                The running gateway predates grouped series, so the chart shows ungrouped totals. Restart the gateway
+                on this build to enable grouping.
+              </div>
+            ) : null}
+            <ChartLegend series={chart.series} />
+            {chartLoading ? (
+              <div className="flex h-64 items-center justify-center">
                 <Spinner size="sm" />
               </div>
-            ) : series.length === 0 ? (
-              <div className="flex h-48 items-center justify-center text-sm text-[var(--otari-muted)]">
+            ) : chart.data.length === 0 ? (
+              <div className="flex h-64 items-center justify-center text-sm text-[var(--otari-muted)]">
                 No data in this range.
               </div>
             ) : (
               <figure className="flex flex-col gap-2">
-                <BarTrendChart
-                  data={trend.points}
-                  formatValue={(value) => formatMetric(value, metric)}
-                  ariaLabel={`${metric} per ${bucket}`}
+                <TrendChart
+                  data={chart.data}
+                  series={chart.series}
+                  formatValue={formatValue}
+                  formatXTick={(iso) => formatBucketLabel(iso, bucket)}
+                  ariaLabel={`${metric} per ${bucket}${effectiveGroupBy ? `, grouped by ${effectiveGroupBy}` : ""}`}
+                  height={260}
+                  showYAxis
+                  showTotal
+                  onSelectRange={onChartSelect}
                 />
                 <figcaption className="text-xs text-[var(--otari-muted)]">
-                  {formatMetric(trend.peak, metric)} peak · {trend.count} {bucket === "hour" ? "hours" : "days"} (times
-                  in UTC)
+                  {formatValue(peak)} peak · {chart.data.length} {bucket === "hour" ? "hours" : "days"} (times in UTC) ·
+                  drag across the chart to zoom
                 </figcaption>
               </figure>
             )}
           </div>
+
+          {/* Breakdowns: the answer to "where is my money going?". The primary
+              table splits spend by who/what is billed (model, user); the
+              secondary by what ran (session, endpoint, provider, source), with
+              session first since it usually names the work behind a bill.
+              Drilling keeps the other active filters, so the log stays scoped
+              to them instead of showing every request for the group. */}
+          <div className="grid gap-6 xl:grid-cols-2">
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold text-[var(--otari-ink)]">Spend by {activePrimary.label.toLowerCase()}</h2>
+                <div className="inline-flex gap-1.5">
+                  {dimensions.map((d) => (
+                    <Button
+                      key={d.key}
+                      size="sm"
+                      variant={primaryDim === d.key ? "primary" : "outline"}
+                      aria-pressed={primaryDim === d.key}
+                      onPress={() => setPrimaryDim(d.key)}
+                    >
+                      {d.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <BreakdownTable
+                dimensionLabel={activePrimary.label}
+                rows={activePrimary.rows}
+                totalCost={totals?.cost ?? 0}
+                emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
+                unknownLabel={activePrimary.unknownLabel}
+                onDrill={activePrimary.drill}
+                loading={summary.isLoading}
+              />
+            </div>
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold text-[var(--otari-ink)]">Spend by {activeSecondary.label.toLowerCase()}</h2>
+                <div className="inline-flex gap-1.5">
+                  {visibleSecondary.map((d) => (
+                    <Button
+                      key={d.key}
+                      size="sm"
+                      variant={secondaryDim === d.key ? "primary" : "outline"}
+                      aria-pressed={secondaryDim === d.key}
+                      onPress={() => setSecondaryDim(d.key)}
+                    >
+                      {d.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <BreakdownTable
+                dimensionLabel={activeSecondary.label}
+                rows={activeSecondary.rows}
+                totalCost={totals?.cost ?? 0}
+                emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
+                unknownLabel={activeSecondary.unknownLabel}
+                onDrill={activeSecondary.drill}
+                loading={summary.isLoading}
+              />
+            </div>
+          </div>
+
         </>
       )}
     </div>

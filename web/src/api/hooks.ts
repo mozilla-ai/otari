@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { apiFetch } from "@/api/client";
+import { ApiError, apiFetch } from "@/api/client";
 import { isoAgo } from "@/lib/timeRange";
 import type {
   AliasResponse,
@@ -42,6 +42,8 @@ import type {
   UsageDeleteResult,
   UsageEntry,
   UsageFilters,
+  UsageGroupBy,
+  UsageGroupedSeries,
   UsageMutationSelection,
   UsageSetPriceRequest,
   UsageSetPriceResult,
@@ -795,5 +797,32 @@ export function useUsageSummary(
     enabled,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
+  });
+}
+
+// A per-group time series for the stacked analytics chart (top groups by spend
+// plus an "other" fold). Only fetched while a group-by dimension is active, so
+// the ungrouped view costs nothing extra. Caching mirrors useUsageSummary.
+export function useUsageGroupedSeries(
+  filters: UsageFilters,
+  bucket: UsageBucket,
+  groupBy: UsageGroupBy | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [USAGE, "series", filters, bucket, groupBy],
+    queryFn: () => {
+      const params = usageParams(filters);
+      params.set("bucket", bucket);
+      params.set("group_by", groupBy as string);
+      return apiFetch<UsageGroupedSeries>(`/v1/usage/series?${params.toString()}`);
+    },
+    enabled: enabled && groupBy !== null,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+    // A 404 is version skew (a gateway older than this dashboard, e.g. not yet
+    // restarted onto the build that ships it); retrying cannot fix that, and
+    // the page falls back to the ungrouped view with a notice instead.
+    retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 3,
   });
 }

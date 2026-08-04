@@ -39,7 +39,12 @@ def _make_log(
     endpoint: str = "/v1/chat/completions",
     source: str = "gateway",
     source_label: str | None = None,
+    prompt_tokens: int | None = 10,
+    completion_tokens: int | None = 5,
     total_tokens: int | None = 15,
+    cache_read_tokens: int | None = None,
+    cache_write_tokens: int | None = None,
+    billing_meters: dict[str, int] | None = None,
     cost: float | None = 0.01,
     status: str = "success",
     latency_ms: int | None = None,
@@ -57,9 +62,12 @@ def _make_log(
             endpoint=endpoint,
             source=source,
             source_label=source_label,
-            prompt_tokens=10,
-            completion_tokens=5,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            billing_meters=billing_meters,
             cost=cost,
             status=status,
             error_message="boom" if status == "error" else None,
@@ -89,6 +97,8 @@ def test_summary_empty_range_is_all_zero(client: TestClient, master_key_header: 
         "error_count": 0,
         "avg_latency_ms": None,
         "unpriced_requests": 0,
+        "billed_input_tokens": 0,
+        "billed_output_tokens": 0,
     }
     assert body["by_model"] == []
     assert body["by_user"] == []
@@ -216,6 +226,8 @@ def test_summary_breaks_down_by_session_endpoint_and_provider(
         endpoint="external",
         provider="anthropic",
         cost=0.50,
+        prompt_tokens=30,
+        completion_tokens=20,
         total_tokens=50,
     )
     _make_log(
@@ -627,3 +639,329 @@ def test_csv_export_guards_formula_injection(
     injected = [r for r in rows if r[0] == "model" and "cmd" in r[1]][0]
     # The dangerous leading '=' is neutralized with a leading quote.
     assert injected[1].startswith("'=")
+
+
+# ---------------------------------------------------------------------------
+# Billed token composition (series + totals + breakdowns) and /series grouping.
+# ---------------------------------------------------------------------------
+
+SERIES_PATH = "/v1/usage/series"
+
+
+def test_series_composition_prefers_meters_and_falls_back(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    ts = datetime(2025, 3, 1, 10, 30, tzinfo=UTC)
+    # Additive-convention row, normalized by its meters: prompt excludes the
+    # cache buckets, so billed input (900) far exceeds prompt_tokens (100).
+    _make_log(
+        db_session,
+        user_id="comp",
+        timestamp=ts,
+        prompt_tokens=100,
+        completion_tokens=50,
+        total_tokens=150,
+        cache_read_tokens=700,
+        cache_write_tokens=100,
+        billing_meters={
+            "total_input_tokens": 900,
+            "fresh_input_tokens": 100,
+            "cache_read_tokens": 700,
+            "cache_write_tokens": 100,
+            "cache_write_1h_tokens": 0,
+            "completion_tokens": 50,
+        },
+    )
+    # Meterless row: falls back to the raw columns under the subset convention
+    # (billed input = prompt_tokens as stored).
+    _make_log(
+        db_session,
+        user_id="comp",
+        timestamp=ts,
+        prompt_tokens=200,
+        completion_tokens=30,
+        total_tokens=230,
+        cache_read_tokens=120,
+        status="error",
+    )
+    db_session.commit()
+
+    body = client.get(
+        SUMMARY_PATH,
+        headers=master_key_header,
+        params={"user_id": "comp", "start_date": "2025-03-01T00:00:00Z", "end_date": "2025-03-02T00:00:00Z"},
+    ).json()
+
+    assert body["totals"]["billed_input_tokens"] == 900 + 200
+    [point] = [p for p in body["series"] if p["requests"]]
+    assert point["input_tokens"] == 1100
+    assert point["cache_read_tokens"] == 700 + 120
+    assert point["cache_write_tokens"] == 100
+    assert point["output_tokens"] == 80
+    assert point["errors"] == 1
+    # The raw provider total is untouched by the composition fields.
+    assert point["tokens"] == 150 + 230
+
+    # Breakdowns report the same billed quantity (input + output).
+    [model_row] = body["by_model"]
+    assert model_row["tokens"] == 1100 + 80
+
+
+def test_breakdown_fold_reconciles_billed_output_with_divergent_meters(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The fold row must use billed output, not the raw completion column.
+
+    A row whose completion meter diverges from its column (here: a NULL column
+    with a meter present) would otherwise drift the residual, and the top
+    groups' billed output could push the fold's token count negative.
+    """
+    ts = datetime(2025, 7, 1, 12, 0, tzinfo=UTC)
+    # Two models so a fold exists when only the top one is kept... the summary
+    # cap is 100, so instead diverge the meters and check exact reconciliation.
+    _make_log(
+        db_session,
+        user_id="divg",
+        timestamp=ts,
+        model="metered",
+        prompt_tokens=10,
+        completion_tokens=None,
+        billing_meters={
+            "total_input_tokens": 10,
+            "fresh_input_tokens": 10,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cache_write_1h_tokens": 0,
+            "completion_tokens": 40,
+        },
+    )
+    _make_log(db_session, user_id="divg", timestamp=ts, model="plain")
+    db_session.commit()
+
+    body = client.get(
+        SUMMARY_PATH,
+        headers=master_key_header,
+        params={"user_id": "divg", "start_date": "2025-07-01T00:00:00Z", "end_date": "2025-07-02T00:00:00Z"},
+    ).json()
+    totals = body["totals"]
+    # Billed output prefers the meter (40) over the NULL column, plus the plain
+    # row's raw 5.
+    assert totals["billed_output_tokens"] == 45
+    assert totals["completion_tokens"] == 5
+    # Per-group billed sums reconcile with the billed totals exactly.
+    by_model = {r["key"]: r for r in body["by_model"]}
+    assert by_model["metered"]["tokens"] == 10 + 40
+    assert by_model["plain"]["tokens"] == 10 + 5
+    assert sum(r["tokens"] for r in body["by_model"]) == totals["billed_input_tokens"] + totals["billed_output_tokens"]
+
+
+def test_grouped_series_requires_master_key_and_group_by(client: TestClient) -> None:
+    assert client.get(SERIES_PATH).status_code == 401
+
+
+def test_grouped_series_rejects_unknown_group_by(client: TestClient, master_key_header: dict[str, str]) -> None:
+    assert client.get(SERIES_PATH, headers=master_key_header, params={"group_by": "provider"}).status_code == 422
+    # group_by is required.
+    assert client.get(SERIES_PATH, headers=master_key_header).status_code == 422
+
+
+def test_grouped_series_by_model_reconciles(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    day1 = datetime(2025, 4, 1, 9, 0, tzinfo=UTC)
+    day2 = datetime(2025, 4, 2, 9, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="grp", timestamp=day1, model="gpt-4", cost=0.30, total_tokens=15)
+    _make_log(db_session, user_id="grp", timestamp=day1, model="claude", cost=0.10, total_tokens=15)
+    _make_log(db_session, user_id="grp", timestamp=day2, model="gpt-4", cost=0.20, total_tokens=15)
+    db_session.commit()
+
+    body = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "model",
+            "user_id": "grp",
+            "start_date": "2025-04-01T00:00:00Z",
+            "end_date": "2025-04-03T00:00:00Z",
+        },
+    ).json()
+
+    assert body["group_by"] == "model"
+    assert [g["key"] for g in body["groups"]] == ["gpt-4", "claude"]
+
+    # Sparse points, canonical UTC buckets, sorted by bucket.
+    buckets = [p["bucket_start"] for p in body["points"]]
+    assert buckets == sorted(buckets)
+    assert set(buckets) == {"2025-04-01T00:00:00Z", "2025-04-02T00:00:00Z"}
+
+    day1_points = {p["key"]: p for p in body["points"] if p["bucket_start"] == "2025-04-01T00:00:00Z"}
+    assert day1_points["gpt-4"]["cost"] == pytest.approx(0.30)
+    assert day1_points["claude"]["cost"] == pytest.approx(0.10)
+    # Billed tokens per (bucket, group): meterless rows fall back to prompt+output.
+    assert day1_points["gpt-4"]["tokens"] == 15
+
+    # The stack reconciles with the window totals.
+    assert sum(p["cost"] for p in body["points"]) == pytest.approx(0.60)
+    assert sum(p["requests"] for p in body["points"]) == 3
+
+
+def test_grouped_series_folds_past_top_n_and_null_groups(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    ts = datetime(2025, 5, 1, 12, 0, tzinfo=UTC)
+    # 10 models, descending spend, one request each: 8 named + 2 folded.
+    for idx in range(10):
+        _make_log(db_session, user_id="topn", timestamp=ts, model=f"m{idx}", cost=1.0 - idx * 0.05, total_tokens=15)
+    db_session.commit()
+
+    body = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "model",
+            "user_id": "topn",
+            "start_date": "2025-05-01T00:00:00Z",
+            "end_date": "2025-05-02T00:00:00Z",
+        },
+    ).json()
+
+    named = [g for g in body["groups"] if not g["is_other"]]
+    fold = [g for g in body["groups"] if g["is_other"]]
+    assert len(named) == 8
+    assert len(fold) == 1
+    assert fold[0]["requests"] == 2
+
+    other_points = [p for p in body["points"] if p["is_other"]]
+    assert sum(p["requests"] for p in other_points) == 2
+    assert sum(p["cost"] for p in other_points) == pytest.approx(0.60 + 0.55)
+    # Every named point carries its own key; the fold rows have key None.
+    assert all(p["key"] is None for p in other_points)
+    assert sum(p["requests"] for p in body["points"]) == 10
+
+
+def test_grouped_series_null_group_key_survives_when_in_top_n(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    ts = datetime(2025, 6, 1, 12, 0, tzinfo=UTC)
+    # api_key_id is NULL on both rows: the NULL group ranks in the top N and must
+    # come back as a real key=None group (not the fold).
+    _make_log(db_session, user_id="nullg", timestamp=ts, cost=0.10, total_tokens=15)
+    _make_log(db_session, user_id="nullg", timestamp=ts, cost=0.20, total_tokens=15)
+    db_session.commit()
+
+    body = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "api_key_id",
+            "user_id": "nullg",
+            "start_date": "2025-06-01T00:00:00Z",
+            "end_date": "2025-06-02T00:00:00Z",
+        },
+    ).json()
+
+    assert [g["key"] for g in body["groups"]] == [None]
+    assert body["groups"][0]["is_other"] is False
+    [point] = body["points"]
+    assert point["key"] is None
+    assert point["is_other"] is False
+    assert point["requests"] == 2
+    assert point["cost"] == pytest.approx(0.30)
+
+
+def test_grouped_series_null_top_group_and_fold_stay_separate(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The three-arm fold CASE: a NULL group ranked in the top N must not merge
+    with the past-top-N fold, even though both are keyed NULL in SQL."""
+    ts = datetime(2025, 7, 1, 12, 0, tzinfo=UTC)
+    # The NULL user is the top spender; nine named users follow, so with top
+    # N = 8 the window keeps NULL + seven named groups and folds the last two.
+    _make_log(db_session, user_id=None, timestamp=ts, model="cf-model", cost=5.0, total_tokens=15)
+    for idx in range(9):
+        _make_log(
+            db_session, user_id=f"cf-u{idx}", timestamp=ts, model="cf-model", cost=1.0 - idx * 0.05, total_tokens=15
+        )
+    db_session.commit()
+
+    body = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "user_id",
+            "model": "cf-model",
+            "start_date": "2025-07-01T00:00:00Z",
+            "end_date": "2025-07-02T00:00:00Z",
+        },
+    ).json()
+
+    groups = body["groups"]
+    assert len([g for g in groups if g["key"] is None and not g["is_other"]]) == 1
+    assert len([g for g in groups if g["key"] is not None]) == 7
+    [fold] = [g for g in groups if g["is_other"]]
+    assert fold["requests"] == 2
+
+    points = body["points"]
+    [null_point] = [p for p in points if p["key"] is None and not p["is_other"]]
+    assert null_point["requests"] == 1
+    assert null_point["cost"] == pytest.approx(5.0)
+    [fold_point] = [p for p in points if p["is_other"]]
+    assert fold_point["requests"] == 2
+    assert fold_point["cost"] == pytest.approx(0.65 + 0.60)
+    assert sum(p["requests"] for p in points) == 10
+
+
+def test_grouped_series_honors_provider_and_session_filters(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """/series accepts the same filters as /summary (it claims parity).
+
+    A filter it silently dropped would make the dashboard's stacked chart
+    aggregate over a wider set than the tiles beside it.
+    """
+    ts = datetime(2025, 8, 1, 12, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="par", timestamp=ts, model="m1", provider="openai", source_label="s1", cost=0.10)
+    _make_log(db_session, user_id="par", timestamp=ts, model="m1", provider="anthropic", source_label="s2", cost=0.20)
+    db_session.commit()
+
+    window = {"start_date": "2025-08-01T00:00:00Z", "end_date": "2025-08-02T00:00:00Z", "user_id": "par"}
+    for params, expected_cost in (
+        ({"provider": "openai"}, 0.10),
+        ({"source_label": "s2"}, 0.20),
+    ):
+        body = client.get(
+            SERIES_PATH, headers=master_key_header, params={"group_by": "model", **window, **params}
+        ).json()
+        assert sum(p["cost"] for p in body["points"]) == pytest.approx(expected_cost), params
+
+
+def test_grouped_series_caps_hourly_buckets(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """An hourly grid over a too-wide window is rejected, not ballooned.
+
+    /summary densifies then caps at _MAX_SERIES_POINTS; the grouped series is
+    sparse per (bucket, group), so it bounds the bucket grid up front.
+    """
+    resp = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "model",
+            "bucket": "hour",
+            "start_date": "2025-01-01T00:00:00Z",
+            "end_date": "2025-06-01T00:00:00Z",
+        },
+    )
+    assert resp.status_code == 422
+    assert "bucket=day" in resp.json()["detail"]
+    # The same window is fine at daily granularity.
+    ok = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "model",
+            "bucket": "day",
+            "start_date": "2025-01-01T00:00:00Z",
+            "end_date": "2025-06-01T00:00:00Z",
+        },
+    )
+    assert ok.status_code == 200

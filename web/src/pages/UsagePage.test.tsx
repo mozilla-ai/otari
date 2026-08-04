@@ -71,6 +71,22 @@ function mockApi(body: UsageSummary | null) {
     if (url.includes("/v1/usage/summary")) {
       return jsonResponse(body ?? summary());
     }
+    if (url.includes("/v1/usage/series")) {
+      return jsonResponse({
+        start_date: "2026-06-21T00:00:00Z",
+        end_date: "2026-07-21T00:00:00Z",
+        bucket: "day",
+        group_by: "model",
+        groups: [
+          { key: "gpt-5.6", cost: 820, tokens: 8_000_000, requests: 42_000, is_other: false },
+          { key: null, cost: 420.5, tokens: 4_400_000, requests: 42_000, is_other: true },
+        ],
+        points: [
+          { bucket_start: "2026-07-19T00:00:00Z", key: "gpt-5.6", is_other: false, cost: 400, tokens: 4_000_000, requests: 28_000 },
+          { bucket_start: "2026-07-20T00:00:00Z", key: null, is_other: true, cost: 420.5, tokens: 4_400_000, requests: 42_000 },
+        ],
+      });
+    }
     if (url.includes("/v1/users")) {
       return jsonResponse([{ user_id: "alice", alias: "Alice" }]);
     }
@@ -161,16 +177,116 @@ describe("UsagePage", () => {
     });
   });
 
-  it("shows cache read and write totals as tiles", async () => {
+  it("shows the cache story as a hit rate with read/write volumes", async () => {
     const base = summary();
-    mockApi(summary({ totals: { ...base.totals, cache_read_tokens: 5_100_000, cache_write_tokens: 2_700_000 } }));
+    mockApi(
+      summary({
+        // The tile reads the meter-normalized series composition (the same
+        // numbers as its sparkline), not the raw totals columns.
+        series: base.series.map((p, i) => ({
+          ...p,
+          input_tokens: i === 0 ? 4_200_000 : 6_000_000,
+          cache_read_tokens: i === 0 ? 2_100_000 : 3_000_000,
+          cache_write_tokens: i === 0 ? 1_200_000 : 1_500_000,
+          output_tokens: 400_000,
+        })),
+      }),
+    );
     renderPage(<UsagePage />);
 
     // Await a value (loads after the query resolves), not the static label.
-    expect(await screen.findByText("5.1M")).toBeInTheDocument();
-    expect(screen.getByText("2.7M")).toBeInTheDocument();
+    // 5.1M reads over 10.2M billed input tokens = a 50.0% hit rate.
+    expect(await screen.findByText("50.0%")).toBeInTheDocument();
+    expect(screen.getByText("Cache hit rate")).toBeInTheDocument();
+    expect(screen.getByText(/5\.1M read · 2\.7M written/)).toBeInTheDocument();
+  });
+
+  it("shows no hit rate when the billed input breakdown is unavailable", async () => {
+    // An older gateway (vite dev against a stale build) omits billed_input_tokens.
+    mockApi(summary());
+    renderPage(<UsagePage />);
+
+    await screen.findByText("$1,240.50");
+    const tile = screen.getByText("Cache hit rate").closest("div")!;
+    expect(within(tile).getByText("—")).toBeInTheDocument();
+  });
+
+  it("groups the chart by a dimension via the grouped series endpoint", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "model");
+
+    // The stack's legend comes from the grouped response: the top group plus
+    // the reconciling fold, which always reads "Other".
+    expect(await screen.findByText("Other")).toBeInTheDocument();
+    const calls = fetchMock.mock.calls.map(([u]) => String(u));
+    expect(calls.some((u) => u.includes("/v1/usage/series") && u.includes("group_by=model"))).toBe(true);
+  });
+
+  it("falls back to ungrouped with a notice when the gateway lacks grouped series", async () => {
+    // Version skew: the dashboard ships inside the gateway, but a not-yet
+    // restarted gateway (or vite dev against an older one) has no
+    // /v1/usage/series. That must degrade to the ungrouped chart plus a
+    // notice, not spin through retries into a bare "Not Found" banner.
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/usage/series")) return jsonResponse({ detail: "Not Found" }, 404);
+      if (url.includes("/v1/usage/summary")) return jsonResponse(summary());
+      return jsonResponse([]);
+    });
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Group by" }), "model");
+
+    expect(await screen.findByText(/predates grouped series/)).toBeInTheDocument();
+    expect(screen.queryByText("Not Found")).not.toBeInTheDocument();
+    // The ungrouped single-series chart is still up (its caption renders).
+    expect(screen.getByText(/peak/)).toBeInTheDocument();
+  });
+
+  it("stacks the billed token composition on the Tokens metric", async () => {
+    const user = userEvent.setup();
+    const base = summary();
+    mockApi(
+      summary({
+        series: base.series.map((p) => ({
+          ...p,
+          input_tokens: 3_000_000,
+          cache_read_tokens: 2_000_000,
+          cache_write_tokens: 500_000,
+          output_tokens: 400_000,
+        })),
+      }),
+    );
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.click(screen.getByRole("button", { name: "Tokens" }));
+
+    // The four billed buckets are legended: the same encoding as the Activity
+    // page's per-row token bar.
+    expect(await screen.findByText("Fresh input")).toBeInTheDocument();
     expect(screen.getByText("Cache read")).toBeInTheDocument();
     expect(screen.getByText("Cache write")).toBeInTheDocument();
+    expect(screen.getByText("Output")).toBeInTheDocument();
+  });
+
+  it("splits requests into succeeded and failed when the window has errors", async () => {
+    const user = userEvent.setup();
+    const base = summary();
+    mockApi(summary({ series: base.series.map((p) => ({ ...p, errors: 100 })) }));
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.click(screen.getByRole("button", { name: "Requests" }));
+
+    expect(await screen.findByText("Failed")).toBeInTheDocument();
+    expect(screen.getByText("Succeeded")).toBeInTheDocument();
   });
 
   it("queries the previous period with a bounded end_date for deltas", async () => {
@@ -236,15 +352,17 @@ describe("UsagePage", () => {
     const user = userEvent.setup();
     mockApi(summary());
     renderPage(<UsagePage />);
-    await screen.findByText("alice");
+    await screen.findByText("gpt-5.6");
 
-    // Filter by a model, then drill into a user row. The model constraint must
-    // survive the navigation, not be dropped in favor of only the clicked user.
+    // Filter by a model, then drill into a user row (on the User breakdown
+    // tab). The model constraint must survive the navigation, not be dropped
+    // in favor of only the clicked user.
     const modelInput = screen.getByRole("combobox", { name: "Model" });
     await user.click(modelInput);
     await user.type(modelInput, "gpt");
     await user.click(await screen.findByRole("option", { name: /gpt-5.6/ }));
 
+    await user.click(screen.getByRole("button", { name: "User" }));
     const row = (await screen.findByText("alice")).closest("tr")!;
     await user.click(row);
 
@@ -405,9 +523,10 @@ describe("UsagePage", () => {
     const { container } = renderPage(<UsagePage />);
     await screen.findByText("gpt-5.6");
 
-    // The trend is now a recharts chart (labelled "<metric> per <bucket>"), and a
-    // reusable sparkline rides the KPI tiles off the same bucketed series.
-    expect(screen.getByRole("img", { name: "cost per day" })).toBeInTheDocument();
+    // The trend is now a recharts chart (labelled "<metric> per <bucket>"; a
+    // group, not an image, since it owns drag selection), and a reusable
+    // sparkline rides the KPI tiles off the same bucketed series.
+    expect(screen.getByRole("group", { name: "cost per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /Spend trend/ })).toBeInTheDocument();
     expect(container.querySelector(".recharts-surface")).not.toBeNull();
 
@@ -456,60 +575,47 @@ describe("UsagePage", () => {
     expect(await screen.findByText(/No usage yet/)).toBeInTheDocument();
   });
 
-  it("bulk-deletes imported rows from the Individual requests list", async () => {
-    const importedRow = {
-      id: "imp-1",
-      user_id: "alice",
-      api_key_id: null,
-      timestamp: new Date().toISOString(),
-      model: "claude-sonnet-5",
-      provider: "anthropic",
-      endpoint: "external",
-      prompt_tokens: 100,
-      completion_tokens: 50,
-      total_tokens: 150,
-      cache_read_tokens: null,
-      cache_write_tokens: null,
-      cache_write_1h_tokens: null,
-      billing_meters: null,
-      pricing_breakdown: null,
-      cost: null,
-      status: "success",
-      error_message: null,
-      latency_ms: 120,
-      source: "claude_code",
-      source_label: null,
-      counts_toward_budget: false,
-    };
-    const calls: { url: string; method: string; body: string | undefined }[] = [];
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = String(input);
-      const method = (init?.method ?? "GET").toUpperCase();
-      calls.push({ url, method, body: typeof init?.body === "string" ? init.body : undefined });
-      if (url.endsWith("/v1/usage") && method === "DELETE") return jsonResponse({ deleted: 1 });
-      if (url.includes("/v1/usage/summary")) return jsonResponse(summary());
-      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 1 });
-      if (url.includes("/v1/users")) return jsonResponse([{ user_id: "alice", alias: "Alice" }]);
-      if (url.includes("/v1/keys")) return jsonResponse([]);
-      if (url.includes("/v1/usage")) return jsonResponse([importedRow]);
-      return jsonResponse([]);
-    });
-    const user = userEvent.setup();
+  it("no longer duplicates the Activity page's per-request table", async () => {
+    mockApi(summary());
     renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
 
-    const row = (await screen.findByText("claude-sonnet-5")).closest("tr")!;
-    await user.click(within(row).getByRole("checkbox"));
+    // The per-request table (and its bulk actions) lives on the Activity page;
+    // the breakdown rows drill there instead.
+    expect(screen.queryByText("Individual requests")).not.toBeInTheDocument();
+  });
 
-    const bar = (await screen.findByText("1 selected")).closest("div")!;
-    await user.click(within(bar).getByRole("button", { name: "Delete" }));
-    const dialog = await screen.findByRole("alertdialog");
-    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+  it("hides the source dimension while only one source exists", async () => {
+    // A plain gateway: every row shares one source, so neither the breakdown
+    // tab nor the group-by option should surface provenance.
+    mockApi(
+      summary({
+        by_source: [{ key: "gateway", cost: 1240.5, tokens: 12_400_000, requests: 84_000, is_other: false }],
+      }),
+    );
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
 
-    await vi.waitFor(() => {
-      const del = calls.find((c) => c.url.endsWith("/v1/usage") && c.method === "DELETE");
-      expect(del).toBeTruthy();
-      expect(del!.body).toContain("imp-1");
-    });
+    expect(screen.queryByRole("button", { name: "Source" })).not.toBeInTheDocument();
+    const groupSelect = screen.getByRole("combobox", { name: "Group by" });
+    expect(within(groupSelect).queryByRole("option", { name: "By source" })).not.toBeInTheDocument();
+  });
+
+  it("offers the source dimension once several sources exist", async () => {
+    mockApi(
+      summary({
+        by_source: [
+          { key: "gateway", cost: 900, tokens: 9_000_000, requests: 60_000, is_other: false },
+          { key: "claude_code", cost: 340.5, tokens: 3_400_000, requests: 24_000, is_other: false },
+        ],
+      }),
+    );
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    expect(screen.getByRole("button", { name: "Source" })).toBeInTheDocument();
+    const groupSelect = screen.getByRole("combobox", { name: "Group by" });
+    expect(within(groupSelect).getByRole("option", { name: "By source" })).toBeInTheDocument();
   });
 
   it("keeps the filter pickers behind an 'Add filter' toggle", async () => {

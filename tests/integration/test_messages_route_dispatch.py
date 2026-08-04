@@ -3,11 +3,14 @@
 These complement :mod:`tests.unit.test_mcp_loop_messages` (which tests the
 Anthropic tool loop in isolation) by exercising the FastAPI route handler:
 tool extraction, mutual-exclusivity validation, error-body mapping to the
-Anthropic shape, and the per-tool dispatch into the right backend.
+Anthropic shape, the per-tool dispatch into the right backend, and the
+prompt-cache contract (``cache_control`` markers reaching the provider
+unchanged, cache usage reaching the client).
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -29,7 +32,12 @@ from any_llm.types.messages import (
 from fastapi.testclient import TestClient
 
 
-def _text_response(text: str = "ok") -> MessageResponse:
+def _text_response(
+    text: str = "ok",
+    *,
+    cache_creation_input_tokens: int | None = None,
+    cache_read_input_tokens: int | None = None,
+) -> MessageResponse:
     return MessageResponse(
         id="msg_test",
         type="message",
@@ -41,8 +49,8 @@ def _text_response(text: str = "ok") -> MessageResponse:
         usage=MessageUsage(
             input_tokens=5,
             output_tokens=2,
-            cache_creation_input_tokens=None,
-            cache_read_input_tokens=None,
+            cache_creation_input_tokens=cache_creation_input_tokens,
+            cache_read_input_tokens=cache_read_input_tokens,
             cache_creation=None,
             server_tool_use=None,
             service_tier=None,
@@ -83,6 +91,47 @@ def test_no_tools_falls_through_to_plain_amessages(
     assert body["content"][0]["text"] == "hi"
     # Direct amessages call: tool-loop-only fields shouldn't appear.
     assert "tools" not in captured
+
+
+def test_cache_control_and_non_stream_usage_round_trip(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Cache markers reach Anthropic unchanged and cache usage reaches the client."""
+    system_block = {
+        "type": "text",
+        "text": "Stable system instructions",
+        "cache_control": {"type": "ephemeral", "ttl": "1h"},
+    }
+    message_block = {
+        "type": "text",
+        "text": "Stable reference material",
+        "cache_control": {"type": "ephemeral"},
+    }
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response(cache_creation_input_tokens=13, cache_read_input_tokens=8)
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "system": [system_block],
+                "messages": [{"role": "user", "content": [message_block]}],
+                "max_tokens": 100,
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["system"] == [system_block]
+    assert captured["messages"] == [{"role": "user", "content": [message_block]}]
+    usage = resp.json()["usage"]
+    assert usage["cache_creation_input_tokens"] == 13
+    assert usage["cache_read_input_tokens"] == 8
 
 
 def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
@@ -163,6 +212,75 @@ def test_user_supplied_openai_shape_tools_get_converted_to_anthropic(
 
 
 # ---------- gateway tool dispatch ----------
+
+
+def test_cache_control_survives_route_level_purpose_hint_injection(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Purpose hints add a block without altering the caller's cached block."""
+    system_block = {
+        "type": "text",
+        "text": "Stable system instructions",
+        "cache_control": {"type": "ephemeral", "ttl": "1h"},
+    }
+    captured: dict[str, Any] = {}
+
+    class FakePool:
+        @property
+        def openai_tools(self) -> list[dict[str, Any]]:
+            return [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "description": "Look up information",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ]
+
+        def purpose_hints(self) -> list[tuple[str, str]]:
+            return [("reference", "Use for authoritative lookups")]
+
+        def owns_tool(self, name: str) -> bool:
+            return name == "lookup"
+
+        async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+            raise AssertionError(f"Unexpected tool call: {name}({arguments})")
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response()
+
+    fake_pool = FakePool()
+    with (
+        patch("gateway.services.mcp_loop_messages.amessages", new=fake_amessages),
+        patch("gateway.services.mcp_client.MCPClientPool.__aenter__", new=AsyncMock(return_value=fake_pool)),
+        patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
+    ):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "system": [system_block],
+                "messages": [{"role": "user", "content": "Look this up"}],
+                "max_tokens": 100,
+                "mcp_servers": [
+                    {
+                        "name": "reference",
+                        "url": "http://127.0.0.1:9999/mcp",
+                        "purpose_hint": "Use for authoritative lookups",
+                    }
+                ],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["system"][0]["type"] == "text"
+    assert "Use for authoritative lookups" in captured["system"][0]["text"]
+    assert captured["system"][1] == system_block
 
 
 def test_mcp_servers_dispatches_through_anthropic_tool_loop(
@@ -540,10 +658,21 @@ def test_sandbox_unreachable_returns_502_anthropic_body(
 # ---------- streaming dispatch ----------
 
 
-def _stream_message_start() -> MessageStartEvent:
+def _stream_message_start(
+    *,
+    cache_creation_input_tokens: int | None = None,
+    cache_read_input_tokens: int | None = None,
+) -> MessageStartEvent:
     return MessageStartEvent(
         type="message_start",
-        message=cast(Any, _text_response("")),
+        message=cast(
+            Any,
+            _text_response(
+                "",
+                cache_creation_input_tokens=cache_creation_input_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+            ),
+        ),
     )
 
 
@@ -616,6 +745,38 @@ def test_stream_no_tools_returns_sse_response(
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("text/event-stream")
     assert tool_loop_called is False
+
+
+def test_stream_cache_usage_reaches_client(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Cache usage from the provider remains present in the SSE message_start event."""
+
+    async def fake_amessages(**_kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return _stream_iter(
+            _stream_message_start(cache_creation_input_tokens=13, cache_read_input_tokens=8),
+            _stream_message_stop(),
+        )
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 100,
+                "stream": True,
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    payloads = [json.loads(line.removeprefix("data: ")) for line in resp.text.splitlines() if line.startswith("data: ")]
+    message_start = next(payload for payload in payloads if payload["type"] == "message_start")
+    usage = message_start["message"]["usage"]
+    assert usage["cache_creation_input_tokens"] == 13
+    assert usage["cache_read_input_tokens"] == 8
 
 
 def test_stream_mcp_servers_dispatches_through_tool_loop_stream(

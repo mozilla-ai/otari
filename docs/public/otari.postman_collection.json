@@ -2466,6 +2466,117 @@
           }
         },
         {
+          "name": "Usage Series",
+          "request": {
+            "description": "Time series split by one dimension, for the dashboard's stacked charts.\n\nSame filters and window bounds as ``/summary`` (kept in lockstep: the\ndashboard serializes one filter object for both, and a filter this endpoint\nsilently ignored would make the stacked chart disagree with the tiles beside\nit). The window's top groups by spend are returned as their own series;\neverything past the top eight folds into a single ``other`` series per\nbucket, so the stack always reconciles with the summary totals. Points are\nsparse (populated cells only); the bucket grid is bounded like ``/summary``'s\nseries, so an hourly bucket over a too-wide window is rejected rather than\nballooning the payload.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "usage",
+                "series"
+              ],
+              "query": [
+                {
+                  "description": "Dimension to split the series by",
+                  "disabled": false,
+                  "key": "group_by",
+                  "value": ""
+                },
+                {
+                  "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "start_date",
+                  "value": ""
+                },
+                {
+                  "description": "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "end_date",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single user",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single status (e.g. 'success' or 'error')",
+                  "disabled": true,
+                  "key": "status",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+                  "disabled": true,
+                  "key": "status_code",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single model",
+                  "disabled": true,
+                  "key": "model",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single endpoint (e.g. '/v1/chat/completions')",
+                  "disabled": true,
+                  "key": "endpoint",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single provider (e.g. 'openai')",
+                  "disabled": true,
+                  "key": "provider",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
+                  "disabled": true,
+                  "key": "source",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+                  "disabled": true,
+                  "key": "source_label",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single API key id",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+                  "disabled": true,
+                  "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
+                  "disabled": true,
+                  "key": "counts_toward_budget",
+                  "value": ""
+                },
+                {
+                  "description": "Time-series granularity: 'hour' or 'day'",
+                  "disabled": true,
+                  "key": "bucket",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/usage/series?group_by=&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&bucket="
+            }
+          }
+        },
+        {
           "name": "Set Usage Price Rows",
           "request": {
             "body": {
@@ -2501,7 +2612,7 @@
         {
           "name": "Usage Summary",
           "request": {
-            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold), the error taxonomy grouped by failure status code,\nand a UTC-bucketed time series.\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
+            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold, billed token counts), the error taxonomy grouped\nby failure status code, and a UTC-bucketed time series carrying each bucket's\nerror count and billed token composition (input incl. cache, cache read/write,\noutput).\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2612,7 +2723,7 @@
         {
           "name": "Usage Summary Csv",
           "request": {
-            "description": "Download every breakdown the summary reports, as one CSV.\n\nOne row per (dimension, key): model, user, API key, source, session\n(``source_label``), endpoint, and provider. A dedicated route rather than a\n``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON\nresponse model and a clean OpenAPI schema. The export is **uncapped** (no\ntop-N fold): finance wants every row. Kept separate from the bare-array\n``/v1/usage`` contract, which is untouched.",
+            "description": "Download every breakdown the summary reports, as one CSV.\n\nOne row per (dimension, key): model, user, API key, source, session\n(``source_label``), endpoint, and provider. A dedicated route rather than a\n``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON\nresponse model and a clean OpenAPI schema. The export is **uncapped** (no\ntop-N fold): finance wants every row. ``tokens`` is the billed total (fresh\ninput, both cache buckets, and output), matching the dashboard's analytics.\nKept separate from the bare-array ``/v1/usage`` contract, which is untouched.",
             "header": [],
             "method": "GET",
             "url": {

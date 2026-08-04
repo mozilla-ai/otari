@@ -21,11 +21,19 @@ export function FilterChips({
   chips,
   children,
   onClearAll,
+  start,
+  end,
 }: {
   chips: FilterChip[];
   // The picker controls (comboboxes/selects), revealed by "Add filter".
   children: ReactNode;
   onClearAll?: () => void;
+  // Optional controls sharing the toggle's row: `start` renders before the
+  // toggle (e.g. the date preset buttons), `end` is pushed to the right edge
+  // (e.g. the window caption and refresh). Keeping them in this row saves a
+  // line of vertical space on pages where filters sit beside the range picker.
+  start?: ReactNode;
+  end?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const regionId = useId();
@@ -33,6 +41,7 @@ export function FilterChips({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
+        {start}
         <Button
           size="sm"
           variant="outline"
@@ -66,6 +75,7 @@ export function FilterChips({
             Clear all
           </Button>
         ) : null}
+        {end ? <div className="ml-auto flex items-center gap-3">{end}</div> : null}
       </div>
       <div id={regionId} className={open ? "flex flex-wrap items-end gap-3" : "hidden"}>
         {children}

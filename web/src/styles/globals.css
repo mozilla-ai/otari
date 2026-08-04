@@ -11,12 +11,38 @@
      app chrome). Nothing fails the build if they drift, so update them here. */
   --otari-brand: #4e8295;
   --otari-brand-dark: #3c6678;
+  /* Mid-step of the brand ramp, between --otari-brand and --otari-line. Exists so
+     a small multi-part mark (the Activity token-composition bar) can shade its
+     segments by one hue at four legible lightnesses instead of by four hues. It
+     is deliberately darker than --otari-line: a hairline token used as a data
+     fill sits at ~1.2:1 against the surrounding surface, which reads as an empty
+     bar rather than a segment. */
+  --otari-brand-soft: #8fb2bf;
   --otari-brand-tint: #eaf1f3;
   --otari-ink: #14242c;
   --otari-muted: #5b6b73;
   --otari-line: #dbe5e8;
   --otari-surface: #ffffff;
   --otari-bg: #f6f9fa;
+  /* Categorical chart palette for grouped series (top-8 + other), slot 1 first.
+     Not hand-picked: generated in OKLCH around the brand hue and validated with
+     the data-viz palette checker on the white chart surface (lightness band,
+     chroma floor, adjacent-pair CVD separation >= 8, normal-vision floor >= 15,
+     contrast >= 3:1). Assign slots in this fixed order, never cycled; the ninth
+     and later groups fold into "other", which wears the neutral below. */
+  --otari-cat-1: #08899f;
+  --otari-cat-2: #b76522;
+  --otari-cat-3: #8560ac;
+  --otari-cat-4: #47a34e;
+  --otari-cat-5: #9d486c;
+  --otari-cat-6: #0871c1;
+  --otari-cat-7: #a9912b;
+  --otari-cat-8: #a64450;
+  --otari-cat-other: #8b969b;
+  /* Error fill for status-stacked charts (the red of the status triad at chart
+     strength: red-600, 4.0:1 on the white surface). Reserved for error marks,
+     never a series color. */
+  --otari-danger: #dc2626;
   /* Foreground for code inside the dark code blocks in the bundled user guide
      (DocsPage). A near-white that reads on the --otari-ink block background. */
   --otari-code-ink: #e8eef0;
