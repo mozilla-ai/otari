@@ -15,7 +15,7 @@ import {
 import type { ModelMetadata, PricingTier } from "@/api/types";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
-import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
+import { isValidModelKey, SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
 import { TablePagination } from "@/components/TablePagination";
 import {
   ConfirmButton,
@@ -999,8 +999,11 @@ function ModelTable({
 // after a problem that isn't there (issue #447).
 function DiscoveredErrors({
   providers,
+  onPriceModel,
 }: {
   providers: { provider: string; error: string | null; discovery_unsupported: boolean }[];
+  /** Opens the hand-pricing dialog seeded with the given key (may be a bare prefix). */
+  onPriceModel: (prefill: string) => void;
 }) {
   if (providers.length === 0) {
     return null;
@@ -1021,9 +1024,20 @@ function DiscoveredErrors({
         <span className="block">
           {names(noDiscovery)} {one(noDiscovery) ? "does" : "do"} not offer model discovery, so{" "}
           {one(noDiscovery) ? "its" : "their"} models are missing from the list below.{" "}
-          {one(noDiscovery) ? "The provider" : "They"} may still serve requests; declare the model ids{" "}
-          {one(noDiscovery) ? "it serves" : "they serve"} under the <code>models:</code> key in config.yml to list them
-          here.
+          {one(noDiscovery) ? "The provider" : "They"} may still serve requests. Price a model by its selector to meter
+          it here, or declare the model ids {one(noDiscovery) ? "it serves" : "they serve"} under the{" "}
+          <code>models:</code> key in config.yml to list them all.
+          {/* Seeded with the prefix only when it is unambiguous: with several
+              providers lacking discovery, guessing one would put the operator on
+              the wrong provider without saying so. */}
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2"
+            onPress={() => onPriceModel(one(noDiscovery) ? `${noDiscovery[0].provider}:` : "")}
+          >
+            Price a model
+          </Button>
         </span>
       ) : null}
     </InfoBanner>
@@ -1049,6 +1063,11 @@ export function ModelsPage() {
   const [bulkPriceOpen, setBulkPriceOpen] = useState(false);
   const [bulkPending, setBulkPending] = useState(false);
   const [bulkError, setBulkError] = useState<unknown>(undefined);
+  // Non-null while the hand-pricing dialog is open, holding the key it opened
+  // with: a searched selector, a provider prefix, or "" for a blank field.
+  const [customPriceKey, setCustomPriceKey] = useState<string | null>(null);
+  const [customPending, setCustomPending] = useState(false);
+  const [customError, setCustomError] = useState<unknown>(undefined);
 
   useEffect(() => {
     try {
@@ -1358,6 +1377,32 @@ export function ModelsPage() {
     }
   };
 
+  // A backend with no /v1/models endpoint serves models the catalogue never
+  // lists, so the only way to meter them is a key typed by hand. The stored key
+  // is what the server normalized, so the new row is selected by that rather
+  // than by the raw input (a legacy provider/model form collapses onto
+  // provider:model). Cache 1h rates and tiers are left out of the request so
+  // re-pricing an existing key inherits them instead of clearing them.
+  const priceCustomModel = async (rates: ManualRates, modelKey: string) => {
+    setCustomPending(true);
+    setCustomError(undefined);
+    try {
+      const created = await setPricing.mutateAsync({
+        model_key: modelKey,
+        input_price_per_million: rates.input_price_per_million,
+        output_price_per_million: rates.output_price_per_million,
+        cache_read_price_per_million: rates.cache_read_price_per_million ?? null,
+        cache_write_price_per_million: rates.cache_write_price_per_million ?? null,
+      });
+      setCustomPriceKey(null);
+      setSelectedKey(created.model_key);
+    } catch (error) {
+      setCustomError(error);
+    } finally {
+      setCustomPending(false);
+    }
+  };
+
   const modelsLoading = models.isLoading || pricing.isLoading || discoverable.isLoading;
   const hasActiveFilters =
     query !== "" ||
@@ -1368,9 +1413,27 @@ export function ModelsPage() {
     minContext !== "0" ||
     maxInput !== "" ||
     releaseFilter !== "all";
-  const emptyModels = hasActiveFilters
-    ? "No models match your filters."
-    : "No models yet. Add a provider on the Providers page, or price a model below.";
+  // A provider that serves no model listing answers requests for models the
+  // catalogue never shows, so searching for one you just called successfully is
+  // the moment the gap is felt. Offer to price it right there, seeded with what
+  // was typed (from `search`, not the lowercased `query`: model ids are
+  // case-sensitive) when that looks like a selector rather than a word.
+  const searchedSelector = isValidModelKey(search) ? search.trim() : null;
+  const emptyModels = (
+    <div className="flex flex-col items-center gap-2 py-2">
+      <span>
+        {hasActiveFilters
+          ? "No models match your filters."
+          : "No models yet. Add a provider on the Providers page."}
+      </span>
+      <span className="text-xs text-[var(--otari-muted)]">
+        A provider that serves no model listing still answers requests, so a model you can call may not be listed here.
+      </span>
+      <Button size="sm" variant="outline" onPress={() => setCustomPriceKey(searchedSelector ?? "")}>
+        {searchedSelector ? `Price ${searchedSelector}` : "Price a model by hand"}
+      </Button>
+    </div>
+  );
 
   // The row selected in the table, resolved against the filtered list (falling
   // back to any known row) to fill the detail panel.
@@ -1459,7 +1522,7 @@ export function ModelsPage() {
               />
             </div>
 
-            <DiscoveredErrors providers={discoveredErrors} />
+            <DiscoveredErrors providers={discoveredErrors} onPriceModel={setCustomPriceKey} />
 
             {selectedModelKeys.length > 0 ? (
               <BulkActionBar
@@ -1543,6 +1606,20 @@ export function ModelsPage() {
           `Apply these per-1M rates to ${count.toLocaleString()} selected ${
             count === 1 ? "model" : "models"
           }. This replaces each model's price; pricing tiers and the 1h cache rate are cleared. Edit a single model for tiers.`
+        }
+      />
+
+      <SetPriceDialog
+        isOpen={customPriceKey !== null}
+        onOpenChange={(open) => setCustomPriceKey(open ? (customPriceKey ?? "") : null)}
+        isPending={customPending}
+        error={customError}
+        onSubmit={priceCustomModel}
+        collectModelKey
+        initialModelKey={customPriceKey ?? ""}
+        title="Price a model"
+        description={() =>
+          "Meter a model the catalogue does not list, for a provider that serves no model listing. Type the selector you send as model and its rates; the model then appears here as custom, and its usage is costed and counted against budgets."
         }
       />
     </div>

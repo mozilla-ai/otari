@@ -720,6 +720,56 @@ describe("ActivityPage", () => {
     });
   });
 
+  it("hides the selection column when nothing on the page can be selected", async () => {
+    // A gateway-only deployment has no imported rows, so every checkbox would
+    // render disabled: a column of dead controls rather than an explanation.
+    mockApi({ rows: [entry({ id: "gw", model: "gateway-model", counts_toward_budget: true })] });
+    renderPage(<ActivityPage />);
+
+    await screen.findByText("gateway-model");
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+
+  it("prices the model from a request that carried no cost", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockApi({ rows: [entry({ id: "free", model: "vllm:mistral-small", cost: null })] });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("vllm:mistral-small")).closest("tr")!;
+    await user.click(row);
+    await user.click(screen.getByRole("button", { name: "Price this model" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByLabelText("Model key")).toHaveValue("vllm:mistral-small");
+    await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2");
+    await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6");
+    await user.click(within(dialog).getByRole("button", { name: "Set price" }));
+
+    await waitFor(() => {
+      const call = calls.find((c) => c.url.includes("/v1/pricing") && c.method === "POST");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(call!.body!)).toMatchObject({
+        model_key: "vllm:mistral-small",
+        input_price_per_million: 0.2,
+        output_price_per_million: 0.6,
+      });
+    });
+    // Setting the model's price must not rewrite what logged rows were billed.
+    expect(calls.some((c) => c.url.includes("/v1/usage/set-price"))).toBe(false);
+  });
+
+  it("does not offer model pricing on a request that was costed", async () => {
+    const user = userEvent.setup();
+    mockApi({ rows: [entry({ id: "paid", model: "openai:gpt-4o", cost: 0.5 })] });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("openai:gpt-4o")).closest("tr")!;
+    await user.click(row);
+
+    expect(screen.getByText("Request detail")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Price this model" })).not.toBeInTheDocument();
+  });
+
   it("keeps the filter pickers behind an 'Add filter' toggle", async () => {
     mockApi({ rows: [entry()] });
     const user = userEvent.setup();

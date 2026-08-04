@@ -6,6 +6,7 @@ import {
   NO_BREAKDOWNS,
   useDeleteUsage,
   useKeys,
+  useSetPricing,
   useSetUsagePrice,
   useUsageCount,
   useUsageLogs,
@@ -321,7 +322,12 @@ function DetailField({
 // carrying either a fixed gateway rejection string (e.g. a model with no pricing
 // under `require_pricing`) or the raw upstream provider error, so the heading
 // stays "Error" rather than blaming the provider for every failure.
-function RequestDetail({ entry }: { entry: UsageEntry }) {
+function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceModel: (model: string) => void }) {
+  // A row with no cost is either a model the gateway has no price for or a
+  // request that was refused before it could be billed. Both are the same fix,
+  // and the row already holds the exact selector the caller sent, which a
+  // provider without model discovery would never have put in the catalogue.
+  const uncosted = !entry.cost;
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
       {entry.error_message ? (
@@ -359,6 +365,17 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
         <DetailField label="Total time">{formatLatency(entry.latency_ms)}</DetailField>
         <DetailField label="Request ID" copyValue={entry.id}>{entry.id}</DetailField>
       </div>
+      {uncosted ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button size="sm" variant="outline" onPress={() => onPriceModel(entry.model)}>
+            Price this model
+          </Button>
+          <span className="text-xs text-[var(--otari-muted)]">
+            This request carries no cost. Set a price for <code className="break-all">{entry.model}</code> so later
+            requests are metered and count against budgets. Rows already logged keep the cost they were served with.
+          </span>
+        </div>
+      ) : null}
       {entry.pricing_breakdown?.length ? (
         <div className="flex flex-col gap-2">
           <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
@@ -680,11 +697,22 @@ export function ActivityPage() {
   const allPageSelected = selectableKeys.length > 0 && pageSelectedCount === selectableKeys.length;
   const canSelectAllMatching = allPageSelected && matchingTotal != null && matchingTotal > pageSelectedCount;
   const effectiveCount = selection.allMatching ? (matchingTotal ?? pageSelectedCount) : pageSelectedCount;
+  // Only offer the selection column when something on the page can actually be
+  // selected. A deployment with no imported usage has none: every checkbox would
+  // render disabled, which reads as a broken control rather than as "these rows
+  // are not eligible". Kept while "all matching" is live so the affordance does
+  // not vanish under an operator mid-bulk-op.
+  const showSelection = selectableKeys.length > 0 || selection.allMatching;
 
   const deleteUsage = useDeleteUsage();
   const setPrice = useSetUsagePrice();
+  const setModelPrice = useSetPricing();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [priceOpen, setPriceOpen] = useState(false);
+  // The model selector whose price is being set from a request detail, or null
+  // when that dialog is closed. Distinct from `priceOpen` above, which reprices
+  // already-logged imported rows rather than setting a model's price.
+  const [modelPriceKey, setModelPriceKey] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Inline accordion panel under the clicked row (DataTable renderDetail).
@@ -699,7 +727,7 @@ export function ActivityPage() {
             Close
           </Button>
         </div>
-        <RequestDetail entry={entry} />
+        <RequestDetail entry={entry} onPriceModel={setModelPriceKey} />
       </div>
     ),
     [],
@@ -738,6 +766,23 @@ export function ActivityPage() {
         selection.clear();
       },
     });
+  };
+
+  // Sets the model's own price (a ModelPricing row), which is what future
+  // requests are billed at. Deliberately does not touch the rows already logged:
+  // a gateway row's cost is what it was served at, and rewriting history from an
+  // activity view would move spend that budgets were already enforced against.
+  const onSetModelPrice = (rates: ManualRates, modelKey: string) => {
+    setModelPrice.mutate(
+      {
+        model_key: modelKey,
+        input_price_per_million: rates.input_price_per_million,
+        output_price_per_million: rates.output_price_per_million,
+        cache_read_price_per_million: rates.cache_read_price_per_million ?? null,
+        cache_write_price_per_million: rates.cache_write_price_per_million ?? null,
+      },
+      { onSuccess: () => setModelPriceKey(null) },
+    );
   };
 
   const onSetPrice = (rates: ManualRates) => {
@@ -922,7 +967,7 @@ export function ActivityPage() {
         getRowKey={getActivityRowKey}
         isLoading={usage.isLoading}
         emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
-        selectionMode="multiple"
+        selectionMode={showSelection ? "multiple" : "none"}
         selectedKeys={selection.selectedKeys}
         onSelectionChange={selection.onSelectionChange}
         disabledKeys={disabledKeys}
@@ -963,6 +1008,20 @@ export function ActivityPage() {
         isPending={setPrice.isPending}
         error={setPrice.error}
         onSubmit={onSetPrice}
+      />
+
+      <SetPriceDialog
+        isOpen={modelPriceKey !== null}
+        onOpenChange={(open) => setModelPriceKey(open ? (modelPriceKey ?? "") : null)}
+        isPending={setModelPrice.isPending}
+        error={setModelPrice.error}
+        onSubmit={onSetModelPrice}
+        collectModelKey
+        initialModelKey={modelPriceKey ?? ""}
+        title="Price this model"
+        description={() =>
+          "Set what this model costs, taken from the request you were looking at. Requests from now on are costed at these rates and counted against budgets; rows already logged keep the cost they were served with."
+        }
       />
     </div>
   );
