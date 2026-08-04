@@ -276,6 +276,20 @@ describe("ModelsPage", () => {
     expect(await navigator.clipboard.readText()).toBe("openai:gpt-4o");
   });
 
+  it("keeps the screen-reader-only key out of a hand-made selection", async () => {
+    // `sr-only` is clipped, not hidden, so its text joins a range selection and a
+    // drag across this cell used to yield "gpt-4oopenai:gpt-4o". Its own
+    // `select-none` outranks the inherited `user-select: text`.
+    mockApi();
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    const srOnly = within(tableRow("openai:gpt-4o")).getByText("openai:gpt-4o", {
+      selector: "span.sr-only",
+    });
+    expect(srOnly.className).toContain("select-none");
+  });
+
   it("does not show a context column in the model table", async () => {
     mockApi();
 

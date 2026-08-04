@@ -22,7 +22,9 @@ export async function copyToClipboard(
 }
 
 // Copies from an offscreen textarea, restoring whatever the operator had
-// selected so a copy does not disturb the page's own selection.
+// selected (and whatever had focus) so a copy does not disturb the page. Both
+// need restoring: `select()` focuses the textarea in Chrome, so removing it would
+// otherwise drop focus to <body> and cost a keyboard operator their tab position.
 function legacyCopy(text: string): boolean {
   const source = document.createElement("textarea");
   source.value = text;
@@ -35,6 +37,7 @@ function legacyCopy(text: string): boolean {
 
   const selection = document.getSelection();
   const previous = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+  const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   source.select();
 
   let copied = false;
@@ -49,5 +52,6 @@ function legacyCopy(text: string): boolean {
     selection.removeAllRanges();
     selection.addRange(previous);
   }
+  previousFocus?.focus();
   return copied;
 }

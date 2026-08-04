@@ -291,17 +291,21 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
 function DetailField({
   label,
   copyValue,
+  copyLabel,
   children,
 }: {
   label: string;
   copyValue?: string | null;
+  /** Overrides the copy control's name where the column heading would misname the
+      value: "API key" holds a key id, never key material. */
+  copyLabel?: string;
   children: ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
       <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">{label}</span>
       {copyValue ? (
-        <CopyableValue value={copyValue} label={label.toLowerCase()} className="text-sm text-[var(--otari-ink)] break-all">
+        <CopyableValue value={copyValue} label={copyLabel ?? label.toLowerCase()} className="text-sm text-[var(--otari-ink)] break-all">
           {children}
         </CopyableValue>
       ) : (
@@ -332,8 +336,8 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
         <DetailField label="Endpoint">{entry.endpoint}</DetailField>
         <DetailField label="Source">{sourceLabel(entry.source)}</DetailField>
         {entry.source_label ? <DetailField label="Session">{entry.source_label}</DetailField> : null}
-        <DetailField label="User" copyValue={entry.user_id}>{entry.user_id ?? "—"}</DetailField>
-        <DetailField label="API key" copyValue={entry.api_key_id}>{entry.api_key_id ?? "—"}</DetailField>
+        <DetailField label="User" copyValue={entry.user_id} copyLabel="user id">{entry.user_id ?? "—"}</DetailField>
+        <DetailField label="API key" copyValue={entry.api_key_id} copyLabel="api key id">{entry.api_key_id ?? "—"}</DetailField>
         <DetailField label="Prompt tokens">{formatTokens(entry.prompt_tokens)}</DetailField>
         <DetailField label="Completion tokens">{formatTokens(entry.completion_tokens)}</DetailField>
         <DetailField label="Total tokens">{formatTokens(entry.total_tokens)}</DetailField>

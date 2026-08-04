@@ -91,6 +91,26 @@ describe("DataTable", () => {
     expect(onRowAction).toHaveBeenCalledWith("c");
   });
 
+  it("still activates a focused row on Enter while an id in the table is highlighted", async () => {
+    // The selection guard belongs to the click path only. Enter on a focused row
+    // is a deliberate activation, and the most likely moment for it is right
+    // after drag-selecting an id in that row, so gating it would drop the
+    // keystroke silently.
+    const user = userEvent.setup();
+    const onRowAction = vi.fn();
+    render(<DataTable {...base({ onRowAction })} />);
+
+    // Focus first: jsdom clears the document selection when focus moves, so
+    // selecting before focusing would leave nothing for the guard to see and the
+    // test would pass either way.
+    screen.getByRole("row", { name: /Bravo/ }).focus();
+    selectContentsOf(screen.getByText("Charlie"));
+    await user.keyboard("{Enter}");
+
+    expect(onRowAction).toHaveBeenCalledWith("b");
+    document.getSelection()?.removeAllRanges();
+  });
+
   it("still drills in when the text selection is outside the table", () => {
     const onRowAction = vi.fn();
     render(

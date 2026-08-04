@@ -56,6 +56,21 @@ describe("copyToClipboard", () => {
     paragraph.remove();
   });
 
+  it("puts focus back where it was, so a keyboard copy keeps its tab position", async () => {
+    // The scratch textarea's select() takes focus in a real browser, so removing
+    // it drops focus to <body>. jsdom does not move focus on select(), so this
+    // pins the restore call rather than reproducing the loss.
+    stubExecCommand(true);
+    const button = document.createElement("button");
+    document.body.appendChild(button);
+    button.focus();
+
+    await copyToClipboard("openai:gpt-4o", undefined);
+
+    expect(document.activeElement).toBe(button);
+    button.remove();
+  });
+
   it("does not report success when both paths fail", async () => {
     const writeText = vi.fn().mockRejectedValue(new Error("clipboard denied"));
     stubExecCommand(false);

@@ -100,8 +100,9 @@
    `allowTextSelectionOnPress`. Because `user-select: auto` on a cell resolves to
    its parent's behavior, the value inside inherits "not selectable" and a drag
    across an id selects nothing at all. `!important` is what outranks the inline
-   style, so it is deliberate here. Scoped to the body cells, leaving the header's
-   sort buttons and the selection checkboxes untouched.
+   style, so it is deliberate here. Scoped to the body rows and their cells, so the
+   header (its sort buttons and resize handles) is untouched. The selection cell is
+   matched too, but a checkbox has no text to select.
 
    CSS alone is not enough: the press also toggles the row's selection on pointer
    down, and that re-render discards the browser's nascent selection. See

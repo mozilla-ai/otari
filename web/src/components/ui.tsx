@@ -266,7 +266,9 @@ export function CopyableValue({
 // out. copyToClipboard covers the plain-HTTP origins this dashboard is routinely
 // served from, where the async Clipboard API does not exist; if even the legacy
 // path fails, this says so rather than claiming a copy it did not make (the same
-// rule as the Keys page's CopyField).
+// rule as the Keys page's CopyField). Unlike that one, the value here is not a
+// form field this can select for the operator, so the failure message asks them
+// to select it rather than implying something already is.
 // The acknowledgement is a tooltip over the icon that was pressed, so the answer
 // appears where the operator is looking in a column of identical buttons. It is
 // controlled (never hover-opened) because it reports an event, not a hint, and it
@@ -295,7 +297,7 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
         </svg>
       </Button>
       <Tooltip.Content placement="top" showArrow>
-        {state === "failed" ? "Copy blocked, press Ctrl/Cmd-C" : "Copied!"}
+        {state === "failed" ? "Copy blocked, select the value and press Ctrl/Cmd-C" : "Copied!"}
       </Tooltip.Content>
     </Tooltip.Root>
   );

@@ -920,7 +920,11 @@ function ModelTable({
       cell: (row) => (
         <CopyableValue value={row.key} label="model id" className="font-medium break-all">
           {row.model}
-          <span className="sr-only">{row.key}</span>
+          {/* `sr-only` is rendered (clipped), not hidden, so its text joins a range
+              selection: without `select-none` a drag across this cell yields
+              "gpt-4oopenai:gpt-4o". An own declaration outranks the inherited
+              `user-select: text`, the same reasoning `select-text` uses above. */}
+          <span className="sr-only select-none">{row.key}</span>
         </CopyableValue>
       ),
     },

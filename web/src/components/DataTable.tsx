@@ -236,11 +236,6 @@ export function DataTable<Row extends object>({
   const fireRowAction = useCallback(
     (key: string) => {
       if (!onRowAction) return;
-      // A click that ended a text drag inside the table is a selection, not an
-      // activation. Cells are selectable by design (see globals.css), and
-      // drilling in mid-highlight both loses the selection and moves the page
-      // under the operator, so the action is skipped for that click only.
-      if (hasTextSelectionIn(rootRef.current)) return;
       if (renderDetail && key !== detailKey) {
         const target = rootRef.current?.querySelector(`tbody tr[data-key="${CSS.escape(key)}"]`);
         target?.classList.add("otari-detail-opening");
@@ -328,10 +323,17 @@ export function DataTable<Row extends object>({
         }}
         onClickCapture={(e: ReactMouseEvent) => {
           const key = dataCellRowKey(e);
-          if (key != null) {
-            e.stopPropagation();
-            fireRowAction(key);
-          }
+          if (key == null) return;
+          // Swallowed either way, so react-aria's row press never fires a second
+          // action. A click that ended a text drag inside the table is a
+          // selection, not an activation: cells are selectable by design (see
+          // globals.css), and drilling in mid-highlight both loses the selection
+          // and moves the page under the operator, so the action is skipped for
+          // that click only. Deliberately scoped to the click path: the same
+          // check in fireRowAction would also swallow Enter on a focused row,
+          // which is a deliberate activation even with an id still highlighted.
+          e.stopPropagation();
+          if (!hasTextSelectionIn(rootRef.current)) fireRowAction(key);
         }}
       >
         <Table.Content
