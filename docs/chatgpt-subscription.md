@@ -222,5 +222,5 @@ race, not process death. This behavior is provider-agnostic; see
 
 - [OpenAI provider guide](providers/openai.md) for the supported API-key route
 - [Supported models](models.md) for the provider list and named-instance selectors
-- [Use with Codex CLI](use-with-codex-cli.md) for pointing Codex back at the instance you just configured
+- [Use with Codex](use-with-codex.md) for pointing Codex back at the instance you just configured
 - [Configuration](configuration.md) for `log_writer_strategy`, `require_pricing`, and pricing
