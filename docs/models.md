@@ -219,6 +219,10 @@ An alias is a display name that maps to a real selector, so you can expose a
 friendly, stable model name and keep the underlying provider/model hidden.
 Aliases are configured in a top-level `aliases` map (display name to target):
 
+> An alias is the one-target case of a [routing policy](routing.md). Everything
+> below still applies; reach for a policy when you want failover, a
+> budget-based tier-down, or a guardrail the caller cannot skip.
+
 ```yaml
 aliases:
   myopusmodel: anthropic:claude-opus-4
@@ -281,11 +285,13 @@ applies to that user alone:
 # Global: everyone resolves "fast" to gpt-5-mini.
 curl -X POST http://localhost:8000/v1/aliases \
   -H "Authorization: Bearer <master-key>" \
+  -H "Content-Type: application/json" \
   -d '{"name": "fast", "target": "openai:gpt-5-mini"}'
 
 # Scoped: alice alone resolves "fast" to a local model instead.
 curl -X POST http://localhost:8000/v1/aliases \
   -H "Authorization: Bearer <master-key>" \
+  -H "Content-Type: application/json" \
   -d '{"name": "fast", "target": "home_lab:qwen3", "user_id": "alice"}'
 ```
 

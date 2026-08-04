@@ -19,6 +19,7 @@ from any_llm.exceptions import AnyLLMError
 from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import GatewayConfig, provider_credential_env_names
 from gateway.services.alias_service import resolve_effective_alias
+from gateway.services.policy_store import resolve_effective_policy
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
@@ -184,6 +185,18 @@ def resolve_provider_selector(
     prior ``AnyLLM.split_model_provider`` behavior.
     """
     alias = resolve_effective_alias(config, model_selector, user_id)
+    if alias is None:
+        # A *static* routing policy is an alias in everything but spelling: one
+        # name, one target. Resolving it here is what makes "an alias is a
+        # one-target policy" true on every model-taking surface (pricing, the
+        # catalog, embeddings, batches) and not only on the completion routes.
+        #
+        # A dynamic policy is deliberately left unresolved. Its candidate depends
+        # on request state that this synchronous path cannot see, so there is no
+        # honest answer to give; picking its default anyway would silently serve a
+        # different model than the policy describes. The completion routes compile
+        # it properly; everywhere else it surfaces as an unknown model.
+        alias = resolve_static_policy_target(config, model_selector, user_id)
     selector = alias if alias is not None else model_selector
 
     split = split_selector(selector)
@@ -206,6 +219,21 @@ def resolve_provider_selector(
         kwargs=get_provider_kwargs(config, provider, instance=provider.value),
         alias=model_selector if alias is not None else None,
     )
+
+
+def resolve_static_policy_target(
+    config: GatewayConfig, model_selector: str, user_id: str | None = None
+) -> str | None:
+    """The single target of a static routing policy, or ``None``.
+
+    ``None`` for a name that is not a policy, for a dynamic policy (whose target
+    depends on the request), and when routing is disabled. Scoped like an alias, so
+    a user-scoped policy resolves to that user's target.
+    """
+    spec = resolve_effective_policy(config, model_selector, user_id)
+    if spec is None or spec.is_dynamic:
+        return None
+    return spec.default_target
 
 
 def normalize_pricing_key(config: GatewayConfig, raw_key: str) -> str:

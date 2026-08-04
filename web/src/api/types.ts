@@ -75,6 +75,102 @@ export interface AliasResponse {
   updated_at: string | null;
 }
 
+// --- Routing policies -------------------------------------------------------
+//
+// A policy is a model name callers use, which decides which real model serves the
+// request. `spec` is the same document the `routing.policies` config block takes,
+// so one schema covers the file and the API.
+
+export interface PolicyThreshold {
+  gte?: number;
+  gt?: number;
+  lte?: number;
+  lt?: number;
+}
+
+export interface PolicyWhen {
+  budget_used_pct?: PolicyThreshold;
+  budget_remaining_usd?: PolicyThreshold;
+  user_id?: string | string[];
+  key_id?: string | string[];
+}
+
+export interface PolicySelectEntry {
+  when?: PolicyWhen;
+  target?: string;
+  /** The fallthrough. Exactly one entry carries it, and it must come last. */
+  default?: string;
+  router?: string;
+}
+
+export interface PolicyGuardrail {
+  profile: string;
+  /** Required: the per-request field defaults to "monitor", so an omitted mode
+   *  here would look like a mandate and behave as shadow mode. */
+  mode: "block" | "monitor";
+  on_unavailable?: "block" | "monitor";
+  url?: string | null;
+}
+
+export interface PolicySpec {
+  spec_version?: number;
+  select: PolicySelectEntry[];
+  on_failure?: string[];
+  guardrails?: PolicyGuardrail[];
+  limits?: Record<string, number | null>;
+}
+
+export interface RoutingPolicyResponse {
+  name: string;
+  spec: PolicySpec;
+  source: "config" | "stored";
+  user_id: string | null;
+  /** True when the selected candidate depends on request state, so the policy has
+   *  no single target or price. */
+  is_dynamic: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface SetRoutingPolicyRequest {
+  name: string;
+  spec: PolicySpec;
+  user_id?: string | null;
+}
+
+export interface ExplainCandidate {
+  position: number;
+  instance: string;
+  model: string;
+  selection_reason: string;
+  dispatch_model: string;
+}
+
+export interface ExplainDropped {
+  selector: string;
+  reason: string;
+  detail: string;
+}
+
+export interface ExplainPolicyRequest {
+  name?: string;
+  spec?: PolicySpec;
+  user_id?: string | null;
+  key_id?: string | null;
+  allowed_models?: string[] | null;
+  budget_used_pct?: number | null;
+  budget_remaining_usd?: number | null;
+}
+
+export interface ExplainPolicyResponse {
+  name: string;
+  selection_reason: string;
+  is_dynamic: boolean;
+  candidates: ExplainCandidate[];
+  dropped: ExplainDropped[];
+  guardrails: Record<string, unknown>[];
+}
+
 export interface CreateAliasRequest {
   name: string;
   target: string;
@@ -413,6 +509,15 @@ export interface UsageEntry {
   // forbidden user, 400 bad request, 502 upstream, ...); null when nothing was
   // rejected over HTTP. Only meaningful on error rows.
   status_code: number | null;
+  // Routing attribution. All null for a request that named a plain model.
+  // `status` is "absorbed" for an attempt a policy recovered from: excluded from
+  // error_count and from request_count server-side, so it must not be styled or
+  // counted as a failure here either.
+  policy_name?: string | null;
+  selection_reason?: string | null;
+  attempt_position?: number | null;
+  attempt_count?: number | null;
+  request_group_id?: string | null;
   // Total server-side request duration in ms; null for historical rows and for
   // write paths with no synchronous duration (e.g. batch jobs).
   latency_ms: number | null;

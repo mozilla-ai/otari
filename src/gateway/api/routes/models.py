@@ -13,6 +13,7 @@ from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, v
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, ModelPricing
+from gateway.models.routing import PolicySpec
 from gateway.services.alias_service import effective_aliases
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_catalog_service import (
@@ -25,6 +26,7 @@ from gateway.services.model_discovery_service import (
     discover_models_with_status,
     get_model_cache,
 )
+from gateway.services.policy_store import effective_policies
 from gateway.services.pricing_service import (
     default_model_pricing,
     default_pricing_enabled,
@@ -249,6 +251,64 @@ def _alias_target_keys(config: GatewayConfig, aliases: dict[str, str]) -> set[st
     return {normalize_pricing_key(config, target) for target in aliases.values()}
 
 
+def _dynamic_policy_model(policy_name: str) -> ModelObject:
+    """Build a ModelObject for a policy whose candidate depends on the request.
+
+    A router-driven or condition-driven policy has no single target, so it has no
+    single price either. Reporting the default candidate's price would be a guess
+    that happens to be wrong whenever the policy does its job. ``pricing_source``
+    already exists for exactly this kind of statement, so it carries ``"dynamic"``
+    rather than inventing a second field; ``pricing`` stays null, and a client that
+    does not know the new value sees "unpriced" instead of a fabricated rate.
+    """
+    return ModelObject(
+        id=policy_name,
+        created=0,
+        owned_by=ALIAS_OWNED_BY,
+        pricing=None,
+        pricing_source="dynamic",
+    )
+
+
+def _policy_catalog_entries(
+    config: GatewayConfig, caller_user_id: str | None
+) -> tuple[dict[str, str], dict[str, PolicySpec]]:
+    """Split the policies in force into ``{name: target}`` and dynamic ones.
+
+    Reads through :func:`effective_policies`, so stored policies are listed
+    alongside the ones from ``config.yml`` and a caller's user-scoped policy wins,
+    exactly as it does at request time. Listing only the configured ones would mean
+    a policy created in the dashboard worked but was invisible in the catalog.
+
+    A static policy is an alias in every way the catalog cares about (one name, one
+    target, priced from the target), so it is folded into the alias map and inherits
+    that handling, including having its target withheld from the listing. A dynamic
+    one is listed separately by :func:`_dynamic_policy_model`.
+    """
+    static: dict[str, str] = {}
+    dynamic: dict[str, PolicySpec] = {}
+    for name, spec in effective_policies(config, caller_user_id).items():
+        if spec.is_dynamic:
+            dynamic[name] = spec
+        else:
+            static[name] = spec.default_target
+    return static, dynamic
+
+
+def _policy_target_keys(config: GatewayConfig, caller_user_id: str | None) -> set[str]:
+    """Canonical pricing keys of every selector any policy in force can reach.
+
+    Withheld from the listing for the same reason alias targets are: a policy exists
+    partly so the provider/model behind it stays private, and that has to hold for
+    its fallback candidates too, not just its default.
+    """
+    return {
+        normalize_pricing_key(config, selector)
+        for spec in effective_policies(config, caller_user_id).values()
+        for selector in spec.static_selectors()
+    }
+
+
 def _pricing_key_candidates(config: GatewayConfig, target: str) -> list[str]:
     """Stored key forms that could hold pricing for ``target``.
 
@@ -352,12 +412,19 @@ async def list_models(
     pricing_lookup = _normalized_pricing_lookup(config, pricing_map)
     # Read once: phase 2 withholds these targets and phase 3 lists the names, and
     # the two must agree even if a write lands between them.
-    aliases = effective_aliases(config, caller_user_id)
+    # A static policy is an alias for catalog purposes (one name, one target,
+    # priced from the target), so it joins the alias map and inherits all of that
+    # handling. Startup validation refuses a policy that collides with an alias
+    # name, so this merge cannot silently shadow one.
+    static_policies, dynamic_policies = _policy_catalog_entries(config, caller_user_id)
+    aliases = {**effective_aliases(config, caller_user_id), **static_policies}
     # Alias targets are withheld from every phase that could surface the real
     # model, discovery (phase 1) as well as pricing-only (phase 2): publishing the
     # target under either would expose the provider:model name the alias exists to
-    # hide. Computed before phase 1 so discovery honors it too.
-    alias_targets = _alias_target_keys(config, aliases)
+    # hide. Computed before phase 1 so discovery honors it too. Policy candidates
+    # are withheld on the same grounds, including a dynamic policy's, whose names
+    # never reach the alias map.
+    alias_targets = _alias_target_keys(config, aliases) | _policy_target_keys(config, caller_user_id)
 
     merged: dict[str, ModelObject] = {}
 
@@ -418,6 +485,11 @@ async def list_models(
     if provider is None:
         for alias, target in aliases.items():
             merged[alias] = _alias_model(config, alias, target, pricing_lookup)
+        # Phase 5: policies whose candidate is decided per request. Listed last so
+        # nothing else can price them, and excluded from a ``?provider=`` filter
+        # for the same reason aliases are.
+        for policy_name in dynamic_policies:
+            merged[policy_name] = _dynamic_policy_model(policy_name)
 
     # Model access control: hide models the calling key may not use, so the
     # catalog never advertises a model that would 403 at inference. Both surfaces
@@ -426,12 +498,23 @@ async def list_models(
     api_key, is_master_key = auth
     key_allowlist = None if is_master_key else await resolve_request_allowlist(db, api_key)
     if key_allowlist is not None:
+        # A dynamic policy is listed when the key may use *any* of its candidates,
+        # which is what the compiler will do at request time: it drops the ones the
+        # key cannot use and serves from the rest. Hiding it unless every candidate
+        # were permitted would withhold a policy the caller can in fact call.
+        dynamic_reachable = {
+            name: [normalize_pricing_key(config, selector) for selector in spec.static_selectors()]
+            for name, spec in dynamic_policies.items()
+        }
 
-        def _canonical(model_id: str) -> str:
+        def _permitted(model_id: str) -> bool:
+            candidates = dynamic_reachable.get(model_id)
+            if candidates is not None:
+                return any(is_model_allowed(key_allowlist, candidate) for candidate in candidates)
             target = aliases[model_id] if model_id in aliases else model_id
-            return normalize_pricing_key(config, target)
+            return is_model_allowed(key_allowlist, normalize_pricing_key(config, target))
 
-        merged = {mid: obj for mid, obj in merged.items() if is_model_allowed(key_allowlist, _canonical(mid))}
+        merged = {mid: obj for mid, obj in merged.items() if _permitted(mid)}
 
     sorted_models = sorted(merged.values(), key=lambda m: m.id)
     return ModelListResponse(data=sorted_models)

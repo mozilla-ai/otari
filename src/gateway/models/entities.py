@@ -218,6 +218,58 @@ class ModelAlias(Base):
         }
 
 
+class RoutingPolicy(Base):
+    """A named routing policy, writable through the API.
+
+    The runtime counterpart of the ``routing.policies`` block in config.yml. The
+    spec is stored as JSON rather than as columns because it is a nested,
+    versioned document (``select`` entries with conditions, ``on_failure``,
+    guardrails, limits); flattening it into columns would mean a migration per
+    schema addition and would still need JSON for the conditions. It is validated
+    against :class:`gateway.models.routing.PolicySpec` on write and again on load,
+    so a row that predates a schema change surfaces as a startup warning rather
+    than as a request-time crash.
+
+    Scoping mirrors :class:`ModelAlias` exactly, including the two-constraint
+    uniqueness (SQLite and PostgreSQL both treat NULLs as distinct in a unique
+    index, so the composite constraint cannot keep one *global* row per name).
+    A policy and an alias are the same concept at different complexities, so it
+    would be strange for their scoping rules to differ.
+    """
+
+    __tablename__ = "routing_policies"
+    __table_args__ = (
+        UniqueConstraint("name", "user_id", name="uq_routing_policies_name_user"),
+        Index(
+            "uq_routing_policies_global_name",
+            "name",
+            unique=True,
+            sqlite_where=text("user_id IS NULL"),
+            postgresql_where=text("user_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column()
+    spec: Mapped[dict[str, Any]] = mapped_column(JSON)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "spec": self.spec,
+            "user_id": self.user_id,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class RuntimeSetting(Base):
     """A persisted override for a runtime-toggleable config flag.
 
@@ -405,8 +457,30 @@ class UsageLog(Base):
     pricing_breakdown: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     cost: Mapped[float | None] = mapped_column()
 
+    # "success", "error", or "absorbed". ``absorbed`` is a failed attempt that a
+    # routing policy recovered from by trying the next candidate: the request
+    # itself succeeded (or failed on a later attempt), so counting it as an error
+    # would make a working fallback chain look like an outage. Every error metric
+    # in the product counts ``status == "error"`` exactly, and ``request_count``
+    # excludes absorbed rows, because a request that took two attempts is still one
+    # request.
     status: Mapped[str] = mapped_column()
     error_message: Mapped[str | None] = mapped_column()
+
+    # Routing attribution. All nullable: a request that named a plain model was not
+    # routed through a policy, and null reads correctly as exactly that.
+    #
+    # `policy_name` is the name the caller sent. `selection_reason` says why this
+    # candidate was chosen ("default", "condition:<keys>", "on_failure",
+    # "router:<name>"). `attempt_position` and `attempt_count` locate the row in
+    # the plan, so "served on attempt 2 of 3" is a query rather than a log grep.
+    # `request_group_id` ties a request's rows together, which is what makes the
+    # absorbed attempts findable from the row that served.
+    policy_name: Mapped[str | None] = mapped_column(index=True)
+    selection_reason: Mapped[str | None] = mapped_column()
+    attempt_position: Mapped[int | None] = mapped_column()
+    attempt_count: Mapped[int | None] = mapped_column()
+    request_group_id: Mapped[str | None] = mapped_column(index=True)
 
     # HTTP status that classifies a failure, so failures can be grouped with a
     # GROUP BY instead of substring-matching provider-specific error prose. It is
@@ -452,6 +526,11 @@ class UsageLog(Base):
             "error_message": self.error_message,
             "status_code": self.status_code,
             "latency_ms": self.latency_ms,
+            "policy_name": self.policy_name,
+            "selection_reason": self.selection_reason,
+            "attempt_position": self.attempt_position,
+            "attempt_count": self.attempt_count,
+            "request_group_id": self.request_group_id,
         }
 
 

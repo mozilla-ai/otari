@@ -204,9 +204,14 @@ async def run_input_guardrails(
                     )
                 result = await _validate_one(client, base_url=base_url, cfg=cfg, input_text=input_text)
             except GuardrailsNotReachableError:
-                if cfg.mode == "block":
+                if cfg.mode == "block" and cfg.on_unavailable == "block":
                     raise  # fail closed: an enforcing guardrail must not be skipped
-                logger.warning("monitor guardrail %r could not be evaluated; failing open", cfg.profile)
+                logger.warning(
+                    "guardrail %r could not be evaluated (mode=%s on_unavailable=%s); failing open",
+                    cfg.profile,
+                    cfg.mode,
+                    cfg.on_unavailable,
+                )
                 results.append(
                     GuardrailResult(
                         profile=cfg.profile,

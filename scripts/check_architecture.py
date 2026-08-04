@@ -65,6 +65,16 @@ RULES: dict[str, LayerRule] = {
         "forbidden": ["gateway.services", "gateway.api"],
         "description": "Repositories",
     },
+    # Leaf data types shared across layers (e.g. the routing Attempt, which
+    # services build and the API layer executes). They sit below everything, so
+    # they may not import any other gateway layer: a type that reaches back into
+    # services or the API would smuggle a dependency edge into every module that
+    # merely wants the shape.
+    "gateway/types": {
+        "allowed": [],
+        "forbidden": ["gateway.api", "gateway.services", "gateway.repositories", "gateway.core"],
+        "description": "Shared types",
+    },
     # Open-core boundary scaffolding. Ports (domain-named interfaces) and their
     # adapters get their own layers so future boundary rules have a place to
     # land (see ARCHITECTURE.md). Intentionally no-op until the first port

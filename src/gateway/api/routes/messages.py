@@ -56,6 +56,7 @@ from gateway.services.mcp_loop_messages import (
 )
 from gateway.services.tool_format import inject_purpose_hints_anthropic, openai_to_anthropic_tools
 from gateway.streaming import ANTHROPIC_STREAM_FORMAT, StreamFormat
+from gateway.types.attempt import Attempt
 
 router = APIRouter(prefix="/v1", tags=["messages"])
 
@@ -336,6 +337,13 @@ class _MessagesAdapter:
     ) -> dict[str, Any]:
         return default_attempt_kwargs(attempt, base_request_fields)
 
+    def local_attempt_kwargs(
+        self,
+        attempt: Attempt,
+        base_request_fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        return attempt.call_kwargs(base_request_fields)
+
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         return kwargs
 
@@ -524,6 +532,7 @@ async def create_message(
         provider=resolved.instance,
         model=resolved.model,
         display_model=resolved.alias,
+        base_request_fields=request_fields,
     )
 
     return result.model_dump(exclude_none=True)

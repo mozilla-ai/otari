@@ -279,6 +279,13 @@ def test_list_usage_response_shape(
         "source": "gateway",
         "source_label": None,
         "counts_toward_budget": True,
+        # Routing attribution: null for a request that named a plain model, which
+        # is what this row is.
+        "policy_name": None,
+        "selection_reason": None,
+        "attempt_position": None,
+        "attempt_count": None,
+        "request_group_id": None,
     }
 
 

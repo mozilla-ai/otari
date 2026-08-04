@@ -17,6 +17,7 @@ from gateway.models.entities import Budget, BudgetResetLog, ModelPricing, User
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.metered_pricing import estimate_metered_cost
 from gateway.services.pricing_service import find_model_pricing
+from gateway.types.budget_state import BudgetState
 
 
 def calculate_next_reset(start: datetime, duration_sec: int) -> datetime:
@@ -82,6 +83,37 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
 async def _get_budget(db: AsyncSession, budget_id: str) -> Budget | None:
     result = await db.execute(select(Budget).where(Budget.budget_id == budget_id))
     return result.scalar_one_or_none()
+
+
+async def get_budget_state(db: AsyncSession, user_id: str) -> BudgetState:
+    """Read what a routing policy's budget conditions need, in one round trip.
+
+    ``used_pct`` and ``remaining_usd`` are computed from ``spend + reserved``
+    against ``max_budget``, which is the same committed total the budget gate
+    enforces (:func:`reserve_budget`). Using bare ``spend`` instead would let a
+    tier-down rule read a smaller number than the gate does and fire late.
+
+    Both fields are ``None`` when the percentage is undefined: no user row, no
+    budget attached, or an unlimited budget (``max_budget is None``). An undefined
+    value never matches a condition, so the policy falls through to its default.
+    """
+    row = (
+        await db.execute(
+            select(User.spend, User.reserved, Budget.max_budget)
+            .outerjoin(Budget, User.budget_id == Budget.budget_id)
+            .where(User.user_id == user_id, User.deleted_at.is_(None))
+        )
+    ).one_or_none()
+    if row is None:
+        return BudgetState()
+    spend, reserved, max_budget = row
+    if max_budget is None or max_budget <= 0:
+        return BudgetState()
+    committed = float(spend or 0.0) + float(reserved or 0.0)
+    return BudgetState(
+        used_pct=committed / float(max_budget) * 100.0,
+        remaining_usd=max(0.0, float(max_budget) - committed),
+    )
 
 
 async def _is_model_free(db: AsyncSession, model: str) -> bool:

@@ -9,6 +9,9 @@ import { Login } from "@/components/Login";
 const ActivityPage = lazy(async () => ({
   default: (await import("@/pages/ActivityPage")).ActivityPage,
 }));
+const RoutingPage = lazy(async () => ({
+  default: (await import("@/pages/RoutingPage")).RoutingPage,
+}));
 const AliasesPage = lazy(async () => ({
   default: (await import("@/pages/AliasesPage")).AliasesPage,
 }));
@@ -71,6 +74,7 @@ export default function App() {
           <Route path="usage" element={withPageLoading(<UsagePage />)} />
           <Route path="models" element={withPageLoading(<ModelsPage />)} />
           <Route path="aliases" element={withPageLoading(<AliasesPage />)} />
+          <Route path="routing" element={withPageLoading(<RoutingPage />)} />
           <Route path="tools" element={withPageLoading(<ToolsGuardrailsPage />)} />
           <Route path="settings" element={withPageLoading(<SettingsPage />)} />
           <Route path="docs" element={withPageLoading(<DocsPage />)} />

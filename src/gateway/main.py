@@ -23,6 +23,11 @@ from gateway.services.dashboard_session_service import revoke_sessions_on_master
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
+from gateway.services.policy_store import (
+    load_policies_at_startup,
+    reset_policy_cache,
+    run_policy_refresher,
+)
 from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
     warn_if_require_pricing_without_pricing,
@@ -110,6 +115,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         configure_default_pricing(config.default_pricing)
         log_writer: LogWriter
         alias_refresher: asyncio.Task[None] | None = None
+        policy_refresher: asyncio.Task[None] | None = None
         provider_refresher: asyncio.Task[None] | None = None
         price_refresher: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
@@ -142,12 +148,17 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 await warn_if_require_pricing_without_pricing(config, session)
                 await warn_if_search_tools_lack_flat_pricing(config, session)
                 await load_aliases_at_startup(session)
+                await load_policies_at_startup(session)
             log_writer = create_log_writer(config.log_writer_strategy)
             app.state.file_store = build_file_store(config)
             # Alias resolution is synchronous and reads a cache, so something has
             # to reload it. A write refreshes its own worker; this is what makes
             # every other worker and replica catch up.
             alias_refresher = asyncio.create_task(run_alias_refresher())
+            # Routing policies are the same shape as aliases: resolution reads a
+            # process cache synchronously, so it is reloaded on a TTL to converge
+            # sibling workers and replicas after a write.
+            policy_refresher = asyncio.create_task(run_policy_refresher())
             # Provider credentials are the same shape: resolution reads
             # config.providers synchronously, so the overlay is reloaded on a TTL
             # to converge sibling workers and replicas after a dashboard write.
@@ -171,6 +182,11 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 with suppress(asyncio.CancelledError):
                     await alias_refresher
                 reset_alias_cache()
+            if policy_refresher is not None:
+                policy_refresher.cancel()
+                with suppress(asyncio.CancelledError):
+                    await policy_refresher
+                reset_policy_cache()
             if provider_refresher is not None:
                 provider_refresher.cancel()
                 with suppress(asyncio.CancelledError):

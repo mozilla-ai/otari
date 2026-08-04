@@ -78,8 +78,16 @@ function timeAgo(iso: string): string {
 // rebuild every row on each selection click.
 const getActivityRowKey = (e: UsageEntry): string => e.id;
 
-const activityRowClassName = (e: UsageEntry): string | undefined =>
-  e.status === "error" ? "bg-red-50" : undefined;
+// An absorbed attempt is a failure a routing policy recovered from, so the
+// request it belongs to succeeded. Styling it like an error would make a working
+// fallback chain read as an outage, which is the same reason the server keeps it
+// out of error_count. Amber says "something happened here" without saying "this
+// request failed".
+const activityRowClassName = (e: UsageEntry): string | undefined => {
+  if (e.status === "error") return "bg-red-50";
+  if (e.status === "absorbed") return "bg-amber-50";
+  return undefined;
+};
 
 // ---------- filter option sets ----------
 //
@@ -166,7 +174,9 @@ function StatusPill({ status }: { status: string }) {
   const cls =
     status === "error"
       ? "border-red-200 bg-red-50 text-red-700"
-      : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]";
+      : status === "absorbed"
+        ? "border-amber-200 bg-amber-50 text-amber-700"
+        : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]";
   return (
     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
       {status}
@@ -806,6 +816,30 @@ export function ActivityPage() {
       },
       { id: "user", header: "User", cell: (e) => e.user_id ?? "—" },
       { id: "model", header: "Model", isRowHeader: true, cell: (e) => e.model },
+      {
+        id: "routing",
+        header: "Routing",
+        // The policy the caller named, plus where this row sits in its plan. The
+        // Model column keeps meaning the model that actually ran (it is the join
+        // key for filters and for spend-by-model), so this is additive: together
+        // they answer "what did I ask for, and what served it".
+        // Blank, not an em-dash, when the request named a plain model. This
+        // column is sparse by nature (most rows are unrouted), and a placeholder
+        // on every one of them would add noise to every scan while saying nothing.
+        cell: (e) =>
+          e.policy_name == null ? null : (
+            <span className="flex flex-col leading-tight">
+              <span className="text-[var(--otari-ink)]">{e.policy_name}</span>
+              <span className="text-xs text-[var(--otari-muted)]">
+                {/* Non-color signal: the position is spelled out, so the amber row
+                    tint is never the only thing carrying the meaning. */}
+                {e.attempt_position != null && e.attempt_count != null && e.attempt_count > 1
+                  ? `attempt ${e.attempt_position}/${e.attempt_count} · ${e.selection_reason ?? ""}`
+                  : (e.selection_reason ?? "")}
+              </span>
+            </span>
+          ),
+      },
       { id: "api_key", header: "API key", cell: (e) => <span className="text-[var(--otari-muted)]">{apiKeyLabel(e.api_key_id)}</span> },
       { id: "tokens", header: "Tokens", align: "end", cell: (e) => <TokenBar entry={e} /> },
       { id: "cost", header: "Cost", align: "end", cell: (e) => formatUSD(e.cost) },

@@ -65,7 +65,8 @@ pricing:
 | `rate_limit_rpm` | int | none | Max requests per minute per user (none = disabled) |
 | `cors_allow_origins` | list | `[]` | Allowed CORS origins (empty = disabled) |
 | `providers` | dict | `{}` | Provider credentials (see below) |
-| `aliases` | dict | `{}` | Model name aliases (display name to target selector `instance:model` or `provider:model`). The alias is what users see in `GET /v1/models` and in response `model` fields; pricing, budgets, and usage key on the resolved target. Standalone mode only. |
+| `routing` | dict | `{}` | Named routing policies: which real model serves a request, what is tried after a retryable failure, and which guardrails always run. An alias is the one-target case. See [Routing policies](routing.md). Standalone mode only. |
+| `aliases` | dict | `{}` | Model name aliases (display name to target selector `instance:model` or `provider:model`). The alias is what users see in `GET /v1/models` and in response `model` fields; pricing, budgets, and usage key on the resolved target. See [Model aliases](models.md#model-aliases) and, for more than one target, [Routing policies](routing.md). Standalone mode only. |
 | `pricing` | dict | `{}` | Model pricing entries |
 | `search_tools` | dict | `{}` | Search tools served by `POST /v1/search` (see below). Standalone mode only. |
 | `enable_metrics` | bool | `false` | Enable Prometheus `/metrics` endpoint |
@@ -114,7 +115,7 @@ pricing:
 
 The following `OTARI_` variables override config file values for their matching fields. For example, `OTARI_PORT=9000` overrides `port: 8000` in the YAML.
 
-`OTARI_` overrides apply to scalar fields (strings, numbers, booleans). List and dict fields (`cors_allow_origins`, `providers`, `pricing`, and the `platform` block) are not read from individual `OTARI_` variables; set them in the YAML file, or supply the whole config through the environment with `OTARI_CONFIG_YAML` / `OTARI_CONFIG_B64` (see [Full config via environment](#full-config-via-environment)). The `platform` block also has dedicated `PLATFORM_*` variables (see the otari.ai variables below).
+`OTARI_` overrides apply to scalar fields (strings, numbers, booleans). List and dict fields (`cors_allow_origins`, `providers`, `pricing`, `aliases`, `routing`, and the `platform` block) are not read from individual `OTARI_` variables; set them in the YAML file, or supply the whole config through the environment with `OTARI_CONFIG_YAML` / `OTARI_CONFIG_B64` (see [Full config via environment](#full-config-via-environment)). The `platform` block also has dedicated `PLATFORM_*` variables (see the otari.ai variables below).
 
 The config file also supports `${ENV_VAR}` interpolation:
 

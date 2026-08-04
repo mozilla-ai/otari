@@ -410,6 +410,40 @@
         "title": "BudgetResponse",
         "type": "object"
       },
+      "CandidateResponse": {
+        "description": "One candidate in a compiled plan.",
+        "properties": {
+          "dispatch_model": {
+            "title": "Dispatch Model",
+            "type": "string"
+          },
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "selection_reason": {
+            "title": "Selection Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "instance",
+          "model",
+          "selection_reason",
+          "dispatch_model"
+        ],
+        "title": "CandidateResponse",
+        "type": "object"
+      },
       "ChatCompletionRequest": {
         "description": "OpenAI-compatible chat completion request.\n\nThe completion-param fields are derived from any-llm's ``CompletionParams``\n(see ``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. Fields below either tighten a derived field (``messages``,\n``response_format``) or add gateway-internal behavior (``mcp_servers``,\n``mcp_server_ids``, ``guardrails``, ``tools_header``, ``max_tool_iterations``)\nthat is stripped before the request is forwarded upstream.",
         "properties": {
@@ -1495,6 +1529,30 @@
         "title": "DiscoverableProvider",
         "type": "object"
       },
+      "DroppedResponse": {
+        "description": "A candidate that was filtered out, and why.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "selector": {
+            "title": "Selector",
+            "type": "string"
+          }
+        },
+        "required": [
+          "selector",
+          "reason",
+          "detail"
+        ],
+        "title": "DroppedResponse",
+        "type": "object"
+      },
       "EmbeddingRequest": {
         "description": "OpenAI-compatible embedding request.",
         "properties": {
@@ -1556,6 +1614,150 @@
           "input"
         ],
         "title": "EmbeddingRequest",
+        "type": "object"
+      },
+      "ExplainRequest": {
+        "description": "Ask what a policy would do, without dispatching anything.\n\nEither name a stored/configured policy (``name``) or pass a draft ``spec`` that\nhas not been saved. The draft form is what makes authoring-time validation\npossible: the compiler filters candidates, so a chain can compile down to one\nattempt, and an author needs to see that before saving rather than during an\noutage.",
+        "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Simulate an API key's allow-list. Omit for unrestricted.",
+            "title": "Allowed Models"
+          },
+          "budget_remaining_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Simulated budget remaining, USD.",
+            "title": "Budget Remaining Usd"
+          },
+          "budget_used_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Simulated budget usage percentage.",
+            "title": "Budget Used Pct"
+          },
+          "key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluate conditions as this API key id.",
+            "title": "Key Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An existing policy to explain.",
+            "title": "Name"
+          },
+          "spec": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An unsaved policy body to explain.",
+            "title": "Spec"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluate conditions as this user.",
+            "title": "User Id"
+          }
+        },
+        "title": "ExplainRequest",
+        "type": "object"
+      },
+      "ExplainResponse": {
+        "description": "The plan a policy compiles to for the given inputs.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/CandidateResponse"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "dropped": {
+            "items": {
+              "$ref": "#/components/schemas/DroppedResponse"
+            },
+            "title": "Dropped",
+            "type": "array"
+          },
+          "guardrails": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Guardrails",
+            "type": "array"
+          },
+          "is_dynamic": {
+            "title": "Is Dynamic",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "selection_reason": {
+            "title": "Selection Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "selection_reason",
+          "is_dynamic",
+          "candidates",
+          "dropped",
+          "guardrails"
+        ],
+        "title": "ExplainResponse",
         "type": "object"
       },
       "ExternalEventsRequest": {
@@ -1862,6 +2064,15 @@
             },
             "title": "On",
             "type": "array"
+          },
+          "on_unavailable": {
+            "default": "block",
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "On Unavailable",
+            "type": "string"
           },
           "profile": {
             "maxLength": 128,
@@ -2962,6 +3173,103 @@
           "flagged"
         ],
         "title": "ModerationResult",
+        "type": "object"
+      },
+      "PolicyRequest": {
+        "description": "Request to create or update a routing policy.",
+        "properties": {
+          "name": {
+            "description": "Model name callers send, e.g. 'fast'.",
+            "title": "Name",
+            "type": "string"
+          },
+          "spec": {
+            "additionalProperties": true,
+            "description": "The policy body: select (with exactly one `default` entry, last), optional on_failure, guardrails, and limits. Same schema as a `routing.policies` entry in config.yml.",
+            "title": "Spec",
+            "type": "object"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "User this policy belongs to. Omit for a global policy every caller sees. A user-scoped policy resolves only for that user and shadows a global one of the same name.",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "name",
+          "spec"
+        ],
+        "title": "PolicyRequest",
+        "type": "object"
+      },
+      "PolicyResponse": {
+        "description": "A routing policy and where it is defined.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "is_dynamic": {
+            "default": false,
+            "title": "Is Dynamic",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "spec": {
+            "additionalProperties": true,
+            "title": "Spec",
+            "type": "object"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "name",
+          "spec",
+          "source"
+        ],
+        "title": "PolicyResponse",
         "type": "object"
       },
       "PricingRefreshChangeResponse": {
@@ -5293,6 +5601,28 @@
             ],
             "title": "Api Key Id"
           },
+          "attempt_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Count"
+          },
+          "attempt_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attempt Position"
+          },
           "billing_meters": {
             "anyOf": [
               {
@@ -5398,6 +5728,17 @@
             "title": "Model",
             "type": "string"
           },
+          "policy_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Name"
+          },
           "pricing_breakdown": {
             "anyOf": [
               {
@@ -5446,6 +5787,28 @@
               }
             ],
             "title": "Provider"
+          },
+          "request_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Group Id"
+          },
+          "selection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection Reason"
           },
           "source": {
             "title": "Source",
@@ -9645,6 +10008,200 @@
         "summary": "Create Response",
         "tags": [
           "responses"
+        ]
+      }
+    },
+    "/v1/routing/policies": {
+      "get": {
+        "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
+        "operationId": "list_policies_v1_routing_policies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PolicyResponse"
+                  },
+                  "title": "Response List Policies V1 Routing Policies Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Policies",
+        "tags": [
+          "routing"
+        ]
+      },
+      "post": {
+        "description": "Create or update a stored policy, global or scoped to one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).",
+        "operationId": "set_policy_v1_routing_policies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Policy",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/v1/routing/policies/explain": {
+      "post": {
+        "description": "Compile a policy and return the plan, without dispatching anything.\n\nMaster-key gated, and deliberately so: the response enumerates the policy's\ntargets, which is exactly the information a policy exists to keep off the wire.\nIt is a management surface, not a caller-facing one.\n\nAccepts an unsaved ``spec`` as well as a saved ``name``, so a form can validate\nwhat the operator is about to save. The response includes dropped candidates\nwith reasons, which is the part that catches a \"failover\" policy that has\nquietly compiled down to a single attempt.",
+        "operationId": "explain_policy_v1_routing_policies_explain_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExplainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplainResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Explain Policy",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/v1/routing/policies/{name}": {
+      "delete": {
+        "description": "Delete a stored policy in one scope.\n\nScoped by ``user_id`` for the same reason the upsert is: deleting the global\npolicy must not take a user's override with it, and deleting an override must\nleave the global one serving everyone else.",
+        "operationId": "delete_policy_v1_routing_policies__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Delete the policy scoped to this user. Omit to delete the global one.",
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the policy scoped to this user. Omit to delete the global one.",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Policy",
+        "tags": [
+          "routing"
         ]
       }
     },

@@ -1958,6 +1958,132 @@
     {
       "item": [
         {
+          "name": "List Policies",
+          "request": {
+            "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "routing",
+                "policies"
+              ],
+              "raw": "{{baseUrl}}/v1/routing/policies"
+            }
+          }
+        },
+        {
+          "name": "Set Policy",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\",\n  \"spec\": {}\n}"
+            },
+            "description": "Create or update a stored policy, global or scoped to one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "routing",
+                "policies"
+              ],
+              "raw": "{{baseUrl}}/v1/routing/policies"
+            }
+          }
+        },
+        {
+          "name": "Explain Policy",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"budget_remaining_usd\": 0,\n  \"budget_used_pct\": 0,\n  \"key_id\": \"string\",\n  \"name\": \"string\",\n  \"spec\": {},\n  \"user_id\": \"string\"\n}"
+            },
+            "description": "Compile a policy and return the plan, without dispatching anything.\n\nMaster-key gated, and deliberately so: the response enumerates the policy's\ntargets, which is exactly the information a policy exists to keep off the wire.\nIt is a management surface, not a caller-facing one.\n\nAccepts an unsaved ``spec`` as well as a saved ``name``, so a form can validate\nwhat the operator is about to save. The response includes dropped candidates\nwith reasons, which is the part that catches a \"failover\" policy that has\nquietly compiled down to a single attempt.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "routing",
+                "policies",
+                "explain"
+              ],
+              "raw": "{{baseUrl}}/v1/routing/policies/explain"
+            }
+          }
+        },
+        {
+          "name": "Delete Policy",
+          "request": {
+            "description": "Delete a stored policy in one scope.\n\nScoped by ``user_id`` for the same reason the upsert is: deleting the global\npolicy must not take a user's override with it, and deleting an override must\nleave the global one serving everyone else.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "routing",
+                "policies",
+                ":name"
+              ],
+              "query": [
+                {
+                  "description": "Delete the policy scoped to this user. Omit to delete the global one.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/routing/policies/:name?user_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "routing"
+    },
+    {
+      "item": [
+        {
           "name": "Create Search",
           "request": {
             "body": {

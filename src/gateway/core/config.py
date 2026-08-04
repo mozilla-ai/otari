@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_valid
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.log_config import logger
+from gateway.models.routing import RoutingConfig
 
 API_KEY_HEADER = "Otari-Key"
 # Aliases accepted for a provider instance's ``provider_type`` that map onto a
@@ -283,6 +284,16 @@ class GatewayConfig(BaseSettings):
             "what users see in GET /v1/models and in response 'model' fields, so the underlying "
             "provider/model can stay hidden. Pricing, budgets, and usage logs key on the resolved "
             "target. Standalone-mode only (hybrid resolves models against the platform)."
+        ),
+    )
+    routing: RoutingConfig = Field(
+        default_factory=RoutingConfig,
+        description=(
+            "Named routing policies. A policy is a model name callers use like any other, which "
+            "decides which real model serves the request ('select'), what is tried after a retryable "
+            "failure ('on_failure'), and which guardrails always run. A one-target policy is an alias, "
+            "so 'aliases:' remains its shorthand. Standalone-mode only: in hybrid mode the platform "
+            "resolves the model, so a policy name would be sent upstream and rejected there."
         ),
     )
     pricing: dict[str, PricingConfig] = Field(
@@ -744,6 +755,98 @@ class GatewayConfig(BaseSettings):
         for name, target in self.aliases.items():
             self.validate_alias(name, target)
 
+    def policy_names(self) -> set[str]:
+        """Every configured routing-policy name. Empty when routing is disabled."""
+        if not self.routing.enabled:
+            return set()
+        return set(self.routing.policies)
+
+    def validate_routing_policies(self) -> None:
+        """Validate the ``routing:`` block at startup so misconfig fails fast.
+
+        A policy name reaches requests the same way an alias name does, so it
+        answers to the same rules: no selector delimiter, no collision with a
+        provider instance, and no chaining (a target may not name another policy
+        or an alias). It additionally may not collide with an ``aliases:`` entry:
+        both would claim the same caller-facing name, and silently preferring one
+        would make the other dead config.
+
+        Validation runs even when ``routing.enabled`` is false. A disabled block
+        is still config someone will re-enable, and finding out it was malformed
+        at that point defeats the purpose of an off-switch.
+        """
+        alias_names = set(self.aliases)
+        policy_names = set(self.routing.policies)
+
+        for name, spec in self.routing.policies.items():
+            where = f"routing.policies.{name}"
+            if not name:
+                msg = "routing policy name must not be empty."
+                raise ValueError(msg)
+            if ":" in name or "/" in name:
+                msg = (
+                    f"routing policy name '{name}' must not contain ':' or '/' "
+                    "(it would shadow a real model selector)."
+                )
+                raise ValueError(msg)
+            if name in self.providers:
+                msg = f"routing policy '{name}' collides with a configured provider instance name."
+                raise ValueError(msg)
+            if name in alias_names:
+                msg = (
+                    f"routing policy '{name}' collides with the alias of the same name "
+                    f"(aliases.{name} -> '{self.aliases[name]}'). Both claim the same model name for "
+                    "callers, so one would be dead config. Rename the policy, or delete the alias and "
+                    "express it as the policy's default target."
+                )
+                raise ValueError(msg)
+
+            # Reuse the alias target rules for every selector the policy names:
+            # the prefix must resolve to a configured instance or a known
+            # implementation, and it must not point at another indirection.
+            # `validate_alias` phrases its errors as `aliases.<name>`, so the
+            # message is re-raised under the policy's own path.
+            chainable = alias_names | policy_names
+            for selector in spec.static_selectors():
+                try:
+                    self.validate_alias(name, selector, alias_names=chainable)
+                except ValueError as exc:
+                    detail = str(exc).replace(f"aliases.{name}", f"{where}", 1)
+                    raise ValueError(detail) from exc
+
+            if spec.default_target in spec.on_failure:
+                msg = (
+                    f"{where}: '{spec.default_target}' is both the default target and an on_failure "
+                    "entry. Retrying the candidate that just failed cannot help; remove it from on_failure."
+                )
+                raise ValueError(msg)
+
+            self._warn_on_policy_name_shadowing_a_model(name, where)
+
+    def _warn_on_policy_name_shadowing_a_model(self, name: str, where: str) -> None:
+        """Warn when a policy name matches a model id declared by an instance.
+
+        A warning rather than a refusal, deliberately. ``aliases:`` has always
+        allowed a name that collides with a real model id, so refusing outright
+        would stop gateways booting on a config file that was valid before the
+        upgrade. This warns for now; the refusal lands a release later, and the
+        message says so. Only declared ``models`` lists are checked: the full set
+        a provider serves is discovered asynchronously and is not knowable here.
+        """
+        for instance, entry in self.providers.items():
+            declared = entry.get("models") if isinstance(entry, dict) else None
+            if isinstance(declared, list) and name in declared:
+                logger.warning(
+                    "%s shadows model '%s' declared by provider instance '%s'. Requests naming '%s' will "
+                    "route through the policy, not the model, including for pricing and budget "
+                    "attribution. This will be refused in a future release; rename the policy now.",
+                    where,
+                    name,
+                    instance,
+                    name,
+                )
+                return
+
     def validate_provider_instances(self) -> None:
         """Validate per-instance ``provider_type`` / ``models`` declarations.
 
@@ -1048,6 +1151,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_mode_selection()
     config.validate_provider_instances()
     config.validate_aliases()
+    config.validate_routing_policies()
     config.validate_search_tools()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config

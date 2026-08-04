@@ -32,7 +32,8 @@ Running and managing a gateway.
 - [Configuration](configuration.md): the full config file and environment variable reference.
 - [Admin dashboard](dashboard.md): the operator dashboard, covering the two-key model, a first-run walkthrough, and a page-by-page reference.
 - [Access control](access-control.md): users, API keys, and budgets, with the management endpoints that drive them.
-- [Supported models](models.md): providers, model format, and capabilities.
+- [Supported models](models.md): providers, model format, aliases, and capabilities.
+- [Routing policies](routing.md): failover, budget-based tier-down, and enforced guardrails behind one model name.
 - [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
 
 ### For integrators

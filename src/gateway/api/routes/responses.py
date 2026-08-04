@@ -48,6 +48,7 @@ from gateway.services.mcp_loop_responses import (
 )
 from gateway.services.tool_format import inject_purpose_hints_responses, openai_to_responses_tools
 from gateway.streaming import RESPONSES_STREAM_FORMAT, StreamFormat
+from gateway.types.attempt import Attempt
 
 router = APIRouter(prefix="/v1", tags=["responses"])
 
@@ -288,6 +289,22 @@ class _ResponsesAdapter:
             **{k: v for k, v in request_fields.items() if k != "provider"},
             "model": attempt.model,
             "provider": LLMProvider(attempt.provider),
+        }
+
+    def local_attempt_kwargs(
+        self,
+        attempt: Attempt,
+        base_request_fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        # Same keyword shape as `attempt_kwargs`, for a locally resolved attempt:
+        # `aresponses` wants `provider` and `model` separately, and the Codex
+        # extra-body has to be rebuilt for *this* candidate's provider.
+        request_fields = _with_codex_extra_body(base_request_fields, attempt.provider)
+        return {
+            **attempt.kwargs,
+            **{k: v for k, v in request_fields.items() if k != "provider"},
+            "model": attempt.model,
+            "provider": attempt.provider,
         }
 
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:

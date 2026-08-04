@@ -21,8 +21,14 @@ from typing import Any, cast
 
 import pytest
 from any_llm import LLMProvider
-from any_llm.types.completion import ChatCompletionChunk, CompletionUsage
-from fastapi import HTTPException
+from any_llm.types.completion import (
+    ChatCompletion,
+    ChatCompletionChunk,
+    ChatCompletionMessage,
+    Choice,
+    CompletionUsage,
+)
+from fastapi import HTTPException, Response
 
 import gateway.api.routes._pipeline as pipeline
 from gateway.api.routes import chat, messages, responses
@@ -32,9 +38,11 @@ from gateway.api.routes._pipeline import (
     build_streaming_response,
     prepare_gateway_tools,
     run_single_attempt_stream,
+    run_standalone_non_stream,
     stream_first_chunk_timeout_seconds,
 )
 from gateway.core.config import GatewayConfig
+from gateway.rate_limit import RateLimitInfo
 from gateway.services.budget_service import ReservationHandle
 
 ADAPTERS = [
@@ -70,6 +78,7 @@ def _ctx(
     db: Any = None,
     log_writer: Any = None,
     reservation: ReservationHandle | None = None,
+    rate_limit_info: RateLimitInfo | None = None,
 ) -> RequestContext:
     return RequestContext(
         config=config,
@@ -80,7 +89,7 @@ def _ctx(
         user_token=None,
         api_key_id="key-1",
         user_id="user-1",
-        rate_limit_info=None,
+        rate_limit_info=rate_limit_info,
         reservation=reservation,
         started_at=time.monotonic(),
     )
@@ -524,3 +533,301 @@ async def test_pre_stream_failure_refunds_reservation(
 
     assert settlement.refunded == 1
     assert settlement.reconciled == []
+
+
+# ---------------------------------------------------------------------------
+# Non-streaming settlement (characterization, issue #463 P1a)
+#
+# `run_standalone_non_stream` and `run_platform_non_stream` are the pair that
+# the routing-policy work merges into one multi-attempt executor. Neither had a
+# single direct test before this block: both were exercised only through
+# route-level HTTP tests, and the standalone half only in the Postgres-backed
+# integration tier. So these pin today's behavior in the fast tier, and the
+# same assertions must hold after the merge.
+#
+# The asymmetry being pinned, and the whole reason the merge is not a move:
+# the standalone path reserves budget, logs usage, reconciles, and relabels the
+# model; `run_platform_non_stream` takes no `ctx` at all, so it does none of
+# those four things. Whatever executes both must acquire local settlement
+# without changing either side's observable behavior.
+# ---------------------------------------------------------------------------
+
+
+def _completion(model: str = "gpt-4", usage: CompletionUsage | None = None) -> ChatCompletion:
+    return ChatCompletion(
+        id="cmpl-1",
+        choices=[
+            Choice(
+                finish_reason="stop",
+                index=0,
+                message=ChatCompletionMessage(role="assistant", content="hi"),
+            )
+        ],
+        created=0,
+        model=model,
+        object="chat.completion",
+        usage=usage,
+    )
+
+
+def _usage() -> CompletionUsage:
+    return CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+
+
+async def _run_standalone(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    result: ChatCompletion | None = None,
+    error: BaseException | None = None,
+    reservation: ReservationHandle | None = None,
+    rate_limit_info: RateLimitInfo | None = None,
+    db: Any = None,
+    display_model: str | None = None,
+) -> tuple[Any, Response]:
+    """Drive the standalone non-streaming path with a faked provider call."""
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        if error is not None:
+            raise error
+        return result if result is not None else _completion()
+
+    monkeypatch.setattr(chat, "acompletion", fake_acompletion)
+
+    ctx = _ctx(
+        GatewayConfig(),
+        db=db if db is not None else object(),
+        log_writer=object(),
+        reservation=reservation,
+        rate_limit_info=rate_limit_info,
+    )
+    response = Response()
+    returned = await run_standalone_non_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(),
+        call_kwargs={"model": "openai:gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+        response=response,
+        provider=LLMProvider.OPENAI,
+        model="gpt-4",
+        display_model=display_model,
+    )
+    return returned, response
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_success_logs_once_and_reconciles(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    result, _ = await _run_standalone(
+        monkeypatch, result=_completion(usage=_usage()), reservation=_reservation()
+    )
+
+    assert result.usage is not None
+    assert len(settlement.logged) == 1
+    assert settlement.reconciled == [0.25]
+    assert settlement.refunded == 0
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_logs_success_without_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Chat sets ``log_success_without_usage``, so a usage-less result still
+    writes a row and still reconciles (at cost 0.0, since the fake returns None).
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    await _run_standalone(monkeypatch, result=_completion(usage=None), reservation=_reservation())
+
+    assert len(settlement.logged) == 1
+    assert settlement.reconciled == [0.0]
+    assert settlement.refunded == 0
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_keys_usage_on_target_and_relabels_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An alias relabels the response ``model`` while usage keys on the target.
+
+    This is the invariant the routing-policy work must preserve for a policy
+    name: what the caller sees and what gets billed are deliberately different.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    result, _ = await _run_standalone(
+        monkeypatch,
+        result=_completion(usage=_usage()),
+        reservation=_reservation(),
+        display_model="fast",
+    )
+
+    assert result.model == "fast"
+    assert settlement.logged[0]["model"] == "gpt-4"
+    assert settlement.logged[0]["provider"] is LLMProvider.OPENAI
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_applies_rate_limit_headers(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    _, response = await _run_standalone(
+        monkeypatch,
+        result=_completion(usage=_usage()),
+        reservation=_reservation(),
+        rate_limit_info=RateLimitInfo(limit=60, remaining=59, reset=time.time() + 60),
+    )
+
+    assert response.headers["X-RateLimit-Limit"] == "60"
+    assert response.headers["X-RateLimit-Remaining"] == "59"
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_provider_failure_logs_error_and_refunds_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    with pytest.raises(HTTPException):
+        await _run_standalone(monkeypatch, error=RuntimeError("connection refused"), reservation=_reservation())
+
+    assert settlement.refunded == 1
+    assert settlement.reconciled == []
+    assert len(settlement.logged) == 1
+    assert settlement.logged[0]["error"] == "connection refused"
+    assert settlement.logged[0]["status_code"] is not None
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_http_exception_refunds_without_logging(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An already-mapped HTTPException refunds but writes no usage row.
+
+    Gateway-side rejections log through ``log_gateway_rejection`` at their own
+    call sites, so logging here would double-count them.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    with pytest.raises(HTTPException):
+        await _run_standalone(
+            monkeypatch,
+            error=HTTPException(status_code=403, detail="nope"),
+            reservation=_reservation(),
+        )
+
+    assert settlement.refunded == 1
+    assert settlement.logged == []
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_without_reservation_settles_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Master-key callers reserve nothing, so there is nothing to reconcile."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=None)
+
+    assert len(settlement.logged) == 1
+    assert settlement.reconciled == []
+    assert settlement.refunded == 0
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_marks_budget_exempt_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ``exclude_from_budget`` key holds an unreserved handle: the row is
+    still written, flagged as not counting toward the budget.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    exempt = ReservationHandle(
+        user_id="user-1", estimate=0.0, reserved=False, strategy="for_update", counts_toward_budget=False
+    )
+    await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=exempt)
+
+    assert settlement.logged[0]["counts_toward_budget"] is False
+
+
+@pytest.mark.asyncio
+async def test_hybrid_shaped_context_settles_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With ``db=None`` (the hybrid shape) the standalone path writes and
+    settles nothing, which is exactly what ``run_platform_non_stream`` does
+    today by having no ``ctx`` at all. The merged executor must keep this
+    difference driven by the presence of a local session, not by the mode flag.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    ctx = _ctx(GatewayConfig(), db=None, log_writer=None, reservation=None)
+
+    async def fake_acompletion(**kwargs: Any) -> Any:
+        return _completion(usage=_usage())
+
+    monkeypatch.setattr(chat, "acompletion", fake_acompletion)
+
+    await run_standalone_non_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(),
+        call_kwargs={"model": "openai:gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+        response=Response(),
+        provider=LLMProvider.OPENAI,
+        model="gpt-4",
+    )
+
+    assert settlement.logged == []
+    assert settlement.reconciled == []
+    assert settlement.refunded == 0
+
+
+@pytest.mark.asyncio
+async def test_standalone_stream_has_no_first_chunk_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A slow first token must not be cut off on the standalone streaming path.
+
+    The first-chunk deadline exists so a hybrid-mode attempt can fail over to
+    the next entry in the routing policy, and it is read from
+    ``config.platform`` (empty in standalone), defaulting to 2000ms. Standalone
+    has no next entry, so ``run_single_attempt_stream`` deliberately never
+    applies a deadline at all.
+
+    This pins that. The config below sets a 10ms deadline and the first chunk
+    takes ~50ms: if the standalone path ever starts consulting the cap (say by
+    being routed through the multi-attempt walker), this test fails instead of
+    turning slow-but-valid responses into 504s in production, which is what
+    issue #237 was.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def slow_first_chunk(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        async def gen() -> AsyncIterator[ChatCompletionChunk]:
+            await asyncio.sleep(0.05)
+            yield _chunk(_usage())
+
+        return gen()
+
+    monkeypatch.setattr(chat, "acompletion", slow_first_chunk)
+
+    config = GatewayConfig(platform={"streaming_first_chunk_timeout_ms": 10})
+    assert stream_first_chunk_timeout_seconds(config, tool_mode=False) == 0.01
+
+    ctx = _ctx(config, db=object(), log_writer=object(), reservation=_reservation())
+    response = await run_single_attempt_stream(
+        adapter=chat._ADAPTER,
+        ctx=ctx,
+        tool_ctx=_tool_ctx(config=config),
+        call_kwargs={"model": "openai:gpt-4", "messages": [{"role": "user", "content": "hi"}]},
+        provider=LLMProvider.OPENAI,
+        model="gpt-4",
+    )
+    chunks = await _drain(response)
+
+    assert chunks, "the slow first chunk was dropped: a first-chunk deadline is being applied"
+    assert settlement.reconciled == [0.25]

@@ -122,6 +122,25 @@ def test_ports_and_adapters_scaffolding_is_noop(tmp_path: Path) -> None:
     assert check.check_file(adapters_file, tmp_path) == []
 
 
+def test_shared_types_may_not_import_other_gateway_layers(tmp_path: Path) -> None:
+    # gateway/types holds leaf data shapes that every layer may depend on (the
+    # routing Attempt is built by services and executed by the API layer), so it
+    # must not reach back into any of them.
+    file_path = _write(
+        tmp_path,
+        "gateway/types/attempt.py",
+        "from gateway.services.provider_kwargs import ResolvedProvider\n",
+    )
+    assert check.check_file(file_path, tmp_path) == [
+        (1, "gateway.services.provider_kwargs", "Forbidden import in Shared types")
+    ]
+
+
+def test_shared_types_may_import_third_party(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "gateway/types/attempt.py", "from any_llm import LLMProvider\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
 def test_repository_naming_convention(tmp_path: Path) -> None:
     _write(tmp_path, "gateway/repositories/__init__.py", "")
     _write(tmp_path, "gateway/repositories/users_repository.py", "")

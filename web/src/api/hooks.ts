@@ -4,6 +4,10 @@ import { ApiError, apiFetch } from "@/api/client";
 import { isoAgo } from "@/lib/timeRange";
 import type {
   AliasResponse,
+  ExplainPolicyRequest,
+  ExplainPolicyResponse,
+  RoutingPolicyResponse,
+  SetRoutingPolicyRequest,
   ApiKey,
   Budget,
   BudgetResetLog,
@@ -57,6 +61,7 @@ const PRICING = "pricing";
 const SETTINGS = "settings";
 const TOOL_SETTINGS = "tool-settings";
 const ALIASES = "aliases";
+const ROUTING_POLICIES = "routing-policies";
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
 // key would fire a live provider call on every save.
@@ -280,6 +285,58 @@ export function useAliases() {
     queryKey: [ALIASES],
     queryFn: () => apiFetch<AliasResponse[]>("/v1/aliases"),
     staleTime: 60_000,
+  });
+}
+
+export function useRoutingPolicies() {
+  return useQuery({
+    queryKey: [ROUTING_POLICIES],
+    queryFn: () => apiFetch<RoutingPolicyResponse[]>("/v1/routing/policies"),
+    staleTime: 60_000,
+  });
+}
+
+export function useSetRoutingPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SetRoutingPolicyRequest) =>
+      apiFetch<RoutingPolicyResponse>("/v1/routing/policies", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] });
+      // A policy is listed as a model, so the catalog changes too.
+      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+    },
+  });
+}
+
+export function useDeleteRoutingPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    // Scoped like an alias delete: the same name can exist globally and per user,
+    // so a delete must say which. Only a null/absent userId means global, checked
+    // explicitly because "" is a legal user id.
+    mutationFn: ({ name, userId }: { name: string; userId?: string | null }) => {
+      const scope = userId == null ? "" : `?user_id=${encodeURIComponent(userId)}`;
+      return apiFetch<void>(`/v1/routing/policies/${encodeURIComponent(name)}${scope}`, { method: "DELETE" });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] });
+      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+    },
+  });
+}
+
+/** Compile a policy (saved or draft) without dispatching anything.
+ *
+ *  A mutation rather than a query: it is an explicit "check this now" action on
+ *  inputs the operator is editing, not cacheable server state. */
+export function useExplainPolicy() {
+  return useMutation({
+    mutationFn: (body: ExplainPolicyRequest) =>
+      apiFetch<ExplainPolicyResponse>("/v1/routing/policies/explain", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
   });
 }
 

@@ -129,3 +129,41 @@ providers:
 #   myopusmodel: anthropic:claude-opus-4
 #   fastmodel: openai:gpt-5
 #   housemodel: home_lab:qwen3
+
+# Routing policies (optional): a model name that decides which real model serves
+# each request. An alias is the one-target case of this, so `aliases:` above stays
+# supported as the shorthand. Standalone-mode only: in hybrid mode the connected
+# platform resolves the model, so a policy name is refused with a 400.
+#
+# Two axes, kept separate on purpose:
+#   select      where the plan starts. Entries are tried in order and the first
+#               whose `when` matches wins; `default` is the fallthrough and must
+#               come last.
+#   on_failure  what is tried next after a retryable failure, in order.
+#
+# `when` conditions (all must match): budget_used_pct, budget_remaining_usd,
+# user_id, key_id. Comparisons are {gte|gt|lte|lt: <number>}. A budget condition
+# never matches for a caller with no budget or an unlimited one, so the default is
+# used. A budget_used_pct threshold at 100 or above is refused: the budget gate
+# rejects the request before selection, so the rule could never fire.
+#
+# Check what a policy compiles to, without sending anything anywhere:
+#   otari routing explain fast --budget-used-pct 85
+# routing:
+#   enabled: true                       # master off-switch
+#   policies:
+#     fast:
+#       select:
+#         - when: {budget_used_pct: {gte: 80}}
+#           target: openai:gpt-5-nano   # tier down as the budget fills up
+#         - default: openai:gpt-5-mini
+#       on_failure:
+#         - anthropic:claude-haiku-4-5  # tried if the selected model fails
+#       guardrails:
+#         # `mode` is required here (the per-request field defaults to monitor, so
+#         # an omitted mode would look like a mandate and behave as shadow mode).
+#         # on_unavailable: block fails closed, which makes the guardrails service
+#         # a hard dependency of every request through this policy.
+#         - {profile: prompt-injection, mode: block, on_unavailable: block}
+#       limits:
+#         streaming_first_chunk_timeout_ms: 8000

@@ -132,6 +132,15 @@ class UsageEntry(BaseModel):
     source: str
     source_label: str | None
     counts_toward_budget: bool
+    # Routing attribution. All null for a request that named a plain model.
+    # `status == "absorbed"` marks an attempt a policy recovered from; those rows
+    # are excluded from `error_count` and from `request_count`, since the request
+    # they belong to is counted once by the attempt that served it.
+    policy_name: str | None = None
+    selection_reason: str | None = None
+    attempt_position: int | None = None
+    attempt_count: int | None = None
+    request_group_id: str | None = None
 
     @classmethod
     def from_model(cls, log: UsageLog) -> "UsageEntry":
@@ -159,6 +168,11 @@ class UsageEntry(BaseModel):
             error_message=log.error_message,
             status_code=log.status_code,
             latency_ms=log.latency_ms,
+            policy_name=log.policy_name,
+            selection_reason=log.selection_reason,
+            attempt_position=log.attempt_position,
+            attempt_count=log.attempt_count,
+            request_group_id=log.request_group_id,
         )
 
 
@@ -642,6 +656,24 @@ def _dialect_name(db: AsyncSession) -> str:
     return bind.dialect.name
 
 
+def _request_count_expr() -> Any:
+    """Count requests, not rows.
+
+    Used by every "request count" in this module (totals, dimension breakdowns, and
+    the grouped series) so the number means one thing everywhere and the breakdowns
+    still sum to the total. The row-count endpoint (`/v1/usage/count`) deliberately
+    does not use it: that one paginates the activity list, where an absorbed attempt
+    is a row the operator can see and page through.
+
+    A request served through a routing policy can write more than one row: the
+    attempt that served it, plus one ``status="absorbed"`` row per failure the
+    policy recovered from. Those extra rows describe attempts within a request that
+    is already counted, so a plain ``count()`` would inflate request volume and
+    deflate every rate computed against it (error rate, cost per request).
+    """
+    return func.coalesce(func.sum(case((UsageLog.status != "absorbed", 1), else_=0)), 0)
+
+
 def _billed_expr(meter: str, fallback: Any) -> Any:
     """A per-row billed token meter, as a summable SQL expression.
 
@@ -686,7 +718,7 @@ async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> Us
                 func.coalesce(func.sum(UsageLog.cache_read_tokens), 0),
                 func.coalesce(func.sum(UsageLog.cache_write_tokens), 0),
                 func.coalesce(func.sum(UsageLog.cache_write_1h_tokens), 0),
-                func.count(),
+                _request_count_expr(),
                 func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
                 func.avg(UsageLog.latency_ms),
                 # Unpriced *served* rows only; see UsageTotals.unpriced_requests.
@@ -741,7 +773,7 @@ async def _breakdown(
             column,
             cost_sum,
             _billed_input_sum() + _billed_output_sum(),
-            func.count(),
+            _request_count_expr(),
         )
         .where(*conditions)
         .group_by(column)
@@ -987,7 +1019,7 @@ async def usage_summary(
                 expr,
                 func.coalesce(func.sum(UsageLog.cost), 0.0),
                 func.coalesce(func.sum(UsageLog.total_tokens), 0),
-                func.count(),
+                _request_count_expr(),
                 func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
                 _billed_input_sum(),
                 func.coalesce(func.sum(_billed_expr("cache_read_tokens", UsageLog.cache_read_tokens)), 0),
@@ -1124,7 +1156,7 @@ async def usage_series(
                 fold_expr,
                 func.coalesce(func.sum(UsageLog.cost), 0.0),
                 _billed_input_sum() + _billed_output_sum(),
-                func.count(),
+                _request_count_expr(),
             )
             .where(*conditions)
             .group_by(bucket_expr, key_expr, fold_expr)

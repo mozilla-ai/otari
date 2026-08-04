@@ -207,6 +207,19 @@ const NAV: NavItem[] = [
     ),
   },
   {
+    to: "/routing",
+    section: "catalog",
+    label: "Routing",
+    icon: (
+      <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
+        <path d="M4 5h4l4 7 4-7h4" strokeLinejoin="round" />
+        <path d="M4 19h4l4-7" strokeLinejoin="round" />
+        <circle cx="19" cy="19" r="2" />
+        <circle cx="19" cy="5" r="2" />
+      </svg>
+    ),
+  },
+  {
     to: "/tools",
     section: "system",
     label: "Tools & Guardrails",

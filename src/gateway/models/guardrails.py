@@ -55,6 +55,19 @@ class GuardrailConfig(BaseModel):
     disrupting workflows on false positives. ``block`` → reject the request
     with a 403 and never call the provider when the guardrail flags it."""
 
+    on_unavailable: Literal["block", "monitor"] = "block"
+    """What to do when the guardrails service cannot be reached at all, as
+    opposed to reachable-and-flagging. Only meaningful with ``mode="block"``,
+    since a ``monitor`` guardrail already fails open.
+
+    ``block`` (default, and the pre-existing behavior) fails closed: an enforcing
+    guardrail that could not run must not be silently skipped. The cost is that a
+    guardrails outage rejects every request carrying this guardrail, ahead of any
+    fallback chain, so an operator mandating one on a routing policy is choosing
+    to make that service a hard dependency. ``monitor`` is the escape hatch: the
+    request is served and the skipped check is recorded, trading enforcement for
+    availability."""
+
     validate_kwargs: dict[str, Any] = Field(default_factory=dict)
     """Extra kwargs forwarded to the guardrails service ``/validate`` call,
     merged on top of the profile's own ``validate_kwargs`` server-side."""

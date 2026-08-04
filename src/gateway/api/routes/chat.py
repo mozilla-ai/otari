@@ -51,6 +51,7 @@ from gateway.services.mcp_loop import (
     mcp_tool_loop_stream,
 )
 from gateway.streaming import OPENAI_STREAM_FORMAT, StreamFormat
+from gateway.types.attempt import Attempt
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
 
@@ -214,6 +215,13 @@ class _ChatAdapter:
     ) -> dict[str, Any]:
         return default_attempt_kwargs(attempt, base_request_fields)
 
+    def local_attempt_kwargs(
+        self,
+        attempt: Attempt,
+        base_request_fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        return attempt.call_kwargs(base_request_fields)
+
     def prepare_platform_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         return kwargs
 
@@ -357,6 +365,7 @@ async def chat_completions(
             provider=resolved.instance,
             model=resolved.model,
             display_model=resolved.alias,
+            base_request_fields=request_fields,
         )
 
     # ------------------------------------------------------------------
@@ -395,4 +404,5 @@ async def chat_completions(
         provider=resolved.instance,
         model=resolved.model,
         display_model=resolved.alias,
+        base_request_fields=request_fields,
     )

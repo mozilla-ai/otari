@@ -226,6 +226,122 @@ def gen_secret_key() -> None:
     click.echo(generate_secret_key())
 
 
+@cli.group()
+def routing() -> None:
+    """Inspect routing policies."""
+
+
+@routing.command(name="explain")
+@click.argument("policy_name", required=False)
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to config YAML file",
+    default=None,
+)
+@click.option("--user", "user_id", default=None, help="Evaluate conditions as this user id.")
+@click.option("--key-id", default=None, help="Evaluate conditions as this API key id.")
+@click.option(
+    "--budget-used-pct",
+    type=float,
+    default=None,
+    help="Pretend this much of the caller's budget is committed, to exercise a tier-down rule.",
+)
+@click.option(
+    "--budget-remaining-usd",
+    type=float,
+    default=None,
+    help="Pretend this much budget is left.",
+)
+@click.option(
+    "--allowed-model",
+    "allowed_models",
+    multiple=True,
+    help="Restrict to these instance:model entries (repeatable), as an API key's allow-list would.",
+)
+def routing_explain(
+    policy_name: str | None,
+    config: str | None,
+    user_id: str | None,
+    key_id: str | None,
+    budget_used_pct: float | None,
+    budget_remaining_usd: float | None,
+    allowed_models: tuple[str, ...],
+) -> None:
+    """Show what a policy compiles to, without sending a request anywhere.
+
+    A routing policy's whole job is to make a choice the caller cannot see, so
+    there has to be a way to see it. This prints the ordered plan, why the first
+    candidate was selected, and every candidate that was dropped with the reason,
+    which is the failure mode worth catching early: a "failover" policy whose
+    fallbacks were all filtered out is a single attempt wearing a chain's name.
+
+    Reads config only. No database, no provider call, nothing billed. The budget
+    options let a tier-down rule be exercised without waiting for real spend to
+    cross the threshold.
+    """
+    from gateway.models.routing import PolicySpec
+    from gateway.services.routing import BudgetState, NoEligibleCandidatesError, compile_policy
+
+    cfg = load_config(config)
+    if not cfg.routing.policies:
+        click.echo("No routing policies are configured. Add a `routing.policies` block to config.yml.")
+        raise SystemExit(1)
+    if not cfg.routing.enabled:
+        click.echo("Note: routing.enabled is false, so these policies are not in effect for requests.\n")
+
+    if policy_name is None:
+        click.echo("Configured policies:")
+        for name, listed in cfg.routing.policies.items():
+            shape = "dynamic" if listed.is_dynamic else "static"
+            click.echo(f"  {name}  ({shape}, {1 + len(listed.on_failure)} candidate(s))")
+        click.echo("\nPass a policy name to see its compiled plan.")
+        return
+
+    spec: PolicySpec | None = cfg.routing.policies.get(policy_name)
+    if spec is None:
+        known = ", ".join(cfg.routing.policies) or "none"
+        raise click.BadParameter(f"unknown policy {policy_name!r}. Configured policies: {known}")
+
+    budget = BudgetState(used_pct=budget_used_pct, remaining_usd=budget_remaining_usd)
+    try:
+        plan = compile_policy(
+            cfg,
+            policy_name,
+            spec,
+            user_id=user_id,
+            key_id=key_id,
+            allowlist=list(allowed_models) or None,
+            budget=budget,
+        )
+    except NoEligibleCandidatesError as exc:
+        click.echo(f"{policy_name}: NO USABLE CANDIDATE")
+        click.echo(f"  {exc.operator_detail}")
+        raise SystemExit(1) from exc
+
+    click.echo(f"{policy_name}: {len(plan.attempts)} candidate(s), selected by {plan.selection_reason}")
+    for attempt in plan.attempts:
+        click.echo(
+            f"  {attempt.position}. {attempt.instance}:{attempt.model}"
+            f"    [{attempt.selection_reason}]  dispatches as {attempt.dispatch_model}"
+        )
+    for dropped in plan.dropped:
+        click.echo(f"  x  {dropped.selector}    dropped: {dropped.detail}")
+    if plan.guardrails:
+        click.echo("  guardrails (always enforced):")
+        for guardrail in plan.guardrails:
+            click.echo(
+                f"    {guardrail.profile}  mode={guardrail.mode}  on_unavailable={guardrail.on_unavailable}"
+            )
+    if spec.is_dynamic:
+        click.echo(
+            "  note: this policy selects per request, so it has no single target or price. It works on "
+            "/v1/chat/completions, /v1/messages and /v1/responses; on the other model-taking endpoints "
+            "(embeddings, images, moderations, rerank, batches) it is not a resolvable model name."
+        )
+
+
 def main() -> None:
     """Entry point for the CLI."""
     cli()
