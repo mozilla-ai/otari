@@ -181,3 +181,64 @@ def test_classifies_provider_sdk_status_errors(sdk_error: type, status: int, ret
     classified_retryable, error_class = _classify_upstream_error(exc)
     assert classified_retryable is retryable
     assert error_class == f"http_{status}"
+
+
+class _MessageStatusError(Exception):
+    """Upstream error carrying both a status code and a provider message, the
+    shape a provider SDK's ``BadRequestError`` reaches the classifier in."""
+
+    def __init__(self, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+
+
+# Anthropic reports an out-of-credit account as a 400 invalid_request_error.
+_ANTHROPIC_BILLING_MSG = (
+    "Your credit balance is too low to access the Anthropic API. "
+    "Please go to Plans & Billing to upgrade or purchase credits."
+)
+
+
+@pytest.mark.parametrize(
+    "status, message",
+    [
+        (400, _ANTHROPIC_BILLING_MSG),
+        (402, "Insufficient Balance"),
+        (422, "insufficient credits for this request"),
+    ],
+)
+def test_billing_exhaustion_falls_through_to_the_next_attempt(status: int, message: str) -> None:
+    """An out-of-credit account is a condition on THIS provider, not a malformed
+    request, so the route's next attempt is worth making. Reported by clawbolt:
+    an Anthropic account ran dry, the 400 was treated as terminal, and traffic
+    never failed over to the other providers configured on the same alias."""
+    retryable, error_class = _classify_upstream_error(_MessageStatusError(status, message))
+    assert retryable is True
+    assert error_class == f"http_{status}_billing"
+
+
+def test_billing_exhaustion_detected_through_original_exception() -> None:
+    """The signal is found when it lives only on ``original_exception`` (the
+    any-llm unified-exception shape)."""
+    wrapped = _WrappedByAnyLLM(_MessageStatusError(400, _ANTHROPIC_BILLING_MSG))
+    wrapped.status_code = 400  # type: ignore[attr-defined]
+    retryable, error_class = _classify_upstream_error(wrapped)
+    assert retryable is True
+    assert error_class == "http_400_billing"
+
+
+def test_malformed_400_is_still_terminal_after_the_billing_probe() -> None:
+    """The billing probe must not sweep up a genuinely malformed request: an
+    unrecognized 400 message stays terminal so it does not waste an attempt
+    against every provider in the route."""
+    exc = _MessageStatusError(400, "messages.3: tool_use ids were found without tool_result blocks")
+    assert _classify_upstream_error(exc) == (False, "http_400")
+
+
+def test_billing_probe_does_not_reinterpret_other_statuses() -> None:
+    """A billing phrase on a status outside the candidate set keeps its normal
+    classification and error_class, so the probe can only ever rescue a 400/402/422
+    dead end."""
+    assert _classify_upstream_error(_MessageStatusError(503, _ANTHROPIC_BILLING_MSG)) == (True, "http_503")
+    assert _classify_upstream_error(_MessageStatusError(429, "insufficient_quota")) == (True, "http_429")

@@ -59,8 +59,40 @@ _USAGE_NON_RETRYABLE_STATUS_CODES = {401, 402, 404, 409, 422}
 # fall through to the next entry rather than failing the whole request. They are
 # distinct from 400/422, which mean the request itself is malformed and would be
 # rejected by every provider, so falling through on those just wastes attempts.
+# The one exception is a provider that reports account billing exhaustion as a
+# 400/402/422 rather than a 402: that is an account condition, not a malformed
+# request, and the next provider would serve it fine. See
+# :func:`is_provider_billing_error`.
 _FALLBACK_RETRYABLE_STATUS_CODES = {401, 403, 404, 405, 408, 409, 410, 429, 500, 502, 503, 504}
 _FALLBACK_NON_RETRYABLE_STATUS_CODES = {400, 422}
+
+# Statuses on which the billing probe runs. Anthropic reports "credit balance is
+# too low" as a 400 ``invalid_request_error``; DeepSeek uses 402 for
+# "Insufficient Balance"; OpenAI's "billing hard limit reached" is a 400. 429 is
+# deliberately excluded: OpenAI's ``insufficient_quota`` arrives as a 429, which
+# is already both failover-eligible and surfaced to the caller as a rate limit,
+# so backing off remains a sane client action and reclassifying it would only
+# change the wording.
+_BILLING_CANDIDATE_STATUS_CODES = {400, 402, 422}
+
+# Lowercase substrings that identify account-level billing exhaustion in an
+# upstream provider message. Deliberately narrow: a false positive turns a
+# genuinely malformed request into wasted failover attempts against every
+# provider in the route, so a phrase only earns a place here if it cannot plausibly
+# describe a malformed request. Best-effort against current provider phrasing; a
+# reworded message degrades safely to the generic bad-request handling rather
+# than misclassifying.
+_BILLING_MESSAGE_PROBES = (
+    "credit balance is too low",  # anthropic
+    "purchase credits",  # anthropic
+    "plans & billing",  # anthropic
+    "billing hard limit",  # openai
+    "insufficient balance",  # deepseek, moonshot
+    "insufficient_quota",  # openai (error code, echoed in some messages)
+    "exceeded your current quota",  # openai
+    "insufficient credits",  # openrouter, together
+    "payment required",  # generic 402 bodies
+)
 
 # Streaming first-chunk timeouts (hybrid-mode fallback). Plain LLM streams
 # rarely take long to produce a first token, so a tight cap keeps failed-
@@ -599,6 +631,51 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
     return None, None
 
 
+def upstream_error_message(exc: BaseException) -> str:
+    """Best-effort human-readable text from an upstream exception (and its wrapper).
+
+    Concatenates the exception's ``message`` attribute and ``str()`` for both the
+    exception and any ``original_exception``, so a substring probe still matches
+    whether otari receives the raw SDK error today or the wrapped
+    ``AnyLLMError`` after any-llm flips to unified exceptions. Used only for
+    fixed-string classification, never echoed back to the caller.
+    """
+    parts: list[str] = []
+    for candidate in (exc, getattr(exc, "original_exception", None)):
+        if candidate is None:
+            continue
+        message = getattr(candidate, "message", None)
+        if isinstance(message, str):
+            parts.append(message)
+        parts.append(str(candidate))
+    return " ".join(parts)
+
+
+def is_provider_billing_error(exc: BaseException) -> bool:
+    """True when a 4xx is the provider saying "this account is out of money".
+
+    Providers disagree on the status for account billing exhaustion. Anthropic
+    returns a 400 ``invalid_request_error`` carrying "Your credit balance is too
+    low to access the Anthropic API"; OpenAI has a 400 "billing hard limit
+    reached"; DeepSeek uses 402 "Insufficient Balance". A 400 normally means the
+    request itself is malformed, so these would otherwise be reported to the
+    caller as "check the model name and parameters" and, worse, skip failover on
+    the assumption that every provider would reject the same request. The
+    account balance is per-provider, so the next attempt in the route can very
+    plausibly succeed.
+
+    Gated on :data:`_BILLING_CANDIDATE_STATUS_CODES` so the probe can only ever
+    reinterpret a status that is otherwise a dead end, and matched against the
+    narrow :data:`_BILLING_MESSAGE_PROBES` so an unrecognized phrasing falls
+    through to the existing generic handling instead of being misclassified.
+    """
+    _kind, status_code = upstream_exception_shape(exc)
+    if status_code not in _BILLING_CANDIDATE_STATUS_CODES:
+        return False
+    message = upstream_error_message(exc).lower()
+    return any(probe in message for probe in _BILLING_MESSAGE_PROBES)
+
+
 def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
     """Classify an upstream provider error.
 
@@ -611,6 +688,13 @@ def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
         return True, kind
 
     if isinstance(status_code, int):
+        # Checked before the non-retryable set: a billing 400/402/422 is an
+        # account condition on THIS provider, so the route's next attempt is
+        # worth making. The distinct error_class keeps "we ran out of credit"
+        # separable from "the request was malformed" in logs and in what the
+        # gateway reports back to the platform.
+        if is_provider_billing_error(exc):
+            return True, f"http_{status_code}_billing"
         if status_code in _FALLBACK_NON_RETRYABLE_STATUS_CODES:
             return False, f"http_{status_code}"
         if status_code in _FALLBACK_RETRYABLE_STATUS_CODES or 500 <= status_code <= 599:

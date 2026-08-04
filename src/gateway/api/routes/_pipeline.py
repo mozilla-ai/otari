@@ -71,7 +71,9 @@ from gateway.api.routes._platform import (
     _resolve_platform_credentials,
     _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
+    is_provider_billing_error,
     run_platform_attempts,
+    upstream_error_message,
     upstream_exception_shape,
 )
 from gateway.api.routes._platform import (
@@ -151,6 +153,10 @@ PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL = (
 )
 PROVIDER_MODEL_NOT_FOUND_DETAIL = "The requested model was not found on the provider"
 PROVIDER_CREDENTIALS_DETAIL = "The provider rejected the gateway's credentials"
+PROVIDER_BILLING_DETAIL = (
+    "The upstream provider account is out of credit or over its billing limit. "
+    "Top up the provider account, or route this model to a provider that has credit."
+)
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
@@ -211,26 +217,6 @@ def _upstream_error_param(exc: BaseException) -> str | None:
     return None
 
 
-def _upstream_error_message(exc: BaseException) -> str:
-    """Best-effort human-readable text from an upstream exception (and its wrapper).
-
-    Concatenates the exception's ``message`` attribute and ``str()`` for both the
-    exception and any ``original_exception``, so a substring probe still matches
-    whether otari receives the raw SDK error today or the wrapped
-    ``AnyLLMError`` after any-llm flips to unified exceptions. Used only for
-    fixed-string classification, never echoed back to the caller.
-    """
-    parts: list[str] = []
-    for candidate in (exc, getattr(exc, "original_exception", None)):
-        if candidate is None:
-            continue
-        message = getattr(candidate, "message", None)
-        if isinstance(message, str):
-            parts.append(message)
-        parts.append(str(candidate))
-    return " ".join(parts)
-
-
 def _is_reasoning_effort_tools_conflict(exc: BaseException) -> bool:
     """True when a 400/422 is the 'function tools + reasoning_effort' rejection.
 
@@ -250,7 +236,7 @@ def _is_reasoning_effort_tools_conflict(exc: BaseException) -> bool:
     """
     if _upstream_error_param(exc) != "reasoning_effort":
         return False
-    return "function tools" in _upstream_error_message(exc).lower()
+    return "function tools" in upstream_error_message(exc).lower()
 
 
 def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
@@ -274,6 +260,15 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
         return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
     if status_code is None:
         return None
+    # Account billing exhaustion, which several providers report as a 400/402/422
+    # rather than a 402. Like a rejected credential this is a gateway-side account
+    # fault rather than anything wrong with the caller's request, so it surfaces as
+    # a 502 and never as a client-facing 400: telling the caller to "check the model
+    # name and parameters" for an empty wallet sends operators debugging the wrong
+    # thing. Checked ahead of the status branches so it wins over both the generic
+    # bad-request detail and the 402 fall-through to a bare 502.
+    if is_provider_billing_error(exc):
+        return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_BILLING_DETAIL)
     if status_code in (400, 422):
         # Preserve the actionable remedy for the one 400/422 a caller can fix by
         # retrying: function tools combined with a non-'none' reasoning_effort.

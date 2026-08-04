@@ -14,6 +14,7 @@ from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
     PROVIDER_BAD_REQUEST_DETAIL,
+    PROVIDER_BILLING_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
     PROVIDER_MODEL_NOT_FOUND_DETAIL,
     PROVIDER_RATE_LIMITED_DETAIL,
@@ -252,3 +253,75 @@ def test_reasoning_effort_tools_conflict_does_not_leak_raw_message() -> None:
     assert mapping.detail == PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL
     assert "gpt-5.6-sol" not in mapping.detail
     assert "SECRET" not in mapping.detail
+
+
+# The exact upstream Anthropic message for an out-of-credit account. Anthropic
+# returns this as a 400 invalid_request_error, not a 402.
+_ANTHROPIC_BILLING_MSG = (
+    "Your credit balance is too low to access the Anthropic API. "
+    "Please go to Plans & Billing to upgrade or purchase credits."
+)
+
+
+@pytest.mark.parametrize(
+    ("status_code", "message"),
+    [
+        (400, _ANTHROPIC_BILLING_MSG),
+        (402, "Insufficient Balance"),
+        (400, "Billing hard limit has been reached"),
+        (422, "insufficient credits for this request"),
+    ],
+)
+def test_billing_exhaustion_maps_to_502_billing_detail(status_code: int, message: str) -> None:
+    """A provider saying "this account is out of money" is a gateway-side account
+    fault, so it surfaces as a 502 with the billing remedy rather than a 400
+    telling the caller to check the model name. Reported by clawbolt: an Anthropic
+    account ran dry and every agent turn failed with "check the model name and
+    parameters", sending the operator to debug a model alias for 10 hours."""
+    exc = _ParamError(status_code, None, message)
+    assert classify_provider_error(exc) == (502, PROVIDER_BILLING_DETAIL)
+
+
+def test_billing_exhaustion_read_from_original_exception() -> None:
+    """The signal is picked up when it lives only on ``original_exception`` (the
+    any-llm unified-exception shape)."""
+    original = _ParamError(400, None, _ANTHROPIC_BILLING_MSG)
+    assert classify_provider_error(_WrappedError(400, original)) == (502, PROVIDER_BILLING_DETAIL)
+
+
+def test_billing_probe_is_gated_on_the_status_code() -> None:
+    """A billing-sounding phrase on a status the probe does not cover keeps its
+    existing classification, so the probe can only ever reinterpret a 400/402/422
+    dead end. 500 stays unclassifiable (generic 502); 429 stays a rate limit,
+    which is still an actionable signal for the caller."""
+    assert classify_provider_error(_ParamError(500, None, _ANTHROPIC_BILLING_MSG)) is None
+    assert classify_provider_error(_ParamError(429, None, "insufficient_quota")) == (
+        429,
+        PROVIDER_RATE_LIMITED_DETAIL,
+    )
+
+
+def test_unrecognized_400_message_stays_generic_bad_request() -> None:
+    """A genuinely malformed request is not swept up by the billing probe: an
+    unrecognized phrasing degrades to the existing generic detail rather than
+    being misclassified into wasted failover attempts."""
+    exc = _ParamError(400, None, "messages.3: tool_use ids were found without tool_result blocks")
+    assert classify_provider_error(exc) == (400, PROVIDER_BAD_REQUEST_DETAIL)
+
+
+def test_billing_detail_does_not_leak_raw_message() -> None:
+    """The billing detail is a fixed string; nothing from the upstream body is
+    echoed to the caller."""
+    exc = _ParamError(400, None, _ANTHROPIC_BILLING_MSG + " SECRET token=abc123")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.detail == PROVIDER_BILLING_DETAIL
+    assert "SECRET" not in mapping.detail
+    assert "Anthropic" not in mapping.detail
+
+
+def test_failure_status_code_keeps_the_upstream_status_for_billing() -> None:
+    """The usage log keeps the status the provider actually returned, so "how much
+    of my error rate is an empty wallet" stays answerable even though the caller
+    saw a 502."""
+    assert failure_status_code(_ParamError(400, None, _ANTHROPIC_BILLING_MSG)) == 400
