@@ -164,8 +164,9 @@ gateway.
   configured provider. Those rows carry no cost, so they never move spend. Not
   every refusal is logged: a rejected API key (401) has no user to attribute the
   row to, and a rate-limited request (429) is an expected throttle rather than
-  dropped traffic, so neither is recorded. Diagnostic detail stays in the
-  gateway logs rather than the browser.
+  dropped traffic, so neither is recorded. Click an error row to see its
+  diagnostic and the HTTP status that classified the failure, whether a fixed
+  gateway rejection message or the raw upstream provider error.
 - **Usage**: aggregate usage and analytics, showing spend and volume over time,
   broken down by model and by user, plus a switchable breakdown by session,
   endpoint, provider, or source. Clicking any row opens the Activity log scoped
