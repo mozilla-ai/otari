@@ -720,6 +720,92 @@ describe("ActivityPage", () => {
     });
   });
 
+  it("hides the selection column when nothing on the page can be selected", async () => {
+    // A gateway-only deployment has no imported rows, so every checkbox would
+    // render disabled: a column of dead controls rather than an explanation.
+    mockApi({ rows: [entry({ id: "gw", model: "gateway-model", counts_toward_budget: true })] });
+    renderPage(<ActivityPage />);
+
+    await screen.findByText("gateway-model");
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+
+  it("prices the model from a request that carried no cost", async () => {
+    const user = userEvent.setup();
+    // A row stores the instance and the bare model separately, so the pricing
+    // key has to be rebuilt from both: the model alone is prefix-less and the
+    // dialog would (rightly) refuse it.
+    const { calls } = mockApi({
+      rows: [entry({ id: "free", model: "mistral-small", provider: "vllm", cost: null })],
+    });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("mistral-small")).closest("tr")!;
+    await user.click(row);
+    await user.click(screen.getByRole("button", { name: "Price this model" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByLabelText("Model key")).toHaveValue("vllm:mistral-small");
+    await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2");
+    await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6");
+    await user.click(within(dialog).getByRole("button", { name: "Set price" }));
+
+    await waitFor(() => {
+      const call = calls.find((c) => c.url.includes("/v1/pricing") && c.method === "POST");
+      expect(call).toBeTruthy();
+      expect(JSON.parse(call!.body!)).toMatchObject({
+        model_key: "vllm:mistral-small",
+        input_price_per_million: 0.2,
+        output_price_per_million: 0.6,
+      });
+    });
+    // Setting the model's price must not rewrite what logged rows were billed.
+    expect(calls.some((c) => c.url.includes("/v1/usage/set-price"))).toBe(false);
+  });
+
+  it("does not offer model pricing on a request that was costed", async () => {
+    const user = userEvent.setup();
+    mockApi({ rows: [entry({ id: "paid", model: "gpt-4o", provider: "openai", cost: 0.5 })] });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("gpt-4o")).closest("tr")!;
+    await user.click(row);
+
+    expect(screen.getByText("Request detail")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Price this model" })).not.toBeInTheDocument();
+  });
+
+  it("treats a $0 cost as priced, not as a model needing a price", async () => {
+    // cost=0 is a real price (a model priced at zero), which is why the backend
+    // marks a row unpriced on cost IS NULL rather than on falsiness.
+    const user = userEvent.setup();
+    mockApi({ rows: [entry({ id: "free-model", model: "mistral-small", provider: "vllm", cost: 0 })] });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("mistral-small")).closest("tr")!;
+    await user.click(row);
+
+    expect(screen.getByText("Request detail")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Price this model" })).not.toBeInTheDocument();
+  });
+
+  it("prices a selector that never resolved from the row's model alone", async () => {
+    // A selector the gateway could not resolve is logged with no provider and
+    // the raw selector as the model, so it is already the key to price.
+    const user = userEvent.setup();
+    mockApi({
+      rows: [entry({ id: "unresolved", model: "vllm:mistral-small", provider: null, cost: null })],
+    });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("vllm:mistral-small")).closest("tr")!;
+    await user.click(row);
+    await user.click(screen.getByRole("button", { name: "Price this model" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByLabelText("Model key")).toHaveValue("vllm:mistral-small");
+  });
+
   it("keeps the filter pickers behind an 'Add filter' toggle", async () => {
     mockApi({ rows: [entry()] });
     const user = userEvent.setup();

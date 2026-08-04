@@ -6,6 +6,7 @@ import {
   NO_BREAKDOWNS,
   useDeleteUsage,
   useKeys,
+  useSetPricing,
   useSetUsagePrice,
   useUsageCount,
   useUsageLogs,
@@ -325,13 +326,33 @@ function DetailField({
   );
 }
 
+// The pricing key a usage row bills against. A row stores the instance and the
+// bare model separately (`log_usage` is called with `provider=resolved.instance,
+// model=resolved.model`, and a gateway rejection logs the same pair), while
+// pricing is looked up as `instance:model` (`find_model_pricing`), so the key has
+// to be rebuilt from both: `entry.model` alone is prefix-less and would store a
+// price nothing ever reads. A row whose selector never resolved carries no
+// provider and its model is the raw selector, so that is used as-is.
+function pricingSelectorOf(entry: UsageEntry): string {
+  if (!entry.provider) return entry.model;
+  return entry.model.startsWith(`${entry.provider}:`) ? entry.model : `${entry.provider}:${entry.model}`;
+}
+
 // The detail panel for one request: the failure diagnostic plus the metadata
 // that does not fit the row. The dashboard is master-key admin-only, so the
 // stored `error_message` is shown verbatim; it is source-neutral by nature,
 // carrying either a fixed gateway rejection string (e.g. a model with no pricing
 // under `require_pricing`) or the raw upstream provider error, so the heading
 // stays "Error" rather than blaming the provider for every failure.
-function RequestDetail({ entry }: { entry: UsageEntry }) {
+function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceModel: (model: string) => void }) {
+  // A row with no cost (cost IS NULL, the same test the "Priced?" filter uses)
+  // is either a model the gateway has no price for or a request refused before
+  // it could be billed. Both are the same fix, and the row holds what the
+  // selector was, which a provider without model discovery would never have put
+  // in the catalogue. A $0 cost is a real price, so it is deliberately not
+  // treated as uncosted.
+  const uncosted = entry.cost === null;
+  const pricingKey = pricingSelectorOf(entry);
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
       {entry.error_message ? (
@@ -369,6 +390,17 @@ function RequestDetail({ entry }: { entry: UsageEntry }) {
         <DetailField label="Total time">{formatLatency(entry.latency_ms)}</DetailField>
         <DetailField label="Request ID" copyValue={entry.id}>{entry.id}</DetailField>
       </div>
+      {uncosted ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button size="sm" variant="outline" onPress={() => onPriceModel(pricingKey)}>
+            Price this model
+          </Button>
+          <span className="text-xs text-[var(--otari-muted)]">
+            This request carries no cost. Set a price for <code className="break-all">{pricingKey}</code> so later
+            requests are metered and count against budgets. Rows already logged keep the cost they were served with.
+          </span>
+        </div>
+      ) : null}
       {entry.pricing_breakdown?.length ? (
         <div className="flex flex-col gap-2">
           <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
@@ -690,11 +722,22 @@ export function ActivityPage() {
   const allPageSelected = selectableKeys.length > 0 && pageSelectedCount === selectableKeys.length;
   const canSelectAllMatching = allPageSelected && matchingTotal != null && matchingTotal > pageSelectedCount;
   const effectiveCount = selection.allMatching ? (matchingTotal ?? pageSelectedCount) : pageSelectedCount;
+  // Only offer the selection column when something on the page can actually be
+  // selected. A deployment with no imported usage has none: every checkbox would
+  // render disabled, which reads as a broken control rather than as "these rows
+  // are not eligible". Kept while "all matching" is live so the affordance does
+  // not vanish under an operator mid-bulk-op.
+  const showSelection = selectableKeys.length > 0 || selection.allMatching;
 
   const deleteUsage = useDeleteUsage();
   const setPrice = useSetUsagePrice();
+  const setModelPrice = useSetPricing();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [priceOpen, setPriceOpen] = useState(false);
+  // The model selector whose price is being set from a request detail, or null
+  // when that dialog is closed. Distinct from `priceOpen` above, which reprices
+  // already-logged imported rows rather than setting a model's price.
+  const [modelPriceKey, setModelPriceKey] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Inline accordion panel under the clicked row (DataTable renderDetail).
@@ -709,7 +752,7 @@ export function ActivityPage() {
             Close
           </Button>
         </div>
-        <RequestDetail entry={entry} />
+        <RequestDetail entry={entry} onPriceModel={setModelPriceKey} />
       </div>
     ),
     [],
@@ -748,6 +791,23 @@ export function ActivityPage() {
         selection.clear();
       },
     });
+  };
+
+  // Sets the model's own price (a ModelPricing row), which is what future
+  // requests are billed at. Deliberately does not touch the rows already logged:
+  // a gateway row's cost is what it was served at, and rewriting history from an
+  // activity view would move spend that budgets were already enforced against.
+  const onSetModelPrice = (rates: ManualRates, modelKey: string) => {
+    setModelPrice.mutate(
+      {
+        model_key: modelKey,
+        input_price_per_million: rates.input_price_per_million,
+        output_price_per_million: rates.output_price_per_million,
+        cache_read_price_per_million: rates.cache_read_price_per_million ?? null,
+        cache_write_price_per_million: rates.cache_write_price_per_million ?? null,
+      },
+      { onSuccess: () => setModelPriceKey(null) },
+    );
   };
 
   const onSetPrice = (rates: ManualRates) => {
@@ -956,7 +1016,7 @@ export function ActivityPage() {
         getRowKey={getActivityRowKey}
         isLoading={usage.isLoading}
         emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
-        selectionMode="multiple"
+        selectionMode={showSelection ? "multiple" : "none"}
         selectedKeys={selection.selectedKeys}
         onSelectionChange={selection.onSelectionChange}
         disabledKeys={disabledKeys}
@@ -997,6 +1057,20 @@ export function ActivityPage() {
         isPending={setPrice.isPending}
         error={setPrice.error}
         onSubmit={onSetPrice}
+      />
+
+      <SetPriceDialog
+        isOpen={modelPriceKey !== null}
+        onOpenChange={(open) => setModelPriceKey(open ? (modelPriceKey ?? "") : null)}
+        isPending={setModelPrice.isPending}
+        error={setModelPrice.error}
+        onSubmit={onSetModelPrice}
+        collectModelKey
+        initialModelKey={modelPriceKey ?? ""}
+        title="Price this model"
+        description={() =>
+          "Set what this model costs, taken from the request you were looking at. Requests from now on are costed at these rates and counted against budgets; rows already logged keep the cost they were served with."
+        }
       />
     </div>
   );

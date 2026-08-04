@@ -1,6 +1,7 @@
 import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react";
 import { useEffect, useState } from "react";
 
+import { Field } from "@/components/Field";
 import { ErrorBanner, InfoBanner } from "@/components/ui";
 
 // Per-1M rates entered by an operator to reprice imported usage rows. Input and
@@ -42,18 +43,38 @@ function parseRate(value: string): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : Number.NaN;
 }
 
+// A pricing row is only ever read back under a `prefix:model` selector, so a key
+// with no provider or instance prefix would store a price nothing bills against
+// (see normalize_pricing_key in services/provider_kwargs.py). Accept the legacy
+// slash form too; the backend collapses it onto the colon form.
+export function isValidModelKey(value: string): boolean {
+  return /^[^\s:/]+[:/][^\s]+$/.test(value.trim());
+}
+
 export interface SetPriceDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   /** How many rows the price will be applied to, for the dialog copy. */
-  targetCount: number;
+  targetCount?: number;
   isPending: boolean;
   error: unknown;
-  onSubmit: (rates: ManualRates) => void;
+  onSubmit: (rates: ManualRates, modelKey: string) => void;
   /** Dialog heading; defaults to "Set price". */
   title?: string;
   /** Body copy explaining what the rates apply to; a sensible usage default is used when omitted. */
   description?: (count: number) => string;
+  /**
+   * Also collect the model key the rates apply to, for pricing a model that is
+   * not in the catalogue (a provider without model discovery). The trimmed key
+   * is passed to `onSubmit`; without this the second argument is an empty string.
+   */
+  collectModelKey?: boolean;
+  /**
+   * Seeds the model key each time the dialog opens (a selector taken from a
+   * search box, a logged request, or a provider prefix). Only read with
+   * `collectModelKey`.
+   */
+  initialModelKey?: string;
 }
 
 const defaultDescription = (count: number): string =>
@@ -64,13 +85,16 @@ const defaultDescription = (count: number): string =>
 export function SetPriceDialog({
   isOpen,
   onOpenChange,
-  targetCount,
+  targetCount = 0,
   isPending,
   error,
   onSubmit,
   title = "Set price",
   description = defaultDescription,
+  collectModelKey = false,
+  initialModelKey = "",
 }: SetPriceDialogProps) {
+  const [modelKey, setModelKey] = useState(initialModelKey);
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [cacheRead, setCacheRead] = useState("");
@@ -81,19 +105,23 @@ export function SetPriceDialog({
   // (a real footgun when the values set money).
   useEffect(() => {
     if (isOpen) {
+      setModelKey(initialModelKey);
       setInput("");
       setOutput("");
       setCacheRead("");
       setCacheWrite("");
     }
-  }, [isOpen]);
+  }, [isOpen, initialModelKey]);
 
   const inputRate = parseRate(input);
   const outputRate = parseRate(output);
   const cacheReadRate = parseRate(cacheRead);
   const cacheWriteRate = parseRate(cacheWrite);
 
+  const keyInvalid = collectModelKey && !isValidModelKey(modelKey);
+
   const invalid =
+    keyInvalid ||
     inputRate === null ||
     Number.isNaN(inputRate) ||
     outputRate === null ||
@@ -103,16 +131,19 @@ export function SetPriceDialog({
 
   const submit = () => {
     if (invalid || inputRate === null || outputRate === null) return;
-    onSubmit({
-      input_price_per_million: inputRate,
-      output_price_per_million: outputRate,
-      ...(cacheReadRate !== null && !Number.isNaN(cacheReadRate)
-        ? { cache_read_price_per_million: cacheReadRate }
-        : {}),
-      ...(cacheWriteRate !== null && !Number.isNaN(cacheWriteRate)
-        ? { cache_write_price_per_million: cacheWriteRate }
-        : {}),
-    });
+    onSubmit(
+      {
+        input_price_per_million: inputRate,
+        output_price_per_million: outputRate,
+        ...(cacheReadRate !== null && !Number.isNaN(cacheReadRate)
+          ? { cache_read_price_per_million: cacheReadRate }
+          : {}),
+        ...(cacheWriteRate !== null && !Number.isNaN(cacheWriteRate)
+          ? { cache_write_price_per_million: cacheWriteRate }
+          : {}),
+      },
+      modelKey.trim(),
+    );
   };
 
   return (
@@ -126,8 +157,29 @@ export function SetPriceDialog({
               </AlertDialog.Header>
               <AlertDialog.Body className="flex flex-col gap-4">
                 <p className="text-sm text-[var(--otari-muted)]">{description(targetCount)}</p>
+                {collectModelKey ? (
+                  <Field
+                    label="Model key"
+                    value={modelKey}
+                    onChange={setModelKey}
+                    placeholder="provider:model"
+                    isRequired
+                    autoFocus
+                    description={
+                      modelKey.trim() !== "" && keyInvalid
+                        ? "Include the provider or instance prefix, as in ollama:llama3.2."
+                        : "The selector callers send as model, prefix included (for example vllm:mistral-small)."
+                    }
+                  />
+                ) : null}
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <RateField label="Input $ / 1M" value={input} onChange={setInput} isRequired autoFocus />
+                  <RateField
+                    label="Input $ / 1M"
+                    value={input}
+                    onChange={setInput}
+                    isRequired
+                    autoFocus={!collectModelKey}
+                  />
                   <RateField label="Output $ / 1M" value={output} onChange={setOutput} isRequired />
                   <RateField label="Cache read $ / 1M" value={cacheRead} onChange={setCacheRead} />
                   <RateField label="Cache write $ / 1M" value={cacheWrite} onChange={setCacheWrite} />

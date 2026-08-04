@@ -126,7 +126,10 @@ The check lists the provider's models, so a backend that does not implement a
 "No model discovery" rather than "Unreachable": the key may be perfectly good,
 and the provider can still serve requests. Declare the model ids it serves under
 that provider's `models:` key in `config.yml` to have them appear in the
-catalogue.
+catalogue. You can also price them one at a time from the dashboard, with no
+config edit or restart: the Models page offers **Price a model** in the warning
+it shows for a provider without discovery, and in its empty state when a search
+finds nothing.
 
 ### 7. Send your first request
 
@@ -172,7 +175,12 @@ gateway.
   row to, and a rate-limited request (429) is an expected throttle rather than
   dropped traffic, so neither is recorded. Click an error row to see its
   diagnostic and the HTTP status that classified the failure, whether a fixed
-  gateway rejection message or the raw upstream provider error.
+  gateway rejection message or the raw upstream provider error. A row that
+  carries no cost, whether the model has no price or the request was refused
+  before it could be billed, offers **Price this model**, which sets that
+  model's price from the exact selector the caller sent. Later requests are
+  costed at those rates; rows already logged keep the cost they were served
+  with.
 - **Usage**: aggregate usage and analytics, showing spend and volume over time,
   broken down by model and by user, plus a switchable breakdown by session,
   endpoint, provider, or source. Clicking any row opens the Activity log scoped
@@ -202,6 +210,19 @@ hand.
   and modality metadata where available (from models.dev). The copy control next
   to a model puts its full `provider:model` id on your clipboard, which is what
   a caller sends as `model`; the name in the table drops the provider prefix.
+  A provider that serves no `/v1/models` listing still answers requests, so a
+  model you can call may never appear here on its own. Three places offer to
+  price one by hand, all opening the same form: the warning shown for a provider
+  without model discovery, the empty state when a search finds nothing (seeded
+  with what you searched for, so searching the selector you just called is the
+  quickest route), and **Price this model** in an Activity request detail. Give
+  the selector callers send as `model`, prefix included (for example
+  `vllm:mistral-small`), with its per-1M input and output rates. The model is
+  then listed as custom ("not discovered"), its requests are costed, and its
+  spend counts against budgets. Open **Edit price** on the new row afterwards for
+  cache rates, the 1-hour cache rate, and long-context tiers. The same form
+  re-prices a model that is already listed, so a key that already has a price
+  replaces it.
 - **Aliases**: friendly names that resolve to a real provider model. Callers
   use the alias; the underlying model stays private to the gateway. The copy
   controls in a row copy the alias name and its target id. "Applies to"

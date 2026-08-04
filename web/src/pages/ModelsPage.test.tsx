@@ -866,4 +866,116 @@ describe("ModelsPage", () => {
       });
     });
   });
+
+  // -- pricing a model the catalogue does not list --------------------------
+
+  it("prices the searched selector when nothing matches, seeded from the search box", async () => {
+    const created: PricingResponse = {
+      ...PRICED,
+      model_key: "vllm:mistral-small",
+      input_price_per_million: 0.2,
+      output_price_per_million: 0.6,
+    };
+    // The pricing list is read per request, so appending on POST models the
+    // refetch that puts the hand-priced model into the catalogue.
+    const pricingRows = [PRICED];
+    const fetchMock = mockApi({
+      pricing: pricingRows,
+      post: () => {
+        pricingRows.push(created);
+        return created;
+      },
+    });
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    // The operator searches for the model they just called successfully; the
+    // table comes up empty and offers to price that exact selector.
+    await user.type(screen.getByRole("searchbox"), "vllm:mistral-small");
+    await user.click(await screen.findByRole("button", { name: "Price vllm:mistral-small" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByLabelText("Model key")).toHaveValue("vllm:mistral-small");
+    await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2");
+    await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6");
+    await user.click(within(dialog).getByRole("button", { name: "Set price" }));
+
+    await vi.waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([u, init]) => String(u).includes("/v1/pricing") && (init?.method ?? "").toUpperCase() === "POST",
+      );
+      expect(call).toBeTruthy();
+      expect(JSON.parse(String(call![1]!.body))).toMatchObject({
+        model_key: "vllm:mistral-small",
+        input_price_per_million: 0.2,
+        output_price_per_million: 0.6,
+      });
+    });
+
+    // Selected on success, so the operator lands on the price they just set
+    // even though the model is not discoverable.
+    expect(await within(panel()).findByText("vllm:mistral-small")).toBeInTheDocument();
+    expect(within(panel()).getByText("not discovered")).toBeInTheDocument();
+    expect(tableRow("vllm:mistral-small")).toBeInTheDocument();
+  });
+
+  it("rejects a model key with no provider prefix", async () => {
+    mockApi();
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("openai:gpt-4o");
+
+    // A search that is a word rather than a selector gets the unseeded button.
+    await user.type(screen.getByRole("searchbox"), "mistral");
+    await user.click(await screen.findByRole("button", { name: "Price a model by hand" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await user.type(within(dialog).getByLabelText("Model key"), "mistral-small");
+    await user.type(within(dialog).getByLabelText("Input $ / 1M"), "0.2");
+    await user.type(within(dialog).getByLabelText("Output $ / 1M"), "0.6");
+
+    expect(within(dialog).getByRole("button", { name: "Set price" })).toBeDisabled();
+    expect(within(dialog).getByText(/Include the provider or instance prefix/)).toBeInTheDocument();
+  });
+
+  it("prices a model from the no-discovery banner, seeded with the provider prefix", async () => {
+    mockApi({
+      discoverable: {
+        providers: [{ provider: "vllm", ok: false, error: "404", discovery_unsupported: true, models: [] }],
+      },
+    });
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText(/vllm does not offer model discovery/);
+
+    await user.click(screen.getByRole("button", { name: "Price a model" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByLabelText("Model key")).toHaveValue("vllm:");
+    // A bare prefix is not yet a key, so the price cannot be submitted.
+    expect(within(dialog).getByRole("button", { name: "Set price" })).toBeDisabled();
+  });
+
+  it("does not seed a prefix when several providers lack discovery", async () => {
+    mockApi({
+      discoverable: {
+        providers: [
+          { provider: "vllm", ok: false, error: "404", discovery_unsupported: true, models: [] },
+          { provider: "ollama", ok: false, error: "404", discovery_unsupported: true, models: [] },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText(/vllm, ollama do not offer model discovery/);
+
+    await user.click(screen.getByRole("button", { name: "Price a model" }));
+
+    expect(within(await screen.findByRole("alertdialog")).getByLabelText("Model key")).toHaveValue("");
+  });
 });
