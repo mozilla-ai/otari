@@ -10719,7 +10719,7 @@
     },
     "/v1/usage/series": {
       "get": {
-        "description": "Time series split by one dimension, for the dashboard's stacked charts.\n\nSame filters and window bounds as ``/summary``. The window's top groups by\nspend are returned as their own series; everything past the top eight folds\ninto a single ``other`` series per bucket, so the stack always reconciles\nwith the summary totals. Points are sparse (populated cells only).",
+        "description": "Time series split by one dimension, for the dashboard's stacked charts.\n\nSame filters and window bounds as ``/summary`` (kept in lockstep: the\ndashboard serializes one filter object for both, and a filter this endpoint\nsilently ignored would make the stacked chart disagree with the tiles beside\nit). The window's top groups by spend are returned as their own series;\neverything past the top eight folds into a single ``other`` series per\nbucket, so the stack always reconciles with the summary totals. Points are\nsparse (populated cells only); the bucket grid is bounded like ``/summary``'s\nseries, so an hourly bucket over a too-wide window is rejected rather than\nballooning the payload.",
         "operationId": "usage_series_v1_usage_series_get",
         "parameters": [
           {
@@ -10814,6 +10814,24 @@
             }
           },
           {
+            "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+            "in": "query",
+            "name": "status_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly",
+              "title": "Status Code"
+            }
+          },
+          {
             "description": "Filter to a single model",
             "in": "query",
             "name": "model",
@@ -10850,6 +10868,24 @@
             }
           },
           {
+            "description": "Filter to a single provider (e.g. 'openai')",
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single provider (e.g. 'openai')",
+              "title": "Provider"
+            }
+          },
+          {
             "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
             "in": "query",
             "name": "source",
@@ -10865,6 +10901,24 @@
               ],
               "description": "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')",
               "title": "Source"
+            }
+          },
+          {
+            "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+            "in": "query",
+            "name": "source_label",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a single session/project label (the source_label carried by imported usage)",
+              "title": "Source Label"
             }
           },
           {

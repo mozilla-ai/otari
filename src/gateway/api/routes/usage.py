@@ -10,7 +10,7 @@ import io
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from sqlalchemy import ColumnElement, case, func, null, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -654,6 +654,13 @@ def _billed_expr(meter: str, fallback: Any) -> Any:
     of a missing key and a NULL column both yield NULL, so the fallback chain
     covers both, ending at 0. ``as_integer`` compiles to the dialect's JSON
     number cast on SQLite and PostgreSQL alike.
+
+    Cost note: ``billing_meters`` is a plain ``json`` column, so on PostgreSQL
+    every extraction re-parses the row's text, and the summary runs several
+    aggregate passes per render. If profiling shows this biting on large
+    windows, the escapes are a ``jsonb`` migration or persisting the billed
+    totals as real columns at write time; the fallback semantics here would be
+    unchanged by either.
     """
     return func.coalesce(UsageLog.billing_meters[meter].as_integer(), fallback, 0)
 
@@ -1041,9 +1048,12 @@ async def usage_series(
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: str | None = Query(default=None, description=_USER_DESC),
     status: str | None = Query(default=None, description=_STATUS_DESC),
+    status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
     model: str | None = Query(default=None, description=_MODEL_DESC),
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
+    provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
+    source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
@@ -1051,10 +1061,15 @@ async def usage_series(
 ) -> UsageGroupedSeries:
     """Time series split by one dimension, for the dashboard's stacked charts.
 
-    Same filters and window bounds as ``/summary``. The window's top groups by
-    spend are returned as their own series; everything past the top eight folds
-    into a single ``other`` series per bucket, so the stack always reconciles
-    with the summary totals. Points are sparse (populated cells only).
+    Same filters and window bounds as ``/summary`` (kept in lockstep: the
+    dashboard serializes one filter object for both, and a filter this endpoint
+    silently ignored would make the stacked chart disagree with the tiles beside
+    it). The window's top groups by spend are returned as their own series;
+    everything past the top eight folds into a single ``other`` series per
+    bucket, so the stack always reconciles with the summary totals. Points are
+    sparse (populated cells only); the bucket grid is bounded like ``/summary``'s
+    series, so an hourly bucket over a too-wide window is rejected rather than
+    ballooning the payload.
     """
     start, end, conditions, totals = await _summary_context(
         db,
@@ -1062,13 +1077,25 @@ async def usage_series(
         end_date=end_date,
         user_id=user_id,
         status=status,
+        status_code=status_code,
         model=model,
         endpoint=endpoint,
+        provider=provider,
         source=source,
+        source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
         counts_toward_budget=counts_toward_budget,
     )
+    # Finding-5 guard: /summary densifies then caps at _MAX_SERIES_POINTS; this
+    # endpoint is sparse, so cap the bucket *grid* instead (hourly over the
+    # 366-day max window would otherwise be ~8.8k buckets x 10 groups per call).
+    step = timedelta(hours=1) if bucket == "hour" else timedelta(days=1)
+    if (end - start) / step > _MAX_SERIES_POINTS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"window spans more than {_MAX_SERIES_POINTS} {bucket} buckets; use bucket=day or narrow the range",
+        )
     column = _GROUP_COLUMNS[group_by]
     groups = await _breakdown(db, column, conditions, totals, limit=_SERIES_TOP_N)
 

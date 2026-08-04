@@ -909,3 +909,59 @@ def test_grouped_series_null_top_group_and_fold_stay_separate(
     assert fold_point["requests"] == 2
     assert fold_point["cost"] == pytest.approx(0.65 + 0.60)
     assert sum(p["requests"] for p in points) == 10
+
+
+def test_grouped_series_honors_provider_and_session_filters(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """/series accepts the same filters as /summary (it claims parity).
+
+    A filter it silently dropped would make the dashboard's stacked chart
+    aggregate over a wider set than the tiles beside it.
+    """
+    ts = datetime(2025, 8, 1, 12, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="par", timestamp=ts, model="m1", provider="openai", source_label="s1", cost=0.10)
+    _make_log(db_session, user_id="par", timestamp=ts, model="m1", provider="anthropic", source_label="s2", cost=0.20)
+    db_session.commit()
+
+    window = {"start_date": "2025-08-01T00:00:00Z", "end_date": "2025-08-02T00:00:00Z", "user_id": "par"}
+    for params, expected_cost in (
+        ({"provider": "openai"}, 0.10),
+        ({"source_label": "s2"}, 0.20),
+    ):
+        body = client.get(
+            SERIES_PATH, headers=master_key_header, params={"group_by": "model", **window, **params}
+        ).json()
+        assert sum(p["cost"] for p in body["points"]) == pytest.approx(expected_cost), params
+
+
+def test_grouped_series_caps_hourly_buckets(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """An hourly grid over a too-wide window is rejected, not ballooned.
+
+    /summary densifies then caps at _MAX_SERIES_POINTS; the grouped series is
+    sparse per (bucket, group), so it bounds the bucket grid up front.
+    """
+    resp = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "model",
+            "bucket": "hour",
+            "start_date": "2025-01-01T00:00:00Z",
+            "end_date": "2025-06-01T00:00:00Z",
+        },
+    )
+    assert resp.status_code == 422
+    assert "bucket=day" in resp.json()["detail"]
+    # The same window is fine at daily granularity.
+    ok = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "model",
+            "bucket": "day",
+            "start_date": "2025-01-01T00:00:00Z",
+            "end_date": "2025-06-01T00:00:00Z",
+        },
+    )
+    assert ok.status_code == 200

@@ -515,6 +515,9 @@ export function ActivityPage() {
   // without one, so its provenance breakdown is that full list and no second query
   // is needed. Only a picked source needs its own, so it is fetched then and only
   // then (each summary runs four grouped aggregations plus the series).
+  // Deliberately broader than modelSuggestFilters: the session/endpoint/provider
+  // drill-down chips are not applied here, so the source list stays complete
+  // (and the picker stays useful) while a drill-down narrows everything else.
   const sourceSuggestFilters: UsageFilters = useMemo(
     () => ({
       start_date: win.start,

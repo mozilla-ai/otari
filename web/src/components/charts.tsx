@@ -163,19 +163,26 @@ export function TrendChart({
     setDrag(next);
   };
 
+  // Series indices arrive from tooltip state and props computed against
+  // whatever length the data had at capture time; clamp every dereference so a
+  // shrunken series degrades the highlight instead of blanking the chart.
+  const last = data.length - 1;
+  const clampIndex = (index: number) => Math.min(Math.max(index, 0), Math.max(last, 0));
+
   const commit = () => {
     const range = dragRef.current;
     setDragBoth(null);
     if (!range || !onSelectRange || range.start === range.end) return;
-    onSelectRange(Math.min(range.start, range.end), Math.max(range.start, range.end));
+    // Clamp like the window prop below: the indices were captured from a
+    // previous render's tooltip state, and a background refetch landing
+    // mid-drag can shrink the series under them.
+    const lo = clampIndex(Math.min(range.start, range.end));
+    const hi = clampIndex(Math.max(range.start, range.end));
+    if (lo === hi) return;
+    onSelectRange(lo, hi);
   };
 
   const selectable = Boolean(onSelectRange) && data.length > 1;
-  // Clamp before dereferencing: a `window` computed against a longer series can
-  // still be in flight when `data` shrinks (a filter change landing first), and
-  // an out-of-range index would blank the chart instead of degrading it.
-  const last = data.length - 1;
-  const clampIndex = (index: number) => Math.min(Math.max(index, 0), Math.max(last, 0));
   const dimmed =
     windowRange && data.length > 0
       ? { startIndex: clampIndex(windowRange.startIndex), endIndex: clampIndex(windowRange.endIndex) }
@@ -183,8 +190,12 @@ export function TrendChart({
   const showDimming = dimmed !== null && (dimmed.startIndex > 0 || dimmed.endIndex < last);
 
   return (
+    // A static chart is an image to AT; one that owns drag selection is not
+    // (role="img" would hide the interaction entirely), so it presents as a
+    // labelled group instead. Keyboard equivalents live with the callers
+    // (presets, zoom buttons, the Activity pan rail).
     <div
-      role="img"
+      role={selectable ? "group" : "img"}
       aria-label={ariaLabel}
       className={`w-full touch-pan-y select-none ${selectable ? "cursor-crosshair" : ""}`}
     >
@@ -203,6 +214,16 @@ export function TrendChart({
           }}
           onMouseUp={commit}
           onMouseLeave={commit}
+          onTouchStart={(state) => {
+            if (!selectable) return;
+            const index = toIndex(state);
+            if (index !== null) setDragBoth({ start: index, end: index });
+          }}
+          onTouchMove={(state) => {
+            const index = toIndex(state);
+            if (dragRef.current && index !== null) setDragBoth({ ...dragRef.current, end: index });
+          }}
+          onTouchEnd={commit}
         >
           <XAxis
             dataKey="x"
@@ -262,10 +283,10 @@ export function TrendChart({
               stroke="none"
             />
           ) : null}
-          {drag && drag.start !== drag.end ? (
+          {drag && clampIndex(drag.start) !== clampIndex(drag.end) ? (
             <ReferenceArea
-              x1={data[Math.min(drag.start, drag.end)].x}
-              x2={data[Math.max(drag.start, drag.end)].x}
+              x1={data[clampIndex(Math.min(drag.start, drag.end))].x}
+              x2={data[clampIndex(Math.max(drag.start, drag.end))].x}
               fill={BRAND}
               fillOpacity={0.18}
               stroke={BRAND}

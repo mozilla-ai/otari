@@ -142,8 +142,6 @@ interface BreakdownProps {
   // has gone missing (a deleted user); a dimension where NULL is a normal state
   // (gateway rows carry no session label) passes its own wording.
   unknownLabel?: string;
-  // Maps a row key to a human label (e.g. API key id -> key name).
-  labelFor?: (key: string) => string;
   // Turns a row key into the Activity-page filter to drill into.
   onDrill: (key: string) => void;
   loading: boolean;
@@ -162,7 +160,6 @@ function BreakdownTable({
   totalCost,
   emptyLabel,
   unknownLabel = "(unknown)",
-  labelFor,
   onDrill,
   loading,
 }: BreakdownProps) {
@@ -188,7 +185,7 @@ function BreakdownTable({
                 ? `Other (${row.requests.toLocaleString()} req)`
                 : row.key === null
                   ? unknownLabel
-                  : (labelFor?.(row.key) ?? row.key)}
+                  : row.key}
             </span>
             <span className="h-1 w-full overflow-hidden rounded-full bg-[var(--otari-line)]">
               <span
@@ -237,12 +234,8 @@ function BreakdownTable({
 
 // ---------- which breakdowns the page asks for ----------
 
-// Every dimension a tab below can show. Requested explicitly so a new
-// server-side dimension does not silently start costing this page a GROUP BY,
-// and so tile-only queries (previous window, typeahead, overview) stay cheap by
-// contrast.
 // Every breakdown the page renders, and nothing more (each one is a GROUP BY
-// over the window server-side). There is deliberately no API-key spend table:
+// over the window server-side; tile-only queries pass NO_BREAKDOWNS instead). There is deliberately no API-key spend table:
 // keys identify callers, not workloads, and the User table already answers
 // "who". The chart's group-by can still split by key via /v1/usage/series.
 const PAGE_BREAKDOWNS: SummaryDimension[] = ["model", "user", "source_label", "endpoint", "provider", "source"];
@@ -261,7 +254,6 @@ interface BreakdownDimensionDef {
   rows: UsageGroupRow[];
   // How a group whose column was NULL reads (see BreakdownTable.unknownLabel).
   unknownLabel?: string;
-  labelFor?: (key: string) => string;
   drill: (key: string) => void;
 }
 
@@ -475,11 +467,25 @@ export function UsagePage() {
       : prevTotals.billed_input_tokens !== undefined
         ? prevTotals.billed_input_tokens + (prevTotals.billed_output_tokens ?? prevTotals.completion_tokens)
         : prevTotals.total_tokens;
-  const cacheHitRate = billedInput !== undefined && billedInput > 0 && totals ? totals.cache_read_tokens / billedInput : null;
-  const prevCacheHitRate =
-    prevTotals?.billed_input_tokens !== undefined && prevTotals.billed_input_tokens > 0
-      ? prevTotals.cache_read_tokens / prevTotals.billed_input_tokens
-      : undefined;
+  // Cache sums from the series composition rather than the raw totals columns:
+  // the raw sums follow each provider's reporting convention, while the series
+  // is meter-normalized, and the tile's own sparkline reads the series. One
+  // source keeps the headline, its trendline, and the hint in agreement.
+  const cacheSums = (points: UsageSeriesPoint[]) => {
+    let input = 0;
+    let read = 0;
+    let write = 0;
+    for (const p of points) {
+      input += p.input_tokens ?? 0;
+      read += p.cache_read_tokens ?? 0;
+      write += p.cache_write_tokens ?? 0;
+    }
+    return { input, read, write };
+  };
+  const cache = cacheSums(series);
+  const cacheHitRate = cache.input > 0 ? cache.read / cache.input : null;
+  const prevCache = cacheSums(previousFilters !== null ? (previous.data?.series ?? []) : []);
+  const prevCacheHitRate = prevCache.input > 0 ? prevCache.read / prevCache.input : undefined;
 
   const pointBilled = (p: UsageSeriesPoint) =>
     p.input_tokens !== undefined ? p.input_tokens + (p.output_tokens ?? 0) : p.tokens;
@@ -754,7 +760,7 @@ export function UsagePage() {
                         {" · "}
                       </>
                     ) : null}
-                    {formatTokens(totals.cache_read_tokens)} read · {formatTokens(totals.cache_write_tokens)} written
+                    {formatTokens(cache.read)} read · {formatTokens(cache.write)} written
                   </span>
                 ) : null
               }
@@ -872,7 +878,6 @@ export function UsagePage() {
                 totalCost={totals?.cost ?? 0}
                 emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
                 unknownLabel={activePrimary.unknownLabel}
-                labelFor={activePrimary.labelFor}
                 onDrill={activePrimary.drill}
                 loading={summary.isLoading}
               />
@@ -900,7 +905,6 @@ export function UsagePage() {
                 totalCost={totals?.cost ?? 0}
                 emptyLabel={anyFilter ? "No usage matches these filters." : "No usage recorded yet."}
                 unknownLabel={activeSecondary.unknownLabel}
-                labelFor={activeSecondary.labelFor}
                 onDrill={activeSecondary.drill}
                 loading={summary.isLoading}
               />

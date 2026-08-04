@@ -181,12 +181,15 @@ describe("UsagePage", () => {
     const base = summary();
     mockApi(
       summary({
-        totals: {
-          ...base.totals,
-          cache_read_tokens: 5_100_000,
-          cache_write_tokens: 2_700_000,
-          billed_input_tokens: 10_200_000,
-        },
+        // The tile reads the meter-normalized series composition (the same
+        // numbers as its sparkline), not the raw totals columns.
+        series: base.series.map((p, i) => ({
+          ...p,
+          input_tokens: i === 0 ? 4_200_000 : 6_000_000,
+          cache_read_tokens: i === 0 ? 2_100_000 : 3_000_000,
+          cache_write_tokens: i === 0 ? 1_200_000 : 1_500_000,
+          output_tokens: 400_000,
+        })),
       }),
     );
     renderPage(<UsagePage />);
@@ -520,9 +523,10 @@ describe("UsagePage", () => {
     const { container } = renderPage(<UsagePage />);
     await screen.findByText("gpt-5.6");
 
-    // The trend is now a recharts chart (labelled "<metric> per <bucket>"), and a
-    // reusable sparkline rides the KPI tiles off the same bucketed series.
-    expect(screen.getByRole("img", { name: "cost per day" })).toBeInTheDocument();
+    // The trend is now a recharts chart (labelled "<metric> per <bucket>"; a
+    // group, not an image, since it owns drag selection), and a reusable
+    // sparkline rides the KPI tiles off the same bucketed series.
+    expect(screen.getByRole("group", { name: "cost per day" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /Spend trend/ })).toBeInTheDocument();
     expect(container.querySelector(".recharts-surface")).not.toBeNull();
 
