@@ -314,7 +314,7 @@ resolve response). The platform is responsible for correlating them.
 | `timeout` | `httpx.TimeoutException`, `asyncio.TimeoutError`, `TimeoutError`, or the OpenAI/Anthropic SDKs' own `APITimeoutError` |
 | `conn_err` | `httpx.NetworkError`, or the OpenAI/Anthropic SDKs' own `APIConnectionError` |
 | `http_<code>` | Provider returned an HTTP status code (e.g. `http_429`, `http_401`) |
-| `http_<code>_billing` | Provider returned a 400, 402, or 422 whose message identifies account billing exhaustion (e.g. Anthropic's "credit balance is too low", DeepSeek's "Insufficient Balance"). Reported as `http_400_billing` etc., keeping an empty provider wallet separable from a malformed request. Otari treats these as retryable and moves to the next attempt |
+| `http_<code>_billing` | Provider returned a 400, 402, or 422 whose message identifies account billing exhaustion (e.g. Anthropic's "credit balance is too low", DeepSeek's "Insufficient Balance"). Reported as `http_400_billing` etc., keeping an empty provider wallet separable from a malformed request. Otari treats these as retryable, so the request walks on to the next attempt unless the failing attempt had already locked in (a tool loop whose upstream returned a first assistant message cannot be replayed on another provider, so its failure is terminal) |
 | `unknown` | Any other exception class |
 
 Treat `error_class` as an open set of strings, not a closed enum: new tags are
