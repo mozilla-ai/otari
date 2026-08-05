@@ -238,7 +238,7 @@ async def walk_attempts(
             failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class))
             # Only a failure with somewhere left to go is "absorbed"; the last one is
             # the request's own outcome and is logged by the caller as an error.
-            if on_absorbed is not None and attempt is not attempts[-1]:
+            if on_absorbed is not None and attempt.position < len(attempts):
                 await on_absorbed(attempt, exc, len(attempts))
             continue
 

@@ -102,8 +102,16 @@ def downgrade() -> None:
     Moves back every policy that an alias can represent, which is one whose
     ``select`` is a single ``default`` entry with no failure chain and no
     guardrails. A policy doing more than that has no alias form, so it is left in
-    place rather than silently flattened into one; a rolled-back binary does not
-    know about ``routing_policies`` and will simply not see it.
+    place rather than silently flattened into one.
+
+    Being left in place only helps a downgrade that stops here. Continuing past
+    this revision reaches ``e8b1d3f5a7c9``, which drops ``routing_policies``
+    outright, so a multi-target policy is gone either way. The choice is between
+    losing it and misrepresenting it as a one-target alias, and this migration is
+    not the place to make that call silently: an operator downgrading through both
+    revisions should expect to lose what the older schema cannot hold. Stopping at
+    this revision (``alembic downgrade b5d7f9a1c3e6``... one step further,
+    ``f4c6a8b0d2e5``) is what makes the round trip lossless for the aliases.
     """
     conn = op.get_bind()
     rows = conn.execute(

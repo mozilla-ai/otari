@@ -897,9 +897,14 @@ export function ActivityPage() {
               <span className="text-xs text-[var(--otari-muted)]">
                 {/* Non-color signal: the position is spelled out, so the amber row
                     tint is never the only thing carrying the meaning. */}
-                {e.attempt_position != null && e.attempt_count != null && e.attempt_count > 1
-                  ? `attempt ${e.attempt_position}/${e.attempt_count} · ${e.selection_reason ?? ""}`
-                  : (e.selection_reason ?? "")}
+                {[
+                  e.attempt_position != null && e.attempt_count != null && e.attempt_count > 1
+                    ? `attempt ${e.attempt_position}/${e.attempt_count}`
+                    : null,
+                  e.selection_reason,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
             </span>
           ),

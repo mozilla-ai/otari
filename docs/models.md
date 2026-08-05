@@ -260,6 +260,16 @@ never puts the hidden name back in the listing. Whether real models are listed i
 governed by `model_discovery` alone. With discovery on, aliases appear alongside
 the discovered models, including any target you aliased.
 
+A [routing policy](routing.md) withholds its targets from the listing the same way
+an alias does, and with a wider reach: a policy can name up to five selectors (its
+head plus an `on_failure` chain), and **every** one of them is withheld, not just
+the default. So a model you can still call directly can disappear from
+`GET /v1/models` because an unrelated policy lists it as a fallback. That is
+deliberate, since the listing is the wrong place to publish where a policy sends
+traffic, but it does mean the catalogue is not a complete inventory of what is
+callable. `otari routing explain` and the dashboard's Routing page show the
+targets to an operator.
+
 Constraints, checked at startup: a target must be of the form `instance:model` or
 `provider:model` whose prefix is a configured instance or a known provider; an
 alias name must not contain `:` or `/` (a selector-shaped name would silently

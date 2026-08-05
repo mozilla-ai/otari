@@ -834,6 +834,41 @@ def test_an_absorbed_failure_does_not_count_as_an_error_or_an_extra_request(clie
     assert totals["request_count"] == 1
 
 
+def test_filtering_to_absorbed_counts_the_attempts_rather_than_reporting_zero(client: TestClient) -> None:
+    """``request_count`` excludes absorbed rows so a recovered chain is one
+    request. Filtering *to* absorbed inverts that: every row in scope is an
+    excluded one, so the same expression reported 0 requests beside non-zero cost
+    and tokens. The Activity page offers this filter, so an operator reaching the
+    Usage page through it saw tiles that looked broken.
+    """
+    _create_user(client)
+
+    async def flaky(**kwargs: Any) -> ChatCompletion:
+        if kwargs["model"] == "openai:gpt-5-mini":
+            raise _http_error(503)
+        return _completion("claude-haiku-4-5")
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky):
+        assert _chat(client, "fast").status_code == 200
+
+    summary = client.get("/v1/usage/summary", params={"status": "absorbed"}, headers=HEADERS)
+    assert summary.status_code == 200, summary.text
+    totals = summary.json()["totals"]
+
+    # The one absorbed attempt, counted as itself.
+    assert totals["request_count"] == 1
+
+    # Unfiltered still reads as one request, the served one.
+    unfiltered = client.get("/v1/usage/summary", headers=HEADERS).json()["totals"]
+    assert unfiltered["request_count"] == 1
+
+    # And the breakdowns agree with the tile rather than contradicting it.
+    by_provider = client.get(
+        "/v1/usage/summary", params={"status": "absorbed", "dimensions": "provider"}, headers=HEADERS
+    ).json()["by_provider"]
+    assert sum(row["requests"] for row in by_provider) == 1
+
+
 def test_a_failed_request_still_says_which_policy_it_went_through(client: TestClient) -> None:
     """A failure is when an operator most needs the attribution, so the error row
     carries it too, attributed to the last candidate the walk reached.

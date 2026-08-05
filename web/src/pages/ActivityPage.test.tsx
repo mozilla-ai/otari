@@ -915,4 +915,46 @@ describe("ActivityPage", () => {
       expect(calls.some((c) => c.url.includes("/v1/usage/summary") && c.url.includes("bucket=hour"))).toBe(true),
     );
   });
+
+  it("joins the routing detail without a dangling separator", async () => {
+    // A row can carry the attempt position with no selection reason (a historical
+    // row, or one written before the column was populated). Interpolating both
+    // unconditionally left "attempt 1/2 · " with a trailing separator.
+    mockApi({
+      rows: [
+        entry({ policy_name: "fast", attempt_position: 1, attempt_count: 2, selection_reason: null }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    expect(await screen.findByText("attempt 1/2")).toBeInTheDocument();
+    expect(screen.queryByText(/attempt 1\/2 ·/)).not.toBeInTheDocument();
+  });
+
+  it("joins the attempt position and the selection reason when both are present", async () => {
+    mockApi({
+      rows: [
+        entry({
+          policy_name: "fast",
+          attempt_position: 2,
+          attempt_count: 2,
+          selection_reason: "on_failure",
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    expect(await screen.findByText("attempt 2/2 · on_failure")).toBeInTheDocument();
+  });
+
+  it("shows the selection reason alone for a single-candidate policy", async () => {
+    mockApi({
+      rows: [
+        entry({ policy_name: "solo", attempt_position: 1, attempt_count: 1, selection_reason: "default" }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    expect(await screen.findByText("default")).toBeInTheDocument();
+  });
 });

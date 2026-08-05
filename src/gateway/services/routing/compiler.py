@@ -54,21 +54,32 @@ class NoEligibleCandidatesError(Exception):
     else, because a policy exists partly to keep its targets off the wire.
     ``operator_detail`` enumerates each candidate and why it went, for the
     activity log and for ``explain``, which are master-key surfaces.
+
+    The status is derived from *why* the candidates went, because the two cases
+    are not the same fault. Access rules dropping them is the caller being denied
+    something that does exist: a 403 they can act on by asking for access. Nothing
+    resolving is a gateway whose provider configuration no longer matches its
+    policies, which is a 502: the caller did nothing wrong and there is nothing
+    they can do. Sending 403 for both told an operator whose provider instance had
+    been deleted to go audit their allow-lists.
     """
 
-    def __init__(self, policy_name: str, dropped: list[DroppedCandidate], status_code: int) -> None:
+    def __init__(self, policy_name: str, dropped: list[DroppedCandidate]) -> None:
         self.policy_name = policy_name
         self.dropped = dropped
-        self.status_code = status_code
+        unresolvable_only = bool(dropped) and all(item.reason == "unresolvable" for item in dropped)
+        self.status_code = 502 if unresolvable_only else 403
+        cause = (
+            "None of its candidates resolve to a configured provider"
+            if unresolvable_only
+            else "Its candidates were all filtered out before dispatch"
+        )
         self.caller_detail = (
             f"Routing policy '{policy_name}' has no usable candidate for this request, so it cannot be "
-            "served. Every candidate was filtered out before dispatch by model-access rules. Ask your "
-            "operator to check the policy."
+            f"served. {cause}. Ask your operator to check the policy."
         )
         reasons = "; ".join(f"'{item.selector}' {item.detail}" for item in dropped) or "no candidates declared"
-        self.operator_detail = (
-            f"Routing policy '{policy_name}' compiled to 0 usable candidates. Dropped: {reasons}."
-        )
+        self.operator_detail = f"Routing policy '{policy_name}' compiled to 0 usable candidates. Dropped: {reasons}."
         super().__init__(self.operator_detail)
 
 
@@ -135,9 +146,26 @@ def _matches(when: WhenClause, *, user_id: str | None, key_id: str | None, budge
     return True
 
 
+_warned_routers: set[tuple[str, str]] = set()
+
+
+def _warn_missing_router(policy_name: str, router: str) -> bool:
+    """Whether this ``(policy, router)`` pair still owes a warning.
+
+    Unbounded in principle, bounded in practice: the pairs come from policy
+    documents, so the set is the size of the config, not of the traffic.
+    """
+    key = (policy_name, router)
+    if key in _warned_routers:
+        return False
+    _warned_routers.add(key)
+    return True
+
+
 def _select_head(
     spec: PolicySpec,
     *,
+    policy_name: str,
     user_id: str | None,
     key_id: str | None,
     budget: BudgetState,
@@ -154,10 +182,19 @@ def _select_head(
             # Router backends are not wired yet. Falling through to the default
             # is the safe reading: a router is an optimization, and it must never
             # be the reason a request cannot be served.
-            logger.warning(
-                "Routing policy names router '%s', which is not available yet; using the default target",
-                entry.router,
-            )
+            #
+            # Warned once per (policy, router) rather than per request: this
+            # compiles on every request through the policy, so an unconditional
+            # warning is one line of log per request forever, which buries real
+            # ones. The condition is static config, so the first line says
+            # everything the thousandth would.
+            if _warn_missing_router(policy_name, entry.router):
+                logger.warning(
+                    "Routing policy '%s' names router '%s', which is not available yet; using the default "
+                    "target. This is logged once per router per process.",
+                    policy_name,
+                    entry.router,
+                )
             continue
         if entry.when is not None and _matches(entry.when, user_id=user_id, key_id=key_id, budget=budget):
             assert entry.target is not None  # schema: a `when` entry always carries a target
@@ -182,11 +219,12 @@ def compile_policy(
     credentials), then filtered by the caller's allow-list, deduplicated, and
     capped.
 
-    Raises :class:`NoEligibleCandidatesError` when nothing survives, with a 403
-    (the only filter that can empty a validated plan is model access).
+    Raises :class:`NoEligibleCandidatesError` when nothing survives. That error
+    derives its own status from why the candidates went: 403 when access rules
+    filtered them, 502 when none of them resolve to a configured provider.
     """
     budget = budget or BudgetState()
-    head, reason = _select_head(spec, user_id=user_id, key_id=key_id, budget=budget)
+    head, reason = _select_head(spec, policy_name=policy_name, user_id=user_id, key_id=key_id, budget=budget)
 
     ordered: list[tuple[str, str]] = [(head, reason)]
     ordered.extend((selector, "on_failure") for selector in spec.on_failure)
@@ -235,7 +273,7 @@ def compile_policy(
         )
 
     if not attempts:
-        raise NoEligibleCandidatesError(policy_name, dropped, status_code=403)
+        raise NoEligibleCandidatesError(policy_name, dropped)
 
     if dropped:
         logger.warning(

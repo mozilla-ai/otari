@@ -321,13 +321,7 @@ async def list_usage(
         priced=priced,
         counts_toward_budget=counts_toward_budget,
     )
-    stmt = (
-        select(UsageLog)
-        .where(*conditions)
-        .order_by(UsageLog.timestamp.desc())
-        .offset(skip)
-        .limit(limit)
-    )
+    stmt = select(UsageLog).where(*conditions).order_by(UsageLog.timestamp.desc()).offset(skip).limit(limit)
     result = await db.execute(stmt)
     logs = result.scalars().all()
     return [UsageEntry.from_model(log) for log in logs]
@@ -659,7 +653,7 @@ def _dialect_name(db: AsyncSession) -> str:
     return bind.dialect.name
 
 
-def _request_count_expr() -> Any:
+def _request_count_expr(status_filter: str | None = None) -> Any:
     """Count requests, not rows.
 
     Used by every "request count" in this module (totals, dimension breakdowns, and
@@ -673,7 +667,15 @@ def _request_count_expr() -> Any:
     policy recovered from. Those extra rows describe attempts within a request that
     is already counted, so a plain ``count()`` would inflate request volume and
     deflate every rate computed against it (error rate, cost per request).
+
+    ``status_filter`` is the caller's ``status`` filter, and ``"absorbed"`` is the
+    one value that inverts the rule: every row in scope is then an excluded one, so
+    the sum would report 0 requests beside non-zero cost and tokens, which reads as
+    a bug rather than as a definition. Filtering *to* the attempts makes them the
+    unit being asked about, so count rows.
     """
+    if status_filter == "absorbed":
+        return func.count()
     return func.coalesce(func.sum(case((UsageLog.status != "absorbed", 1), else_=0)), 0)
 
 
@@ -710,7 +712,9 @@ def _billed_output_sum() -> Any:
     return func.coalesce(func.sum(_billed_expr("completion_tokens", UsageLog.completion_tokens)), 0)
 
 
-async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> UsageTotals:
+async def _totals(
+    db: AsyncSession, conditions: list[ColumnElement[bool]], status_filter: str | None = None
+) -> UsageTotals:
     row = (
         await db.execute(
             select(
@@ -721,7 +725,7 @@ async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> Us
                 func.coalesce(func.sum(UsageLog.cache_read_tokens), 0),
                 func.coalesce(func.sum(UsageLog.cache_write_tokens), 0),
                 func.coalesce(func.sum(UsageLog.cache_write_1h_tokens), 0),
-                _request_count_expr(),
+                _request_count_expr(status_filter),
                 func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
                 # Averaged over requests, not attempts: an absorbed row carries the
                 # time spent on a candidate that did not serve, and folding it in
@@ -762,6 +766,7 @@ async def _breakdown(
     totals: UsageTotals,
     *,
     limit: int | None,
+    status_filter: str | None = None,
 ) -> list[UsageGroupRow]:
     """Spend/tokens/requests grouped by ``column``, biggest spend first.
 
@@ -780,7 +785,7 @@ async def _breakdown(
             column,
             cost_sum,
             _billed_input_sum() + _billed_output_sum(),
-            _request_count_expr(),
+            _request_count_expr(status_filter),
         )
         .where(*conditions)
         .group_by(column)
@@ -789,9 +794,7 @@ async def _breakdown(
     if limit is not None:
         stmt = stmt.limit(limit)
     rows = (await db.execute(stmt)).all()
-    result = [
-        UsageGroupRow(key=row[0], cost=float(row[1]), tokens=int(row[2]), requests=int(row[3])) for row in rows
-    ]
+    result = [UsageGroupRow(key=row[0], cost=float(row[1]), tokens=int(row[2]), requests=int(row[3])) for row in rows]
     if limit is not None:
         seen_requests = sum(r.requests for r in result)
         # request_count is an exact integer, so a positive residual is the reliable
@@ -912,7 +915,7 @@ async def _summary_context(
         priced=priced,
         counts_toward_budget=counts_toward_budget,
     )
-    totals = await _totals(db, conditions)
+    totals = await _totals(db, conditions, status)
     return start, end, conditions, totals
 
 
@@ -1008,7 +1011,7 @@ async def usage_summary(
     # an empty selection, and it never contributes a dimension of its own.
     requested: set[str] = _ALL_SUMMARY_DIMENSIONS if dimensions is None else {d for d in dimensions if d != "none"}
     breakdowns = {
-        name: await _breakdown(db, column, conditions, totals, limit=cap)
+        name: await _breakdown(db, column, conditions, totals, limit=cap, status_filter=status)
         for name, (column, cap) in _SUMMARY_DIMENSIONS.items()
         if name in requested
     }
@@ -1026,7 +1029,7 @@ async def usage_summary(
                 expr,
                 func.coalesce(func.sum(UsageLog.cost), 0.0),
                 func.coalesce(func.sum(UsageLog.total_tokens), 0),
-                _request_count_expr(),
+                _request_count_expr(status),
                 func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
                 _billed_input_sum(),
                 func.coalesce(func.sum(_billed_expr("cache_read_tokens", UsageLog.cache_read_tokens)), 0),
@@ -1136,7 +1139,7 @@ async def usage_series(
             detail=f"window spans more than {_MAX_SERIES_POINTS} {bucket} buckets; use bucket=day or narrow the range",
         )
     column = _GROUP_COLUMNS[group_by]
-    groups = await _breakdown(db, column, conditions, totals, limit=_SERIES_TOP_N)
+    groups = await _breakdown(db, column, conditions, totals, limit=_SERIES_TOP_N, status_filter=status)
 
     # One grouped query for the whole grid: groups outside the top N collapse
     # into the fold in SQL rather than being fetched and folded here, so the row
@@ -1163,7 +1166,7 @@ async def usage_series(
                 fold_expr,
                 func.coalesce(func.sum(UsageLog.cost), 0.0),
                 _billed_input_sum() + _billed_output_sum(),
-                _request_count_expr(),
+                _request_count_expr(status),
             )
             .where(*conditions)
             .group_by(bucket_expr, key_expr, fold_expr)
@@ -1255,7 +1258,10 @@ async def usage_summary_csv(
     # Driven off the same dimension table as ``/summary`` so a new breakdown lands
     # in the export without a second edit here.
     dimensions = [
-        (_CSV_DIMENSION_LABELS.get(name, name), await _breakdown(db, column, conditions, totals, limit=None))
+        (
+            _CSV_DIMENSION_LABELS.get(name, name),
+            await _breakdown(db, column, conditions, totals, limit=None, status_filter=status),
+        )
         for name, (column, _cap) in _SUMMARY_DIMENSIONS.items()
     ]
 
@@ -1264,9 +1270,7 @@ async def usage_summary_csv(
     writer.writerow(["dimension", "key", "cost", "tokens", "requests"])
     for dimension, rows in dimensions:
         for row in rows:
-            writer.writerow(
-                [dimension, _csv_safe(row.key or ""), f"{row.cost:.6f}", row.tokens, row.requests]
-            )
+            writer.writerow([dimension, _csv_safe(row.key or ""), f"{row.cost:.6f}", row.tokens, row.requests])
 
     return Response(
         content=buffer.getvalue(),

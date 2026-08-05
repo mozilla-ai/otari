@@ -286,7 +286,12 @@ def routing_explain(
 
     cfg = load_config(config)
     if not cfg.routing.policies:
-        click.echo("No routing policies are configured. Add a `routing.policies` block to config.yml.")
+        click.echo(
+            "No routing policies are configured in config.yml. Add a `routing.policies` block there, or, if "
+            "your policies were created through the dashboard or the API, note that this command reads config "
+            "only: it has no database. Use `POST /v1/routing/policies/explain` against a running gateway to "
+            "compile a stored policy."
+        )
         raise SystemExit(1)
     if not cfg.routing.enabled:
         click.echo("Note: routing.enabled is false, so these policies are not in effect for requests.\n")

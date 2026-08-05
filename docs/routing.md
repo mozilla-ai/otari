@@ -13,7 +13,18 @@ Aliases stored in the database were **moved into policies** by migration
 `b5d7f9a1c3e6`, so there is one store and one dashboard page for the concept.
 Nothing about how they resolve changed: a moved alias is a policy whose `select`
 is a single `default`. The `aliases:` block in `config.yml` is untouched and still
-works, and `/v1/aliases` remains as the one-target API.
+works.
+
+> **Breaking change for `/v1/aliases` callers.** The endpoint still exists and
+> still creates one-target aliases, but the rows the migration moved are no longer
+> aliases. For an alias that existed before the upgrade: `GET /v1/aliases` no
+> longer lists it, `DELETE /v1/aliases/{name}` returns 404, and `POST /v1/aliases`
+> with that name returns 400 because the name is now a routing policy. Manage
+> those through `/v1/routing/policies` or the dashboard's Routing page instead.
+> The dashboard needs no change: it reads both stores. A script driving
+> `/v1/aliases` against pre-upgrade names does, and rolling the binary back
+> without also running `alembic downgrade` leaves those rows unreadable, because
+> the old binary does not know about `routing_policies`.
 
 Standalone mode only. In hybrid mode the connected platform resolves the model for
 every request, so a policy name is not a model it knows; sending one returns a 400
