@@ -228,6 +228,32 @@ async def test_the_tool_iteration_cap_reports_the_candidate_it_happened_on() -> 
     assert [attempt.position for attempt in stopped] == [2]
 
 
+@pytest.mark.asyncio
+async def test_a_cancelled_request_unwinds_instead_of_becoming_a_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A disconnected caller is not a provider failure.
+
+    ``CancelledError`` derives from ``BaseException``, so the broad catch that
+    lets a non-``Exception`` provider client fall through to the next candidate
+    would otherwise classify a cancellation as ``unknown``, count an abandoned
+    attempt against a provider that answered fine, and convert it into a 502 that
+    suppresses the cancellation.
+    """
+    abandoned: list[tuple[str, str, str, int]] = []
+    monkeypatch.setattr(
+        "gateway.api.routes._attempts.record_abandoned_attempt",
+        lambda instance, model, reason, position: abandoned.append((instance, model, reason, position)),
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b")],
+            [asyncio.CancelledError(), "ok"],
+        )
+    assert abandoned == []
+
+
 # ---------------------------------------------------------------------------
 # Exhaustion
 # ---------------------------------------------------------------------------

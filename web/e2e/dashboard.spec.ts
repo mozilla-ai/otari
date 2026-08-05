@@ -142,7 +142,11 @@ test.describe("dashboard core flows", () => {
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Create policy" }).click();
 
-    await expect(page.getByRole("rowheader", { name: "chained" })).toBeVisible();
-    await expect(page.getByText(/\+1 on failure/)).toBeVisible();
+    // Scoped to the row this test created: "+1 on failure" anywhere on the page
+    // would also be satisfied by another policy's chain, so a `chained` saved
+    // without its fallback would still pass.
+    const chained = page.getByRole("row").filter({ has: page.getByRole("rowheader", { name: "chained" }) });
+    await expect(chained).toBeVisible();
+    await expect(chained).toContainText(/\+1 on failure/);
   });
 });

@@ -29,6 +29,7 @@ new edge.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, NamedTuple, TypeVar
 
@@ -203,6 +204,16 @@ async def walk_attempts(
                 on_terminal(attempt)
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
         except (SandboxNotReachableError, WebSearchNotReachableError):
+            raise
+        except asyncio.CancelledError:
+            # The catch below is `BaseException` so a provider client raising
+            # outside the `Exception` hierarchy still falls through to the next
+            # candidate. Cancellation is the one case that must not: the caller is
+            # gone, so there is nobody to serve and no provider at fault. Letting
+            # the classifier see it would record an `upstream_error` attempt
+            # against a provider that answered fine, and swallowing it into an
+            # HTTPException would suppress the cancellation the server is waiting
+            # to unwind.
             raise
         except BaseException as exc:
             retryable, error_class = classify_error(exc)

@@ -57,9 +57,12 @@ def upgrade() -> None:
     ).mappings().all()
 
     for row in rows:
-        # Defensive: a policy of the same name and scope already existing would make
-        # this insert violate the unique constraint. Skipping keeps the migration
-        # runnable on a database where someone created both.
+        # A policy of the same name and scope already existing would make this
+        # insert violate the unique constraint. Refuse rather than skip: alias
+        # resolution used to win, so carrying on would delete the alias below and
+        # silently hand the name to a policy that may serve a different model.
+        # Which of the two the operator meant is not knowable from here, and this
+        # object decides where money is spent, so it is theirs to resolve.
         clash = conn.execute(
             sa.text(
                 "SELECT 1 FROM routing_policies WHERE name = :name "
@@ -68,7 +71,13 @@ def upgrade() -> None:
             {"name": row["name"], "user_id": row["user_id"]},
         ).first()
         if clash is not None:
-            continue
+            scope = f"user {row['user_id']}" if row["user_id"] is not None else "global scope"
+            raise RuntimeError(
+                f"Cannot move alias {row['name']!r} ({scope}) into routing_policies: a policy of that "
+                "name and scope already exists. The alias currently wins at request time, so this "
+                "migration would change which model that name serves. Delete whichever of the two is "
+                "obsolete, then re-run the migration."
+            )
         conn.execute(
             sa.text(
                 "INSERT INTO routing_policies (id, name, spec, user_id, created_at, updated_at) "
@@ -117,19 +126,28 @@ def downgrade() -> None:
             ),
             {"name": row["name"], "user_id": row["user_id"]},
         ).first()
-        if clash is None:
-            conn.execute(
-                sa.text(
-                    "INSERT INTO model_aliases (id, name, target, user_id, created_at, updated_at) "
-                    "VALUES (:id, :name, :target, :user_id, :created_at, :updated_at)"
-                ),
-                {
-                    "id": str(uuid.uuid4()),
-                    "name": row["name"],
-                    "target": select[0]["default"],
-                    "user_id": row["user_id"],
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                },
+        if clash is not None:
+            # Symmetric with the upgrade: deleting the policy without writing the
+            # alias would drop the policy's target on the floor, and the surviving
+            # alias may point somewhere else.
+            scope = f"user {row['user_id']}" if row["user_id"] is not None else "global scope"
+            raise RuntimeError(
+                f"Cannot move policy {row['name']!r} ({scope}) back into model_aliases: an alias of that "
+                "name and scope already exists. Delete whichever of the two is obsolete, then re-run the "
+                "downgrade."
             )
+        conn.execute(
+            sa.text(
+                "INSERT INTO model_aliases (id, name, target, user_id, created_at, updated_at) "
+                "VALUES (:id, :name, :target, :user_id, :created_at, :updated_at)"
+            ),
+            {
+                "id": str(uuid.uuid4()),
+                "name": row["name"],
+                "target": select[0]["default"],
+                "user_id": row["user_id"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            },
+        )
         conn.execute(sa.text("DELETE FROM routing_policies WHERE id = :id"), {"id": row["id"]})

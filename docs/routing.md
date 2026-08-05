@@ -89,9 +89,11 @@ A comparison is `{gte: 80}`, `{gt: 80}`, `{lte: 20}`, or `{lt: 20}` (exactly one
 Two rules worth knowing, because both are silent-failure traps otherwise:
 
 - **A budget condition never matches when the number is undefined**, which is the
-  case for a caller with no budget, an unlimited budget, or the master key. The
-  policy falls through to `default`. It does not raise: "no budget configured"
-  must not turn into an error on every request.
+  case for a caller with no budget or an unlimited budget. The policy falls
+  through to `default`. It does not raise: "no budget configured" must not turn
+  into an error on every request. A master-key request is not one of these cases:
+  it has to name the billed user, and conditions are evaluated against that
+  user's budget, so a master-key request can take a tier-down branch.
 - **A `budget_used_pct` threshold of `gte` or `gt` 100 or above is refused at
   startup.** The budget gate rejects a request before selection happens, so such a
   rule could never fire. Tiering down keeps a caller *under* a cap; it is not a way
