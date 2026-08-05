@@ -11,6 +11,7 @@ import csv
 import io
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -44,7 +45,9 @@ def _make_log(
     total_tokens: int | None = 15,
     cache_read_tokens: int | None = None,
     cache_write_tokens: int | None = None,
-    billing_meters: dict[str, int] | None = None,
+    # Token meters are flat ints; the gateway-run tool meters are nested under the
+    # reserved ``tools`` key, so the value type is not int-only.
+    billing_meters: dict[str, Any] | None = None,
     cost: float | None = 0.01,
     status: str = "success",
     latency_ms: int | None = None,
@@ -967,22 +970,87 @@ def test_grouped_series_caps_hourly_buckets(client: TestClient, master_key_heade
     assert ok.status_code == 200
 
 
-def test_tool_breakdown_is_empty_for_absorbed_rows(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """``dimensions=tool&status=absorbed`` reports nothing rather than a broken row.
+def test_tool_breakdown_counts_the_row_that_served_not_the_absorbed_attempt(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A failed-over request contributes one request and its full tool work.
 
-    An absorbed row is an attempt a routing policy recovered from. Those rows are
-    written without a tool tally on purpose (``log_absorbed_attempt``), because they
-    settle no reservation and a charge placed there would never reach ``users.spend``.
-    So no absorbed row carries tool meters, the per-tool aggregate matches nothing,
-    and the entry is dropped instead of rendering as "0 requests, N calls".
+    The production shape: a routing policy writes one ``absorbed`` row per attempt it
+    recovered from plus the row that served, and only the serving row carries the tool
+    ledger (``log_absorbed_attempt`` passes no tally, because it settles no
+    reservation and a charge there would never reach ``users.spend``).
 
-    This pins the invariant the aggregate depends on: if absorbed rows ever start
-    carrying tool meters, ``requests`` (which excludes them by definition) would
-    disagree with ``calls``, and this test is what says so.
+    So ``calls`` comes from the serving row while ``requests`` stays 1.
+
+    Note what this does and does not prove. It does not exercise
+    ``_request_count_expr`` in the aggregate: the query already restricts to rows
+    carrying tool meters, and an absorbed row never has them, so it is excluded
+    before the count is taken. That expression is defensive there, and the invariant
+    it defends (absorbed rows carry no tool ledger) is asserted directly in
+    ``test_routing_policies.test_tools_run_by_the_candidate_that_serves_...``. What
+    this does prove is that a two-row request reports its tool work once, with the
+    counts and cost coming off the row that served.
     """
+    now = datetime.now(UTC)
+    _make_log(
+        db_session,
+        user_id="tools",
+        timestamp=now,
+        status="absorbed",
+        cost=None,
+        billing_meters=None,
+    )
+    _make_log(
+        db_session,
+        user_id="tools",
+        timestamp=now,
+        status="success",
+        cost=0.05,
+        billing_meters={
+            "total_input_tokens": 10,
+            "completion_tokens": 5,
+            "tools": {"web_search": {"billed": 3, "errors": 1, "unit_rate": 0.01}},
+        },
+    )
+    db_session.commit()
+
     response = client.get(
         "/v1/usage/summary",
-        params={"dimensions": "tool", "status": "absorbed"},
+        params={"dimensions": "tool", "user_id": "tools"},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    by_tool = response.json()["by_tool"]
+    assert len(by_tool) == 1
+    row = by_tool[0]
+    assert row["tool"] == "web_search"
+    assert row["calls"] == 3
+    assert row["errors"] == 1
+    assert row["requests"] == 1
+    assert row["cost"] == pytest.approx(0.03)
+
+
+def test_tool_breakdown_is_empty_when_only_absorbed_rows_match(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """Filtering to absorbed rows reports nothing rather than a contradictory row.
+
+    Absorbed rows carry no tool meters, so the aggregate matches none of them and the
+    entry is dropped instead of rendering as "N calls, 0 requests".
+    """
+    _make_log(
+        db_session,
+        user_id="absorbed-only",
+        timestamp=datetime.now(UTC),
+        status="absorbed",
+        cost=None,
+        billing_meters=None,
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/v1/usage/summary",
+        params={"dimensions": "tool", "status": "absorbed", "user_id": "absorbed-only"},
         headers=master_key_header,
     )
     assert response.status_code == 200, response.text
