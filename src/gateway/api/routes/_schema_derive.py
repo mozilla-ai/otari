@@ -52,6 +52,14 @@ SENSITIVE_PARAM_FIELDS: frozenset[str] = frozenset(
         "extra_body",
         "aws_access_key_id",
         "aws_secret_access_key",
+        # any-llm's acompletion()/aresponses() forward this dict straight to
+        # the provider's client constructor (see build_attempt_client_args in
+        # _platform.py). A hybrid-mode attempt with no extra_params of its own
+        # (the common case for every provider except Bedrock) never sets this
+        # key at all, so a caller-supplied client_args smuggled in through a
+        # schema that allows extra fields would otherwise reach the provider
+        # call unfiltered.
+        "client_args",
     }
 )
 

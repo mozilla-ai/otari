@@ -218,6 +218,56 @@ def test_hybrid_mode_forwards_extra_params(
     assert response.status_code == 200, response.text
 
 
+def test_hybrid_mode_rejects_caller_supplied_client_args(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Responses request schema allows extra fields (``extra="allow"``),
+    so a caller could smuggle a ``client_args`` field into the request body.
+    An attempt with no extra_params of its own (the common case for every
+    provider except Bedrock) never sets client_args itself, so without
+    stripping it first, a caller-supplied client_args would reach the
+    provider call unfiltered — e.g. overriding client-constructor kwargs the
+    platform never authorized. client_args must be stripped the same way
+    api_key/api_base already are."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json=_resolve_payload(
+                    [_attempt(0, "att-1", "gpt-4o-mini", "sk-platform-key", provider="openai")],
+                    fallback_enabled=False,
+                ),
+            )
+        return httpx.Response(204)
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        assert kwargs["api_key"] == "sk-platform-key"
+        assert "client_args" not in kwargs
+        return _response_object()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.responses.aresponses", fake_aresponses)
+
+    response = platform_client.post(
+        "/v1/responses",
+        json={
+            "model": "gpt-4o-mini",
+            "input": "hi",
+            "client_args": {"api_key": "attacker-controlled-key"},
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200, response.text
+
+
 @pytest.mark.parametrize(("provider", "preserves_codex_metadata"), [("openai", True), ("fireworks", False)])
 def test_hybrid_mode_forwards_codex_metadata_only_to_openai(
     platform_client: TestClient,

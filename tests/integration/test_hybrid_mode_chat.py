@@ -203,7 +203,7 @@ def test_hybrid_mode_forwards_bedrock_classic_key_pair_via_client_args(
 ) -> None:
     """A Bedrock attempt using the classic IAM access-key/secret-key shape
     reaches the ``acompletion()`` call under ``client_args`` (not flat), with
-    the secret aliased to ``aws_secret_access_key`` — the shape any-llm's
+    the secret aliased to ``aws_secret_access_key``: the shape any-llm's
     Bedrock provider actually reads when building its boto3 client. Without
     this, boto3 raises ``NoRegionError`` ("You must specify a region.") even
     though the gateway received the right values."""

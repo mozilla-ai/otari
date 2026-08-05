@@ -37,7 +37,7 @@ import botocore
 from botocore.config import Config
 
 # any-llm-sdk's BedrockProvider never forwards ``api_key`` into the boto3
-# client it builds (it's only used for a non-empty presence check) — the
+# client it builds (it's only used for a non-empty presence check): the
 # secret must instead be forwarded under boto3's real constructor kwarg.
 # Verified against any-llm-sdk's bedrock.py: ``_init_client`` calls
 # ``boto3.client("bedrock-runtime", endpoint_url=api_base, **kwargs)`` with no
