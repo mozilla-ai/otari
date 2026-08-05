@@ -20,6 +20,9 @@ from gateway.api.routes import _platform
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, run_platform_attempts
 from gateway.core.config import GatewayConfig
 from gateway.metrics import REGISTRY
+from gateway.services.mcp_loop import MaxToolIterationsExceeded
+from gateway.services.sandbox_backend import SandboxNotReachableError
+from gateway.services.web_search_backend import WebSearchNotReachableError
 
 
 def _abandoned_sample(provider: str, model: str, reason: str, position: int) -> float:
@@ -127,6 +130,82 @@ async def test_locked_in_failure_not_counted_as_abandoned() -> None:
         )
 
     assert _abandoned_sample("anthropic", "claude-locked", "upstream_error", 0) == before
+
+
+@pytest.mark.asyncio
+async def test_locked_in_retryable_failure_marks_attempt_final() -> None:
+    attempts = [
+        ResolvedAttempt(
+            attempt_id="a0", position=0, provider="anthropic", model="claude-primary", api_key="bad", managed=False
+        ),
+        ResolvedAttempt(
+            attempt_id="a1", position=1, provider="openai", model="gpt-fallback", api_key="unused", managed=False
+        ),
+    ]
+    route = ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts)
+    reports: list[tuple[Any, ...]] = []
+
+    async def _run_attempt(_kwargs: dict[str, Any], on_first_response: Any) -> Any:
+        on_first_response()
+        raise RuntimeError("failed after lock-in")
+
+    with pytest.raises(HTTPException):
+        await run_platform_attempts(
+            route=route,
+            attempts=attempts,
+            base_request_fields={},
+            run_attempt=_run_attempt,
+            extract_usage=lambda _r: None,
+            classify_error=lambda _exc: (True, "http_500"),
+            report_attempt_outcome=lambda *args: reports.append(args),
+            on_success=lambda _attempt: None,
+            max_tool_iterations=1,
+        )
+
+    assert reports == [(attempts[0], "error", None, "http_500", True)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("terminal_error", "expected_error"),
+    [
+        (MaxToolIterationsExceeded("iteration cap reached"), HTTPException),
+        (SandboxNotReachableError("sandbox unavailable"), SandboxNotReachableError),
+        (WebSearchNotReachableError("web search unavailable"), WebSearchNotReachableError),
+    ],
+)
+async def test_gateway_terminal_error_marks_current_attempt_final(
+    terminal_error: BaseException,
+    expected_error: type[BaseException],
+) -> None:
+    attempts = [
+        ResolvedAttempt(
+            attempt_id="a0", position=0, provider="openai", model="gpt-primary", api_key="bad", managed=False
+        ),
+        ResolvedAttempt(
+            attempt_id="a1", position=1, provider="openai", model="gpt-fallback", api_key="unused", managed=False
+        ),
+    ]
+    route = ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts)
+    reports: list[tuple[Any, ...]] = []
+
+    async def _run_attempt(_kwargs: dict[str, Any], _on_first_response: Any) -> Any:
+        raise terminal_error
+
+    with pytest.raises(expected_error):
+        await run_platform_attempts(
+            route=route,
+            attempts=attempts,
+            base_request_fields={},
+            run_attempt=_run_attempt,
+            extract_usage=lambda _r: None,
+            classify_error=lambda _exc: (False, "unused"),
+            report_attempt_outcome=lambda *args: reports.append(args),
+            on_success=lambda _attempt: None,
+            max_tool_iterations=1,
+        )
+
+    assert reports == [(attempts[0], "error", None, None, True)]
 
 
 @pytest.mark.asyncio

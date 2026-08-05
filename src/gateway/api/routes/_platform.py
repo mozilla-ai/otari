@@ -276,6 +276,7 @@ async def run_platform_attempts(
         except HTTPException:
             raise
         except MaxToolIterationsExceeded as exc:
+            report_attempt_outcome(attempt, "error", None, None, True)
             logger.warning(
                 "Tool loop iteration cap hit request_id=%s position=%d cap=%d",
                 route.request_id,
@@ -289,9 +290,10 @@ async def run_platform_attempts(
         except (SandboxNotReachableError, WebSearchNotReachableError):
             # Gateway-side backend failure, not an upstream provider error:
             # the same backend serves every attempt, so falling through cannot
-            # help, and reporting it as a provider attempt error would be
-            # wrong. Propagate raw so ``run_platform_non_stream`` maps it to a
+            # help. Report a terminal outcome without a provider error class,
+            # then propagate raw so ``run_platform_non_stream`` maps it to a
             # 502 with the backend-specific detail.
+            report_attempt_outcome(attempt, "error", None, None, True)
             raise
         except BaseException as exc:
             retryable, error_class = classify_error(exc)

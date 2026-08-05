@@ -328,10 +328,10 @@ def test_hybrid_mode_provider_without_responses_support_returns_400(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The ``SUPPORTS_RESPONSES`` provider guard must still fire in hybrid
-    mode — once credentials are resolved, the guard checks the primary
-    attempt's provider before any upstream call.
+    """The ``SUPPORTS_RESPONSES`` guard rejects an unsupported fallback before
+    any upstream call and marks the first planned attempt as terminal.
     """
+    usage_reports: list[dict[str, Any]] = []
 
     async def fake_post_platform(
         url: str,
@@ -343,9 +343,13 @@ def test_hybrid_mode_provider_without_responses_support_returns_400(
             return httpx.Response(
                 200,
                 json=_resolve_payload(
-                    [_attempt(0, "att-1", "claude-3-5-sonnet-20241022", "sk-1", provider="anthropic")]
+                    [
+                        _attempt(0, "att-1", "gpt-4o-mini", "sk-1"),
+                        _attempt(1, "att-2", "claude-3-5-sonnet-20241022", "sk-2", provider="anthropic"),
+                    ]
                 ),
             )
+        usage_reports.append(body)
         return httpx.Response(204)
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
@@ -358,6 +362,13 @@ def test_hybrid_mode_provider_without_responses_support_returns_400(
 
     assert response.status_code == 400
     assert "does not support the Responses API" in response.json()["detail"]
+    assert usage_reports == [
+        {
+            "correlation_id": "att-1",
+            "status": "error",
+            "is_final_attempt": True,
+        }
+    ]
 
 
 # ---------- tool-loop fallback (pre-lock-in) ----------

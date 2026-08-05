@@ -1916,6 +1916,8 @@ def test_platform_mode_sandbox_unreachable_returns_502(
     from gateway.api.routes._pipeline import SANDBOX_UNREACHABLE_DETAIL
     from gateway.services.sandbox_backend import SandboxNotReachableError
 
+    usage_reports: list[dict[str, Any]] = []
+
     async def fake_post_platform(
         url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
     ) -> httpx.Response:
@@ -1923,6 +1925,7 @@ def test_platform_mode_sandbox_unreachable_returns_502(
             return _single_attempt_resolve_response(request_id="sbx-down")
         if url.endswith("/gateway/code-execution/resolve"):
             return httpx.Response(200, json={"enabled": True})
+        usage_reports.append(body)
         return httpx.Response(204)
 
     class _DownSandboxBackend:
@@ -1950,6 +1953,13 @@ def test_platform_mode_sandbox_unreachable_returns_502(
 
     assert response.status_code == 502
     assert response.json() == {"detail": SANDBOX_UNREACHABLE_DETAIL}
+    assert usage_reports == [
+        {
+            "correlation_id": "sbx-down",
+            "status": "error",
+            "is_final_attempt": True,
+        }
+    ]
 
 
 def test_platform_mode_web_search_unreachable_returns_502(
@@ -1963,6 +1973,8 @@ def test_platform_mode_web_search_unreachable_returns_502(
     from gateway.api.routes._pipeline import WEB_SEARCH_UNREACHABLE_DETAIL
     from gateway.services.web_search_backend import WebSearchNotReachableError
 
+    usage_reports: list[dict[str, Any]] = []
+
     async def fake_post_platform(
         url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
     ) -> httpx.Response:
@@ -1970,6 +1982,7 @@ def test_platform_mode_web_search_unreachable_returns_502(
             return _single_attempt_resolve_response(request_id="ws-down")
         if url.endswith("/gateway/web-search/resolve"):
             return httpx.Response(200, json={"enabled": True})
+        usage_reports.append(body)
         return httpx.Response(204)
 
     class _DownWebSearchBackend:
@@ -1997,3 +2010,10 @@ def test_platform_mode_web_search_unreachable_returns_502(
 
     assert response.status_code == 502
     assert response.json() == {"detail": WEB_SEARCH_UNREACHABLE_DETAIL}
+    assert usage_reports == [
+        {
+            "correlation_id": "ws-down",
+            "status": "error",
+            "is_final_attempt": True,
+        }
+    ]

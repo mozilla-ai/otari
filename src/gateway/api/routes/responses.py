@@ -21,6 +21,7 @@ from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
     PROVIDER_ERROR_DETAIL,
     ErrorKind,
+    _flush_pending_usage_reports,
     classify_provider_error,
     prepare_gateway_tools,
     raise_all_streaming_attempts_failed,
@@ -389,8 +390,21 @@ async def create_response(
     if ctx.hybrid_mode:
         route = ctx.route
         assert route is not None  # guaranteed by the hybrid-mode preamble
-        for attempt in route.attempts:
-            _ensure_provider_supports_responses(LLMProvider(attempt.provider))
+        try:
+            for attempt in route.attempts:
+                _ensure_provider_supports_responses(LLMProvider(attempt.provider))
+        except HTTPException:
+            if route.attempts:
+                # No provider call ran, so attach the preflight rejection to
+                # the first attempt and mark it final so later entries are unused.
+                first_attempt = route.attempts[0]
+                await _flush_pending_usage_reports(
+                    config,
+                    [(first_attempt.attempt_id, "error", None, None, True)],
+                    route.request_id,
+                    request_body.session_label,
+                )
+            raise
     else:
         resolved = await resolve_dispatch_provider(ctx, config, request_body.model, adapter=_ADAPTER)
         # ``provider`` is the underlying implementation handed to any-llm;
