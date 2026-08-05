@@ -46,7 +46,7 @@ test.describe("dashboard core flows", () => {
 
   test("navigate the management pages", async ({ page }) => {
     await login(page);
-    for (const name of ["Models", "Aliases", "Users", "Budgets", "Settings", "Providers"]) {
+    for (const name of ["Models", "Routing", "Users", "Budgets", "Settings", "Providers"]) {
       await nav(page).getByRole("link", { name }).click();
       // Exact match: the Budgets onboarding heading ("No budgets yet") would
       // otherwise also substring-match the page title.
@@ -109,20 +109,40 @@ test.describe("dashboard core flows", () => {
     await expect(row.getByText("alice@example.com")).toBeVisible();
   });
 
-  test("create an alias", async ({ page }) => {
+  test("create a routing policy", async ({ page }) => {
     await login(page);
-    await nav(page).getByRole("link", { name: "Aliases" }).click();
-    await page.getByRole("button", { name: "New alias" }).click();
-    // Role-scoped for the same reason as the user form: alias rows carry a
-    // "Copy alias name" control.
-    await page.getByRole("textbox", { name: /Alias name/ }).fill("fast");
-    // Target is a model combobox (allows custom values); type the selector, then
+    await nav(page).getByRole("link", { name: "Routing" }).click();
+    await page.getByRole("button", { name: "New policy" }).click();
+    // Role-scoped for the same reason as the user form: policy rows carry a
+    // "Copy policy name" control.
+    await page.getByRole("textbox", { name: /Policy name/ }).fill("fast");
+    // "Serves" is a model combobox (allows custom values); type the selector, then
     // close the popover so it does not aria-hide the submit button.
-    await page.getByRole("combobox", { name: /Target/ }).fill("openai:gpt-4o");
+    await page.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o");
     await page.keyboard.press("Escape");
-    await page.getByRole("button", { name: "Create alias" }).click();
+    await page.getByRole("button", { name: "Create policy" }).click();
 
-    // The alias name is the table's row-header cell (react-aria rowheader).
+    // The policy name is the table's row-header cell (react-aria rowheader).
     await expect(page.getByRole("rowheader", { name: "fast" })).toBeVisible();
+  });
+
+  test("grows a policy a fallback chain", async ({ page }) => {
+    await login(page);
+    await nav(page).getByRole("link", { name: "Routing" }).click();
+    await page.getByRole("button", { name: "New policy" }).click();
+    await page.getByRole("textbox", { name: /Policy name/ }).fill("chained");
+    await page.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o");
+    await page.keyboard.press("Escape");
+
+    // The failure chain is summoned, not presented, so naming one model stays a
+    // short task.
+    await expect(page.getByText("If that fails, try")).toBeHidden();
+    await page.getByRole("button", { name: /Add a fallback chain/ }).click();
+    await page.getByRole("combobox", { name: /Fallback 1/ }).fill("anthropic:claude-3-5-haiku-latest");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Create policy" }).click();
+
+    await expect(page.getByRole("rowheader", { name: "chained" })).toBeVisible();
+    await expect(page.getByText(/\+1 on failure/)).toBeVisible();
   });
 });
