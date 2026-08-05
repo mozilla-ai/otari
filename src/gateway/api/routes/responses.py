@@ -34,7 +34,7 @@ from gateway.api.routes._pipeline import (
     run_standalone_non_stream,
     run_streaming_with_fallback,
 )
-from gateway.api.routes._platform import ResolvedAttempt
+from gateway.api.routes._platform import ResolvedAttempt, build_attempt_client_args
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -286,16 +286,22 @@ class _ResponsesAdapter:
         if attempt.api_base:
             kwargs["api_base"] = attempt.api_base
         request_fields = _with_codex_extra_body(base_request_fields, LLMProvider(attempt.provider))
-        return {
+        merged = {
             **kwargs,
             **{k: v for k, v in request_fields.items() if k != "provider"},
-            # extra_params (e.g. Bedrock's region_name) is platform-trusted, so
-            # it's merged in after the caller's own request fields and before
-            # the forced model/provider keys, mirroring default_attempt_kwargs.
-            **(attempt.extra_params or {}),
             "model": attempt.model,
             "provider": LLMProvider(attempt.provider),
         }
+        # client_args (built from extra_params, e.g. Bedrock's region_name) is
+        # platform-trusted, so it's merged in last: it can never be shadowed
+        # by a same-named field in the caller's own request body. It must be
+        # nested under client_args, not merged flat, or any-llm forwards it
+        # to the completion call instead of the provider's client
+        # constructor, mirroring default_attempt_kwargs.
+        client_args = build_attempt_client_args(attempt)
+        if client_args is not None:
+            merged["client_args"] = client_args
+        return merged
 
     def local_attempt_kwargs(
         self,

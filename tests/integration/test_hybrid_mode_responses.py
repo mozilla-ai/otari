@@ -170,9 +170,10 @@ def test_hybrid_mode_forwards_extra_params(
 ) -> None:
     """The Responses adapter's own ``attempt_kwargs`` override (which does not
     delegate to ``default_attempt_kwargs``) must forward an attempt's
-    ``extra_params`` too. This is the wire-contract field that carries e.g.
-    AWS Bedrock's mandatory ``region_name`` (exercised generically here via
-    ``openai`` since Bedrock itself doesn't support the Responses API)."""
+    ``extra_params`` too, nested under ``client_args`` (not merged flat: any-llm
+    only routes a ``client_args`` mapping to the provider's client
+    constructor). Exercised generically here via ``openai`` since Bedrock
+    itself doesn't support the Responses API."""
 
     async def fake_post_platform(
         url: str,
@@ -201,7 +202,8 @@ def test_hybrid_mode_forwards_extra_params(
 
     async def fake_aresponses(**kwargs: Any) -> Response:
         assert kwargs["api_key"] == "sk-platform-key"
-        assert kwargs["region_name"] == "us-east-1"
+        assert "region_name" not in kwargs
+        assert kwargs["client_args"] == {"region_name": "us-east-1"}
         return _response_object()
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)

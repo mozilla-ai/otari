@@ -146,10 +146,34 @@ def test_default_attempt_kwargs_omits_extra_params_when_unset() -> None:
     }
 
 
-def test_default_attempt_kwargs_forwards_extra_params() -> None:
-    """A Bedrock-shaped attempt's ``extra_params`` (region_name plus, for the
-    classic IAM key-pair shape, aws_access_key_id) is forwarded verbatim into
-    the kwargs handed to ``acompletion()``."""
+def test_default_attempt_kwargs_forwards_extra_params_as_client_args() -> None:
+    """A generic (non-Bedrock) attempt's ``extra_params`` is nested under
+    ``client_args``, not merged flat: any-llm's ``acompletion()`` only routes
+    a ``client_args`` mapping to the provider's client constructor, so a flat
+    top-level key would silently reach the completion call instead."""
+    attempt = ResolvedAttempt(
+        attempt_id="a0",
+        position=0,
+        provider="openai",
+        model="gpt-4o-mini",
+        api_key="sk-...",
+        managed=False,
+        extra_params={"some_client_kwarg": "value"},
+    )
+
+    kwargs = default_attempt_kwargs(attempt, {})
+
+    assert kwargs["client_args"] == {"some_client_kwarg": "value"}
+    assert "some_client_kwarg" not in kwargs
+    assert kwargs["api_key"] == "sk-..."
+    assert kwargs["model"] == "openai:gpt-4o-mini"
+
+
+def test_default_attempt_kwargs_forwards_bedrock_extra_params_via_client_args() -> None:
+    """A Bedrock classic-IAM-pair attempt's ``extra_params`` reaches
+    ``client_args`` with the secret aliased to ``aws_secret_access_key``,
+    which any-llm's Bedrock provider actually reads when building its boto3
+    client (unlike a plain ``api_key``)."""
     attempt = ResolvedAttempt(
         attempt_id="a0",
         position=0,
@@ -162,30 +186,33 @@ def test_default_attempt_kwargs_forwards_extra_params() -> None:
 
     kwargs = default_attempt_kwargs(attempt, {})
 
-    assert kwargs["region_name"] == "us-east-1"
-    assert kwargs["aws_access_key_id"] == "AKIAIOSFODNN7EXAMPLE"
+    assert kwargs["client_args"] == {
+        "region_name": "us-east-1",
+        "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+        "aws_secret_access_key": "secret-access-key",
+    }
     assert kwargs["api_key"] == "secret-access-key"
     assert kwargs["model"] == "bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0"
 
 
-def test_default_attempt_kwargs_extra_params_not_overridable_by_request_fields() -> None:
-    """``extra_params`` is platform-trusted and must win over a same-named
-    field in the caller's own request body, exactly like ``api_key``/``model``
-    already do: a request cannot smuggle a different region past the
-    platform's resolved credentials."""
+def test_default_attempt_kwargs_client_args_not_overridable_by_request_fields() -> None:
+    """``client_args`` (built from the platform-trusted ``extra_params``) must
+    win over a same-named field in the caller's own request body, exactly
+    like ``api_key``/``model`` already do: a request cannot smuggle its own
+    client_args past the platform's resolved credentials."""
     attempt = ResolvedAttempt(
         attempt_id="a0",
         position=0,
-        provider="bedrock",
-        model="anthropic.claude-3-5-sonnet-20241022-v2:0",
-        api_key="secret-access-key",
+        provider="openai",
+        model="gpt-4o-mini",
+        api_key="sk-...",
         managed=False,
-        extra_params={"region_name": "us-east-1"},
+        extra_params={"some_client_kwarg": "platform-value"},
     )
 
-    kwargs = default_attempt_kwargs(attempt, {"region_name": "attacker-controlled-region"})
+    kwargs = default_attempt_kwargs(attempt, {"client_args": {"some_client_kwarg": "attacker-controlled"}})
 
-    assert kwargs["region_name"] == "us-east-1"
+    assert kwargs["client_args"] == {"some_client_kwarg": "platform-value"}
 
 
 @pytest.mark.asyncio
