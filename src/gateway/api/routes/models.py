@@ -28,6 +28,7 @@ from gateway.services.model_discovery_service import (
 )
 from gateway.services.policy_store import effective_policies
 from gateway.services.pricing_service import (
+    GATEWAY_TOOL_PRICING_PROVIDER,
     default_model_pricing,
     default_pricing_enabled,
     model_context_window,
@@ -466,6 +467,12 @@ async def list_models(
     # governed by ``model_discovery`` (phase 1), never by pricing config.
     for model_key, pricing in pricing_map.items():
         if model_key in merged or normalize_pricing_key(config, model_key) in alias_targets:
+            continue
+        # A gateway-run tool is priced under the reserved ``otari:`` provider (see
+        # ``gateway_tool_pricing_key``). It is not a model: publishing it would put a
+        # selectable entry in the OpenAI-compatible catalogue whose per-request rate
+        # reads as a per-million-token price, and calling it would fail.
+        if model_key.startswith(f"{GATEWAY_TOOL_PRICING_PROVIDER}:"):
             continue
         merged[model_key] = _model_from_pricing(pricing)
 

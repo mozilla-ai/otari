@@ -205,6 +205,13 @@ class _ChatStreamState:
         self.finish_reason: str | None = None
         self.pending_terminal: ChatCompletionChunk | None = None
         self.mcp_calls: list[dict[str, Any]] = []
+        # Upstream tool_call index -> the index the client sees. Gateway-owned calls
+        # are dropped from the stream, so the surviving foreign calls have to be
+        # renumbered into a gapless sequence: an SDK accumulator indexes its snapshot
+        # array by the index it is handed, and a first fragment numbered 1 makes the
+        # official OpenAI client raise IndexError.
+        self.visible_tool_index: dict[int, int] = {}
+        self.next_visible_tool_index = 0
 
 
 class _ChatToolLoopStrategy:
@@ -335,11 +342,16 @@ class _ChatToolLoopStrategy:
                 # arguments has no name of its own, so ownership is resolved from
                 # the accumulated slot for its index.
                 foreign = [tc for tc in delta.tool_calls if not self._owned_fragment(state, pool, tc)]
+                renumbered = [self._renumbered(state, tc) for tc in foreign]
                 if len(foreign) != len(delta.tool_calls):
                     if foreign or getattr(delta, "content", None):
-                        visible = _with_tool_calls(event, foreign or None)
+                        visible = _with_tool_calls(event, renumbered or None)
                     else:
                         hide = True
+                elif any(tc is not original for tc, original in zip(renumbered, foreign, strict=True)):
+                    # No owned call in this chunk, but an earlier one shifted the
+                    # numbering, so the survivors still need rewriting.
+                    visible = _with_tool_calls(event, renumbered)
             if choice.finish_reason:
                 # Sticky-tool-calls: a trailing ``stop`` chunk from
                 # Anthropic must not override ``tool_calls`` we've
@@ -348,11 +360,33 @@ class _ChatToolLoopStrategy:
                     state.finish_reason = choice.finish_reason
                 chunk_is_terminal = True
         if chunk_is_terminal:
-            state.pending_terminal = event
-            return StreamAction.DEFER, event
+            # The rewritten chunk, not the upstream one: a provider that packs
+            # tool_calls and finish_reason into a single chunk would otherwise leak
+            # the gateway's own call through the deferred terminal, undoing the hiding
+            # above for exactly the providers any-llm synthesizes streaming for.
+            state.pending_terminal = visible
+            return StreamAction.DEFER, visible
         if hide:
             return StreamAction.DEFER, event
         return StreamAction.FORWARD, visible
+
+    @staticmethod
+    def _renumbered(state: _ChatStreamState, fragment: Any) -> Any:
+        """Return ``fragment`` with its client-visible tool_call index.
+
+        Identity is returned when the index already matches, so a stream with no
+        hidden calls forwards byte-identical fragments.
+        """
+        index = getattr(fragment, "index", None)
+        if not isinstance(index, int):
+            return fragment
+        if index not in state.visible_tool_index:
+            state.visible_tool_index[index] = state.next_visible_tool_index
+            state.next_visible_tool_index += 1
+        visible = state.visible_tool_index[index]
+        if visible == index or not hasattr(fragment, "model_copy"):
+            return fragment
+        return fragment.model_copy(update={"index": visible})
 
     @staticmethod
     def _owned_fragment(state: _ChatStreamState, pool: ToolBackend, fragment: Any) -> bool:
@@ -373,13 +407,16 @@ class _ChatToolLoopStrategy:
             return True
         tool_calls = _finalize_tool_calls(state.slots)
         state.mcp_calls, has_foreign = _execute_split(tool_calls, pool)
-        # Mixed (has_foreign with mcp_calls) is handled the same as
-        # all-foreign here: the terminal chunk is forwarded so the
-        # client sees the full tool_calls set, and any MCP-owned calls
-        # in a mixed batch are left for a follow-up turn (the
-        # non-streaming variant filters them out; rewriting deltas
-        # mid-stream is too invasive to do here).
+        # A mixed batch exits so the caller can dispatch its own tools, and the
+        # gateway's calls were filtered out of the stream, so the client only ever
+        # sees what it can act on. Those owned calls are still executed, in
+        # ``finalize_exit``, which is the same "execute for side effects, return only
+        # the foreign calls" contract the non-streaming loop applies.
         return has_foreign or not state.mcp_calls
+
+    async def finalize_exit(self, state: _ChatStreamState, pool: ToolBackend) -> None:
+        if state.mcp_calls:
+            await _execute_mcp_calls(pool, state.mcp_calls)
 
     def terminal_events(self, state: _ChatStreamState, acc: None) -> list[ChatCompletionChunk]:
         return [state.pending_terminal] if state.pending_terminal is not None else []

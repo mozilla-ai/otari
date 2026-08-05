@@ -20,8 +20,7 @@ Billing differs by who ran the tool:
 | Who ran it | Billed by Otari? |
 |---|---|
 | Otari (`otari_*`) | Yes, per call, at the rate you set (see [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)) |
-| Anthropic's native `web_search_<date>` | Yes: the provider reports its search count, which Otari meters the same way |
-| Any other provider's native tool | No. The provider bills you directly; Otari records the tokens only |
+| A provider's native tool (`code_interpreter`, `web_search_<date>`, …) | No. The provider bills you directly, per search or per session, and Otari records only the tokens the response reported |
 
 ## Pricing a gateway-run tool
 
@@ -68,14 +67,21 @@ a tool for you":
 
 | API | Non-streaming | Streaming |
 |---|---|---|
-| `/v1/responses` | A native `web_search_call` output item per search, before the message | The same item, as `response.output_item.added` / `.done` |
+| `/v1/responses` | A native `web_search_call` output item per search, before the message | The same item, as `response.output_item.added` / `.done`. It is not repeated in `response.completed`'s `output`, so a client reading only the final response sees the answer without the calls |
 | `/v1/messages` | Nothing. The final message only | Nothing. The gateway's own `tool_use` blocks are not forwarded |
 | `/v1/chat/completions` | Nothing. The final message only | Nothing. The gateway's own `tool_call` deltas are not forwarded |
 
 The gateway's own tool calls are deliberately withheld from streaming clients: a
 client shown a `tool_use` block can never be sent the matching `tool_result`,
 because Otari consumed it, and an SDK accumulating that stream would be left with
-an unanswered call.
+an unanswered call. When a model asks for one of your tools *and* a gateway tool in
+the same message, Otari runs its own, hides it, renumbers what is left so the
+indices stay gapless for SDK accumulators, and hands you only the call you can
+dispatch.
+
+Billing is standalone-only. In hybrid mode the platform resolves the model and
+receives the usage report, and that report carries no tool counts, so a
+gateway-run tool call there is recorded upstream as tokens only.
 
 Anthropic Messages does not get the native treatment even though it has a
 `server_tool_use` block, because the matching `web_search_tool_result` block

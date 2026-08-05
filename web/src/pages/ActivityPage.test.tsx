@@ -173,8 +173,9 @@ describe("ActivityPage", () => {
 
   it("asks the summary endpoint only for the breakdowns it reads", async () => {
     // Two summary reads back this page: the model typeahead (by_model) and the
-    // timeline histogram (series only). Each breakdown is a separate GROUP BY over
-    // the window server-side, so neither may request the full set.
+    // timeline histogram (series, plus by_tool so the Tool filter knows whether this
+    // window has any gateway-run tool calls to offer). Each breakdown is a separate
+    // GROUP BY over the window server-side, so neither may request the full set.
     const { calls } = mockApi({ rows: [entry()] });
     renderPage(<ActivityPage />);
 
@@ -182,7 +183,7 @@ describe("ActivityPage", () => {
     const summaryCalls = calls.filter((c) => c.url.includes("/v1/usage/summary")).map((c) => c.url);
     expect(summaryCalls.length).toBeGreaterThan(0);
     expect(summaryCalls.some((url) => url.includes("dimensions=model"))).toBe(true);
-    expect(summaryCalls.some((url) => url.includes("dimensions=none"))).toBe(true);
+    expect(summaryCalls.some((url) => url.includes("dimensions=tool"))).toBe(true);
     // No caller here reads a session/provider/user breakdown.
     expect(summaryCalls.some((url) => url.includes("dimensions=source_label"))).toBe(false);
     expect(summaryCalls.every((url) => url.includes("dimensions="))).toBe(true);

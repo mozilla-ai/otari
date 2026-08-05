@@ -366,14 +366,17 @@ async def price_tool_calls(
     after a real model would otherwise be billed at that model's
     per-million-token rate divided by a million.
     """
+    tools = [tool for tool in sorted(billable_calls) if billable_calls[tool] > 0]
+    if not tools:
+        return 0.0, [], []
+    rates = await _tool_rates(db, tools, as_of=as_of)
+
     total = 0.0
     lines: list[dict[str, float | int | str]] = []
     unpriced: list[str] = []
-    for tool in sorted(billable_calls):
+    for tool in tools:
         units = billable_calls[tool]
-        if units <= 0:
-            continue
-        pricing = await find_model_pricing(db, GATEWAY_TOOL_PRICING_PROVIDER, tool, as_of=as_of, use_defaults=False)
+        pricing = rates.get(tool)
         if pricing is None:
             unpriced.append(tool)
         unit_rate = flat_request_cost(pricing)
@@ -381,6 +384,34 @@ async def price_tool_calls(
         total += cost
         lines.append({"meter": f"{tool}_calls", "units": units, "unit_rate": unit_rate, "cost": cost})
     return total, lines, unpriced
+
+
+async def _tool_rates(
+    db: AsyncSession,
+    tools: list[str],
+    *,
+    as_of: datetime | None,
+) -> dict[str, ModelPricing]:
+    """Latest-as-of pricing for several gateway tools, in one query.
+
+    One statement rather than a lookup per tool: an MCP pool can put up to
+    ``MAX_TOOL_NAMES`` distinct names on a single request, and this runs on the
+    settlement path. Rows come back oldest-first so the newest effective row for a key
+    wins the dict assignment, the same "latest as of" rule :func:`find_model_pricing`
+    applies one key at a time. The genai-prices fallback is deliberately not consulted
+    (see the note in :func:`price_tool_calls`).
+    """
+    lookup_time = normalize_effective_at(as_of)
+    keys = {f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}": tool for tool in tools}
+    stmt = (
+        select(ModelPricing)
+        .where(ModelPricing.model_key.in_(keys), ModelPricing.effective_at <= lookup_time)
+        .order_by(ModelPricing.effective_at)
+    )
+    found: dict[str, ModelPricing] = {}
+    for row in (await db.execute(stmt)).scalars():
+        found[keys[row.model_key]] = row
+    return found
 
 
 def per_image_cost(n_images: int, pricing: ModelPricing) -> float:

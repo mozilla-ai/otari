@@ -216,7 +216,7 @@ UNPRICED_TOOL_DETAIL_TEMPLATE = (
     "The gateway tool '{tool}' has no pricing, and this gateway runs with "
     "require_pricing enabled, so it will not run work it cannot bill. Set a "
     "per-request price for model_key '{key}' (POST /v1/pricing, or the dashboard's "
-    "Models screen), or set require_pricing to false to serve it unpriced."
+    "Tools & Guardrails screen), or set require_pricing to false to serve it unpriced."
 )
 
 
@@ -1586,8 +1586,15 @@ async def _require_tool_pricing(
 
     MCP tools are deliberately not covered: their names come from a caller-supplied
     server, are unbounded, and are not something an operator can pre-price.
+
+    A budget-exempt key is skipped for the same reason the model gate skips it: the
+    gate exists because an unrecorded charge cannot be restrained by a budget, and a
+    key that is never debited has no budget to protect. Serving an unpriced model but
+    refusing an unpriced tool on the same key would be arbitrary.
     """
     if ctx.db is None or not ctx.config.require_pricing:
+        return
+    if ctx.reservation is not None and not ctx.reservation.counts_toward_budget:
         return
     tools = [CODE_EXECUTION_TOOL_NAME] if use_sandbox else []
     if use_web_search:
@@ -1596,12 +1603,26 @@ async def _require_tool_pricing(
         pricing = await find_model_pricing(ctx.db, GATEWAY_TOOL_PRICING_PROVIDER, tool, use_defaults=False)
         if pricing is None:
             key = gateway_tool_pricing_key(tool)
+            detail = UNPRICED_TOOL_DETAIL_TEMPLATE.format(tool=tool, key=key)
             logger.warning("Rejecting request: gateway tool '%s' has no pricing under '%s'", tool, key)
-            raise adapter.error(
-                402,
-                UNPRICED_TOOL_DETAIL_TEMPLATE.format(tool=tool, key=key),
-                ErrorKind.INVALID_REQUEST,
+            # Logged for the same reason the model gate logs its 402: an operator who
+            # turns require_pricing on has to be able to see that live traffic is
+            # being dropped, and by what.
+            await log_gateway_rejection(
+                db=ctx.db,
+                log_writer=ctx.log_writer,
+                api_key_id=ctx.api_key_id,
+                user_id=ctx.user_id,
+                model=key,
+                provider=GATEWAY_TOOL_PRICING_PROVIDER,
+                endpoint=adapter.endpoint,
+                detail=detail,
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                started_at=ctx.started_at,
             )
+            # Same kind the model gate uses for its own 402, so both no-pricing
+            # rejections map to one wire shape per format.
+            raise adapter.error(402, detail, ErrorKind.INVALID_REQUEST)
 
 
 # ---------------------------------------------------------------------------
@@ -1749,8 +1770,10 @@ async def log_usage(
     await _apply_tool_charges(db, usage_log, tool_tally)
 
     # Emitted once here rather than inside the pricing branch so the cost metric
-    # tracks the row's total, including tool charges on an unpriced model.
-    if usage_log.cost:
+    # tracks the row's total, including tool charges on an unpriced model. A priced
+    # row that happens to cost 0 still reports, matching the previous behavior; only
+    # a row with no cost at all (None) is skipped.
+    if usage_log.cost is not None:
         record_cost(str(provider or ""), model, usage_log.cost)
 
     await log_writer.put(usage_log)
@@ -2348,8 +2371,31 @@ def build_streaming_response(
 
     async def _on_incomplete() -> None:
         # Client disconnected mid-stream: release the reservation.
+        #
+        # Tool work already done is still owed. Without this, disconnecting after the
+        # searches have run is an unlimited supply of unbilled, unrecorded searches,
+        # which is the abuse this metering exists to close. A row is written only when
+        # there was tool work, so an abandoned stream that ran no tools keeps its
+        # existing behavior of leaving no trace.
         if db is None or reservation is None:
             return
+        if log_writer is not None and tool_tally is not None and not tool_tally.is_empty():
+            abandoned_cost = await log_usage(
+                db=db,
+                log_writer=log_writer,
+                api_key_id=api_key_id,
+                model=model,
+                provider=provider,
+                endpoint=adapter.endpoint,
+                user_id=user_id,
+                error="client disconnected before the stream completed",
+                latency_ms=_elapsed_ms(started_at),
+                counts_toward_budget=_handle_counts_toward_budget(reservation),
+                tool_tally=tool_tally,
+            )
+            if abandoned_cost:
+                await reconcile_reservation(db, reservation, abandoned_cost)
+                return
         await refund_reservation(db, reservation)
 
     # StreamingResponse builds its own response object, so headers we want on

@@ -568,8 +568,14 @@ export function ToolsGuardrailsPage() {
                     configured={currentRates.get(service.pricingKey) ?? null}
                     onSave={(perCall) => savePrice(service.pricingKey as string, perCall)}
                     saving={pricedTool === service.pricingKey}
-                    saveError={priceErrors[service.pricingKey] || undefined}
-                    disabled={pricing.isLoading}
+                    saveError={
+                      priceErrors[service.pricingKey] ||
+                      (pricing.error ? "Could not load the current price. Reload before editing." : undefined)
+                    }
+                    // Also disabled when the load failed: an errored query leaves
+                    // `configured` null, which renders as "Not priced" and would
+                    // invite an operator to overwrite a rate they cannot see.
+                    disabled={pricing.isLoading || Boolean(pricing.error)}
                   />
                 ) : null}
                 {fields.map((field) => (

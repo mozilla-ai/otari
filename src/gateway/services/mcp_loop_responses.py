@@ -214,6 +214,56 @@ def _web_search_items_for(owned: list[Any]) -> list[ResponseFunctionWebSearch]:
     return items
 
 
+async def _execute_stream_owned(state: "_ResponsesStreamState", pool: ToolBackend) -> list[dict[str, Any]]:
+    """Run the stream's gateway-owned function calls, returning their output items.
+
+    Shared by the continue path and the mixed-batch exit so both parse the buffered
+    arguments identically.
+    """
+    results: list[dict[str, Any]] = []
+    for spec in state.owned_specs:
+        try:
+            args = json.loads(spec.get("arguments") or "{}")
+        except json.JSONDecodeError:
+            args = {}
+        try:
+            text = await pool.call_tool(spec["name"], args)
+        except Exception as exc:  # noqa: BLE001 — same tool-error-as-message idiom as the non-stream loop
+            logger.warning("MCP tool %s execution failed: %s", spec["name"], exc)
+            text = f"[tool error] {exc}"
+        results.append({"type": "function_call_output", "call_id": spec["call_id"], "output": text})
+    return results
+
+
+def _hidden_call_ids(state: "_ResponsesStreamState") -> set[str]:
+    """``call_id``s of the gateway-owned calls whose item events were withheld."""
+    return {
+        str(spec.get("call_id"))
+        for idx, spec in state.function_calls.items()
+        if idx in state.hidden_output_indices and spec.get("call_id")
+    }
+
+
+def _without_output_items(event: Any, call_ids: set[str]) -> Any:
+    """Return a ``response.completed`` event with the named function calls removed."""
+    response_obj = getattr(event, "response", None)
+    output = getattr(response_obj, "output", None)
+    if response_obj is None or not output:
+        return event
+    kept = [
+        item
+        for item in output
+        if not (getattr(item, "type", None) == "function_call" and getattr(item, "call_id", None) in call_ids)
+    ]
+    if len(kept) == len(output):
+        return event
+    try:
+        return event.model_copy(update={"response": response_obj.model_copy(update={"output": kept})})
+    except (AttributeError, TypeError):
+        logger.warning("Could not filter gateway function_call items from response.completed")
+        return event
+
+
 class _ResponsesStreamState:
     """Per-iteration bookkeeping for the Responses streaming loop."""
 
@@ -451,10 +501,23 @@ class _ResponsesToolLoopStrategy:
         # trade-off as the Anthropic streaming variant.
         return has_foreign or not owned_specs
 
+    async def finalize_exit(self, state: _ResponsesStreamState, pool: ToolBackend) -> None:
+        # Mixed batch: the gateway's function_call items were withheld from the
+        # stream, so run them for their side effects rather than dropping the model's
+        # request. Matches the non-streaming loop's mixed-batch handling.
+        if state.owned_specs:
+            await _execute_stream_owned(state, pool)
+
     def terminal_events(self, state: _ResponsesStreamState, acc: dict[str, int]) -> list[ResponseStreamEvent]:
         if state.deferred_completed is None:
             return []
-        folded = _maybe_fold_response_completed_usage(state.deferred_completed, acc["output_tokens"])
+        # The terminal event carries the whole response, whose ``output`` still lists
+        # the gateway's own function_call items even though their item events were
+        # hidden. Left in, ``get_final_response()`` would contradict the stream the
+        # client just accumulated, and hand it a call it cannot dispatch.
+        hidden = _hidden_call_ids(state)
+        folded = _without_output_items(state.deferred_completed, hidden) if hidden else state.deferred_completed
+        folded = _maybe_fold_response_completed_usage(folded, acc["output_tokens"])
         # The terminal event is the last thing the client sees, so it continues the
         # same sequence as the events forwarded before it.
         return [self._resequenced(folded, acc)]
@@ -524,17 +587,7 @@ class _ResponsesToolLoopStrategy:
             for spec in state.owned_specs
         )
 
-        for spec in state.owned_specs:
-            try:
-                parsed_args = json.loads(spec["arguments"] or "{}")
-            except json.JSONDecodeError:
-                parsed_args = {}
-            try:
-                text = await pool.call_tool(spec["name"], parsed_args)
-            except Exception as exc:  # noqa: BLE001 — same tool-error-as-message idiom as the non-stream loop
-                logger.warning("MCP tool %s execution failed: %s", spec["name"], exc)
-                text = f"[tool error] {exc}"
-            transcript.append({"type": "function_call_output", "call_id": spec["call_id"], "output": text})
+        transcript.extend(await _execute_stream_owned(state, pool))
 
 
 _RESPONSES_STRATEGY = _ResponsesToolLoopStrategy()

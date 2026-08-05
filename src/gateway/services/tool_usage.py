@@ -46,7 +46,10 @@ TOOL_METER_NAMESPACE = "tools"
 # schema, so the caps are enforced here.
 MAX_TOOL_NAMES = 32
 MAX_TOOL_NAME_CHARS = 64
-OVERFLOW_TOOL_NAME = "other"
+# Reserved rather than a plausible tool name: MCP tool names come from a
+# caller-supplied server, and a server with a tool literally named "other" would
+# otherwise have its counts merged into the overflow bucket.
+OVERFLOW_TOOL_NAME = "_other"
 
 
 def is_tool_error(result: str) -> bool:

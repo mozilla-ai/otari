@@ -155,6 +155,8 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
 
     def synthetic_events(self, state: StateT, acc: AccT) -> list[ChunkT]: ...
 
+    async def finalize_exit(self, state: StateT, pool: ToolBackend) -> None: ...
+
 
 def _prepare(
     strategy_key: str,
@@ -321,6 +323,13 @@ async def run_tool_loop_stream(
                     yield visible
 
         if strategy.stream_exiting(state, pool):
+            # A mixed batch (the gateway's own tools plus the caller's) exits here so
+            # the caller can dispatch its own, but the gateway's calls were hidden
+            # from the stream and would otherwise never run: the model asked for a
+            # search and would get silence. Executing them for their side effects is
+            # what the non-streaming loop already does before returning a mixed
+            # result (see ``run_tool_loop``), so the two agree.
+            await strategy.finalize_exit(state, pool)
             for terminal in strategy.terminal_events(state, acc):
                 yield terminal
             return

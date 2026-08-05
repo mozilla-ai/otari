@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
-  NO_BREAKDOWNS,
   useDeleteUsage,
   useKeys,
   useSetPricing,
@@ -146,6 +145,10 @@ const TOOL_OPTIONS: { label: string; value: string }[] = [
   { label: "Web search", value: "web_search" },
   { label: "Code execution", value: "code_execution" },
 ];
+
+// The only breakdown this page asks the summary for: whether the window contains
+// gateway-run tool calls, which decides if the Tool filter is worth offering.
+const TOOL_BREAKDOWN: SummaryDimension[] = ["tool"];
 
 const DEFAULT_PAGE_SIZE = 50;
 
@@ -478,7 +481,7 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
               {toolCost(entry) === null ? (
                 <span
                   className="text-[var(--otari-warning-ink,var(--otari-muted))]"
-                  title="No per-request price is configured for this tool, so its calls were recorded at zero cost. Set one on the Models screen."
+                  title="No per-request price is configured for this tool, so its calls were recorded at zero cost. Set one on the Tools & Guardrails screen."
                 >
                   unpriced
                 </span>
@@ -732,10 +735,12 @@ export function ActivityPage() {
       source_label: sessionFilter || undefined,
       endpoint: endpointFilter || undefined,
       provider: providerFilter || undefined,
+      tool: (toolFilter || undefined) as UsageFilters["tool"],
       priced,
     }),
     [
       winOutsideExtent,
+      toolFilter,
       win,
       extentWin,
       statusFilter,
@@ -749,8 +754,11 @@ export function ActivityPage() {
       priced,
     ],
   );
-  // The timeline reads `series` only.
-  const contextSummary = useUsageSummary(contextFilters, extentBucket, NO_BREAKDOWNS);
+  // The timeline reads `series`; the tool dimension is requested so the Tool filter
+  // knows whether this window contains any gateway-run tool calls. With
+  // NO_BREAKDOWNS the server returns `by_tool: []` by contract, which left the
+  // selector permanently hidden unless a tool filter was already in the URL.
+  const contextSummary = useUsageSummary(contextFilters, extentBucket, TOOL_BREAKDOWN);
   const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
     bucketStart: p.bucket_start,
     requests: p.requests,

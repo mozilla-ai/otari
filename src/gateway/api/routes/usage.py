@@ -979,10 +979,12 @@ async def _tool_breakdown(
     Rows with no calls for a tool contribute nothing, so a deployment that never
     ran a tool gets an empty list and the UI can hide the section entirely.
 
-    ``calls`` and ``errors`` sum over every row including absorbed attempts, because
-    a search run by an attempt that was later abandoned still happened and was still
-    paid for. ``requests`` counts requests, so the two answer different questions on
-    purpose: "how much tool work did we do" and "how many requests used a tool".
+    ``calls`` and ``errors`` count every call a request made, including calls made by
+    an attempt a routing policy later abandoned: the tally is shared across a
+    request's attempts and settled onto the row that served, so those calls are on
+    that one row rather than spread across the absorbed ones. ``requests`` counts
+    requests, so the two answer different questions on purpose: "how much tool work
+    did we do" and "how many requests used a tool".
     """
     out: list[UsageToolRow] = []
     for tool in GATEWAY_TOOL_NAMES:

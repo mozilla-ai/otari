@@ -160,6 +160,31 @@ def _reindexed(event: Any, visible_index: int) -> Any:
     return event.model_copy(update={"index": visible_index})
 
 
+async def _execute_stream_owned(
+    state: "_MessagesStreamState",
+    pool: ToolBackend,
+) -> list[dict[str, Any]]:
+    """Run the stream's gateway-owned tool_use blocks, returning tool_result blocks.
+
+    Shared by the continue path (which feeds the results back to the model) and the
+    mixed-batch exit (which runs them for their side effects only), so both parse the
+    buffered JSON arguments the same way.
+    """
+    results: list[dict[str, Any]] = []
+    for spec in state.owned_specs:
+        try:
+            parsed_input = json.loads(state.tool_use_json_bufs.get(spec["index"], "") or "{}")
+        except json.JSONDecodeError:
+            parsed_input = {}
+        try:
+            text = await pool.call_tool(spec["name"], parsed_input)
+        except Exception as exc:  # noqa: BLE001 — same tool-error-as-message idiom as the non-stream loop
+            logger.warning("MCP tool %s execution failed: %s", spec["name"], exc)
+            text = f"[tool error] {exc}"
+        results.append({"type": "tool_result", "tool_use_id": spec["id"], "content": text})
+    return results
+
+
 class _MessagesStreamState:
     """Per-iteration bookkeeping for the Anthropic streaming loop.
 
@@ -386,6 +411,14 @@ class _MessagesToolLoopStrategy:
         # dropped iterations).
         return not owned_specs or has_foreign or state.stop_reason != "tool_use"
 
+    async def finalize_exit(self, state: _MessagesStreamState, pool: ToolBackend) -> None:
+        # Mixed batch: the gateway's tool_use blocks were withheld from the stream, so
+        # run them for their side effects rather than dropping the model's request.
+        # Matches the non-streaming loop, which executes the owned subset and filters
+        # it out of the returned content.
+        if state.stop_reason == "tool_use" and state.owned_specs:
+            await _execute_stream_owned(state, pool)
+
     def terminal_events(self, state: _MessagesStreamState, acc: dict[str, int]) -> list[MessageStreamEvent]:
         return [_maybe_fold_message_delta_usage(term, acc["output_tokens"]) for term in state.deferred_terminal]
 
@@ -423,20 +456,7 @@ class _MessagesToolLoopStrategy:
                 block_dict = {**block_dict, "input": parsed_input}
             assistant_content.append(block_dict)
 
-        # Execute owned tool_use blocks and build tool_result blocks for the
-        # next user message.
-        tool_results: list[dict[str, Any]] = []
-        for spec in state.owned_specs:
-            try:
-                parsed_input = json.loads(state.tool_use_json_bufs.get(spec["index"], "") or "{}")
-            except json.JSONDecodeError:
-                parsed_input = {}
-            try:
-                text = await pool.call_tool(spec["name"], parsed_input)
-            except Exception as exc:  # noqa: BLE001 — same tool-error-as-message idiom as the non-stream loop
-                logger.warning("MCP tool %s execution failed: %s", spec["name"], exc)
-                text = f"[tool error] {exc}"
-            tool_results.append({"type": "tool_result", "tool_use_id": spec["id"], "content": text})
+        tool_results = await _execute_stream_owned(state, pool)
 
         transcript.append({"role": "assistant", "content": assistant_content})
         transcript.append({"role": "user", "content": tool_results})

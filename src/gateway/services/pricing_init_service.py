@@ -33,7 +33,15 @@ async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: Asy
     """
     if not config.require_pricing:
         return
-    count = (await db.execute(select(func.count()).select_from(ModelPricing))).scalar_one()
+    # Tool rows are excluded: pricing only ``otari:web_search`` leaves every *model*
+    # unpriced, which is precisely the state this warning exists to announce.
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(ModelPricing)
+            .where(ModelPricing.model_key.notlike(f"{GATEWAY_TOOL_PRICING_PROVIDER}:%"))
+        )
+    ).scalar_one()
     if count > 0:
         return
     if not config.default_pricing:

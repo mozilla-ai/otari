@@ -745,3 +745,110 @@ async def test_loop_omitting_on_first_response_is_backward_compatible(
         max_iterations=5,
     )
     assert out.choices[0].message.content == "ok"
+
+
+# ---------- mixed owned + foreign batches, streaming ----------
+
+
+@pytest.mark.asyncio
+async def test_stream_mixed_batch_renumbers_foreign_calls_for_sdk_accumulators(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A surviving foreign tool_call is renumbered into a gapless sequence.
+
+    The gateway's own calls are filtered out of the stream, which leaves a hole in the
+    upstream numbering. An SDK accumulator indexes its snapshot array by the index it
+    is handed, so forwarding a first fragment still numbered 1 makes the official
+    OpenAI client raise IndexError. Verified here against that client's own
+    accumulator rather than by inspecting indices alone.
+    """
+    from openai.lib.streaming.chat._completions import ChatCompletionStreamState
+
+    frames = [
+        _chunk(
+            tool_calls=[
+                (0, "call_owned", "fetch_url", '{"u":"x"}'),
+                (1, "call_foreign", "user_tool", "{}"),
+            ]
+        ),
+        _chunk(finish="tool_calls"),
+    ]
+
+    async def fake_acompletion(**_kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return _async_iter(*frames)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+    events = [
+        event
+        async for event in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=cast(Any, pool),
+            max_iterations=3,
+        )
+    ]
+
+    forwarded = [
+        (tc.index, tc.function.name if tc.function else None)
+        for event in events
+        for tc in (event.choices[0].delta.tool_calls or [])
+        if event.choices
+    ]
+    # Only the caller's own tool, and numbered from 0 so the array has no hole.
+    assert forwarded == [(0, "user_tool")]
+
+    state = ChatCompletionStreamState(input_tools=[], response_format=type(None))
+    for event in events:
+        state.handle_chunk(event)
+    snapshot = state.current_completion_snapshot.choices[0].message.tool_calls or []
+    assert [tc.function.name for tc in snapshot] == ["user_tool"]
+
+    # The gateway's call is still executed: it was hidden, not dropped, which is the
+    # same contract the non-streaming loop applies to a mixed batch.
+    assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_terminal_chunk_does_not_leak_a_gateway_tool_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider that packs tool_calls and finish_reason into one chunk leaks nothing.
+
+    The terminal chunk is deferred and later forwarded, so deferring the *upstream*
+    chunk rather than the rewritten one would undo the filtering for exactly the
+    providers any-llm synthesizes streaming for.
+    """
+    frames = [
+        _chunk(
+            finish="tool_calls",
+            tool_calls=[
+                (0, "call_owned", "fetch_url", '{"u":"x"}'),
+                (1, "call_foreign", "user_tool", "{}"),
+            ],
+        ),
+    ]
+
+    async def fake_acompletion(**_kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        return _async_iter(*frames)
+
+    monkeypatch.setattr(mcp_loop_module, "acompletion", fake_acompletion)
+
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+    events = [
+        event
+        async for event in mcp_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=cast(Any, pool),
+            max_iterations=3,
+        )
+    ]
+
+    names = [
+        tc.function.name
+        for event in events
+        for tc in (event.choices[0].delta.tool_calls or [])
+        if event.choices and tc.function
+    ]
+    assert names == ["user_tool"]
+    assert pool.calls == [("fetch_url", {"u": "x"})]

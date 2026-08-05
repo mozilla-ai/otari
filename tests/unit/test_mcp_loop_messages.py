@@ -799,3 +799,56 @@ async def test_stream_input_json_delta_accumulates_across_chunks(monkeypatch: py
     ):
         pass
     assert pool.calls == [("fetch_url", {"u": "x", "n": 3})]
+
+
+@pytest.mark.asyncio
+async def test_stream_mixed_batch_hides_and_still_runs_the_gateway_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mixed batch shows only the caller's tool, and still runs the gateway's.
+
+    The loop exits so the caller can dispatch its own tool. The gateway's block was
+    withheld from the stream (the client can never be sent its result), so it has to
+    be executed anyway or the model's search silently vanishes.
+    """
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_owned", "fetch_url"),
+                _input_json_delta(0, '{"u": "x"}'),
+                _content_block_stop(0),
+                _tool_use_block_start(1, "tu_foreign", "user_tool"),
+                _input_json_delta(1, "{}"),
+                _content_block_stop(1),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
+    ]
+
+    shown = [
+        getattr(getattr(e, "content_block", None), "name", None)
+        for e in events
+        if getattr(getattr(e, "content_block", None), "type", None) == "tool_use"
+    ]
+    assert shown == ["user_tool"]
+    # Renumbered so the caller's block is index 0, with no hole where the hidden one was.
+    starts = [getattr(e, "index") for e in events if e.type == "content_block_start"]
+    assert starts == [0]
+    assert pool.calls == [("fetch_url", {"u": "x"})]

@@ -541,10 +541,10 @@ def _text_delta(item_id: str, output_index: int, delta: str, seq: int = 0) -> Re
     )
 
 
-def _response_completed(seq: int = 0) -> ResponseCompletedEvent:
+def _response_completed(seq: int = 0, output: list[Any] | None = None) -> ResponseCompletedEvent:
     return ResponseCompletedEvent(
         type="response.completed",
-        response=_response(output=[], status="completed"),
+        response=_response(output=output or [], status="completed"),
         sequence_number=seq,
     )
 
@@ -765,3 +765,57 @@ async def test_stream_announces_gateway_search_as_native_web_search_call(
     seqs = [e.sequence_number for e in events if getattr(e, "sequence_number", None) is not None]
     assert seqs == list(range(len(seqs)))
     assert pool.calls == [("web_search", {"query": "otari gateway"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_mixed_batch_hides_runs_and_strips_the_gateway_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mixed batch shows only the caller's call, runs the gateway's, and strips it
+    from the terminal response.
+
+    ``response.completed`` carries the whole response, so leaving the gateway's
+    function_call in ``output`` would make ``get_final_response()`` contradict the
+    stream the client just accumulated and hand it a call it cannot dispatch.
+    """
+    owned = _function_call("call_owned", "fetch_url", '{"u": "x"}')
+    foreign = _function_call("call_foreign", "user_tool", "{}")
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, owned),
+                _function_call_args_done(0, "fc_owned", "fetch_url", '{"u": "x"}'),
+                _output_item_added(1, foreign),
+                _function_call_args_done(1, "fc_foreign", "user_tool", "{}"),
+                _response_completed(output=[owned, foreign]),
+            ),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
+    ]
+
+    shown = [
+        getattr(getattr(e, "item", None), "name", None)
+        for e in events
+        if getattr(getattr(e, "item", None), "type", None) == "function_call"
+    ]
+    assert shown == ["user_tool"]
+
+    completed = next(e for e in events if e.type == "response.completed")
+    names = [getattr(item, "name", None) for item in completed.response.output]
+    assert names == ["user_tool"]
+
+    assert pool.calls == [("fetch_url", {"u": "x"})]
