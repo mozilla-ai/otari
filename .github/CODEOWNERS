@@ -1,0 +1,7 @@
+# CODEOWNERS — open-core boundary guardrails.
+# Auto-requests a boundary-aware reviewer on the paths that define the open-core
+# boundary, so it can't drift unreviewed. No catch-all: only the guardrails are owned.
+
+/ARCHITECTURE.md                @mozilla-ai/otari-team
+/scripts/check_architecture.py  @mozilla-ai/otari-team
+/.github/CODEOWNERS             @mozilla-ai/otari-team
