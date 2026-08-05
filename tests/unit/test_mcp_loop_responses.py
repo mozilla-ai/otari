@@ -750,7 +750,9 @@ async def test_stream_announces_gateway_search_as_native_web_search_call(
     ]
 
     web_search_items = [
-        e.item for e in events if getattr(getattr(e, "item", None), "type", None) == "web_search_call"
+        getattr(e, "item")
+        for e in events
+        if getattr(getattr(e, "item", None), "type", None) == "web_search_call"
     ]
     # One added + one done event, carrying the same item.
     assert len(web_search_items) == 2

@@ -58,7 +58,10 @@ if db.query(ModelPricing).filter(ModelPricing.model_key == gateway_tool_pricing_
     db.add(
         ModelPricing(
             model_key=gateway_tool_pricing_key("web_search"),
-            input_price_per_million=TOOL_UNIT_RATES["web_search"] * 1_000_000,
+            # Narrowed for the type checker: this entry is priced by construction,
+            # while code_execution is deliberately left unpriced (None) so the
+            # dashboard's unpriced-tool treatment is visible in the seeded data.
+            input_price_per_million=(TOOL_UNIT_RATES["web_search"] or 0.0) * 1_000_000,
             output_price_per_million=0.0,
             effective_at=datetime.now(UTC) - timedelta(days=60),
         )

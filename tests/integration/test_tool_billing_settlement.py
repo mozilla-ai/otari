@@ -11,7 +11,7 @@ pass while the budget silently leaked.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -57,7 +57,7 @@ def _completion(*, tool_call: bool, prompt_tokens: int = 10, completion_tokens: 
     message = ChatCompletionMessage(
         role="assistant",
         content=None if tool_call else "done",
-        tool_calls=tool_calls,
+        tool_calls=cast(Any, tool_calls),
     )
     return ChatCompletion(
         id="chatcmpl-test",

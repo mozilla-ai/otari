@@ -653,7 +653,7 @@ async def test_stream_runs_owned_tool_and_continues(monkeypatch: pytest.MonkeyPa
     assert [e.type for e in events].count("message_start") == 1
     # The gateway's own tool_use block never reaches the client: it could never be
     # sent the matching tool_result, because the loop consumed it.
-    assert not any(getattr(e, "content_block", None) is not None and e.content_block.type == "tool_use" for e in events)
+    assert not any(getattr(getattr(e, "content_block", None), "type", None) == "tool_use" for e in events)
     assert pool.calls == [("fetch_url", {"u": "x"})]
 
 
@@ -706,7 +706,9 @@ async def test_stream_renumbers_blocks_across_iterations(monkeypatch: pytest.Mon
         )
     ]
 
-    indexed = [(e.type, e.index) for e in events if getattr(e, "index", None) is not None]
+    # The stream event type is a union; only the content_block_* members carry an
+    # index, so read it positionally rather than narrowing 6 variants per element.
+    indexed = [(e.type, getattr(e, "index")) for e in events if getattr(e, "index", None) is not None]
     assert indexed == [
         ("content_block_start", 0),
         ("content_block_delta", 0),

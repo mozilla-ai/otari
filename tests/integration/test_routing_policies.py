@@ -1200,7 +1200,7 @@ def _tool_completion(model: str, *, tool_call: bool) -> ChatCompletion:
                 message=ChatCompletionMessage(
                     role="assistant",
                     content=None if tool_call else "answered",
-                    tool_calls=tool_calls,
+                    tool_calls=cast(Any, tool_calls),
                 ),
             )
         ],
