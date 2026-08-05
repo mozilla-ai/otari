@@ -1,4 +1,4 @@
-# CODEOWNERS — open-core boundary guardrails.
+# CODEOWNERS: open-core boundary guardrails.
 # Auto-requests a boundary-aware reviewer on the paths that define the open-core
 # boundary, so it can't drift unreviewed. No catch-all: only the guardrails are owned.
 
