@@ -130,6 +130,75 @@ async def test_locked_in_failure_not_counted_as_abandoned() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fallback_reports_nonfinal_error_and_final_success() -> None:
+    attempts = [
+        ResolvedAttempt(
+            attempt_id="a0", position=0, provider="openai", model="gpt-4o", api_key="bad", managed=False
+        ),
+        ResolvedAttempt(
+            attempt_id="a1", position=1, provider="openai", model="gpt-4o", api_key="good", managed=False
+        ),
+    ]
+    route = ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts)
+    reports: list[tuple[Any, ...]] = []
+
+    async def _run_attempt(kwargs: dict[str, Any], _on_first_response: Any) -> str:
+        if kwargs["api_key"] == "bad":
+            raise RuntimeError("primary failed")
+        return "ok"
+
+    result = await run_platform_attempts(
+        route=route,
+        attempts=attempts,
+        base_request_fields={},
+        run_attempt=_run_attempt,
+        extract_usage=lambda _result: None,
+        classify_error=lambda _exc: (True, "http_500"),
+        report_attempt_outcome=lambda *args: reports.append(args),
+        on_success=lambda _attempt: None,
+        max_tool_iterations=1,
+    )
+
+    assert result == "ok"
+    assert reports == [
+        (attempts[0], "error", None, "http_500", False),
+        (attempts[1], "success", None, None, True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nonretryable_error_marks_first_attempt_final() -> None:
+    attempts = [
+        ResolvedAttempt(
+            attempt_id="a0", position=0, provider="openai", model="gpt-4o", api_key="bad", managed=False
+        ),
+        ResolvedAttempt(
+            attempt_id="a1", position=1, provider="openai", model="gpt-4o", api_key="unused", managed=False
+        ),
+    ]
+    route = ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts)
+    reports: list[tuple[Any, ...]] = []
+
+    async def _run_attempt(_kwargs: dict[str, Any], _on_first_response: Any) -> str:
+        raise RuntimeError("invalid request")
+
+    with pytest.raises(HTTPException):
+        await run_platform_attempts(
+            route=route,
+            attempts=attempts,
+            base_request_fields={},
+            run_attempt=_run_attempt,
+            extract_usage=lambda _result: None,
+            classify_error=lambda _exc: (False, "http_400"),
+            report_attempt_outcome=lambda *args: reports.append(args),
+            on_success=lambda _attempt: None,
+            max_tool_iterations=1,
+        )
+
+    assert reports == [(attempts[0], "error", None, "http_400", True)]
+
+
+@pytest.mark.asyncio
 async def test_report_platform_usage_does_not_retry_on_402(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 402 from the usage-report endpoint is a permanent rejection (the org
     wallet is overdrawn or missing and won't recover within the retry window).
@@ -192,3 +261,27 @@ async def test_report_platform_usage_forwards_session_label(
         assert "session_label" not in body
     else:
         assert body["session_label"] == expected
+
+
+@pytest.mark.asyncio
+async def test_report_platform_usage_forwards_final_attempt_marker(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = cast(
+        GatewayConfig,
+        SimpleNamespace(
+            platform={"base_url": "http://platform", "usage_max_retries": 3},
+            platform_token="gw-test",
+        ),
+    )
+    post_mock = AsyncMock(return_value=httpx.Response(204))
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+
+    await _platform._report_platform_usage(
+        config,
+        "corr-1",
+        "error",
+        None,
+        error_class="http_400",
+        is_final_attempt=True,
+    )
+
+    assert post_mock.call_args.kwargs["body"]["is_final_attempt"] is True

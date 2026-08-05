@@ -137,6 +137,57 @@ async def test_non_final_slow_attempt_fails_over_at_the_budget() -> None:
 
 
 @pytest.mark.asyncio
+async def test_retryable_stream_failure_is_not_marked_final_when_fallback_remains() -> None:
+    final_markers: list[bool] = []
+    attempts = [
+        _attempt("primary", build_error=_RetryableError("primary down")),
+        _attempt("fallback", chunks=("fallback-chunk",)),
+    ]
+
+    async def build_stream(attempt: SimpleNamespace) -> AsyncIterator[str]:
+        if attempt.build_error is not None:
+            raise attempt.build_error
+        return _stream(attempt.delay, attempt.chunks)
+
+    async def on_attempt_failed(_attempt: SimpleNamespace, failure: StreamingAttemptFailure) -> None:
+        final_markers.append(failure.is_final_attempt)
+
+    chosen, stream = await iterate_streaming_attempts(
+        attempts=attempts,
+        build_stream=build_stream,
+        classify_error=lambda _exc: (True, "http_500"),
+        on_attempt_failed=on_attempt_failed,
+        first_chunk_timeout_seconds=_BUDGET_SECONDS,
+    )
+
+    assert chosen.name == "fallback"
+    assert await _drain(stream) == ["fallback-chunk"]
+    assert final_markers == [False]
+
+
+@pytest.mark.asyncio
+async def test_sole_stream_failure_is_marked_final() -> None:
+    final_markers: list[bool] = []
+
+    async def build_stream(_attempt: SimpleNamespace) -> AsyncIterator[str]:
+        raise _RetryableError("only attempt failed")
+
+    async def on_attempt_failed(_attempt: SimpleNamespace, failure: StreamingAttemptFailure) -> None:
+        final_markers.append(failure.is_final_attempt)
+
+    with pytest.raises(_RetryableError):
+        await iterate_streaming_attempts(
+            attempts=[_attempt("only")],
+            build_stream=build_stream,
+            classify_error=lambda _exc: (True, "http_500"),
+            on_attempt_failed=on_attempt_failed,
+            first_chunk_timeout_seconds=_BUDGET_SECONDS,
+        )
+
+    assert final_markers == [True]
+
+
+@pytest.mark.asyncio
 async def test_final_attempt_of_chain_gets_the_grace() -> None:
     """The last attempt in a chain has no successor, so it gets the terminal grace
     even though an earlier attempt failed over into it."""

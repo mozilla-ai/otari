@@ -197,7 +197,7 @@ async def run_platform_attempts(
     run_attempt: Callable[[dict[str, Any], Callable[[], None]], Awaitable[T]],
     extract_usage: Callable[[T], Any],
     classify_error: Callable[[BaseException], tuple[bool, str]],
-    report_attempt_outcome: Callable[[ResolvedAttempt, str, Any, str | None], None],
+    report_attempt_outcome: Callable[[ResolvedAttempt, str, Any, str | None, bool], None],
     on_success: Callable[[ResolvedAttempt], None],
     max_tool_iterations: int,
 ) -> T:
@@ -250,8 +250,9 @@ async def run_platform_attempts(
     failures: list[_AttemptFailure] = []
     last_exc: BaseException | None = None
 
-    for attempt in attempts:
+    for index, attempt in enumerate(attempts):
         completion_kwargs = default_attempt_kwargs(attempt, base_request_fields)
+        is_last_planned_attempt = index == len(attempts) - 1
 
         # Per-attempt lock-in flag. Flipped the moment the upstream returns
         # its first assistant message via the ``_mark_locked_in`` callback
@@ -294,7 +295,8 @@ async def run_platform_attempts(
             raise
         except BaseException as exc:
             retryable, error_class = classify_error(exc)
-            report_attempt_outcome(attempt, "error", None, error_class)
+            is_final_attempt = locked_in or not retryable or is_last_planned_attempt
+            report_attempt_outcome(attempt, "error", None, error_class, is_final_attempt)
             logger.warning(
                 "Provider call failed request_id=%s position=%d provider=%s model=%s "
                 "error=%s retryable=%s locked_in=%s",
@@ -326,7 +328,7 @@ async def run_platform_attempts(
             continue
 
         # Success on this attempt.
-        report_attempt_outcome(attempt, "success", extract_usage(result), None)
+        report_attempt_outcome(attempt, "success", extract_usage(result), None, True)
         on_success(attempt)
         return result
 
@@ -792,11 +794,13 @@ async def _report_platform_usage(
     usage: CompletionUsage | None,
     error_class: str | None = None,
     session_label: str | None = None,
+    is_final_attempt: bool = False,
 ) -> None:
     """POST a usage record back to the platform with bounded retries.
 
-    Best-effort — failures are swallowed after ``max_retries`` so they don't
-    impact the user's response path. Non-retryable status codes (auth /
+    ``is_final_attempt`` tells the platform that no later planned fallback will
+    run. Failures are swallowed after ``max_retries`` so they don't impact the
+    user's response path. Non-retryable status codes (auth /
     payment-required / not-found / conflict / unprocessable) short-circuit the
     retry loop.
     """
@@ -809,7 +813,11 @@ async def _report_platform_usage(
     usage_url = _platform_url(platform_base_url, "/gateway/usage")
     headers = {"X-Gateway-Token": config.platform_token or ""}
 
-    payload: dict[str, Any] = {"correlation_id": correlation_id, "status": outcome}
+    payload: dict[str, Any] = {
+        "correlation_id": correlation_id,
+        "status": outcome,
+        "is_final_attempt": is_final_attempt,
+    }
     # Forward the caller's session label so the platform can attribute this
     # attempt's spend. Blank is treated as absent; the body field already caps
     # length, so the platform never has to truncate.

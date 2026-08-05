@@ -35,11 +35,13 @@ class StreamingAttemptFailure:
     is the coarse phase bucket for metrics: ``build_error`` when opening the
     stream failed, ``timeout`` when the first-chunk wait elapsed, or
     ``upstream_error`` when the upstream raised before yielding a chunk.
+    ``is_final_attempt`` is true when no later planned fallback will run.
     """
 
     error_class: str
     exception: BaseException
     reason: str
+    is_final_attempt: bool
 
 
 @dataclass(frozen=True)
@@ -236,7 +238,15 @@ async def iterate_streaming_attempts(
             stream = await build_stream(attempt)
         except BaseException as exc:
             retryable, error_class = classify_error(exc)
-            await on_attempt_failed(attempt, StreamingAttemptFailure(error_class, exc, reason="build_error"))
+            await on_attempt_failed(
+                attempt,
+                StreamingAttemptFailure(
+                    error_class,
+                    exc,
+                    reason="build_error",
+                    is_final_attempt=is_final_attempt or not retryable,
+                ),
+            )
             last_exception = exc
             if not retryable:
                 raise
@@ -263,14 +273,27 @@ async def iterate_streaming_attempts(
         except asyncio.TimeoutError as exc:
             await on_attempt_failed(
                 attempt,
-                StreamingAttemptFailure("timeout", exc, reason="timeout"),
+                StreamingAttemptFailure(
+                    "timeout",
+                    exc,
+                    reason="timeout",
+                    is_final_attempt=is_final_attempt,
+                ),
             )
             await _close_stream_quietly(stream)
             last_exception = exc
             continue
         except BaseException as exc:
             retryable, error_class = classify_error(exc)
-            await on_attempt_failed(attempt, StreamingAttemptFailure(error_class, exc, reason="upstream_error"))
+            await on_attempt_failed(
+                attempt,
+                StreamingAttemptFailure(
+                    error_class,
+                    exc,
+                    reason="upstream_error",
+                    is_final_attempt=is_final_attempt or not retryable,
+                ),
+            )
             await _close_stream_quietly(stream)
             last_exception = exc
             if not retryable:

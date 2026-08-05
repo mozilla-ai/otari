@@ -188,6 +188,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
         {
             "correlation_id": "att-1",
             "status": "success",
+            "is_final_attempt": True,
             "usage": {
                 "prompt_tokens": 10,
                 "completion_tokens": 7,
@@ -654,12 +655,14 @@ def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     gateway must NOT try the second attempt — that would replay a
     provider-specific transcript on a different provider.
     """
+    usage_reports: list[dict[str, Any]] = []
 
     async def fake_post_platform(
         url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
     ) -> httpx.Response:
         if url.endswith("/gateway/provider-keys/resolve"):
             return _two_attempt_resolve_response_anthropic_first(request_id="tool-req-2")
+        usage_reports.append(body)
         return httpx.Response(204)
 
     calls: list[str] = []
@@ -714,6 +717,8 @@ def test_hybrid_mode_tool_loop_no_fallback_after_lock_in(
     # Both calls were to attempt 1 (rounds 1 and 2 of the tool loop). The
     # second attempt is never tried because lock-in fired on round 1.
     assert calls == ["sk-ant-broken", "sk-ant-broken"]
+    assert len(usage_reports) == 1
+    assert usage_reports[0]["is_final_attempt"] is True
 
 
 # ---------- hybrid-mode tool-loop streaming contract ----------

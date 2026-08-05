@@ -142,6 +142,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
         {
             "correlation_id": "att-1",
             "status": "success",
+            "is_final_attempt": True,
             "usage": {
                 "prompt_tokens": 10,
                 "completion_tokens": 7,
@@ -270,12 +271,17 @@ def test_hybrid_mode_falls_through_on_first_attempt_failure(
     outcomes = [report["status"] for report in usage_reports]
     assert "error" in outcomes
     assert "success" in outcomes
+    reports_by_id = {report["correlation_id"]: report for report in usage_reports}
+    assert reports_by_id["att-primary"]["is_final_attempt"] is False
+    assert reports_by_id["att-fallback"]["is_final_attempt"] is True
 
 
 def test_hybrid_mode_returns_502_when_all_attempts_fail(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    usage_reports: list[dict[str, Any]] = []
+
     async def fake_post_platform(
         url: str,
         headers: dict[str, str],
@@ -292,6 +298,7 @@ def test_hybrid_mode_returns_502_when_all_attempts_fail(
                     ]
                 ),
             )
+        usage_reports.append(body)
         return httpx.Response(204)
 
     async def fake_aresponses(**kwargs: Any) -> Response:
@@ -312,6 +319,9 @@ def test_hybrid_mode_returns_502_when_all_attempts_fail(
 
     assert response.status_code == 502
     assert response.json() == {"detail": "All upstream providers failed"}
+    reports_by_id = {report["correlation_id"]: report for report in usage_reports}
+    assert reports_by_id["att-1"]["is_final_attempt"] is False
+    assert reports_by_id["att-2"]["is_final_attempt"] is True
 
 
 def test_hybrid_mode_provider_without_responses_support_returns_400(
@@ -595,6 +605,7 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     success_reports = [r for r in usage_reports if r.get("status") == "success"]
     assert success_reports, "expected a success usage report for the hybrid-mode tool-loop stream"
     assert success_reports[0]["correlation_id"] == "stream-att-1"
+    assert success_reports[0]["is_final_attempt"] is True
 
 
 def test_hybrid_mode_supports_responses_guard_checks_every_attempt(

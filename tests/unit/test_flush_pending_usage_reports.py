@@ -12,7 +12,7 @@ from gateway.core.config import GatewayConfig
 
 
 def test_flush_delivers_all_reports_when_fast(monkeypatch: pytest.MonkeyPatch) -> None:
-    sent: list[tuple[str, str, str | None, str | None]] = []
+    sent: list[tuple[str, str, str | None, str | None, bool]] = []
 
     async def fake_report(
         config: Any,
@@ -21,8 +21,9 @@ def test_flush_delivers_all_reports_when_fast(monkeypatch: pytest.MonkeyPatch) -
         usage: Any,
         error_class: str | None,
         session_label: str | None = None,
+        is_final_attempt: bool = False,
     ) -> None:
-        sent.append((cid, outcome, error_class, session_label))
+        sent.append((cid, outcome, error_class, session_label, is_final_attempt))
 
     monkeypatch.setattr(_pipeline, "_report_platform_usage", fake_report)
     config = GatewayConfig(platform={"base_url": "http://platform.test"})
@@ -30,7 +31,7 @@ def test_flush_delivers_all_reports_when_fast(monkeypatch: pytest.MonkeyPatch) -
     asyncio.run(
         _pipeline._flush_pending_usage_reports(
             config,
-            [("att-1", "error", None, "http_500"), ("att-2", "error", None, "http_429")],
+            [("att-1", "error", None, "http_500", False), ("att-2", "error", None, "http_429", True)],
             "req-1",
             "my-run-personas",
         )
@@ -38,8 +39,8 @@ def test_flush_delivers_all_reports_when_fast(monkeypatch: pytest.MonkeyPatch) -
 
     # Every flushed report carries the per-request session label.
     assert sorted(sent) == [
-        ("att-1", "error", "http_500", "my-run-personas"),
-        ("att-2", "error", "http_429", "my-run-personas"),
+        ("att-1", "error", "http_500", "my-run-personas", False),
+        ("att-2", "error", "http_429", "my-run-personas", True),
     ]
 
 
@@ -58,6 +59,7 @@ def test_flush_is_bounded_and_does_not_wait_for_a_slow_report(monkeypatch: pytes
         usage: Any,
         error_class: str | None,
         session_label: str | None = None,
+        is_final_attempt: bool = False,
     ) -> None:
         await asyncio.sleep(10)
         completed.append(cid)
@@ -69,7 +71,7 @@ def test_flush_is_bounded_and_does_not_wait_for_a_slow_report(monkeypatch: pytes
     asyncio.run(
         _pipeline._flush_pending_usage_reports(
             config,
-            [("att-1", "error", None, "http_500")],
+            [("att-1", "error", None, "http_500", True)],
             "req-1",
         )
     )
