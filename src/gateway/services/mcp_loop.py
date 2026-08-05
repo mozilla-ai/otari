@@ -111,13 +111,17 @@ def _accumulate_tool_call_deltas(slots: dict[int, dict[str, Any]], deltas: list[
                 slot["function"]["arguments"] += fn.arguments
 
 
-def _with_tool_calls(event: ChatCompletionChunk, tool_calls: list[Any] | None) -> ChatCompletionChunk:
-    """Return ``event`` with its delta's ``tool_calls`` replaced.
+def _with_tool_calls(event: ChatCompletionChunk, tool_calls: list[Any] | None) -> ChatCompletionChunk | None:
+    """Return ``event`` with its delta's ``tool_calls`` replaced, or ``None`` on failure.
 
-    Used to strip gateway-owned fragments out of a chunk that also carries
-    content or foreign fragments, so the client sees only what it can act on.
-    Falls back to the original chunk if the SDK models are frozen, which is a
-    cosmetic regression rather than a correctness one.
+    Used to strip gateway-owned fragments out of a chunk that also carries content or
+    foreign fragments, so the client sees only what it can act on.
+
+    ``None`` means the rewrite failed and the caller must drop the chunk rather than
+    forward it. Forwarding the original would hand the client a gateway tool call it
+    can never receive a result for, and one the gateway is about to execute itself, so
+    losing a delta is the safer failure: the terminal chunk still carries the finish
+    reason, and the caller's own tool calls survive in the following chunks.
     """
     try:
         choice = event.choices[0]
@@ -125,8 +129,19 @@ def _with_tool_calls(event: ChatCompletionChunk, tool_calls: list[Any] | None) -
         new_choice = choice.model_copy(update={"delta": new_delta})
         return event.model_copy(update={"choices": [new_choice]})
     except (AttributeError, TypeError, IndexError):
-        logger.warning("Could not strip gateway tool_calls from a streamed chunk; forwarding as-is")
-        return event
+        logger.warning("Could not strip gateway tool_calls from a streamed chunk; dropping it")
+        return None
+
+
+def _stripped_tool_calls(event: ChatCompletionChunk) -> ChatCompletionChunk:
+    """``event`` with its tool_calls removed, or unchanged if that cannot be built.
+
+    Last resort for a terminal chunk whose rewrite failed: the finish reason has to
+    reach the client, and a terminal carrying no tool_calls is a valid stream, while
+    one carrying the gateway's own call is not.
+    """
+    stripped = _with_tool_calls(event, None)
+    return stripped if stripped is not None else event
 
 
 def _finalize_tool_calls(slots: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -343,15 +358,20 @@ class _ChatToolLoopStrategy:
                 # the accumulated slot for its index.
                 foreign = [tc for tc in delta.tool_calls if not self._owned_fragment(state, pool, tc)]
                 renumbered = [self._renumbered(state, tc) for tc in foreign]
+                rewritten: ChatCompletionChunk | None = None
                 if len(foreign) != len(delta.tool_calls):
                     if foreign or getattr(delta, "content", None):
-                        visible = _with_tool_calls(event, renumbered or None)
+                        rewritten = _with_tool_calls(event, renumbered or None)
+                        hide = rewritten is None
                     else:
                         hide = True
                 elif any(tc is not original for tc, original in zip(renumbered, foreign, strict=True)):
                     # No owned call in this chunk, but an earlier one shifted the
                     # numbering, so the survivors still need rewriting.
-                    visible = _with_tool_calls(event, renumbered)
+                    rewritten = _with_tool_calls(event, renumbered)
+                    hide = rewritten is None
+                if rewritten is not None:
+                    visible = rewritten
             if choice.finish_reason:
                 # Sticky-tool-calls: a trailing ``stop`` chunk from
                 # Anthropic must not override ``tool_calls`` we've
@@ -363,9 +383,11 @@ class _ChatToolLoopStrategy:
             # The rewritten chunk, not the upstream one: a provider that packs
             # tool_calls and finish_reason into a single chunk would otherwise leak
             # the gateway's own call through the deferred terminal, undoing the hiding
-            # above for exactly the providers any-llm synthesizes streaming for.
-            state.pending_terminal = visible
-            return StreamAction.DEFER, visible
+            # above for exactly the providers any-llm synthesizes streaming for. If
+            # the rewrite failed, the terminal still has to reach the client (it
+            # carries the finish reason), so send it with no tool_calls at all.
+            state.pending_terminal = visible if not hide else _stripped_tool_calls(event)
+            return StreamAction.DEFER, state.pending_terminal
         if hide:
             return StreamAction.DEFER, event
         return StreamAction.FORWARD, visible

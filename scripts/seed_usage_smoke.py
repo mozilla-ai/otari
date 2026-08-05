@@ -68,6 +68,20 @@ if db.query(ModelPricing).filter(ModelPricing.model_key == gateway_tool_pricing_
     )
 db.flush()
 
+# Read the rate back rather than trusting TOOL_UNIT_RATES: the pricing row above is
+# only created when absent, so an instance already priced differently (say through
+# POST /v1/pricing) would otherwise get seeded rows whose unit_rate and cost
+# contradict the pricing table the dashboard reads.
+for tool in list(TOOL_UNIT_RATES):
+    row = (
+        db.query(ModelPricing)
+        .filter(ModelPricing.model_key == gateway_tool_pricing_key(tool))
+        .order_by(ModelPricing.effective_at.desc())
+        .first()
+    )
+    TOOL_UNIT_RATES[tool] = (row.input_price_per_million / 1_000_000) if row else None
+print(f"tool rates in effect: {TOOL_UNIT_RATES}")
+
 now = datetime.now(UTC)
 n = 0
 tool_rows = 0

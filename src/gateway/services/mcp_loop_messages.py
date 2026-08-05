@@ -178,7 +178,7 @@ async def _execute_stream_owned(
             parsed_input = {}
         try:
             text = await pool.call_tool(spec["name"], parsed_input)
-        except Exception as exc:  # noqa: BLE001 — same tool-error-as-message idiom as the non-stream loop
+        except Exception as exc:  # noqa: BLE001 (same tool-error-as-message idiom as the non-stream loop)
             logger.warning("MCP tool %s execution failed: %s", spec["name"], exc)
             text = f"[tool error] {exc}"
         results.append({"type": "tool_result", "tool_use_id": spec["id"], "content": text})

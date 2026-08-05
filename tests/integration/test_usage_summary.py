@@ -965,3 +965,25 @@ def test_grouped_series_caps_hourly_buckets(client: TestClient, master_key_heade
         },
     )
     assert ok.status_code == 200
+
+
+def test_tool_breakdown_is_empty_for_absorbed_rows(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """``dimensions=tool&status=absorbed`` reports nothing rather than a broken row.
+
+    An absorbed row is an attempt a routing policy recovered from. Those rows are
+    written without a tool tally on purpose (``log_absorbed_attempt``), because they
+    settle no reservation and a charge placed there would never reach ``users.spend``.
+    So no absorbed row carries tool meters, the per-tool aggregate matches nothing,
+    and the entry is dropped instead of rendering as "0 requests, N calls".
+
+    This pins the invariant the aggregate depends on: if absorbed rows ever start
+    carrying tool meters, ``requests`` (which excludes them by definition) would
+    disagree with ``calls``, and this test is what says so.
+    """
+    response = client.get(
+        "/v1/usage/summary",
+        params={"dimensions": "tool", "status": "absorbed"},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["by_tool"] == []
