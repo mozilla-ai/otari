@@ -272,4 +272,22 @@ describe("OverviewIndex routing", () => {
     await user.click(screen.getByRole("button", { name: "Add your first provider" }));
     expect(await screen.findByTestId("loc")).toHaveTextContent("/providers");
   });
+
+  it("reports a failed provider query instead of silently rendering a normal overview", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/providers/health")) {
+        return jsonResponse({ providers: [], healthy: 1, total: 1, checked_at: null });
+      }
+      if (url.includes("/v1/usage/summary")) return jsonResponse(summary({}));
+      if (url.includes("/v1/providers")) return jsonResponse({ detail: "providers exploded" }, 500);
+      return jsonResponse([]);
+    });
+    renderPage(<OverviewIndex />);
+
+    // The failure is surfaced, and the setup state stays neutral: no
+    // getting-started block claiming the gateway is fresh, and no silent success.
+    expect(await screen.findByText(/providers exploded/)).toBeInTheDocument();
+    expect(screen.queryByText("Get started with Otari")).not.toBeInTheDocument();
+  });
 });

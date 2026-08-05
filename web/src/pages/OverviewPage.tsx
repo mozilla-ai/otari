@@ -80,10 +80,23 @@ export function OverviewIndex() {
     // query resolves on first paint.
     return <PageLoading />;
   }
-  return <OverviewPage needsSetup={providers.isSuccess && providers.data.providers.length === 0} />;
+  // A failed providers query leaves the setup state unknown, so it stays neutral
+  // (no getting-started block) and the error is reported instead of swallowed.
+  return (
+    <OverviewPage
+      needsSetup={providers.isSuccess && providers.data.providers.length === 0}
+      setupError={providers.error}
+    />
+  );
 }
 
-export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
+export function OverviewPage({
+  needsSetup = false,
+  setupError,
+}: {
+  needsSetup?: boolean;
+  setupError?: unknown;
+}) {
   const w = useWindows();
 
   const todayFilters = useMemo(() => ({ start_date: w.today }), [w]);
@@ -133,8 +146,12 @@ export function OverviewPage({ needsSetup = false }: { needsSetup?: boolean }) {
 
   // Surface the first load error across the tile queries so a broken master key
   // or backend does not just leave a wall of "—". Recent activity is excluded: it
-  // renders its own inline banner, so including it here would double-report.
-  const loadError = today.error ?? period.error ?? health.error ?? budgets.error ?? keys.error ?? users.error;
+  // renders its own inline banner, so including it here would double-report. The
+  // provider-list error from the index comes first: it is the query that decides
+  // whether this page is a getting-started screen, so its failure is the most
+  // load-bearing thing to tell the operator about.
+  const loadError =
+    setupError ?? today.error ?? period.error ?? health.error ?? budgets.error ?? keys.error ?? users.error;
 
   // Manual refresh for the whole page; the windows already advance across
   // midnight on focus, but the numbers within a day are only as fresh as the
