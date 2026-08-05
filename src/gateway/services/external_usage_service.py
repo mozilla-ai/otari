@@ -400,6 +400,11 @@ async def ingest_external_events(
             ),
         )
     result = ExternalIngestResult()
+    # A key flagged ``ignore_user_mismatch`` is lenient here too, so the per-key
+    # opt-out means the same thing on the import path as on the request path
+    # (see resolve_user_id): the named user is ignored and usage binds to the
+    # key's own user, never to someone else's.
+    reject_mismatch = reject_user_mismatch and not (api_key is not None and api_key.ignore_user_mismatch)
     key_user = str(api_key.user_id) if api_key and api_key.user_id else None
     api_key_id = api_key.id if api_key else None
     seen_in_batch: set[str] = set()
@@ -428,7 +433,7 @@ async def ingest_external_events(
             request.user_id,
             key_user,
             is_master=is_master_key,
-            reject_mismatch=reject_user_mismatch,
+            reject_mismatch=reject_mismatch,
         )
         if bind_error is not None or target_user is None:
             _reject(result, index, event.source_event_id, bind_error or "Could not attribute usage to a user.")

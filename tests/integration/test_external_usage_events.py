@@ -81,7 +81,12 @@ def _post(
 
 
 def _make_key(
-    client: TestClient, master_key_header: dict[str, str], user_id: str, *, exclude_from_budget: bool = True
+    client: TestClient,
+    master_key_header: dict[str, str],
+    user_id: str,
+    *,
+    exclude_from_budget: bool = True,
+    ignore_user_mismatch: bool = False,
 ) -> dict[str, str]:
     """Create an API key bound to `user_id` and return its auth header.
 
@@ -89,7 +94,12 @@ def _make_key(
     """
     resp = client.post(
         "/v1/keys",
-        json={"key_name": f"importer-{user_id}", "user_id": user_id, "exclude_from_budget": exclude_from_budget},
+        json={
+            "key_name": f"importer-{user_id}",
+            "user_id": user_id,
+            "exclude_from_budget": exclude_from_budget,
+            "ignore_user_mismatch": ignore_user_mismatch,
+        },
         headers=master_key_header,
     )
     assert resp.status_code == 200, resp.text
@@ -153,6 +163,24 @@ def test_api_key_cannot_attribute_to_another_user(
     assert body["rejected"] == 1
     assert "does not match" in body["errors"][0]["detail"]
     assert db_session.query(UsageLog).filter(UsageLog.source_event_id == "cross").count() == 0
+
+
+def test_lenient_key_binds_foreign_user_to_its_own(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A key flagged ignore_user_mismatch accepts a foreign user_id and still binds
+    the usage to its own user, matching the request path (issue #493)."""
+    _seed_user(client, master_key_header, "dev-a")
+    _seed_user(client, master_key_header, "dev-b")
+    _seed_pricing(client, master_key_header)
+    headers = _make_key(client, master_key_header, "dev-a", ignore_user_mismatch=True)
+
+    resp = _post(client, headers, [_event("lenient")], user_id="dev-b")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["accepted"] == 1
+
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "lenient").one()
+    assert row.user_id == "dev-a"
 
 
 def test_accepts_and_prices_with_cache(

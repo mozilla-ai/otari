@@ -353,6 +353,12 @@ describe("KeysPage", () => {
     expect(await screen.findByText("Budget-exempt")).toBeInTheDocument();
   });
 
+  it("renders a Lenient user chip for keys that ignore a mismatched user field", async () => {
+    mockApi({ keys: [apiKey({ id: "key-1", key_name: "claude-code", ignore_user_mismatch: true })] });
+    renderPage(<KeysPage />);
+    expect(await screen.findByText("Lenient user")).toBeInTheDocument();
+  });
+
   it("posts the picked owner's user_id, not the option's display label", async () => {
     // Regression: picking an existing owner used to submit the option's label
     // ("alice (Alice)") because selecting writes that text back into the input,

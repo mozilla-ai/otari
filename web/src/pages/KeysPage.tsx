@@ -658,6 +658,14 @@ export function KeysPage() {
                 Budget-exempt
               </span>
             ) : null}
+            {k.ignore_user_mismatch ? (
+              <span
+                className="inline-flex items-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] px-2 py-0.5 text-xs font-medium text-[var(--otari-brand-dark)]"
+                title="Requests on this key may name a different user without being rejected; spend still binds to this key's owner"
+              >
+                Lenient user
+              </span>
+            ) : null}
           </div>
         </div>
       ),

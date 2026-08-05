@@ -21,8 +21,9 @@ the authenticated principal, just like a normal gateway request:
 
 - **An API key** attributes every event to that key's own user, and stamps the
   key's id on the rows. You can omit `user_id` entirely; if you send one, it must
-  match the key's user (a different user is rejected, unless
-  `reject_user_mismatch: false`). This is the recommended path: hand each importer
+  match the key's user (a different user is rejected, unless the key is flagged
+  `ignore_user_mismatch` or the deployment sets `reject_user_mismatch: false`, in
+  which case it binds to the key's user). This is the recommended path: hand each importer
   a scoped API key rather than putting the master key in an adapter or collector.
   **The key must be budget-exempt** (`exclude_from_budget: true`); a budgeted key is
   refused with a 403. Imported usage is retrospective and can never be blocked, so
