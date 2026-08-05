@@ -457,7 +457,10 @@ function attemptSentence(entry: UsageEntry, outcome: GroupOutcome | null): strin
   const attempt = `attempt ${position} of ${total}`;
   if (entry.status === "absorbed") {
     if (outcome?.servedBy) return `${attempt} failed, served by ${outcome.servedBy}`;
-    if (outcome) return `${attempt} failed, and so did the rest`;
+    // Not "and so did the rest": the group's outcome row is an error, but the walk
+    // may have stopped on it (a non-retryable status, a lock-in) with later
+    // candidates never called, which is what that row's own sentence says.
+    if (outcome) return `${attempt} failed, and the request ended in an error`;
     return `${attempt} failed, fell back`;
   }
   if (entry.status === "error") {
@@ -510,18 +513,29 @@ function planOrder(rows: readonly UsageEntry[]): UsageEntry[] {
 // with the one that served marked. This is the answer to "a fallback fired, so
 // what actually served me", which no single row can give.
 function RoutingPlan({ entry }: { entry: UsageEntry }) {
-  const groupIds = entry.request_group_id ? [entry.request_group_id] : [];
+  const groupId = entry.request_group_id;
+  const groupIds = groupId ? [groupId] : [];
   const group = useRequestGroups(groupIds);
+  // Only rows of this row's own group are the plan. The lookup keeps previous data
+  // across a key change, so this is what stops another request's plan from ever
+  // being narrated as this one's, whatever the detail panel does with mounting.
+  const siblings = groupId ? (group.data ?? []).filter((row) => row.request_group_id === groupId) : [];
   // Falls back to the row itself while the lookup is in flight (and for a
   // pre-`request_group_id` row, which has no siblings to find), so the section
   // never flashes empty and never claims a one-attempt plan it did not read.
-  const attempts = planOrder(group.data?.length ? group.data : [entry]);
-  const complete = Boolean(group.data?.length);
+  const attempts = planOrder(siblings.length ? siblings : [entry]);
+  const complete = siblings.length > 0;
   const served = attempts.find((attempt) => attempt.status === "success");
   const total = entry.attempt_count ?? attempts.length;
 
+  // "Loading" only while a lookup is actually outstanding: a failed lookup, or a row
+  // that carries no group to look up, would otherwise sit on that line forever.
   const summary = !complete
-    ? "Loading the rest of this request's attempts…"
+    ? group.isError
+      ? "Could not load this request's other attempts."
+      : entry.request_group_id
+        ? "Loading the rest of this request's attempts…"
+        : "This row carries no request group, so its other attempts cannot be found."
     : served
       ? `Served by attempt ${served.attempt_position ?? "?"} of ${total}: ${pricingSelectorOf(served)}`
       : attempts.some((attempt) => attempt.status === "error")
@@ -542,7 +556,10 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
               <th scope="col" className="px-3 py-2 text-left font-medium">Target</th>
               <th scope="col" className="px-3 py-2 text-left font-medium">Selected as</th>
               <th scope="col" className="px-3 py-2 text-left font-medium">Outcome</th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">Time</th>
+              {/* Every attempt's `latency_ms` is measured from the start of the
+                  request, not from the start of that attempt, so this is the same
+                  "Total time" the row column shows, not a per-candidate duration. */}
+              <th scope="col" className="px-3 py-2 text-right font-medium">Total time</th>
               <th scope="col" className="px-3 py-2 text-right font-medium">Cost</th>
             </tr>
           </thead>

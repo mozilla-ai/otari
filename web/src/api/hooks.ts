@@ -795,9 +795,10 @@ export function useFailureCount(windowSeconds: number, enabled = true) {
 
 // The rows of one or more request groups: every attempt a routed request made,
 // which is what turns "attempt 1 of 2, failed" into "and here is what served it".
-// A plan is capped at a handful of candidates, so one page covers the batch the
-// activity table asks for; the cap is generous rather than tight so a truncated
-// plan can never silently read as a complete one.
+// A plan is capped at a handful of candidates and the activity table pages at a
+// hundred rows, so this leaves an order of magnitude of headroom over the largest
+// batch either caller can ask for. It is deliberately not a tight bound: nothing
+// downstream detects truncation, so the limit has to be one no real page reaches.
 const REQUEST_GROUP_PAGE_LIMIT = 1000;
 
 // Fetched as a batch (the endpoint takes a repeatable `request_group_id`) so a

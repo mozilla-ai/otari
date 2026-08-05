@@ -274,7 +274,7 @@ targets, which is what a policy exists to keep off the wire.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `status_code`, `model`, `endpoint`, `provider`, `source`, `source_label`, `api_key_id`. `status_code` is the HTTP status classifying a failure (e.g. 429 provider rate limit, 402 missing pricing); only error rows carry one, so filtering by it also restricts to `status=error` unless `status` is passed explicitly. | Master key |
+| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `status_code`, `model`, `endpoint`, `provider`, `source`, `source_label`, `api_key_id`, `request_group_id`. `status_code` is the HTTP status classifying a failure (e.g. 429 provider rate limit, 402 missing pricing); only error rows carry one, so filtering by it also restricts to `status=error` unless `status` is passed explicitly. `request_group_id` is repeatable and returns a routed request's whole attempt plan (see [Routing](routing.md)). | Master key |
 | `GET` | `/v1/usage/count` | Total rows matching the filters (paginator total). | Master key |
 | `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source/session/endpoint/provider, the failure taxonomy in `errors_by_status_code` (failures grouped by `status_code` with a coarse `error_class`), and a time series. `dimensions` narrows which breakdowns are computed (each one is a separate `GROUP BY`, including `status_code` for the taxonomy); `dimensions=none` returns totals and series only. | Master key |
 | `GET` | `/v1/usage/summary.csv` | Every breakdown as a CSV download. | Master key |

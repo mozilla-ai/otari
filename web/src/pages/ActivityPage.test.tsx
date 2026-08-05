@@ -1021,6 +1021,44 @@ describe("ActivityPage", () => {
     expect(await screen.findByText("attempt 1 of 2 failed, no further candidate tried")).toBeInTheDocument();
   });
 
+  it("does not claim the untried candidates failed when the walk stopped mid-plan", async () => {
+    // Attempt 1 was absorbed, attempt 2 stopped the walk on a non-retryable 400, so
+    // candidates 3 and 4 were never called. The absorbed row must not say "and so
+    // did the rest" while its sibling says "no further candidate tried".
+    mockApi({
+      rows: [
+        entry({
+          id: "absorbed",
+          model: "deepseek",
+          provider: "fireworks",
+          status: "absorbed",
+          status_code: 429,
+          cost: null,
+          policy_name: "fast",
+          selection_reason: "default",
+          attempt_position: 1,
+          attempt_count: 4,
+          request_group_id: "grp-1",
+        }),
+        entry({
+          id: "stopped",
+          status: "error",
+          status_code: 400,
+          cost: null,
+          policy_name: "fast",
+          selection_reason: "on_failure",
+          attempt_position: 2,
+          attempt_count: 4,
+          request_group_id: "grp-1",
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    expect(await screen.findByText("attempt 1 of 4 failed, and the request ended in an error")).toBeInTheDocument();
+    expect(screen.getByText("attempt 2 of 4 failed, no further candidate tried")).toBeInTheDocument();
+  });
+
   it("spells out the selection reason alone for a single-candidate policy", async () => {
     mockApi({
       rows: [
