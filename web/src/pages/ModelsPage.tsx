@@ -1587,7 +1587,7 @@ export function ModelsPage() {
                 row={selectedRow}
                 metadata={metadataByKey[selectedRow.key]}
                 metadataAvailable={metadataAvailable}
-                onMakeAlias={(key) => navigate(`/aliases?target=${encodeURIComponent(key)}`)}
+                onMakeAlias={(key) => navigate(`/routing?target=${encodeURIComponent(key)}`)}
                 onClose={() => setSelectedKey(null)}
               />
             </aside>

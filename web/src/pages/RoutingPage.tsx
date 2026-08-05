@@ -1,9 +1,12 @@
 import { Button, Card, Chip } from "@heroui/react";
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
-import type { PolicyGuardrail, PolicySpec, RoutingPolicyResponse } from "@/api/types";
+import type { AliasResponse, PolicyGuardrail, PolicySpec, RoutingPolicyResponse } from "@/api/types";
 import {
+  useAliases,
+  useCreateAlias,
+  useDeleteAlias,
   useDeleteRoutingPolicy,
   useRoutingPolicies,
   useSetRoutingPolicy,
@@ -16,10 +19,33 @@ import { ModelComboBox } from "@/components/ModelComboBox";
 import { UserComboBox } from "@/components/UserComboBox";
 import { ConfirmButton, CopyableValue, EmptyState, ErrorBanner, PageHeader } from "@/components/ui";
 
+/** A row on this page: either a routing policy or a stored/config alias.
+ *
+ *  An alias is the one-target case of a policy, so the two are listed together
+ *  and this page is the single place either is managed. They still live in
+ *  different tables behind different endpoints, so `kind` decides which API a
+ *  write goes to; it is not cosmetic.
+ */
+type RoutingRow = RoutingPolicyResponse & { kind: "policy" | "alias" };
+
+/** Present an alias as the one-target policy it is. */
+function aliasAsRow(alias: AliasResponse): RoutingRow {
+  return {
+    kind: "alias",
+    name: alias.name,
+    spec: { select: [{ default: alias.target }] },
+    source: alias.source,
+    user_id: alias.user_id,
+    is_dynamic: false,
+    created_at: alias.created_at,
+    updated_at: alias.updated_at,
+  };
+}
+
 // Scope is part of the identity, so it is part of the row key: the same policy
 // name can exist globally and per user, and keying on the name alone would
 // collapse those rows into one. Same reasoning (and encoding) as the alias table.
-const rowKeyOf = (policy: RoutingPolicyResponse): string => JSON.stringify([policy.user_id, policy.name]);
+const rowKeyOf = (row: RoutingRow): string => JSON.stringify([row.kind, row.user_id, row.name]);
 
 /** Whether a guardrails service is configured for this gateway.
  *
@@ -187,18 +213,25 @@ function ModeToggle({
  */
 function PolicyForm({
   existing,
+  initialTarget = "",
   onClose,
 }: {
-  existing: RoutingPolicyResponse | null;
+  existing: RoutingRow | null;
+  initialTarget?: string;
   onClose: () => void;
 }) {
   const save = useSetRoutingPolicy();
+  const saveAlias = useCreateAlias();
   const editing = existing !== null;
+  // Editing an alias writes back through the alias API: it is still a row in
+  // model_aliases, and silently rewriting it as a policy would leave the original
+  // behind under the same name.
+  const editingAlias = existing?.kind === "alias";
   const guardrails_ = useGuardrailsConfigured();
 
   const [name, setName] = useState(existing?.name ?? "");
   const [userId, setUserId] = useState<string | null>(existing?.user_id ?? null);
-  const [target, setTarget] = useState(existing ? defaultTargetOf(existing.spec) : "");
+  const [target, setTarget] = useState(existing ? defaultTargetOf(existing.spec) : initialTarget);
   const [chain, setChain] = useState<string[]>(existing?.spec.on_failure ?? []);
   const [conditions, setConditions] = useState(existing ? conditionsOf(existing.spec) : []);
   const [guardrails, setGuardrails] = useState<PolicyGuardrail[]>(existing?.spec.guardrails ?? []);
@@ -233,12 +266,21 @@ function PolicyForm({
     [conditions, target, chain, guardrails],
   );
 
+  // An alias has exactly one target, so growing one a chain, a condition, or a
+  // guardrail makes it a policy. Saving it as a policy alone would leave the alias
+  // row in place under the same name, and the API refuses that collision, so the
+  // form keeps an alias an alias and points the operator at the way across.
+  const outgrewAlias = editingAlias && (chain.length > 0 || conditions.length > 0 || guardrails.length > 0);
+  const pending = save.isPending || saveAlias.isPending;
+
   const submit = () => {
-    if (!canSubmit) return;
-    save.mutate(
-      { name: name.trim(), spec, user_id: userId === null ? null : userId.trim() },
-      { onSuccess: onClose },
-    );
+    if (!canSubmit || outgrewAlias) return;
+    const scope = userId === null ? null : userId.trim();
+    if (editingAlias) {
+      saveAlias.mutate({ name: name.trim(), target: target.trim(), user_id: scope }, { onSuccess: onClose });
+      return;
+    }
+    save.mutate({ name: name.trim(), spec, user_id: scope }, { onSuccess: onClose });
   };
 
   return (
@@ -248,7 +290,7 @@ function PolicyForm({
           <div className="text-sm font-semibold text-[var(--otari-ink)]">
             {editing ? (
               <>
-                Edit policy <code>{existing.name}</code>
+                Edit {existing.kind === "alias" ? "alias" : "policy"} <code>{existing.name}</code>
                 {existing.user_id ? (
                   <>
                     {" "}
@@ -260,7 +302,7 @@ function PolicyForm({
               "New routing policy"
             )}
           </div>
-          <ErrorBanner error={save.error} />
+          <ErrorBanner error={save.error ?? saveAlias.error} />
 
           <div className="grid gap-4 sm:grid-cols-2">
             {editing ? (
@@ -508,13 +550,19 @@ function PolicyForm({
           </div>
 
           <div className="flex items-center gap-3">
-            <Button variant="primary" isDisabled={!canSubmit || save.isPending} onPress={submit}>
-              {save.isPending ? "Saving…" : editing ? "Save policy" : "Create policy"}
+            <Button variant="primary" isDisabled={!canSubmit || pending || outgrewAlias} onPress={submit}>
+              {pending ? "Saving…" : editing ? "Save" : "Create policy"}
             </Button>
             <Button variant="ghost" onPress={onClose}>
               Cancel
             </Button>
             <span className="text-xs text-[var(--otari-muted)]">In effect for new requests within 30s.</span>
+            {outgrewAlias ? (
+              <span className="text-xs text-amber-700">
+                An alias holds one target. To add a fallback, a condition, or a guardrail, delete this alias
+                and create a policy with the same name.
+              </span>
+            ) : null}
           </div>
         </Card.Content>
       </Card>
@@ -528,15 +576,23 @@ function PolicyForm({
 
 export function RoutingPage() {
   const policies = useRoutingPolicies();
+  const aliases = useAliases();
   const deletePolicy = useDeleteRoutingPolicy();
-  const [adding, setAdding] = useState(false);
-  const [editing, setEditing] = useState<RoutingPolicyResponse | null>(null);
+  const deleteAlias = useDeleteAlias();
+  // A "Make an alias" link from the Models page arrives as ?target=provider:model.
+  const [searchParams] = useSearchParams();
+  const initialTarget = searchParams.get("target") ?? "";
+  const [adding, setAdding] = useState(initialTarget !== "");
+  const [editing, setEditing] = useState<RoutingRow | null>(null);
 
-  const rows = [...(policies.data ?? [])].sort(
-    (a, b) => a.name.localeCompare(b.name) || (a.user_id ?? "").localeCompare(b.user_id ?? ""),
-  );
+  // Aliases and policies are listed together: an alias is the one-target case,
+  // and this page is the only place either is managed.
+  const rows: RoutingRow[] = [
+    ...(policies.data ?? []).map((policy) => ({ ...policy, kind: "policy" as const })),
+    ...(aliases.data ?? []).map(aliasAsRow),
+  ].sort((a, b) => a.name.localeCompare(b.name) || (a.user_id ?? "").localeCompare(b.user_id ?? ""));
 
-  const columns = useMemo<DataTableColumn<RoutingPolicyResponse>[]>(
+  const columns = useMemo<DataTableColumn<RoutingRow>[]>(
     () => [
       {
         id: "name",
@@ -584,10 +640,17 @@ export function RoutingPage() {
       {
         id: "source",
         header: "Source",
-        cell: (policy) => (
-          <Chip size="sm" color={policy.source === "config" ? "default" : "accent"}>
-            {policy.source}
-          </Chip>
+        cell: (row) => (
+          <div className="flex items-center gap-1">
+            <Chip size="sm" color={row.source === "config" ? "default" : "accent"}>
+              {row.source}
+            </Chip>
+            {row.kind === "alias" ? (
+              <Chip size="sm" color="default">
+                alias
+              </Chip>
+            ) : null}
+          </div>
         ),
       },
       {
@@ -609,8 +672,12 @@ export function RoutingPage() {
               )}
               <ConfirmButton
                 confirmLabel="Confirm"
-                isPending={deletePolicy.isPending}
-                onConfirm={() => deletePolicy.mutate({ name: policy.name, userId: policy.user_id })}
+                isPending={deletePolicy.isPending || deleteAlias.isPending}
+                onConfirm={() =>
+                  policy.kind === "alias"
+                    ? deleteAlias.mutate({ name: policy.name, userId: policy.user_id })
+                    : deletePolicy.mutate({ name: policy.name, userId: policy.user_id })
+                }
               >
                 Delete
               </ConfirmButton>
@@ -618,7 +685,7 @@ export function RoutingPage() {
           ),
       },
     ],
-    [deletePolicy],
+    [deletePolicy, deleteAlias],
   );
 
   return (
@@ -635,12 +702,14 @@ export function RoutingPage() {
         }
       />
 
-      <ErrorBanner error={policies.error ?? deletePolicy.error} />
+      <ErrorBanner error={policies.error ?? aliases.error ?? deletePolicy.error ?? deleteAlias.error} />
 
-      {adding ? <PolicyForm existing={null} onClose={() => setAdding(false)} /> : null}
+      {adding ? (
+        <PolicyForm existing={null} initialTarget={initialTarget} onClose={() => setAdding(false)} />
+      ) : null}
       {editing !== null ? <PolicyForm existing={editing} onClose={() => setEditing(null)} /> : null}
 
-      {rows.length === 0 && !policies.isLoading && !adding ? (
+      {rows.length === 0 && !policies.isLoading && !aliases.isLoading && !adding ? (
         <EmptyState title="No routing policies yet">
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-[var(--otari-muted)]">
             <li>Create a policy and point it at the model that should normally serve.</li>
@@ -654,7 +723,7 @@ export function RoutingPage() {
           columns={columns}
           rows={rows}
           getRowKey={rowKeyOf}
-          isLoading={policies.isLoading}
+          isLoading={policies.isLoading || aliases.isLoading}
           emptyContent="No routing policies yet."
         />
       )}

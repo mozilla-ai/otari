@@ -1,7 +1,7 @@
 # Admin dashboard
 
 Otari ships with a web admin dashboard for operators. It browses the model
-catalogue, sets model pricing, manages aliases, adds and edits provider API
+catalogue, sets model pricing, manages routing policies, adds and edits provider API
 keys, manages users, keys, and budgets, and toggles runtime settings, all
 against the local management API using the master key.
 
@@ -223,16 +223,13 @@ hand.
   cache rates, the 1-hour cache rate, and long-context tiers. The same form
   re-prices a model that is already listed, so a key that already has a price
   replaces it.
-- **Aliases**: friendly names that resolve to a real provider model. Callers
-  use the alias; the underlying model stays private to the gateway. The copy
-  controls in a row copy the alias name and its target id. "Applies to"
-  is the scope: an alias for every caller, or one scoped to a single user, which
-  lets the same name resolve to a different model per person and takes precedence
-  over a global alias of that name. See [Model aliases](models.md#model-aliases).
-- **Routing**: policies, which are what an alias grows into. A policy is still a
-  name your callers send as `model`, but it also decides what to try when the
-  first model fails, can tier down to a cheaper model as a budget fills up, and
-  can attach guardrails a caller cannot skip. "Serves" summarises the chain, and
+- **Routing**: every named model your callers can send, in one place. A simple
+  one-target name (what used to be called an alias) still works exactly as
+  before; a policy adds what to try when the first model fails, a tier-down to a
+  cheaper model as a budget fills up, and guardrails a caller cannot skip.
+  Aliases were folded into this page: stored ones were moved into policies by a
+  migration, and any left in `config.yml` are listed here, read-only, tagged
+  `alias`. "Serves" summarises the chain, and
   a `Dynamic` chip marks a policy whose choice depends on the request (so it has
   no single price). **Dry run** compiles the policy and shows the plan without
   sending anything to a provider or billing anything; it lists the candidates

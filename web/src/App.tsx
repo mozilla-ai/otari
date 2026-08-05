@@ -12,9 +12,6 @@ const ActivityPage = lazy(async () => ({
 const RoutingPage = lazy(async () => ({
   default: (await import("@/pages/RoutingPage")).RoutingPage,
 }));
-const AliasesPage = lazy(async () => ({
-  default: (await import("@/pages/AliasesPage")).AliasesPage,
-}));
 const BudgetsPage = lazy(async () => ({
   default: (await import("@/pages/BudgetsPage")).BudgetsPage,
 }));
@@ -73,7 +70,10 @@ export default function App() {
           <Route path="activity" element={withPageLoading(<ActivityPage />)} />
           <Route path="usage" element={withPageLoading(<UsagePage />)} />
           <Route path="models" element={withPageLoading(<ModelsPage />)} />
-          <Route path="aliases" element={withPageLoading(<AliasesPage />)} />
+          {/* Aliases were folded into Routing, which lists and manages them as the
+              one-target policies they are. The old path redirects so bookmarks and
+              any link still pointing at it keep working. */}
+          <Route path="aliases" element={<Navigate to="/routing" replace />} />
           <Route path="routing" element={withPageLoading(<RoutingPage />)} />
           <Route path="tools" element={withPageLoading(<ToolsGuardrailsPage />)} />
           <Route path="settings" element={withPageLoading(<SettingsPage />)} />

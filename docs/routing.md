@@ -9,6 +9,12 @@ An alias is the simplest possible policy: one name, one target. That is why
 shorthand. Reach for a policy when you want more than one target, a condition, or
 an enforced guardrail.
 
+Aliases stored in the database were **moved into policies** by migration
+`b5d7f9a1c3e6`, so there is one store and one dashboard page for the concept.
+Nothing about how they resolve changed: a moved alias is a policy whose `select`
+is a single `default`. The `aliases:` block in `config.yml` is untouched and still
+works, and `/v1/aliases` remains as the one-target API.
+
 Standalone mode only. In hybrid mode the connected platform resolves the model for
 every request, so a policy name is not a model it knows; sending one returns a 400
 that says so rather than a confusing upstream 404.

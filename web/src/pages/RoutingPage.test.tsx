@@ -48,8 +48,13 @@ function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-function mockApi(policies: RoutingPolicyResponse[] = POLICIES, guardrailsUrl: string | null = "http://guardrails:8000") {
+function mockApi(
+  policies: RoutingPolicyResponse[] = POLICIES,
+  guardrailsUrl: string | null = "http://guardrails:8000",
+  aliases: { name: string; target: string; source: string; user_id: string | null }[] = [],
+) {
   let list = [...policies];
+  let aliasList = [...aliases];
   const calls: { url: string; method: string; body: unknown }[] = [];
   const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
@@ -93,6 +98,13 @@ function mockApi(policies: RoutingPolicyResponse[] = POLICIES, guardrailsUrl: st
         return new Response(null, { status: 204 });
       }
       return jsonResponse(list);
+    }
+    if (url.includes("/v1/aliases")) {
+      if (method === "DELETE") {
+        aliasList = [];
+        return new Response(null, { status: 204 });
+      }
+      return jsonResponse(aliasList);
     }
     if (url.includes("/v1/tool-settings")) {
       return jsonResponse({
@@ -251,7 +263,6 @@ describe("RoutingPage", () => {
     expect(screen.getByText("Must be under 100.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create policy" })).toBeDisabled();
   });
-});
 
   it("does not offer Edit for a policy the form would silently truncate", async () => {
     // The editor models only a `budget_used_pct.gte` condition. Offering Edit on a
@@ -273,3 +284,53 @@ describe("RoutingPage", () => {
     // Delete stays available: removing a policy is never lossy.
     expect(within(row).getByRole("button", { name: "Delete" })).toBeInTheDocument();
   });
+
+  it("lists stored aliases alongside policies, so nothing is unmanageable", async () => {
+    // Aliases were folded into this page. If they were not listed here they would
+    // be invisible and undeletable from the dashboard, since the Aliases tab is gone.
+    mockApi([], "http://guardrails:8000", [
+      { name: "legacy", target: "openai:gpt-4o-mini", source: "stored", user_id: null },
+    ]);
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("legacy")).closest("tr")!;
+    expect(within(row).getByText("openai:gpt-4o-mini")).toBeInTheDocument();
+    expect(within(row).getByText("alias")).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });
+
+  it("deletes an alias through the alias endpoint, not the policy one", async () => {
+    const { calls } = mockApi([], "http://guardrails:8000", [
+      { name: "legacy", target: "openai:gpt-4o-mini", source: "stored", user_id: null },
+    ]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("legacy")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    await user.click(within(row).getByRole("button", { name: "Confirm" }));
+
+    const deletes = calls.filter((call) => call.method === "DELETE");
+    expect(deletes).toHaveLength(1);
+    // An alias still lives in model_aliases; deleting it as a policy would 404 and
+    // leave the row in place.
+    expect(deletes[0].url).toContain("/v1/aliases/legacy");
+  });
+
+  it("will not let an alias grow options an alias cannot hold", async () => {
+    mockApi([], "http://guardrails:8000", [
+      { name: "legacy", target: "openai:gpt-4o-mini", source: "stored", user_id: null },
+    ]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("legacy")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    await user.click(await screen.findByRole("button", { name: /Add a fallback chain/ }));
+
+    // Saving it as a policy would leave the alias row behind under the same name,
+    // and the API refuses that collision, so the form says so instead of failing.
+    expect(screen.getByText(/An alias holds one target/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+});
