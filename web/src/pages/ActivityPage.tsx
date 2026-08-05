@@ -662,8 +662,19 @@ export function ActivityPage() {
       source_label: sessionFilter || undefined,
       endpoint: endpointFilter || undefined,
       provider: providerFilter || undefined,
+      tool: (toolFilter || undefined) as UsageFilters["tool"],
     }),
-    [win, statusFilter, userFilter, apiKeyFilter, sourceFilter, sessionFilter, endpointFilter, providerFilter],
+    [
+      win,
+      statusFilter,
+      userFilter,
+      apiKeyFilter,
+      sourceFilter,
+      sessionFilter,
+      endpointFilter,
+      providerFilter,
+      toolFilter,
+    ],
   );
   // Only `by_model` and `by_source` are read (typeahead + source picker), so
   // only those breakdowns are requested: no use for the other five GROUP BYs.

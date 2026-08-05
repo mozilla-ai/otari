@@ -704,6 +704,11 @@ export function useDeleteUser() {
 
 // Serialize the activity-log filters into query params, dropping empty values so
 // the query key and the request URL stay stable across renders.
+//
+// Every field of UsageFilters has to appear here. The list, the row count, and the
+// summary all go through this one function, so a field left out does not fail
+// loudly: the page still shows its filter chip and the URL still carries the value,
+// while the request goes out unfiltered and the table quietly shows everything.
 function usageParams(filters: UsageFilters): URLSearchParams {
   const params = new URLSearchParams();
   if (filters.start_date) params.set("start_date", filters.start_date);
@@ -716,6 +721,7 @@ function usageParams(filters: UsageFilters): URLSearchParams {
   if (filters.api_key_id) params.set("api_key_id", filters.api_key_id);
   if (filters.source) params.set("source", filters.source);
   if (filters.source_label) params.set("source_label", filters.source_label);
+  if (filters.tool) params.set("tool", filters.tool);
   if (filters.priced !== undefined) params.set("priced", String(filters.priced));
   if (filters.counts_toward_budget !== undefined) {
     params.set("counts_toward_budget", String(filters.counts_toward_budget));

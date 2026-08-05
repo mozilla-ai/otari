@@ -1018,3 +1018,22 @@ describe("ActivityPage gateway-run tools", () => {
     expect(screen.getByText("unpriced")).toBeInTheDocument();
   });
 });
+
+describe("ActivityPage filter serialization", () => {
+  it("sends every active filter to the server, not just the chip", async () => {
+    // Regression: `tool` was added to the URL state, the chip, and the bulk-mutation
+    // body, but not to the query serializer every request shares. The page then
+    // looked filtered (chip, URL) while the list, the count, and the timeline all
+    // went out unfiltered, so the table showed rows that did not match.
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?tool=web_search&range=24h");
+
+    await screen.findByText("gpt-4o");
+    const requested = calls.map((c) => c.url);
+    for (const path of ["/v1/usage?", "/v1/usage/count", "/v1/usage/summary"]) {
+      const hit = requested.find((url) => url.includes(path));
+      expect(hit, `no request to ${path}`).toBeDefined();
+      expect(hit, `${path} dropped the tool filter`).toContain("tool=web_search");
+    }
+  });
+});
