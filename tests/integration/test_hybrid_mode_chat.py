@@ -154,6 +154,81 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     ]
 
 
+def test_hybrid_mode_forwards_bedrock_extra_params(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Bedrock attempt's ``extra_params`` (region_name, aws_access_key_id)
+    reaches the ``acompletion()`` call the gateway makes — this is the wire-
+    contract field that carries AWS's mandatory region, without which boto3
+    raises ``NoRegionError`` ("You must specify a region.")."""
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "bedrock-req-1",
+                    "fallback_enabled": False,
+                    "attempts": [
+                        {
+                            "attempt_id": "bedrock-att-1",
+                            "position": 0,
+                            "provider": "bedrock",
+                            "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                            "api_key": "secret-access-key",
+                            "api_base": None,
+                            "managed": False,
+                            "extra_params": {
+                                "region_name": "us-east-1",
+                                "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+                            },
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(204)
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        assert kwargs["model"] == "bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0"
+        assert kwargs["api_key"] == "secret-access-key"
+        assert kwargs["region_name"] == "us-east-1"
+        assert kwargs["aws_access_key_id"] == "AKIAIOSFODNN7EXAMPLE"
+        return ChatCompletion(
+            id="chatcmpl-bedrock",
+            object="chat.completion",
+            created=1700000000,
+            model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+            choices=[
+                Choice(
+                    index=0,
+                    message=ChatCompletionMessage(role="assistant", content="hello"),
+                    finish_reason="stop",
+                )
+            ],
+            usage=CompletionUsage(prompt_tokens=10, completion_tokens=7, total_tokens=17),
+        )
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+
+
 def test_hybrid_mode_forwards_session_label_and_strips_it_upstream(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,

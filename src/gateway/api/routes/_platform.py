@@ -136,6 +136,11 @@ class ResolvedAttempt(BaseModel):
     api_base: str | None = None
     api_key: str
     managed: bool
+    extra_params: dict[str, str] | None = None
+    """Provider-specific extra client kwargs beyond api_key/api_base (e.g. AWS
+    Bedrock's ``region_name``/``aws_access_key_id``). Sourced only from the
+    trusted platform peer, never from the caller's request body — see
+    ``default_attempt_kwargs``, which merges these in non-overridably."""
 
 
 class ResolvedRoute(BaseModel):
@@ -157,7 +162,14 @@ def default_attempt_kwargs(
     attempt: ResolvedAttempt,
     base_request_fields: dict[str, Any],
 ) -> dict[str, Any]:
-    """Standard platform-attempt kwargs: credentials + ``provider:model`` selector."""
+    """Standard platform-attempt kwargs: credentials + ``provider:model`` selector.
+
+    ``extra_params`` is merged in *after* ``base_request_fields`` (and before
+    the forced ``model`` key) so a provider-specific credential field the
+    platform returns (e.g. Bedrock's ``region_name``) can never be shadowed by
+    a same-named field in the caller's own request body, matching how
+    ``api_key``/``model`` are already non-overridable.
+    """
     attempt_provider = LLMProvider(attempt.provider)
     kwargs: dict[str, Any] = {"api_key": attempt.api_key}
     if attempt.api_base:
@@ -165,6 +177,7 @@ def default_attempt_kwargs(
     return {
         **kwargs,
         **base_request_fields,
+        **(attempt.extra_params or {}),
         "model": f"{attempt_provider.value}:{attempt.model}",
     }
 
@@ -527,6 +540,7 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
                 api_base=att.get("api_base"),
                 api_key=str(att["api_key"]),
                 managed=bool(att.get("managed", False)),
+                extra_params=att.get("extra_params"),
             )
             for att in attempts_payload
         ]
@@ -549,6 +563,7 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
                 api_base=payload.get("api_base"),
                 api_key=str(payload["api_key"]),
                 managed=bool(payload.get("managed", False)),
+                extra_params=payload.get("extra_params"),
             )
         ],
     )

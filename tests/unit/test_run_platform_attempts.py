@@ -17,7 +17,7 @@ import pytest
 from fastapi import HTTPException
 
 from gateway.api.routes import _platform
-from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, run_platform_attempts
+from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, default_attempt_kwargs, run_platform_attempts
 from gateway.core.config import GatewayConfig
 from gateway.metrics import REGISTRY
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
@@ -130,6 +130,62 @@ async def test_locked_in_failure_not_counted_as_abandoned() -> None:
         )
 
     assert _abandoned_sample("anthropic", "claude-locked", "upstream_error", 0) == before
+
+
+def test_default_attempt_kwargs_omits_extra_params_when_unset() -> None:
+    """Most providers' attempts carry no ``extra_params``; the kwargs shape is
+    unchanged from before the field existed."""
+    attempt = _single_attempt("openai", "gpt-4o-mini")
+
+    kwargs = default_attempt_kwargs(attempt, {"temperature": 0.2})
+
+    assert kwargs == {
+        "api_key": "k",
+        "temperature": 0.2,
+        "model": "openai:gpt-4o-mini",
+    }
+
+
+def test_default_attempt_kwargs_forwards_extra_params() -> None:
+    """A Bedrock-shaped attempt's ``extra_params`` (region_name plus, for the
+    classic IAM key-pair shape, aws_access_key_id) is forwarded verbatim into
+    the kwargs handed to ``acompletion()``."""
+    attempt = ResolvedAttempt(
+        attempt_id="a0",
+        position=0,
+        provider="bedrock",
+        model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        api_key="secret-access-key",
+        managed=False,
+        extra_params={"region_name": "us-east-1", "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE"},
+    )
+
+    kwargs = default_attempt_kwargs(attempt, {})
+
+    assert kwargs["region_name"] == "us-east-1"
+    assert kwargs["aws_access_key_id"] == "AKIAIOSFODNN7EXAMPLE"
+    assert kwargs["api_key"] == "secret-access-key"
+    assert kwargs["model"] == "bedrock:anthropic.claude-3-5-sonnet-20241022-v2:0"
+
+
+def test_default_attempt_kwargs_extra_params_not_overridable_by_request_fields() -> None:
+    """``extra_params`` is platform-trusted and must win over a same-named
+    field in the caller's own request body, exactly like ``api_key``/``model``
+    already do — a request cannot smuggle a different region past the
+    platform's resolved credentials."""
+    attempt = ResolvedAttempt(
+        attempt_id="a0",
+        position=0,
+        provider="bedrock",
+        model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        api_key="secret-access-key",
+        managed=False,
+        extra_params={"region_name": "us-east-1"},
+    )
+
+    kwargs = default_attempt_kwargs(attempt, {"region_name": "attacker-controlled-region"})
+
+    assert kwargs["region_name"] == "us-east-1"
 
 
 @pytest.mark.asyncio

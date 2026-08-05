@@ -89,6 +89,19 @@ Content-Type: application/json
       "api_key": "sk-...",
       "api_base": "https://api.openai.com/v1",
       "managed": false
+    },
+    {
+      "attempt_id": "01HX3...",
+      "position": 2,
+      "provider": "bedrock",
+      "model": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+      "api_key": "wJalrXUtnFEMI...",
+      "api_base": null,
+      "managed": false,
+      "extra_params": {
+        "region_name": "us-east-1",
+        "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE"
+      }
     }
   ]
 }
@@ -98,6 +111,21 @@ Otari iterates `attempts` in order. On a retryable failure it moves to the
 next entry; on success it stops. The `attempt_id` of the entry that ultimately
 succeeded (or the last one tried, on total failure) is what Otari echoes
 back via `X-Correlation-ID` and reports through `/gateway/usage`.
+
+`extra_params` (optional, omitted for most providers) carries provider-specific
+credential/client fields beyond `api_key`/`api_base`: for example AWS
+Bedrock's mandatory `region_name` and, for the classic IAM-key-pair shape,
+`aws_access_key_id` (the paired secret access key travels in `api_key`, since
+that's the only field the wire contract treats as sensitive). Otari merges
+these verbatim into the `acompletion()` call for that attempt, applied after
+the caller's own request fields so they can never be shadowed by a
+same-named field in the request body: the same non-overridable treatment
+`api_key` and `model` already get. This field is sourced only from the
+trusted platform peer; Otari never accepts it from the caller. AWS Bedrock's
+bearer-token ("Bedrock API key") credential shape is not representable here,
+since it requires an in-process boto3 client with a custom signing hook, so
+the platform only sends `extra_params` for the classic IAM access-key/secret-key
+shape.
 
 `request_id` groups every `attempt_id` from the same resolve call so the
 platform can attribute spend, render trace timelines, and emit fallback events.
