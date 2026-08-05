@@ -7,6 +7,7 @@ import {
   useKeys,
   useSetPricing,
   useSetUsagePrice,
+  useRequestGroups,
   useUsageCount,
   useUsageLogs,
   useUsageSummary,
@@ -384,6 +385,202 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
   );
 }
 
+// ---------- routing ----------
+//
+// A routed request writes one usage row per attempt (all sharing a
+// `request_group_id`), so a single row answers only half of what an operator
+// wants: "attempt 1 of 2 failed" without saying what served the request. These
+// helpers turn the stored attribution into the sentence the Routing column shows,
+// and reassemble a plan from the rows of one group.
+
+// Plain English for a compiled attempt's `selection_reason`. The stored values are
+// the compiler's vocabulary (`static`, `default`, `on_failure`, `condition:<keys>`,
+// `router:<name>`): precise, and meaningless to a reader who has not read the
+// compiler. An unrecognized value is de-underscored rather than dropped, since the
+// set is open by construction (a condition or router name comes from config).
+function selectionReasonLabel(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  if (reason === "static") return "the policy's only target";
+  if (reason === "default") return "the policy's default target";
+  if (reason === "on_failure") return "a fallback candidate";
+  if (reason.startsWith("condition:")) {
+    const keys = reason
+      .slice("condition:".length)
+      .split(",")
+      .filter(Boolean)
+      .join(", ");
+    return keys ? `matched on ${keys}` : "matched a condition";
+  }
+  if (reason.startsWith("router:")) {
+    const name = reason.slice("router:".length);
+    return name ? `chosen by router ${name}` : "chosen by a router";
+  }
+  return reason.replaceAll("_", " ");
+}
+
+// What a group's request ended up doing, read off its outcome row. Absorbed rows
+// are attempts the policy recovered from, so exactly one row per finished group is
+// the outcome: the attempt that served, or the terminal failure.
+interface GroupOutcome {
+  /** Qualified target of the attempt that served, or null when none did. */
+  servedBy: string | null;
+  servedPosition: number | null;
+}
+
+// Index the outcome of every group represented in `rows`. Built from rows the page
+// already holds first, then filled in from a batched lookup, so the common case
+// (a group's attempts are adjacent in a newest-first list) costs no extra request.
+function indexGroupOutcomes(rows: readonly UsageEntry[]): Map<string, GroupOutcome> {
+  const index = new Map<string, GroupOutcome>();
+  for (const row of rows) {
+    if (!row.request_group_id || row.status === "absorbed") continue;
+    index.set(row.request_group_id, {
+      servedBy: row.status === "success" ? pricingSelectorOf(row) : null,
+      servedPosition: row.status === "success" ? (row.attempt_position ?? null) : null,
+    });
+  }
+  return index;
+}
+
+// One line of prose for a row's place in its plan, replacing the "attempt 1/2 ·
+// default" shorthand: that read as a fraction of something unnamed, said nothing
+// about whether the attempt worked, and pointed at no other row. `outcome` is the
+// group's outcome when it is known, which is what lets an absorbed row name the
+// model that served in its place.
+function attemptSentence(entry: UsageEntry, outcome: GroupOutcome | null): string | null {
+  const reason = selectionReasonLabel(entry.selection_reason);
+  const position = entry.attempt_position;
+  const total = entry.attempt_count;
+  // A policy with one candidate has no plan to place the row in, so the only thing
+  // worth saying is why that candidate was picked.
+  if (position == null || total == null || total <= 1) return reason;
+  const attempt = `attempt ${position} of ${total}`;
+  if (entry.status === "absorbed") {
+    if (outcome?.servedBy) return `${attempt} failed, served by ${outcome.servedBy}`;
+    if (outcome) return `${attempt} failed, and so did the rest`;
+    return `${attempt} failed, fell back`;
+  }
+  if (entry.status === "error") {
+    // The walk stops early on a non-retryable failure, a lock-in, or a
+    // gateway-side refusal, so the later candidates were not necessarily tried.
+    return position < total ? `${attempt} failed, no further candidate tried` : `${attempt} failed, plan exhausted`;
+  }
+  return reason ? `served on ${attempt} (${reason})` : `served on ${attempt}`;
+}
+
+// The Routing column: the policy the caller named, then where this row sits in its
+// plan and how that turned out.
+function RoutingCell({ entry, outcome }: { entry: UsageEntry; outcome: GroupOutcome | null }) {
+  // Blank, not an em-dash, when the request named a plain model. This column is
+  // sparse by nature (most rows are unrouted), and a placeholder on every one of
+  // them would add noise to every scan while saying nothing.
+  if (entry.policy_name == null) return null;
+  const sentence = attemptSentence(entry, outcome);
+  return (
+    <span className="flex flex-col leading-tight">
+      <span className="text-[var(--otari-ink)]">{entry.policy_name}</span>
+      {/* Non-color signal: the outcome is spelled out, so the amber row tint is
+          never the only thing carrying the meaning. */}
+      {/* Wraps rather than truncates: the tail is the part that matters (it names
+          the model that served), and a qualified target is routinely longer than
+          the column. The Model column wraps for the same reason. */}
+      {sentence ? <span className="text-xs break-words text-[var(--otari-muted)]">{sentence}</span> : null}
+    </span>
+  );
+}
+
+// Per-attempt outcome for the plan table. Terser than the row sentence, which has
+// to stand alone; here the table's shape already says which attempt this is.
+function attemptOutcome(entry: UsageEntry): string {
+  if (entry.status === "absorbed") return entry.status_code === null ? "failed, fell back" : `failed ${entry.status_code}, fell back`;
+  if (entry.status === "error") return entry.status_code === null ? "failed" : `failed ${entry.status_code}`;
+  return "served the request";
+}
+
+// Attempts in plan order. `attempt_position` is authoritative; timestamp is the
+// tiebreaker for a row written before the column existed, or a group whose rows
+// share a position (which would be a writer bug, not something to hide).
+function planOrder(rows: readonly UsageEntry[]): UsageEntry[] {
+  return [...rows].sort(
+    (a, b) => (a.attempt_position ?? 0) - (b.attempt_position ?? 0) || a.timestamp.localeCompare(b.timestamp),
+  );
+}
+
+// The whole plan behind one routed request: every candidate that ran, in order,
+// with the one that served marked. This is the answer to "a fallback fired, so
+// what actually served me", which no single row can give.
+function RoutingPlan({ entry }: { entry: UsageEntry }) {
+  const groupIds = entry.request_group_id ? [entry.request_group_id] : [];
+  const group = useRequestGroups(groupIds);
+  // Falls back to the row itself while the lookup is in flight (and for a
+  // pre-`request_group_id` row, which has no siblings to find), so the section
+  // never flashes empty and never claims a one-attempt plan it did not read.
+  const attempts = planOrder(group.data?.length ? group.data : [entry]);
+  const complete = Boolean(group.data?.length);
+  const served = attempts.find((attempt) => attempt.status === "success");
+  const total = entry.attempt_count ?? attempts.length;
+
+  const summary = !complete
+    ? "Loading the rest of this request's attempts…"
+    : served
+      ? `Served by attempt ${served.attempt_position ?? "?"} of ${total}: ${pricingSelectorOf(served)}`
+      : attempts.some((attempt) => attempt.status === "error")
+        ? "No candidate served this request."
+        : "This request has no outcome row yet.";
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+        Routing plan · {entry.policy_name}
+      </span>
+      <span className="text-sm text-[var(--otari-ink)]">{summary}</span>
+      <div className="overflow-x-auto rounded-lg border border-[var(--otari-line)]">
+        <table className="w-full text-xs" aria-label={`Routing plan for policy ${entry.policy_name}`}>
+          <thead className="text-[var(--otari-muted)]">
+            <tr className="border-b border-[var(--otari-line)]">
+              <th scope="col" className="px-3 py-2 text-left font-medium">#</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium">Target</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium">Selected as</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium">Outcome</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Time</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {attempts.map((attempt) => (
+              <tr
+                key={attempt.id}
+                className={`border-t border-[var(--otari-line)] first:border-t-0 ${
+                  attempt.status === "success" ? "bg-[var(--otari-brand-tint)]" : ""
+                }`}
+              >
+                <td className="px-3 py-2 tabular-nums">{attempt.attempt_position ?? "?"}</td>
+                <td className="px-3 py-2 break-all text-[var(--otari-ink)]">
+                  {pricingSelectorOf(attempt)}
+                  {attempt.id === entry.id ? (
+                    <span className="ml-2 rounded-full border border-[var(--otari-line)] px-1.5 py-0.5 text-[10px] text-[var(--otari-muted)]">
+                      this row
+                    </span>
+                  ) : null}
+                </td>
+                <td className="px-3 py-2">{selectionReasonLabel(attempt.selection_reason) ?? "—"}</td>
+                <td className={`px-3 py-2 ${attempt.status === "success" ? "" : "text-amber-700"}`}>
+                  {attemptOutcome(attempt)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatLatency(attempt.latency_ms)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatUSD(attempt.cost)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <span className="text-xs text-[var(--otari-muted)]">
+        Cost and tool charges settle on the attempt that served, so a failed attempt carries its tokens and no charge.
+      </span>
+    </div>
+  );
+}
+
 // `copyValue` adds a copy control for the fields that hold an opaque identifier
 // (a request id, an api key id): they are what an operator pastes into a log
 // search or a support thread, and a mistyped character makes them useless.
@@ -453,6 +650,10 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
           </pre>
         </div>
       ) : null}
+      {/* Routed requests only. Placed above the metadata grid, and above the
+          per-row fields, because on a failed attempt it answers the first question
+          the failure raises: what served the request instead. */}
+      {entry.policy_name !== null && entry.policy_name !== undefined ? <RoutingPlan entry={entry} /> : null}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <DetailField label="Provider">{entry.provider ?? "—"}</DetailField>
         <DetailField label="Endpoint">{entry.endpoint}</DetailField>
@@ -779,6 +980,29 @@ export function ActivityPage() {
   }));
 
   const rows = usage.data ?? [];
+
+  // What served each routed request on this page. Built from the page itself where
+  // possible (a group's attempts are written milliseconds apart, so they are
+  // usually adjacent in a newest-first list), and looked up for the groups whose
+  // outcome row is missing: a page boundary splits a group, and filtering to the
+  // `absorbed` status (the way an operator investigates fallovers) hides every
+  // outcome row by construction, which is precisely when the answer is wanted.
+  const { pageOutcomes, unresolvedGroupIds } = useMemo(() => {
+    const known = indexGroupOutcomes(rows);
+    const missing = new Set<string>();
+    for (const row of rows) {
+      if (row.status === "absorbed" && row.request_group_id && !known.has(row.request_group_id)) {
+        missing.add(row.request_group_id);
+      }
+    }
+    return { pageOutcomes: known, unresolvedGroupIds: [...missing] };
+  }, [rows]);
+  const unresolvedGroups = useRequestGroups(unresolvedGroupIds);
+  const groupOutcomes = useMemo(() => {
+    if (!unresolvedGroups.data?.length) return pageOutcomes;
+    return new Map([...pageOutcomes, ...indexGroupOutcomes(unresolvedGroups.data)]);
+  }, [pageOutcomes, unresolvedGroups.data]);
+
   const totalIsExact = count.isSuccess && !count.isPlaceholderData;
   const total = totalIsExact ? (count.data?.total ?? 0) : null;
   // Neither the default preset nor the unbounded "All" is itself a filter: only an
@@ -991,8 +1215,9 @@ export function ActivityPage() {
   };
   const pickCustom = (startIso: string, endIso: string) => url.patch({ start_date: startIso, end_date: endIso });
 
-  // Memoized on keyLabels (the only per-render input) so DataTable's per-row
-  // cache holds: a fresh array every render would rebuild all rows per click.
+  // Memoized on its per-render inputs (the key labels and the routing outcomes,
+  // both themselves memoized) so DataTable's per-row cache holds: a fresh array
+  // every render would rebuild all rows per click.
   const columns = useMemo<DataTableColumn<UsageEntry>[]>(() => {
     const apiKeyLabel = (id: string | null): string =>
       id === null ? "—" : (keyLabels.get(id) ?? `${id.slice(0, 8)}…`);
@@ -1037,31 +1262,11 @@ export function ActivityPage() {
       {
         id: "routing",
         header: "Routing",
-        // The policy the caller named, plus where this row sits in its plan. The
-        // Model column keeps meaning the model that actually ran (it is the join
-        // key for filters and for spend-by-model), so this is additive: together
-        // they answer "what did I ask for, and what served it".
-        // Blank, not an em-dash, when the request named a plain model. This
-        // column is sparse by nature (most rows are unrouted), and a placeholder
-        // on every one of them would add noise to every scan while saying nothing.
-        cell: (e) =>
-          e.policy_name == null ? null : (
-            <span className="flex flex-col leading-tight">
-              <span className="text-[var(--otari-ink)]">{e.policy_name}</span>
-              <span className="text-xs text-[var(--otari-muted)]">
-                {/* Non-color signal: the position is spelled out, so the amber row
-                    tint is never the only thing carrying the meaning. */}
-                {[
-                  e.attempt_position != null && e.attempt_count != null && e.attempt_count > 1
-                    ? `attempt ${e.attempt_position}/${e.attempt_count}`
-                    : null,
-                  e.selection_reason,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </span>
-            </span>
-          ),
+        // The policy the caller named, plus where this row sits in its plan and how
+        // that turned out. The Model column keeps meaning the model that actually
+        // ran (it is the join key for filters and for spend-by-model), so this is
+        // additive: together they answer "what did I ask for, and what served it".
+        cell: (e) => <RoutingCell entry={e} outcome={groupOutcomes.get(e.request_group_id ?? "") ?? null} />,
       },
       { id: "api_key", header: "API key", cell: (e) => <span className="text-[var(--otari-muted)]">{apiKeyLabel(e.api_key_id)}</span> },
       { id: "tokens", header: "Tokens", align: "end", cell: (e) => <TokenBar entry={e} /> },
@@ -1069,7 +1274,7 @@ export function ActivityPage() {
       { id: "latency", header: "Total time", align: "end", cell: (e) => formatLatency(e.latency_ms) },
       { id: "status", header: "Status", cell: (e) => <StatusPill status={e.status} /> },
     ];
-  }, [keyLabels]);
+  }, [keyLabels, groupOutcomes]);
 
   return (
     <div className="flex flex-col gap-6">

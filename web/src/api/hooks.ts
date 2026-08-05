@@ -793,6 +793,34 @@ export function useFailureCount(windowSeconds: number, enabled = true) {
   });
 }
 
+// The rows of one or more request groups: every attempt a routed request made,
+// which is what turns "attempt 1 of 2, failed" into "and here is what served it".
+// A plan is capped at a handful of candidates, so one page covers the batch the
+// activity table asks for; the cap is generous rather than tight so a truncated
+// plan can never silently read as a complete one.
+const REQUEST_GROUP_PAGE_LIMIT = 1000;
+
+// Fetched as a batch (the endpoint takes a repeatable `request_group_id`) so a
+// page of the activity log costs one lookup rather than one per row. The key
+// sorts its ids so two callers asking for the same set share a cache entry.
+export function useRequestGroups(groupIds: readonly string[]) {
+  const ids = [...new Set(groupIds)].sort();
+  return useQuery({
+    queryKey: [USAGE, "groups", ids],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      for (const id of ids) params.append("request_group_id", id);
+      params.set("limit", String(REQUEST_GROUP_PAGE_LIMIT));
+      return apiFetch<UsageEntry[]>(`/v1/usage?${params.toString()}`);
+    },
+    enabled: ids.length > 0,
+    placeholderData: keepPreviousData,
+    // A group is immutable once its request finished, so the only reason to
+    // refetch is a group that was still in flight when it was first read.
+    staleTime: 30_000,
+  });
+}
+
 // Delete imported usage rows by selection (ids or by_filter). Only rows the
 // server treats as imported (counts_toward_budget = false) are removed; every
 // usage view is invalidated so the list, count, and analytics refresh.

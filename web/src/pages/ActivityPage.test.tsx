@@ -49,7 +49,7 @@ interface FetchCall {
 
 // Mock fetch for the usage list/count/summary reads plus the delete and
 // set-price mutations. Records every call so tests can assert URLs and bodies.
-function mockApi(opts: { rows?: UsageEntry[]; total?: number } = {}) {
+function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageEntry[] } = {}) {
   const rows = opts.rows ?? [];
   const total = opts.total ?? rows.length;
   const calls: FetchCall[] = [];
@@ -99,6 +99,14 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number } = {}) {
       });
     }
     if (url.includes("/v1/usage")) {
+      // The request-group lookup (repeatable request_group_id) is the same list
+      // endpoint, so it is served here: rows of the asked-for groups only, out of
+      // `groupRows` when a test needs siblings the page itself never listed.
+      const asked = new URL(url, "http://localhost").searchParams.getAll("request_group_id");
+      if (asked.length) {
+        const pool = opts.groupRows ?? rows;
+        return jsonResponse(pool.filter((r) => r.request_group_id && asked.includes(r.request_group_id)));
+      }
       return jsonResponse(rows);
     }
     if (url.includes("/v1/users") || url.includes("/v1/keys")) {
@@ -917,38 +925,103 @@ describe("ActivityPage", () => {
     );
   });
 
-  it("joins the routing detail without a dangling separator", async () => {
-    // A row can carry the attempt position with no selection reason (a historical
-    // row, or one written before the column was populated). Interpolating both
-    // unconditionally left "attempt 1/2 · " with a trailing separator.
-    mockApi({
-      rows: [
-        entry({ policy_name: "fast", attempt_position: 1, attempt_count: 2, selection_reason: null }),
-      ],
-    });
-    renderPage(<ActivityPage />);
-
-    expect(await screen.findByText("attempt 1/2")).toBeInTheDocument();
-    expect(screen.queryByText(/attempt 1\/2 ·/)).not.toBeInTheDocument();
-  });
-
-  it("joins the attempt position and the selection reason when both are present", async () => {
-    mockApi({
+  it("names the model that served an absorbed attempt, from the rows already on the page", async () => {
+    // The question a failed-over row raises is "so what served it". The serving
+    // attempt is a sibling row sharing the request group, and it is normally on the
+    // same page (the rows are written milliseconds apart), so no lookup is needed.
+    const { calls } = mockApi({
       rows: [
         entry({
+          id: "served",
+          model: "gpt-4o",
+          provider: "openai",
+          status: "success",
           policy_name: "fast",
+          selection_reason: "on_failure",
           attempt_position: 2,
           attempt_count: 2,
-          selection_reason: "on_failure",
+          request_group_id: "grp-1",
+        }),
+        entry({
+          id: "absorbed",
+          model: "deepseek",
+          provider: "fireworks",
+          status: "absorbed",
+          status_code: 404,
+          cost: null,
+          policy_name: "fast",
+          selection_reason: "default",
+          attempt_position: 1,
+          attempt_count: 2,
+          request_group_id: "grp-1",
         }),
       ],
     });
     renderPage(<ActivityPage />);
 
-    expect(await screen.findByText("attempt 2/2 · on_failure")).toBeInTheDocument();
+    expect(await screen.findByText("attempt 1 of 2 failed, served by openai:gpt-4o")).toBeInTheDocument();
+    expect(screen.getByText("served on attempt 2 of 2 (a fallback candidate)")).toBeInTheDocument();
+    // The serving row was already listed, so nothing was looked up for it.
+    expect(listCalls(calls).some((url) => url.includes("request_group_id="))).toBe(false);
   });
 
-  it("shows the selection reason alone for a single-candidate policy", async () => {
+  it("looks the serving model up when the outcome row is not on the page", async () => {
+    // Filtering to `absorbed` (how an operator investigates fallovers) hides every
+    // outcome row by construction, so the answer has to be fetched.
+    const { calls } = mockApi({
+      rows: [
+        entry({
+          id: "absorbed",
+          model: "deepseek",
+          provider: "fireworks",
+          status: "absorbed",
+          policy_name: "fast",
+          attempt_position: 1,
+          attempt_count: 2,
+          request_group_id: "grp-1",
+        }),
+      ],
+      groupRows: [
+        entry({
+          id: "served",
+          model: "gpt-4o",
+          provider: "openai",
+          status: "success",
+          attempt_position: 2,
+          attempt_count: 2,
+          request_group_id: "grp-1",
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />, "/activity?status=absorbed");
+
+    expect(await screen.findByText("attempt 1 of 2 failed, served by openai:gpt-4o")).toBeInTheDocument();
+    expect(listCalls(calls).some((url) => url.includes("request_group_id=grp-1"))).toBe(true);
+  });
+
+  it("does not imply a fallback ran when the walk stopped early", async () => {
+    // A non-retryable failure, a tool-loop lock-in, or a gateway-side refusal stops
+    // the walk on the candidate it happened on, so the later candidates were never
+    // called. "attempt 1 of 2" alone read as though the second one had been tried.
+    mockApi({
+      rows: [
+        entry({
+          status: "error",
+          status_code: 400,
+          policy_name: "fast",
+          selection_reason: "default",
+          attempt_position: 1,
+          attempt_count: 2,
+          request_group_id: "grp-1",
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    expect(await screen.findByText("attempt 1 of 2 failed, no further candidate tried")).toBeInTheDocument();
+  });
+
+  it("spells out the selection reason alone for a single-candidate policy", async () => {
     mockApi({
       rows: [
         entry({ policy_name: "solo", attempt_position: 1, attempt_count: 1, selection_reason: "default" }),
@@ -956,7 +1029,76 @@ describe("ActivityPage", () => {
     });
     renderPage(<ActivityPage />);
 
-    expect(await screen.findByText("default")).toBeInTheDocument();
+    expect(await screen.findByText("the policy's default target")).toBeInTheDocument();
+  });
+
+  it("humanizes a condition-matched selection reason", async () => {
+    mockApi({
+      rows: [entry({ policy_name: "tiered", attempt_position: 1, attempt_count: 1, selection_reason: "condition:user_id,budget_remaining" })],
+    });
+    renderPage(<ActivityPage />);
+
+    expect(await screen.findByText("matched on user_id, budget_remaining")).toBeInTheDocument();
+  });
+
+  it("shows the whole plan in the request detail, marking the attempt that served", async () => {
+    mockApi({
+      rows: [
+        entry({
+          id: "absorbed",
+          model: "deepseek",
+          provider: "fireworks",
+          status: "absorbed",
+          status_code: 404,
+          cost: null,
+          latency_ms: 264,
+          error_message: "no pricing is configured for it",
+          policy_name: "fast",
+          selection_reason: "default",
+          attempt_position: 1,
+          attempt_count: 2,
+          request_group_id: "grp-1",
+        }),
+      ],
+      groupRows: [
+        entry({
+          id: "absorbed",
+          model: "deepseek",
+          provider: "fireworks",
+          status: "absorbed",
+          status_code: 404,
+          cost: null,
+          latency_ms: 264,
+          policy_name: "fast",
+          selection_reason: "default",
+          attempt_position: 1,
+          attempt_count: 2,
+          request_group_id: "grp-1",
+        }),
+        entry({
+          id: "served",
+          model: "gpt-4o",
+          provider: "openai",
+          status: "success",
+          cost: 0.0031,
+          latency_ms: 1200,
+          policy_name: "fast",
+          selection_reason: "on_failure",
+          attempt_position: 2,
+          attempt_count: 2,
+          request_group_id: "grp-1",
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    await userEvent.click(await screen.findByText("deepseek"));
+    expect(await screen.findByText("Served by attempt 2 of 2: openai:gpt-4o")).toBeInTheDocument();
+    const plan = screen.getByRole("table", { name: /routing plan/i });
+    expect(within(plan).getByText("failed 404, fell back")).toBeInTheDocument();
+    expect(within(plan).getByText("served the request")).toBeInTheDocument();
+    expect(within(plan).getByText("this row")).toBeInTheDocument();
+    expect(within(plan).getByText("$0.0031")).toBeInTheDocument();
   });
 });
 

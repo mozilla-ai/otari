@@ -10748,7 +10748,7 @@
         ]
       },
       "get": {
-        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, and session (``source_label``).\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
+        "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, session (``source_label``), and request\ngroup (``request_group_id``, repeatable, which returns a routed request's\nwhole attempt plan). Paginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
         "operationId": "list_usage_v1_usage_get",
         "parameters": [
           {
@@ -11008,6 +11008,28 @@
               ],
               "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
+            "in": "query",
+            "name": "request_group_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 1000,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
+              "title": "Request Group Id"
             }
           },
           {
@@ -11336,6 +11358,28 @@
               ],
               "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
+            "in": "query",
+            "name": "request_group_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 1000,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
+              "title": "Request Group Id"
             }
           }
         ],

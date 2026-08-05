@@ -37,6 +37,10 @@ def _make_log(
     status_code: int | None = None,
     latency_ms: int | None = None,
     log_id: str | None = None,
+    policy_name: str | None = None,
+    attempt_position: int | None = None,
+    attempt_count: int | None = None,
+    request_group_id: str | None = None,
 ) -> UsageLog:
     _ensure_user(db, user_id)
     log = UsageLog(
@@ -55,9 +59,78 @@ def _make_log(
         error_message=error_message,
         status_code=status_code,
         latency_ms=latency_ms,
+        policy_name=policy_name,
+        attempt_position=attempt_position,
+        attempt_count=attempt_count,
+        request_group_id=request_group_id,
     )
     db.add(log)
     return log
+
+
+def test_list_usage_filters_by_request_group(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """One group's rows are the whole plan behind one routed request."""
+    ts = datetime(2026, 7, 1, 9, 0, tzinfo=UTC)
+    _make_log(
+        db_session,
+        user_id="u",
+        timestamp=ts,
+        log_id="absorbed-1",
+        status="absorbed",
+        cost=None,
+        policy_name="fast",
+        attempt_position=1,
+        attempt_count=2,
+        request_group_id="grp-1",
+    )
+    _make_log(
+        db_session,
+        user_id="u",
+        timestamp=ts + timedelta(milliseconds=300),
+        log_id="served-1",
+        policy_name="fast",
+        attempt_position=2,
+        attempt_count=2,
+        request_group_id="grp-1",
+    )
+    _make_log(db_session, user_id="u", timestamp=ts, log_id="other-group", request_group_id="grp-2")
+    db_session.commit()
+
+    listed = client.get(USAGE_PATH, params={"request_group_id": "grp-1"}, headers=master_key_header)
+    assert sorted(row["id"] for row in listed.json()) == ["absorbed-1", "served-1"]
+    count = client.get("/v1/usage/count", params={"request_group_id": "grp-1"}, headers=master_key_header)
+    assert count.json()["total"] == 2
+
+
+def test_list_usage_filters_by_several_request_groups(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The dashboard resolves a whole page of rows in one batched lookup."""
+    ts = datetime(2026, 7, 1, 9, 0, tzinfo=UTC)
+    for group in ("grp-1", "grp-2", "grp-3"):
+        _make_log(db_session, user_id="u", timestamp=ts, log_id=f"row-{group}", request_group_id=group)
+    db_session.commit()
+
+    listed = client.get(
+        USAGE_PATH,
+        params=[("request_group_id", "grp-1"), ("request_group_id", "grp-3")],
+        headers=master_key_header,
+    )
+    assert sorted(row["id"] for row in listed.json()) == ["row-grp-1", "row-grp-3"]
+
+
+def test_list_usage_request_group_batch_is_capped(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """An unbounded IN list is rejected rather than executed."""
+    response = client.get(
+        USAGE_PATH,
+        params=[("request_group_id", f"grp-{index}") for index in range(1001)],
+        headers=master_key_header,
+    )
+    assert response.status_code == 422
 
 
 def test_list_usage_filters_by_api_key(

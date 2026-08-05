@@ -60,6 +60,12 @@ _SERIES_TOP_N = 8
 # swallowed by the "other" fold.
 _SESSION_BREAKDOWN_TOP_N = 250
 
+# How many request groups one call may ask for. The dashboard batches the groups
+# visible on a page of the activity log into a single lookup, so the bound tracks
+# the largest page size (1000) rather than a plan's candidate count; it exists to
+# keep a caller from posting an unbounded IN list.
+_MAX_REQUEST_GROUPS = 1000
+
 Bucket = Literal["hour", "day"]
 SeriesGroupBy = Literal["model", "user_id", "api_key_id", "source"]
 
@@ -213,6 +219,14 @@ _PROVIDER_DESC = "Filter to a single provider (e.g. 'openai')"
 _SOURCE_DESC = "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')"
 _SOURCE_LABEL_DESC = "Filter to a single session/project label (the source_label carried by imported usage)"
 _API_KEY_DESC = "Filter to a single API key id"
+_REQUEST_GROUP_DESC = (
+    "Filter to the rows of one or more request groups; repeatable "
+    "(request_group_id=a&request_group_id=b). A routed request writes one row per "
+    "attempt, all sharing a request_group_id, so this returns a request's whole plan: "
+    "its absorbed attempts and the attempt that served it. Ignore ordering by "
+    "timestamp and read attempt_position to reconstruct the plan. At most "
+    f"{_MAX_REQUEST_GROUPS} ids per call."
+)
 _PRICED_DESC = (
     "Filter by token-pricing state: true = only rows whose model tokens were priced, "
     "false = only rows that still need pricing (no cost at all, or tokens that were "
@@ -252,6 +266,7 @@ def _usage_filters(
     tool: str | None = None,
     counts_toward_budget: bool | None = None,
     status_code: int | None = None,
+    request_group_id: list[str] | None = None,
 ) -> list[ColumnElement[bool]]:
     """Build the shared WHERE conditions for the list and count endpoints.
 
@@ -290,6 +305,15 @@ def _usage_filters(
         conditions.append(UsageLog.source_label == source_label)
     if api_key_id is not None:
         conditions.append(UsageLog.api_key_id == api_key_id)
+    if request_group_id:
+        # A one-id lookup stays an equality test so it uses the index the same way
+        # a single-row fetch would; the IN form is for the dashboard's batched
+        # page lookup.
+        conditions.append(
+            UsageLog.request_group_id == request_group_id[0]
+            if len(request_group_id) == 1
+            else UsageLog.request_group_id.in_(request_group_id)
+        )
     if priced is True:
         conditions.append(~_needs_pricing_expr())
     elif priced is False:
@@ -318,14 +342,18 @@ async def list_usage(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    request_group_id: Annotated[
+        list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
+    ] = None,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[UsageEntry]:
     """List usage logs ordered by timestamp (most recent first).
 
     Supports optional filters for time range, user, status, failure status code,
-    model, endpoint, provider, source, and session (``source_label``).
-    Paginated via skip/limit. The return shape is a bare JSON array; external
+    model, endpoint, provider, source, session (``source_label``), and request
+    group (``request_group_id``, repeatable, which returns a routed request's
+    whole attempt plan). Paginated via skip/limit. The return shape is a bare JSON array; external
     billing/analytics consumers depend on this, so the total row count for a
     paginated UI is served separately by ``GET /v1/usage/count`` rather than
     wrapped in an envelope here. Timestamps accept either ISO 8601 strings or
@@ -346,6 +374,7 @@ async def list_usage(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        request_group_id=request_group_id,
     )
     stmt = select(UsageLog).where(*conditions).order_by(UsageLog.timestamp.desc()).offset(skip).limit(limit)
     result = await db.execute(stmt)
@@ -399,6 +428,9 @@ async def count_usage(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    request_group_id: Annotated[
+        list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
+    ] = None,
 ) -> UsageCount:
     """Total number of usage logs matching the given filters.
 
@@ -423,6 +455,7 @@ async def count_usage(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        request_group_id=request_group_id,
     )
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
     total = (await db.execute(stmt)).scalar_one()

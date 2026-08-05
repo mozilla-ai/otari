@@ -253,6 +253,12 @@ working fallback chain never reads as an outage and a request that took two
 attempts is still counted as one request. Filter the activity log to the
 `absorbed` status to see them on their own.
 
+To read a request's whole plan back, ask the usage endpoint for its group:
+`GET /v1/usage?request_group_id=<id>` returns every attempt, and the parameter is
+repeatable so a page of rows resolves in one call. The dashboard uses this to name
+the model that served an attempt that failed, and to render the plan behind a
+routed row (see [the Activity page](dashboard.md#observability)).
+
 `GET /v1/models` lists policies. A one-target policy reports its target's price. A
 policy that selects per request (a condition or a router) has no single target, so
 it reports `pricing_source: "dynamic"` with a null price rather than quoting a rate

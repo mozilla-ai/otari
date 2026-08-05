@@ -160,9 +160,15 @@ gateway.
 
 - **Activity**: the per-request log of what the gateway served, with filters.
   Use it to inspect individual requests, their models, and their outcomes.
-  The **Routing** column names the policy a caller asked for, if any, plus which
-  attempt in its plan this row is ("attempt 2/2") and why that candidate was
-  chosen. A row with the `absorbed` status is an attempt a policy recovered from
+  The **Routing** column names the policy a caller asked for, if any, plus where
+  this row sits in that policy's plan and how it turned out: "served on attempt 2
+  of 2 (a fallback candidate)", or, on a failed attempt, "attempt 1 of 2 failed,
+  served by openai:gpt-4o", which names the model that served in its place.
+  Expanding a routed row shows the whole **routing plan**: every candidate that
+  ran, in order, with why it was selected, what it did, its latency and its cost,
+  and the attempt that served marked. That is the place to answer "a fallback
+  fired, so what actually served me", since each attempt is its own row.
+  A row with the `absorbed` status is an attempt a policy recovered from
   by trying the next candidate: the request itself was served, so an absorbed row
   is deliberately not counted as an error and not counted as an extra request.
   That is what keeps a working fallback chain from reading as an outage in the

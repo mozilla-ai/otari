@@ -2334,7 +2334,7 @@
         {
           "name": "List Usage",
           "request": {
-            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, and session (``source_label``).\nPaginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
+            "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, session (``source_label``), and request\ngroup (``request_group_id``, repeatable, which returns a routed request's\nwhole attempt plan). Paginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
             "header": [],
             "method": "GET",
             "url": {
@@ -2431,6 +2431,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
+                  "disabled": true,
+                  "key": "request_group_id",
+                  "value": ""
+                },
+                {
                   "description": "",
                   "disabled": true,
                   "key": "skip",
@@ -2443,7 +2449,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&skip=&limit="
+              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&skip=&limit="
             }
           }
         },
@@ -2564,9 +2570,15 @@
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""
+                },
+                {
+                  "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
+                  "disabled": true,
+                  "key": "request_group_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget="
+              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id="
             }
           }
         },
