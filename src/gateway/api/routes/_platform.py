@@ -139,7 +139,7 @@ class ResolvedAttempt(BaseModel):
     extra_params: dict[str, str] | None = None
     """Provider-specific extra client kwargs beyond api_key/api_base (e.g. AWS
     Bedrock's ``region_name``/``aws_access_key_id``). Sourced only from the
-    trusted platform peer, never from the caller's request body — see
+    trusted platform peer, never from the caller's request body. See
     ``default_attempt_kwargs``, which merges these in non-overridably."""
 
 

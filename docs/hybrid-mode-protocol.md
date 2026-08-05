@@ -122,10 +122,15 @@ the caller's own request fields so they can never be shadowed by a
 same-named field in the request body: the same non-overridable treatment
 `api_key` and `model` already get. This field is sourced only from the
 trusted platform peer; Otari never accepts it from the caller. AWS Bedrock's
-bearer-token ("Bedrock API key") credential shape is not representable here,
-since it requires an in-process boto3 client with a custom signing hook, so
-the platform only sends `extra_params` for the classic IAM access-key/secret-key
-shape.
+bearer-token ("Bedrock API key") credential shape is a current gap, not a
+fundamental one: AWS's own recommended path for it is the
+`AWS_BEARER_TOKEN_BEDROCK` environment variable (or, in newer boto3 releases,
+an `aws_bearer_token` constructor kwarg), either of which is in principle
+JSON-serializable and forwardable like any other `extra_params` value. The
+reference platform (otari.ai) currently builds an in-process boto3 client
+with a custom signing hook for that shape instead, which has no
+representable form once serialized over HTTP, so it only sends
+`extra_params` for the classic IAM access-key/secret-key shape today.
 
 `request_id` groups every `attempt_id` from the same resolve call so the
 platform can attribute spend, render trace timelines, and emit fallback events.

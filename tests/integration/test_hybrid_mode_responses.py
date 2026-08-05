@@ -170,7 +170,7 @@ def test_hybrid_mode_forwards_extra_params(
 ) -> None:
     """The Responses adapter's own ``attempt_kwargs`` override (which does not
     delegate to ``default_attempt_kwargs``) must forward an attempt's
-    ``extra_params`` too — this is the wire-contract field that carries e.g.
+    ``extra_params`` too. This is the wire-contract field that carries e.g.
     AWS Bedrock's mandatory ``region_name`` (exercised generically here via
     ``openai`` since Bedrock itself doesn't support the Responses API)."""
 

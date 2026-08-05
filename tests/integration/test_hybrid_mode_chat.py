@@ -159,7 +159,7 @@ def test_hybrid_mode_forwards_bedrock_extra_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A Bedrock attempt's ``extra_params`` (region_name, aws_access_key_id)
-    reaches the ``acompletion()`` call the gateway makes — this is the wire-
+    reaches the ``acompletion()`` call the gateway makes. This is the wire-
     contract field that carries AWS's mandatory region, without which boto3
     raises ``NoRegionError`` ("You must specify a region.")."""
 

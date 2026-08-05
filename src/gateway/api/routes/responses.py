@@ -291,7 +291,7 @@ class _ResponsesAdapter:
             **{k: v for k, v in request_fields.items() if k != "provider"},
             # extra_params (e.g. Bedrock's region_name) is platform-trusted, so
             # it's merged in after the caller's own request fields and before
-            # the forced model/provider keys — mirrors default_attempt_kwargs.
+            # the forced model/provider keys, mirroring default_attempt_kwargs.
             **(attempt.extra_params or {}),
             "model": attempt.model,
             "provider": LLMProvider(attempt.provider),

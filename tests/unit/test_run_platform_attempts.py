@@ -171,7 +171,7 @@ def test_default_attempt_kwargs_forwards_extra_params() -> None:
 def test_default_attempt_kwargs_extra_params_not_overridable_by_request_fields() -> None:
     """``extra_params`` is platform-trusted and must win over a same-named
     field in the caller's own request body, exactly like ``api_key``/``model``
-    already do — a request cannot smuggle a different region past the
+    already do: a request cannot smuggle a different region past the
     platform's resolved credentials."""
     attempt = ResolvedAttempt(
         attempt_id="a0",
