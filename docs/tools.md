@@ -45,6 +45,10 @@ token charge, and appears in the Activity detail as a `web_search_calls` line an
 on the Usage page under "Gateway-run tools". A failed call is counted and never
 billed.
 
+When a request is routed through a [routing policy](routing.md), the whole
+request's tool work is billed onto the row that served it, so a chain that failed
+over does not split or double-count its searches.
+
 **With `require_pricing` on (the default), an unpriced tool is refused with a 402**
 before the provider is called, exactly as an unpriced model is. Otari warns at
 startup when a configured tool has no price, so this surfaces before the first

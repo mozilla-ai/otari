@@ -258,6 +258,14 @@ policy that selects per request (a condition or a router) has no single target, 
 it reports `pricing_source: "dynamic"` with a null price rather than quoting a rate
 that is wrong whenever the policy does its job.
 
+Tools Otari runs itself ([built-in tools](tools.md)) are billed per call onto the
+row that **settled** the request, not spread across attempts. So a request that
+failed over reports every attempt's search work on the row that served, and an
+`absorbed` row carries the attempt's tokens and no tool charge. Absorbed rows settle
+no reservation, so a charge placed there would show in the activity log and never
+reach the budget it consumed. A plan whose every candidate failed still owes for the
+searches it ran, and that charge lands on its error row.
+
 ## Failure behavior
 
 | Situation | Result |

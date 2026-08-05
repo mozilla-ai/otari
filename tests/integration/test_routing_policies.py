@@ -25,10 +25,12 @@ import pytest
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionMessage,
+    ChatCompletionMessageFunctionToolCall,
     Choice,
     CompletionUsage,
     CreateEmbeddingResponse,
     Embedding,
+    Function,
     Usage,
 )
 from fastapi.testclient import TestClient
@@ -1169,3 +1171,178 @@ def test_responses_endpoint_fails_over(client: TestClient) -> None:
 
     assert resp.status_code == 200, resp.text
     assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+
+
+# ---------------------------------------------------------------------------
+# Routing policies x gateway-run tools
+# ---------------------------------------------------------------------------
+
+
+def _tool_completion(model: str, *, tool_call: bool) -> ChatCompletion:
+    """A response that either asks for the gateway's web_search tool or answers."""
+    tool_calls = (
+        [
+            ChatCompletionMessageFunctionToolCall(
+                id="call_1",
+                type="function",
+                function=Function(name="web_search", arguments='{"query": "otari"}'),
+            )
+        ]
+        if tool_call
+        else None
+    )
+    return ChatCompletion(
+        id="cmpl-tool",
+        choices=[
+            Choice(
+                finish_reason="tool_calls" if tool_call else "stop",
+                index=0,
+                message=ChatCompletionMessage(
+                    role="assistant",
+                    content=None if tool_call else "answered",
+                    tool_calls=tool_calls,
+                ),
+            )
+        ],
+        created=0,
+        model=model,
+        object="chat.completion",
+        usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+
+def test_tools_run_by_the_candidate_that_serves_are_billed_once_on_its_row(
+    client: TestClient,
+) -> None:
+    """A failed-over request bills its searches once, on the row that served.
+
+    Neither feature alone covers this: routing writes one row per attempt, while
+    gateway-run tool calls are billed onto the row that settles the reservation.
+    Attempt 1 dies before producing anything, so it ran no tools; attempt 2 runs
+    three searches and serves. The absorbed row must carry no tool ledger, since it
+    settles nothing and a charge there would show on the row and be missing from
+    ``users.spend``.
+    """
+    _create_user(client)
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "otari:web_search",
+            # USD per million calls: a cent per search.
+            "input_price_per_million": 10_000.0,
+            "output_price_per_million": 0.0,
+        },
+        headers=HEADERS,
+    )
+
+    scripted: list[ChatCompletion | Exception] = [
+        # Attempt 1 falls over before any assistant output, so the policy may retry.
+        _http_error(503),
+        # Attempt 2 runs three searches, then answers.
+        _tool_completion("claude-haiku-4-5", tool_call=True),
+        _tool_completion("claude-haiku-4-5", tool_call=True),
+        _tool_completion("claude-haiku-4-5", tool_call=True),
+        _tool_completion("claude-haiku-4-5", tool_call=False),
+    ]
+
+    async def scripted_provider(**_kwargs: Any) -> ChatCompletion:
+        nxt = scripted.pop(0)
+        if isinstance(nxt, Exception):
+            raise nxt
+        return nxt
+
+    with (
+        patch("gateway.services.mcp_loop.acompletion", new=scripted_provider),
+        patch(
+            "gateway.services.web_search_backend.WebSearchBackend._search_tool",
+            new=AsyncMock(return_value="results"),
+        ),
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
+    ):
+        resp = _chat(client, "fast", tools=[{"type": "otari_web_search"}])
+
+    assert resp.status_code == 200, resp.text
+
+    rows = _usage_rows(client)
+    served = next(r for r in rows if r["status"] == "success")
+    absorbed = next(r for r in rows if r["status"] == "absorbed")
+    assert served["request_group_id"] == absorbed["request_group_id"]
+
+    # The absorbed attempt never reached a tool, and never owns the ledger anyway.
+    assert (absorbed["billing_meters"] or {}).get("tools") is None
+
+    # All three calls land once, on the row that settled the request.
+    tools = (served["billing_meters"] or {})["tools"]
+    assert tools["web_search"]["billed"] == 3
+    line = next(entry for entry in served["pricing_breakdown"] if entry["meter"] == "web_search_calls")
+    assert line["units"] == 3
+    assert line["cost"] == pytest.approx(0.03)
+
+    # The per-tool breakdown counts the work once and the request once, even though
+    # the request wrote two rows. A plain row count would report two requests here.
+    summary = client.get("/v1/usage/summary", params={"dimensions": "tool"}, headers=HEADERS).json()
+    by_tool = {row["tool"]: row for row in summary["by_tool"]}
+    assert by_tool["web_search"]["calls"] == 3
+    assert by_tool["web_search"]["requests"] == 1
+    assert by_tool["web_search"]["cost"] == pytest.approx(0.03)
+
+
+def test_a_locked_in_tool_loop_cannot_fail_over_and_still_owes_for_its_searches(
+    client: TestClient,
+) -> None:
+    """A tool loop that dies mid-flight is terminal, and the searches are still owed.
+
+    Once the upstream has produced an assistant message the plan locks to that
+    provider (``_attempts`` lock-in), so a later failure inside the loop cannot be
+    retried elsewhere: the transcript carries provider-specific tool-call ids. The
+    request therefore ends as a 502 with a single error row, which must still carry
+    the search that ran before the failure. Refunding instead of reconciling here is
+    what would leave the cost on the row and absent from the spend ledger.
+    """
+    _create_user(client)
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "otari:web_search",
+            "input_price_per_million": 10_000.0,
+            "output_price_per_million": 0.0,
+        },
+        headers=HEADERS,
+    )
+
+    scripted: list[ChatCompletion | Exception] = [
+        # One search, then the provider falls over with the loop already committed.
+        _tool_completion("gpt-5-mini", tool_call=True),
+        _http_error(503),
+    ]
+
+    async def scripted_provider(**_kwargs: Any) -> ChatCompletion:
+        nxt = scripted.pop(0)
+        if isinstance(nxt, Exception):
+            raise nxt
+        return nxt
+
+    with (
+        patch("gateway.services.mcp_loop.acompletion", new=scripted_provider),
+        patch(
+            "gateway.services.web_search_backend.WebSearchBackend._search_tool",
+            new=AsyncMock(return_value="results"),
+        ),
+        patch.dict("os.environ", {"OTARI_WEB_SEARCH_URL": "http://web-search.invalid"}),
+    ):
+        resp = _chat(client, "fast", tools=[{"type": "otari_web_search"}])
+
+    # Terminal, not failed over: the second candidate is never tried.
+    assert resp.status_code == 502, resp.text
+    assert not scripted, "the fallback candidate should never have been called"
+
+    rows = _usage_rows(client)
+    assert [r["status"] for r in rows] == ["error"]
+    error_row = rows[0]
+    tools = (error_row["billing_meters"] or {})["tools"]
+    assert tools["web_search"]["billed"] == 1
+    assert error_row["cost"] == pytest.approx(0.01)
+
+    # And the money is in the ledger, not only on the row.
+    user = client.get("/v1/users/test-user", headers=HEADERS).json()
+    assert user["spend"] == pytest.approx(0.01)

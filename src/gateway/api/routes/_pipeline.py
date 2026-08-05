@@ -535,6 +535,13 @@ class RequestContext:
         self.user_id = user_id
         self.rate_limit_info = rate_limit_info
         self.reservation = reservation
+        # USD already written onto a failure row for gateway-run tool calls. A
+        # request whose plan is exhausted still owes for the searches it ran, and
+        # ``log_exhausted_plan`` writes that onto the row without settling. Recording
+        # it here lets the single release site reconcile it instead of refunding,
+        # which is what keeps ``users.spend`` matching the row: ``refund_reservation``
+        # releases the hold *without* writing spend.
+        self.tool_charge: float = 0.0
         # Monotonic clock reading taken at the very start of the handler
         # preamble; used to compute the usage log's latency_ms at settlement.
         self.started_at = started_at
@@ -1832,9 +1839,19 @@ async def release_reservation(ctx: RequestContext) -> None:
     :func:`resolve_request_context` pre-debited the estimate; otherwise the
     held amount shrinks the user's budget until the next reset (or forever,
     for budgets without a reset period).
+
+    When ``ctx.tool_charge`` is set, the request already ran gateway-run tool calls
+    that were written onto its failure row, so the reservation is *reconciled* to
+    that amount rather than refunded: a refund releases the hold without recording
+    spend, which would leave the charge visible in the activity log and missing from
+    the budget it should have consumed.
     """
-    if ctx.db is not None and ctx.reservation is not None:
-        await refund_reservation(ctx.db, ctx.reservation)
+    if ctx.db is None or ctx.reservation is None:
+        return
+    if ctx.tool_charge:
+        await reconcile_reservation(ctx.db, ctx.reservation, ctx.tool_charge)
+        return
+    await refund_reservation(ctx.db, ctx.reservation)
 
 
 def throttle_early_rejection(raw_request: Request, user_id: str) -> bool:
@@ -2480,7 +2497,9 @@ async def run_single_attempt_stream(
                     on_terminal=stopped_on.append,
                 )
             except HTTPException as exhausted:
-                await log_exhausted_plan(ctx, adapter, exhausted, stopped_on[0] if stopped_on else None)
+                await log_exhausted_plan(
+                    ctx, adapter, exhausted, stopped_on[0] if stopped_on else None, tool_tally=tool_ctx.tally
+                )
                 raise
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             stream_attribution = _attribution_for(ctx, chosen)
@@ -2927,6 +2946,7 @@ async def log_exhausted_plan(
     adapter: FormatAdapter[Any, Any],
     exc: HTTPException,
     stopped_on: Attempt | None = None,
+    tool_tally: ToolUsageTally | None = None,
 ) -> None:
     """Record the failure of a plan whose every candidate failed.
 
@@ -2936,11 +2956,18 @@ async def log_exhausted_plan(
     invisible in the activity log, while the same failure on a plain model is
     recorded. This writes the row and deliberately does **not** refund, so the
     caller's existing single refund site stays the only one.
+
+    ``tool_tally`` is what makes an exhausted plan still owe for the searches it
+    ran, including the case that cannot fail over at all: once a tool loop has
+    produced an assistant message the plan locks to that provider (see
+    ``_attempts``), so a failure inside the loop is terminal and this is the only
+    row the request gets. The charge is recorded on ``ctx`` for the caller's single
+    release site to reconcile.
     """
     if ctx.db is None or ctx.plan is None:
         return
     last = stopped_on or ctx.plan.attempts[-1]
-    await log_usage(
+    cost = await log_usage(
         db=ctx.db,
         log_writer=ctx.log_writer,
         api_key_id=ctx.api_key_id,
@@ -2953,7 +2980,9 @@ async def log_exhausted_plan(
         latency_ms=_elapsed_ms(ctx.started_at),
         counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
         attribution=_failure_attribution(ctx, last),
+        tool_tally=tool_tally,
     )
+    ctx.tool_charge = cost or 0.0
 
 
 async def log_absorbed_attempt(
@@ -3071,7 +3100,9 @@ async def run_standalone_non_stream(
                     on_terminal=stopped_on.append,
                 )
             except HTTPException as exhausted:
-                await log_exhausted_plan(ctx, adapter, exhausted, stopped_on[0] if stopped_on else None)
+                await log_exhausted_plan(
+                    ctx, adapter, exhausted, stopped_on[0] if stopped_on else None, tool_tally=tool_ctx.tally
+                )
                 raise
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             attribution = _attribution_for(ctx, chosen)
