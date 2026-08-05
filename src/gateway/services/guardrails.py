@@ -153,12 +153,18 @@ async def run_input_guardrails(
     code path can assume the URL was already validated instead of needing to
     remember to add the check itself.
 
-    Failure handling depends on the guardrail's ``mode``:
+    Failure handling depends on the guardrail's ``mode`` and its
+    ``on_unavailable``:
 
-    * ``block`` guardrails **fail closed** — if one can't be evaluated (service
-      unreachable, no URL configured, malformed response) we raise
+    * ``block`` guardrails with ``on_unavailable="block"`` (the default) **fail
+      closed** — if one can't be evaluated (service unreachable, no URL
+      configured, malformed response) we raise
       :class:`GuardrailsNotReachableError` (the caller surfaces it as a 502)
       rather than let an unchecked request through.
+    * ``block`` guardrails with ``on_unavailable="monitor"`` trade enforcement for
+      availability: the check is recorded as inconclusive and the request
+      proceeds, the same as a ``monitor`` guardrail. Only reachability is affected;
+      a guardrail that runs and flags still blocks.
     * ``monitor`` guardrails **fail open** — they're observe-only, so an
       evaluation error is logged and recorded as an inconclusive result
       (``valid=None``) and the request proceeds; we don't 502 a request the
@@ -168,8 +174,8 @@ async def run_input_guardrails(
         A :class:`GuardrailVerdict` aggregating every input guardrail's result.
 
     Raises:
-        GuardrailsNotReachableError: if a ``block``-mode guardrail can't be
-            evaluated.
+        GuardrailsNotReachableError: if a ``block``-mode guardrail with
+            ``on_unavailable="block"`` can't be evaluated.
     """
     # A caller-supplied `url` override is SSRF-checked here rather than at
     # request-body-parse time (the check does a DNS lookup that must be

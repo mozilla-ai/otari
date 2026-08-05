@@ -124,9 +124,11 @@ async def walk_attempts(
 
     ``on_terminal`` is called with the candidate the walk actually stopped on,
     before the terminal error is raised. The caller cannot infer it: only a
-    retryable exhaustion reaches the last candidate, while a non-retryable status
-    or a tool-loop lock-in stops the walk early, and attributing the failure to
-    the end of the plan would name a provider that was never called.
+    retryable exhaustion reaches the last candidate, while a non-retryable status,
+    a tool-loop lock-in, a gateway-side refusal for one candidate (a refused
+    reservation top-up, an unpriced fallback) or the tool-iteration cap all stop
+    the walk early, and attributing the failure to the end of the plan would name
+    a provider that was never called.
 
     ``on_absorbed`` is awaited for each attempt the walk *recovers* from, i.e. a
     retryable failure with another candidate left to try. It exists so the caller can
@@ -182,6 +184,13 @@ async def walk_attempts(
         try:
             result = await run_attempt(attempt, make_kwargs(attempt, base_request_fields), _mark_locked_in)
         except HTTPException:
+            # A gateway-side refusal for this candidate (a refused reservation
+            # top-up, an unpriced fallback under `require_pricing`), not a provider
+            # failure to try the next one for. Report the candidate it happened on:
+            # the caller cannot infer it, and defaulting to the end of the plan
+            # would name a provider that was never called.
+            if on_terminal is not None:
+                on_terminal(attempt)
             raise
         except MaxToolIterationsExceeded as exc:
             logger.warning(
@@ -190,6 +199,8 @@ async def walk_attempts(
                 attempt.position,
                 max_tool_iterations,
             )
+            if on_terminal is not None:
+                on_terminal(attempt)
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
         except (SandboxNotReachableError, WebSearchNotReachableError):
             raise

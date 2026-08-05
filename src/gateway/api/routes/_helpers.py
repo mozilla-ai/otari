@@ -132,7 +132,12 @@ async def apply_input_guardrails(
     response: Response,
     config: GatewayConfig | None = None,
 ) -> None:
-    """Enforce caller-requested input guardrails before the provider call.
+    """Enforce the input guardrails for a request before the provider call.
+
+    ``guardrails`` is the effective list: the caller's own, merged with any a
+    routing policy mandates (see
+    :func:`gateway.api.routes._pipeline.merge_policy_guardrails`, which is where
+    the merge happens so every completion endpoint enforces a mandate alike).
 
     No-op when ``guardrails`` is empty/None (zero overhead for the common
     case). On a ``block``-mode flag, raises ``403`` and the provider is never
@@ -140,10 +145,11 @@ async def apply_input_guardrails(
     summary to the :data:`GUARDRAILS_RESULT_HEADER` response header and lets
     the request proceed.
 
-    Service-failure handling is mode-dependent (see
+    Service-failure handling depends on ``mode`` and ``on_unavailable`` (see
     :func:`gateway.services.guardrails.run_input_guardrails`): a ``block``
-    guardrail that can't be evaluated fails closed (``502``); a ``monitor``
-    guardrail fails open (logged, request proceeds).
+    guardrail that can't be evaluated fails closed (``502``) unless it sets
+    ``on_unavailable="monitor"``; a ``monitor`` guardrail fails open (logged,
+    request proceeds).
 
     Note:
         The header is set on the injected ``response``, so it reaches
@@ -155,7 +161,8 @@ async def apply_input_guardrails(
     Raises:
         HTTPException: ``400`` when a guardrail's ``url`` override fails the
             SSRF/scheme safety check; ``403`` when a ``block`` guardrail flags
-            the input; ``502`` when a ``block`` guardrail can't be evaluated.
+            the input; ``502`` when a ``block`` guardrail that fails closed can't
+            be evaluated.
     """
     if not guardrails:
         return

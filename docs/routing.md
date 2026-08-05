@@ -40,7 +40,10 @@ curl http://localhost:8000/v1/chat/completions \
 
 If `openai:gpt-5-mini` returns a retryable failure, Anthropic serves the request
 instead and the caller never sees the difference: the response `model` says
-`fast`, and one usage row is written for the model that actually served.
+`fast`, and the billed usage row names the model that actually served. The
+attempt that failed gets its own row too, with `status: "absorbed"`, so the
+failover is visible in the activity log without counting as an error or as a
+second request (see [What is billed](#what-is-billed-and-what-the-caller-sees)).
 
 Before this existed, a standalone gateway had no failover at all. A provider blip
 was a 502.
@@ -89,10 +92,11 @@ Two rules worth knowing, because both are silent-failure traps otherwise:
   case for a caller with no budget, an unlimited budget, or the master key. The
   policy falls through to `default`. It does not raise: "no budget configured"
   must not turn into an error on every request.
-- **A `budget_used_pct` threshold at 100 or above is refused at startup.** The
-  budget gate rejects a request before selection happens, so such a rule could
-  never fire. Tiering down keeps a caller *under* a cap; it is not a way to keep
-  serving past one.
+- **A `budget_used_pct` threshold of `gte` or `gt` 100 or above is refused at
+  startup.** The budget gate rejects a request before selection happens, so such a
+  rule could never fire. Tiering down keeps a caller *under* a cap; it is not a way
+  to keep serving past one. `lt`/`lte` thresholds are not restricted: "still under
+  the cap" is a reachable condition.
 
 ## Guardrails you cannot opt out of
 
@@ -227,6 +231,14 @@ Pricing, budgets, and usage rows key on the **resolved target**, exactly as they
 do for an alias. The response `model` field says the **policy name**, on
 non-streaming responses and on every streaming chunk, so the underlying model
 stays private and a fallover is invisible to caller code.
+
+A request that fails over writes more than one usage row: one per absorbed
+attempt, plus the one for the attempt that served. They share a
+`request_group_id`, and the absorbed rows carry `status: "absorbed"` with no cost.
+Absorbed rows are excluded from `error_count` and from `request_count`, so a
+working fallback chain never reads as an outage and a request that took two
+attempts is still counted as one request. Filter the activity log to the
+`absorbed` status to see them on their own.
 
 `GET /v1/models` lists policies. A one-target policy reports its target's price. A
 policy that selects per request (a condition or a router) has no single target, so

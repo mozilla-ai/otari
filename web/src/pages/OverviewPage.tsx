@@ -352,8 +352,13 @@ function SystemStatusStrip({
   );
 }
 
+// "absorbed" is kept verbatim rather than folded into "ok": it is an attempt a
+// routing policy recovered from, so calling it "ok" would present a failed attempt
+// as a served request, and this preview is unfiltered so those rows do appear here.
+// It is still not an error, which is why it does not read as one.
 function statusWord(status: string): string {
-  return status === "error" ? "error" : "ok";
+  if (status === "error") return "error";
+  return status === "absorbed" ? "absorbed" : "ok";
 }
 
 // Newest few requests, as an at-a-glance preview. Rows are read-only; a single
@@ -379,7 +384,9 @@ function RecentActivity({ entries, loading, error }: { entries: UsageEntry[]; lo
           className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
             entry.status === "error"
               ? "border-red-200 bg-red-50 text-red-700"
-              : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
+              : entry.status === "absorbed"
+                ? "border-amber-200 bg-amber-50 text-amber-700"
+                : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
           }`}
         >
           {statusWord(entry.status)}

@@ -273,7 +273,8 @@ map does not apply.
 ### Runtime aliases, and scoping one to a user
 
 Aliases can also be created without a restart, through `/v1/aliases` (master key
-only) or the dashboard's Aliases page. A runtime alias means the same thing to a
+only) or the dashboard's Routing page, which lists and manages aliases alongside
+[routing policies](routing.md). A runtime alias means the same thing to a
 request as a configured one; it is stored in the database rather than in
 `config.yml`, and the listing tells you which is which (`source: config` or
 `source: stored`).

@@ -46,8 +46,9 @@ class PolicyRequest(BaseModel):
     name: str = Field(description="Model name callers send, e.g. 'fast'.")
     spec: dict[str, Any] = Field(
         description=(
-            "The policy body: select (with exactly one `default` entry, last), optional on_failure, "
-            "guardrails, and limits. Same schema as a `routing.policies` entry in config.yml."
+            "The policy body: select (with exactly one `default` entry, last), optional on_failure "
+            "and guardrails. Same schema as a `routing.policies` entry in config.yml, and closed to "
+            "unknown keys, so a typo is a 400 rather than a silently ignored setting."
         )
     )
     user_id: str | None = Field(

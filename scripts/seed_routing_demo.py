@@ -2,8 +2,9 @@
 """Seed a running gateway with routing policies and traffic, to click through.
 
 Creates a set of policies covering the shapes the feature supports, then drives
-enough traffic to populate the Activity and Usage pages, including a real fallover
-so the ``absorbed`` attempt row is there to look at.
+enough traffic to populate the Activity and Usage pages. Nothing here forces a
+first-attempt failure, so an ``absorbed`` attempt row appears only if a candidate
+really does fail; point ``--model`` at something broken to see one on demand.
 
 It talks to the gateway over HTTP like any operator would, so it works against
 localhost or a deployed instance and needs nothing but the master key.

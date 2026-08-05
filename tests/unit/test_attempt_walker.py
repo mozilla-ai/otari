@@ -66,6 +66,7 @@ async def _walk(attempts: list[Attempt], behaviors: list[Any], **overrides: Any)
         run_attempt=run_attempt,
         max_tool_iterations=10,
         policy_name=overrides.get("policy_name", "fast"),
+        on_terminal=overrides.get("on_terminal"),
     )
     return chosen, result
 
@@ -195,6 +196,36 @@ async def test_http_exception_from_an_attempt_is_passed_through() -> None:
         await _walk([_attempt(1, "a"), _attempt(2, "b")], [HTTPException(status_code=402, detail="no pricing"), "ok"])
     assert exc_info.value.status_code == 402
     assert exc_info.value.detail == "no pricing"
+
+
+@pytest.mark.asyncio
+async def test_a_gateway_side_refusal_reports_the_candidate_it_happened_on() -> None:
+    """A refused reservation top-up (or an unpriced fallback under
+    ``require_pricing``) raises an ``HTTPException`` from the middle of the plan.
+    The caller writes the failure's usage row from ``on_terminal``, so without it
+    the row would name the last candidate, which was never called.
+    """
+    stopped: list[Attempt] = []
+    with pytest.raises(HTTPException):
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b"), _attempt(3, "c")],
+            [_http_error(503), HTTPException(status_code=402, detail="budget"), "ok"],
+            on_terminal=stopped.append,
+        )
+    assert [attempt.position for attempt in stopped] == [2]
+
+
+@pytest.mark.asyncio
+async def test_the_tool_iteration_cap_reports_the_candidate_it_happened_on() -> None:
+    stopped: list[Attempt] = []
+    with pytest.raises(HTTPException) as exc_info:
+        await _walk(
+            [_attempt(1, "a"), _attempt(2, "b"), _attempt(3, "c")],
+            [_http_error(503), MaxToolIterationsExceeded("cap hit"), "ok"],
+            on_terminal=stopped.append,
+        )
+    assert exc_info.value.status_code == 422
+    assert [attempt.position for attempt in stopped] == [2]
 
 
 # ---------------------------------------------------------------------------

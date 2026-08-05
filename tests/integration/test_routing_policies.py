@@ -15,6 +15,7 @@ The invariants worth defending, and why:
 * A policy never routes a caller to a model their key is not allowed to use.
 """
 
+import json
 from collections.abc import Generator
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -643,6 +644,47 @@ def test_an_invalid_spec_is_refused_with_field_level_errors(client: TestClient) 
     detail = resp.json()["detail"]
     assert detail["message"].startswith("routing policy 'broken'")
     assert detail["errors"], "the pydantic errors must be surfaced for the form to bind"
+
+
+def test_an_unreachable_budget_threshold_is_refused(client: TestClient) -> None:
+    """The budget gate rejects a request before selection, so `gte 100` can never
+    fire and an operator writing it believes they configured something.
+    """
+    resp = client.post(
+        "/v1/routing/policies",
+        json={
+            "name": "past-the-cap",
+            "spec": {
+                "select": [
+                    {"when": {"budget_used_pct": {"gte": 100}}, "target": "openai:gpt-5-nano"},
+                    {"default": "openai:gpt-5-mini"},
+                ]
+            },
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 400
+    assert "can never match" in json.dumps(resp.json()["detail"])
+
+
+def test_still_under_the_cap_is_a_usable_threshold(client: TestClient) -> None:
+    """`lt 100` reads as "any caller still under the cap", which every request that
+    reaches selection satisfies, so it must not be refused alongside `gte 100`.
+    """
+    resp = client.post(
+        "/v1/routing/policies",
+        json={
+            "name": "under-the-cap",
+            "spec": {
+                "select": [
+                    {"when": {"budget_used_pct": {"lt": 100}}, "target": "openai:gpt-5-nano"},
+                    {"default": "openai:gpt-5-mini"},
+                ]
+            },
+        },
+        headers=HEADERS,
+    )
+    assert resp.status_code == 200, resp.text
 
 
 def test_a_stored_policy_may_not_point_at_an_alias(client: TestClient) -> None:

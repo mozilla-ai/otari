@@ -144,7 +144,7 @@ providers:
 # `when` conditions (all must match): budget_used_pct, budget_remaining_usd,
 # user_id, key_id. Comparisons are {gte|gt|lte|lt: <number>}. A budget condition
 # never matches for a caller with no budget or an unlimited one, so the default is
-# used. A budget_used_pct threshold at 100 or above is refused: the budget gate
+# used. A budget_used_pct threshold of `gte`/`gt` 100 or above is refused: the budget gate
 # rejects the request before selection, so the rule could never fire.
 #
 # Check what a policy compiles to, without sending anything anywhere:

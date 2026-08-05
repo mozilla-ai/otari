@@ -224,7 +224,7 @@ class RoutingPolicy(Base):
     The runtime counterpart of the ``routing.policies`` block in config.yml. The
     spec is stored as JSON rather than as columns because it is a nested,
     versioned document (``select`` entries with conditions, ``on_failure``,
-    guardrails, limits); flattening it into columns would mean a migration per
+    guardrails); flattening it into columns would mean a migration per
     schema addition and would still need JSON for the conditions. It is validated
     against :class:`gateway.models.routing.PolicySpec` on write and again on load,
     so a row that predates a schema change surfaces as a startup warning rather

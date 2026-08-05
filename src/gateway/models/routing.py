@@ -139,9 +139,14 @@ class WhenClause(BaseModel):
         writing one believes they have configured "keep serving on a cheaper model
         after the budget runs out" when they have configured nothing. Tiering down
         keeps a caller *under* a cap; it is not a way past one.
+
+        Only the upward comparators are unreachable. ``{lt: 100}`` and
+        ``{lte: 100}`` mean "any caller still under the cap", which every request
+        that gets as far as selection satisfies, so refusing those would reject a
+        rule that works.
         """
         used = self.budget_used_pct
-        if used is not None and used.value >= 100:
+        if used is not None and used.comparator in ("gte", "gt") and used.value >= 100:
             raise ValueError(
                 f"budget_used_pct {used.describe()} can never match: the budget gate rejects a request "
                 "before selection once the cap is reached, so this rule would never take effect. "

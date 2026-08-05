@@ -41,6 +41,20 @@ curl http://localhost:8000/v1/chat/completions \
 | `monitor` (default) | Forwards to the provider and surfaces the verdict on the `X-Otari-Guardrails` response header. |
 | `block` | Returns `403` and never calls the provider when the input is flagged. |
 
+### When the guardrails service is unreachable
+
+A `block` guardrail that cannot be evaluated at all (service down, no URL
+configured, malformed response) **fails closed**: the request is rejected with a
+`502` rather than forwarded unchecked. A `monitor` guardrail fails open, since it
+was never enforcing.
+
+Set `"on_unavailable": "monitor"` on an entry to trade that enforcement for
+availability: the request is served and the check is recorded as inconclusive.
+`"on_unavailable": "block"` is the default and the pre-existing behavior. An
+operator can also mandate a guardrail on a [routing policy](routing.md), in which
+case the stricter of the operator's and the caller's settings applies and a caller
+cannot weaken the mandate.
+
 ## Runnable walkthrough
 
 A full end-to-end demo is in `demo/guardrails/`.

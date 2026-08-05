@@ -662,7 +662,18 @@ export function RoutingPage() {
           ) : (
             <div className="flex items-center justify-end gap-2">
               {isEditableInForm(policy.spec) ? (
-                <Button size="sm" variant="ghost" onPress={() => setEditing(policy)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => {
+                    // The table stays mounted while the create form is open, so
+                    // Edit is still reachable from it. Closing the other editor
+                    // keeps this to one form: two stacked forms do not recover on
+                    // their own, since each only closes when cancelled.
+                    setAdding(false);
+                    setEditing(policy);
+                  }}
+                >
                   Edit
                 </Button>
               ) : (
@@ -695,7 +706,13 @@ export function RoutingPage() {
         description="Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run."
         action={
           adding || editing !== null ? undefined : (
-            <Button variant="primary" onPress={() => setAdding(true)}>
+            <Button
+              variant="primary"
+              onPress={() => {
+                setEditing(null);
+                setAdding(true);
+              }}
+            >
               New policy
             </Button>
           )
