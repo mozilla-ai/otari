@@ -12,7 +12,7 @@ For full request/response schemas, see the [OpenAPI spec](public/openapi.json) o
 | Chat completions (`/v1/chat/completions`) | Yes | Yes |
 | Messages (`/v1/messages`, `/v1/messages/count_tokens`) | Yes | Yes |
 | Responses (`/v1/responses`) | Yes | Yes |
-| Management (keys, users, budgets, pricing, usage) | Yes | No |
+| Management (keys, users, budgets, aliases, routing policies, pricing, usage) | Yes | No |
 | OpenAI-compatible (embeddings, models, files, batches, images, audio, moderations, rerank) | Yes | No |
 
 ## Authentication
@@ -232,6 +232,33 @@ into something a text-only local model can read.
 | `GET` | `/v1/budgets/{budget_id}` | Get a specific budget. | Master key |
 | `PATCH` | `/v1/budgets/{budget_id}` | Update a budget. | Master key |
 | `DELETE` | `/v1/budgets/{budget_id}` | Delete a budget. | Master key |
+
+### Aliases
+
+An alias is a display name that resolves to one real model selector. See
+[Model aliases](models.md#model-aliases).
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `GET` | `/v1/aliases` | List every alias in force, from `config.yml` and from storage, in every scope. | Master key |
+| `POST` | `/v1/aliases` | Create or update a stored alias. Omit `user_id` for a global one. | Master key |
+| `DELETE` | `/v1/aliases/{name}` | Delete a stored alias. `user_id` query param selects the scope; omit it for the global one. Aliases from `config.yml` cannot be deleted here. | Master key |
+
+### Routing policies
+
+A policy is the general form of an alias: it decides which real model serves a
+request, what is tried after a retryable failure, and which guardrails always run.
+See [Routing policies](routing.md).
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `GET` | `/v1/routing/policies` | List every policy in force, from `config.yml` and from storage, in every scope. | Master key |
+| `POST` | `/v1/routing/policies` | Create or update a stored policy. Body is `{name, spec, user_id?}`; `spec` is the same document a `routing.policies` entry takes. Omit `user_id` for a global one. | Master key |
+| `POST` | `/v1/routing/policies/explain` | Compile a policy and return the plan without dispatching anything. Takes a saved `name`, an unsaved draft `spec`, or both (the draft wins). Optional `user_id`, `key_id`, `allowed_models`, `budget_used_pct`, `budget_remaining_usd` simulate the request. Returns the ordered candidates **and** the ones that were dropped, with reasons. | Master key |
+| `DELETE` | `/v1/routing/policies/{name}` | Delete a stored policy. `user_id` query param selects the scope. Policies from `config.yml` cannot be deleted here. | Master key |
+
+Master key on every verb, including `explain`: the response enumerates a policy's
+targets, which is what a policy exists to keep off the wire.
 
 ### Pricing
 

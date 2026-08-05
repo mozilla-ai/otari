@@ -152,6 +152,54 @@ That last line is the reason this command exists. A policy is filtered per calle
 so a three-model chain can compile down to one attempt, and a "failover" policy
 that is secretly a single attempt is worth finding before an outage does.
 
+## Managing policies at runtime
+
+Everything above can also be done without touching a file or restarting. Policies
+created through the API live in the `routing_policies` table, are managed on the
+dashboard's **Routing** page, and take effect on the worker that served the write
+immediately; other workers and replicas converge within 30 seconds.
+
+```bash
+# Create or update. Omit user_id for a policy every caller sees.
+curl -X POST http://localhost:8000/v1/routing/policies \
+  -H "Otari-Key: Bearer <master-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "name": "fast",
+        "spec": {
+          "select": [{"default": "openai:gpt-5-mini"}],
+          "on_failure": ["anthropic:claude-haiku-4-5"]
+        }
+      }'
+
+# What is in force, from config.yml and storage alike, in every scope.
+curl http://localhost:8000/v1/routing/policies -H "Otari-Key: Bearer <master-key>"
+
+# Delete one. user_id selects the scope; omit it for the global policy.
+curl -X DELETE http://localhost:8000/v1/routing/policies/fast \
+  -H "Otari-Key: Bearer <master-key>"
+```
+
+A stored policy scoped to a user takes precedence over a `config.yml` policy of
+the same name, and a global stored policy is refused if one already exists in
+`config.yml`, because config wins during resolution and the stored one would be
+dead config.
+
+`POST /v1/routing/policies/explain` is the API form of `otari routing explain`,
+and it also accepts an unsaved draft `spec`, which is what the dashboard uses to
+check a policy before saving it:
+
+```bash
+curl -X POST http://localhost:8000/v1/routing/policies/explain \
+  -H "Otari-Key: Bearer <master-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "fast", "allowed_models": ["anthropic:*"], "budget_used_pct": 85}'
+```
+
+Every one of these needs the master key, `explain` included: the response
+enumerates the policy's targets, which is what a policy exists to keep off the
+wire. See the [API reference](api-reference.md#routing-policies).
+
 ## Rules and limits
 
 - **Candidate cap: 5** (the selected candidate plus `on_failure`). A policy over
