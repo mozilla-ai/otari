@@ -214,6 +214,14 @@ class ProviderErrorMapping(NamedTuple):
     detail: str
 
 
+class _PendingUsageReport(NamedTuple):
+    attempt_id: str
+    outcome: str
+    usage: Any
+    error_class: str | None
+    is_final_attempt: bool
+
+
 def _upstream_error_param(exc: BaseException) -> str | None:
     """Pull the offending request field off an upstream exception, if it names one.
 
@@ -2356,7 +2364,7 @@ async def run_single_attempt_stream(
 
 async def _flush_pending_usage_reports(
     config: GatewayConfig,
-    pending_error_reports: list[tuple[str, str, Any, str | None, bool]],
+    pending_error_reports: list[_PendingUsageReport],
     request_id: str,
     session_label: str | None = None,
 ) -> None:
@@ -2383,14 +2391,14 @@ async def _flush_pending_usage_reports(
                 *(
                     _report_platform_usage(
                         config,
-                        attempt_id,
-                        outcome,
-                        usage,
-                        error_class,
+                        report.attempt_id,
+                        report.outcome,
+                        report.usage,
+                        report.error_class,
                         session_label,
-                        is_final_attempt=is_final_attempt,
+                        is_final_attempt=report.is_final_attempt,
                     )
-                    for attempt_id, outcome, usage, error_class, is_final_attempt in pending_error_reports
+                    for report in pending_error_reports
                 ),
                 return_exceptions=True,
             ),
@@ -2493,7 +2501,7 @@ async def run_streaming_with_fallback(
     # for the success path (it flushes once the SSE response completes), but
     # also stash the error reports so they can be flushed inline on the
     # all-failed path below.
-    pending_error_reports: list[tuple[str, str, Any, str | None, bool]] = []
+    pending_error_reports: list[_PendingUsageReport] = []
 
     async def _on_attempt_failed(attempt: ResolvedAttempt, failure: StreamingAttemptFailure) -> None:
         background_tasks.add_task(
@@ -2507,7 +2515,13 @@ async def run_streaming_with_fallback(
             is_final_attempt=failure.is_final_attempt,
         )
         pending_error_reports.append(
-            (attempt.attempt_id, "error", None, failure.error_class, failure.is_final_attempt)
+            _PendingUsageReport(
+                attempt_id=attempt.attempt_id,
+                outcome="error",
+                usage=None,
+                error_class=failure.error_class,
+                is_final_attempt=failure.is_final_attempt,
+            )
         )
         record_abandoned_attempt(attempt.provider, attempt.model, failure.reason, attempt.position)
         logger.warning(
@@ -2658,7 +2672,7 @@ async def run_platform_non_stream(
     # can't fire its fallback-exhausted accounting. Keep the background task for
     # the success-response path (non-blocking), but also stash the error reports
     # so they can be flushed inline if the request ends in an exception.
-    pending_error_reports: list[tuple[str, str, Any, str | None, bool]] = []
+    pending_error_reports: list[_PendingUsageReport] = []
 
     def _report_attempt_outcome(
         attempt: ResolvedAttempt,
@@ -2678,7 +2692,15 @@ async def run_platform_non_stream(
             is_final_attempt=is_final_attempt,
         )
         if outcome != "success":
-            pending_error_reports.append((attempt.attempt_id, outcome, usage, error_class, is_final_attempt))
+            pending_error_reports.append(
+                _PendingUsageReport(
+                    attempt_id=attempt.attempt_id,
+                    outcome=outcome,
+                    usage=usage,
+                    error_class=error_class,
+                    is_final_attempt=is_final_attempt,
+                )
+            )
 
     def _on_attempt_success(attempt: ResolvedAttempt) -> None:
         response.headers["X-Correlation-ID"] = attempt.attempt_id

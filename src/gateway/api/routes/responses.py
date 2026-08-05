@@ -22,6 +22,7 @@ from gateway.api.routes._pipeline import (
     PROVIDER_ERROR_DETAIL,
     ErrorKind,
     _flush_pending_usage_reports,
+    _PendingUsageReport,
     classify_provider_error,
     prepare_gateway_tools,
     raise_all_streaming_attempts_failed,
@@ -400,7 +401,15 @@ async def create_response(
                 first_attempt = route.attempts[0]
                 await _flush_pending_usage_reports(
                     config,
-                    [(first_attempt.attempt_id, "error", None, None, True)],
+                    [
+                        _PendingUsageReport(
+                            attempt_id=first_attempt.attempt_id,
+                            outcome="error",
+                            usage=None,
+                            error_class=None,
+                            is_final_attempt=True,
+                        )
+                    ],
                     route.request_id,
                     request_body.session_label,
                 )

@@ -31,7 +31,22 @@ def test_flush_delivers_all_reports_when_fast(monkeypatch: pytest.MonkeyPatch) -
     asyncio.run(
         _pipeline._flush_pending_usage_reports(
             config,
-            [("att-1", "error", None, "http_500", False), ("att-2", "error", None, "http_429", True)],
+            [
+                _pipeline._PendingUsageReport(
+                    attempt_id="att-1",
+                    outcome="error",
+                    usage=None,
+                    error_class="http_500",
+                    is_final_attempt=False,
+                ),
+                _pipeline._PendingUsageReport(
+                    attempt_id="att-2",
+                    outcome="error",
+                    usage=None,
+                    error_class="http_429",
+                    is_final_attempt=True,
+                ),
+            ],
             "req-1",
             "my-run-personas",
         )
@@ -71,7 +86,15 @@ def test_flush_is_bounded_and_does_not_wait_for_a_slow_report(monkeypatch: pytes
     asyncio.run(
         _pipeline._flush_pending_usage_reports(
             config,
-            [("att-1", "error", None, "http_500", True)],
+            [
+                _pipeline._PendingUsageReport(
+                    attempt_id="att-1",
+                    outcome="error",
+                    usage=None,
+                    error_class="http_500",
+                    is_final_attempt=True,
+                )
+            ],
             "req-1",
         )
     )
