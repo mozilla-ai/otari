@@ -36,6 +36,7 @@ function summary(totals: Partial<UsageSummary["totals"]>): UsageSummary {
     by_source_label: [],
     by_endpoint: [],
     by_provider: [],
+    by_tool: [],
     series: [],
   };
 }

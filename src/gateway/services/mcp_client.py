@@ -22,6 +22,7 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 from gateway.log_config import logger
+from gateway.services.tool_usage import ToolUsageTally
 
 if TYPE_CHECKING:
     from mcp.types import Tool as MCPTool
@@ -52,11 +53,14 @@ class _ConnectedServer:
 class MCPClientPool:
     """Manages concurrent MCP sessions for one request lifetime."""
 
-    def __init__(self, configs: list[McpServerConfig]):
+    def __init__(self, configs: list[McpServerConfig], *, tally: ToolUsageTally | None = None):
         self._configs = configs
         self._stack = AsyncExitStack()
         self._servers: dict[str, _ConnectedServer] = {}
         self._tool_owner: dict[str, str] = {}
+        # Per-request accounting, owned by the route and passed in. None when the
+        # pool runs outside a billed request (tests, direct use).
+        self._tally = tally
 
     async def __aenter__(self) -> MCPClientPool:
         try:
@@ -124,16 +128,26 @@ class MCPClientPool:
         For tools that return images or large embedded resources, this is intentionally
         lossy — fine for the current text-tool use case, but a future improvement is to
         pass image content through as multimodal message blocks when the model supports it.
+
+        The call is recorded on the request's tally (see
+        :class:`gateway.services.tool_usage.ToolUsageTally`); an ``isError`` result
+        is counted and never billed.
         """
         owner = self._tool_owner.get(name)
         if owner is None:
             raise KeyError(f"No MCP server owns tool {name!r}")
-        result = await self._servers[owner].session.call_tool(name, arguments)
+        try:
+            result = await self._servers[owner].session.call_tool(name, arguments)
+        except Exception:
+            if self._tally is not None:
+                self._tally.record_failure(name)
+            raise
         parts = [_render_content_block(block) for block in result.content]
         flattened = "\n".join(p for p in parts if p)
-        if result.isError:
-            return f"[tool error] {flattened}"
-        return flattened
+        rendered = f"[tool error] {flattened}" if result.isError else flattened
+        if self._tally is not None:
+            self._tally.record_result(name, rendered)
+        return rendered
 
 
 def _render_content_block(block: Any) -> str:

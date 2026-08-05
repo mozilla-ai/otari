@@ -39,6 +39,7 @@ import httpx
 import trafilatura
 from opentelemetry import trace
 
+from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.url_safety import UnsafeURLError, validate_outbound_fetch_url
 
 if TYPE_CHECKING:
@@ -122,8 +123,12 @@ class WebSearchBackend:
         purpose_hint: str | None = None,
         provider_options: dict[str, Any] | None = None,
         auth_token: str | None = None,
+        tally: ToolUsageTally | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        # Per-request accounting, owned by the route and passed in. None when the
+        # backend runs outside a billed request (tests, direct use).
+        self._tally = tally
         self._engines = engines
         # Clamp to [1, _MAX_RESULTS_CAP]. Sub-1 values (e.g. ``0`` or ``-1``
         # from a misconfigured env var) would otherwise reach
@@ -201,8 +206,26 @@ class WebSearchBackend:
         return [(WEB_SEARCH_TOOL_NAME, self._purpose_hint)]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        """Run a search and record it on the request's tally.
+
+        Recording happens here, not in the tool loop, because this is the only
+        place that knows a call actually reached the backend. The loop converts
+        every failure to a ``[tool error]`` string for the model, which cannot
+        distinguish a search that failed from one that never ran.
+        """
         if name != WEB_SEARCH_TOOL_NAME:
             raise KeyError(f"WebSearchBackend does not own tool {name!r}")
+        try:
+            result = await self._search_tool(arguments)
+        except Exception:
+            if self._tally is not None:
+                self._tally.record_failure(WEB_SEARCH_TOOL_NAME)
+            raise
+        if self._tally is not None:
+            self._tally.record_result(WEB_SEARCH_TOOL_NAME, result)
+        return result
+
+    async def _search_tool(self, arguments: dict[str, Any]) -> str:
         if self._client is None:
             raise RuntimeError("WebSearchBackend not entered as an async context manager")
 

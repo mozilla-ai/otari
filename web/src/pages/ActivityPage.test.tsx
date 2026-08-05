@@ -958,3 +958,62 @@ describe("ActivityPage", () => {
     expect(await screen.findByText("default")).toBeInTheDocument();
   });
 });
+
+describe("ActivityPage gateway-run tools", () => {
+  it("marks a row that ran tools and keeps its token bar", async () => {
+    // A row can carry tool meters while its tokens were never metered (an unpriced
+    // model still owes for the searches it ran). Keying the token split off the
+    // presence of `billing_meters` rather than each key made the bar vanish here.
+    mockApi({
+      rows: [
+        entry({
+          prompt_tokens: 1200,
+          completion_tokens: 300,
+          total_tokens: 1500,
+          billing_meters: { tools: { web_search: { billed: 3, errors: 1, unit_rate: 0.01 } } },
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    const row = (await screen.findByText("gpt-4o")).closest("tr")!;
+    // 3 billed + 1 failed = 4 calls, and the detail is on the accessible name.
+    const pill = within(row).getByLabelText(/Gateway tools/);
+    expect(pill).toHaveTextContent("4 tools");
+    expect(pill).toHaveAccessibleName("Gateway tools: web search ×3, 1 failed");
+    // The bar still renders from the raw columns.
+    expect(within(row).getByRole("img", { name: /Token composition/ })).toBeInTheDocument();
+  });
+
+  it("shows tool counts and cost in the request detail", async () => {
+    mockApi({
+      rows: [
+        entry({
+          cost: 0.05,
+          billing_meters: { tools: { web_search: { billed: 3, errors: 0, unit_rate: 0.01 } } },
+          pricing_breakdown: [{ meter: "web_search_calls", units: 3, unit_rate: 0.01, cost: 0.03 }],
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    await userEvent.click(await screen.findByText("gpt-4o"));
+    expect(await screen.findByText("Tools")).toBeInTheDocument();
+    expect(screen.getByText("web search ×3")).toBeInTheDocument();
+    // Per-call charge lines read "N at $X each", not the token form "$X / 1M".
+    expect(screen.getByText(/3 at \$0\.01 each, \$0\.03/)).toBeInTheDocument();
+  });
+
+  it("labels an unpriced tool instead of reporting it as free", async () => {
+    // A tool with no rate records units at cost 0. Rendering that as "$0.0000"
+    // would read as "this is free" when it means "nobody set a price".
+    mockApi({
+      rows: [entry({ billing_meters: { tools: { web_search: { billed: 2, errors: 0 } } } })],
+    });
+    renderPage(<ActivityPage />);
+
+    await userEvent.click(await screen.findByText("gpt-4o"));
+    expect(await screen.findByText("Tool cost")).toBeInTheDocument();
+    expect(screen.getByText("unpriced")).toBeInTheDocument();
+  });
+});

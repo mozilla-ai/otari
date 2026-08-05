@@ -31,6 +31,7 @@ from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing, UsageLog
 from gateway.services.metered_pricing import calculate_metered_cost
+from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 
 # Cap on an explicit id list. Page selections drive the id path and the largest
 # rows-per-page the UI offers is 500; 1000 leaves headroom without letting a single
@@ -66,6 +67,12 @@ class UsageSelection(BaseModel):
     end_date: datetime | None = None
     # None: any; True: only rows with a cost; False: only rows with no cost yet.
     priced: bool | None = None
+    # Gateway-run tool usage, forwarded so a bulk op driven from a tool-filtered
+    # Activity view targets exactly the rows the operator was shown. In practice it
+    # matches nothing here, because only gateway rows carry tool meters and this
+    # selection is hard-scoped to imported rows; it is still forwarded so the
+    # "every scoping filter must be repeatable" invariant holds without exception.
+    tool: str | None = None
 
     @model_validator(mode="after")
     def _require_exactly_one_mode(self) -> "UsageSelection":
@@ -160,6 +167,15 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
         conditions.append(UsageLog.cost.is_not(None))
     elif selection.priced is False:
         conditions.append(UsageLog.cost.is_(None))
+    if selection.tool is not None:
+        namespace = UsageLog.billing_meters[TOOL_METER_NAMESPACE]
+        conditions.append(
+            # See routes/usage._tool_used_expr: the text coercion is what makes a
+            # missing key compare as SQL NULL rather than JSON null.
+            namespace.as_string().is_not(None)
+            if selection.tool == "any"
+            else namespace[selection.tool]["billed"].as_integer().is_not(None)
+        )
     return conditions
 
 

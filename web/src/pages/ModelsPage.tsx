@@ -33,6 +33,9 @@ import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 // `owned_by` the gateway stamps on a configured alias (ALIAS_OWNED_BY in
 // src/gateway/api/routes/models.py). Aliases are display names declared in
 // config.yml, not models, so they cannot be priced here.
+// Provider segment of a gateway-run tool's pricing key; see the loop in `rows`.
+const GATEWAY_TOOL_PRICING_PROVIDER = "otari";
+
 const ALIAS_OWNED_BY = "otari";
 
 // Where a row's price comes from. "configured" is a DB price and the only kind
@@ -1156,6 +1159,14 @@ export function ModelsPage() {
       });
     }
     for (const key of configured.keys()) {
+      // Gateway-run tools (otari:web_search, otari:code_execution) are priced per
+      // call, not per million tokens, so they are managed on the Tools & Guardrails
+      // page. Listing them here would put a per-call rate under columns labelled
+      // "$ / 1M" and drag them into the price filters and the comparison chart,
+      // where a rate stored as 10000 would rank as the costliest "model" served.
+      if (key.startsWith(`${GATEWAY_TOOL_PRICING_PROVIDER}:`)) {
+        continue;
+      }
       add(key, key, providerFromModelKey(key));
     }
 

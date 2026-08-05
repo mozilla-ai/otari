@@ -629,18 +629,94 @@ async def test_stream_runs_owned_tool_and_continues(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
 
     pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
-    terminal_types = [
-        event.type
+    events = [
+        event
         async for event in anthropic_tool_loop_stream(
             completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
             pool=cast(Any, pool),
             max_iterations=5,
         )
-        if event.type in {"message_delta", "message_stop"}
     ]
-    # Only the FINAL iteration's terminal events are forwarded. The intermediate
-    # ``tool_use`` iteration's terminal events are dropped.
-    assert terminal_types == ["message_delta", "message_stop"]
+
+    # The FULL sequence, not just the terminal events: a client accumulating this
+    # stream must see one well-formed message. Asserting only the terminal events
+    # is what let a duplicated ``message_start`` and a reused block index ship.
+    assert [e.type for e in events] == [
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop",
+    ]
+    # Exactly one envelope, even though the loop consumed two upstream messages.
+    assert [e.type for e in events].count("message_start") == 1
+    # The gateway's own tool_use block never reaches the client: it could never be
+    # sent the matching tool_result, because the loop consumed it.
+    assert not any(getattr(e, "content_block", None) is not None and e.content_block.type == "tool_use" for e in events)
+    assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_renumbers_blocks_across_iterations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Content-block indices are continuous across a tool-loop round trip.
+
+    The model speaks before it calls the tool ("let me look that up"), so
+    iteration 1 forwards a text block at upstream index 0 and iteration 2 opens
+    its own text block, also at upstream index 0. The client sees one message, so
+    the second block has to arrive as index 1; reusing 0 would make an accumulator
+    overwrite the first block.
+    """
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "let me look"),
+                _content_block_stop(0),
+                _tool_use_block_start(1, "tu_1", "fetch_url"),
+                _input_json_delta(1, '{"u": "x"}'),
+                _content_block_stop(1),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "done"),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
+    ]
+
+    indexed = [(e.type, e.index) for e in events if getattr(e, "index", None) is not None]
+    assert indexed == [
+        ("content_block_start", 0),
+        ("content_block_delta", 0),
+        ("content_block_stop", 0),
+        # Iteration 2's block arrives at 1, not at its upstream index of 0.
+        ("content_block_start", 1),
+        ("content_block_delta", 1),
+        ("content_block_stop", 1),
+    ]
+    assert [e.type for e in events].count("message_start") == 1
     assert pool.calls == [("fetch_url", {"u": "x"})]
 
 

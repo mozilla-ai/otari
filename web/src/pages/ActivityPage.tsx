@@ -47,6 +47,31 @@ function formatTokens(value: number | null): string {
   return value === null ? "—" : value.toLocaleString();
 }
 
+// A per-call rate, unlike a per-million-token one, is routinely smaller than the
+// 4 decimal places `usd` keeps: $0.00002 per search would render as "$0.0000" and
+// read as free. Fall back to significant digits once the value is below what the
+// currency format can show, so a real rate is never displayed as zero.
+const usdPrecise = new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "USD",
+  maximumSignificantDigits: 3,
+});
+
+function formatUnitRate(value: number): string {
+  if (value === 0) return usd.format(0);
+  return value < 0.0001 ? usdPrecise.format(value) : usd.format(value);
+}
+
+// A charge line is discriminated by which rate it carries: token meters price per
+// million, gateway-run tool meters price per call.
+type ChargeLine = NonNullable<UsageEntry["pricing_breakdown"]>[number];
+
+// Token lines first, tool lines after, each group keeping the order the writers
+// emitted. "Billed meters" otherwise reads as an unordered mix once a row has both.
+function sortedBreakdown(lines: readonly ChargeLine[]): ChargeLine[] {
+  return [...lines].sort((a, b) => Number("unit_rate" in a) - Number("unit_rate" in b));
+}
+
 // Humanize a millisecond duration: "820 ms", "1.4 s". Null (historical rows,
 // batch jobs) renders as an em-dash so the column reads cleanly.
 function formatLatency(ms: number | null): string {
@@ -113,6 +138,15 @@ const PRICED_OPTIONS: { label: string; value: string }[] = [
   { label: "Unpriced", value: "false" },
 ];
 
+// Gateway-run tools an operator can filter on. "Any tool" also matches MCP tools,
+// whose names come from the caller's own server and so cannot be enumerated here.
+const TOOL_OPTIONS: { label: string; value: string }[] = [
+  { label: "All", value: "" },
+  { label: "Any tool", value: "any" },
+  { label: "Web search", value: "web_search" },
+  { label: "Code execution", value: "code_execution" },
+];
+
 const DEFAULT_PAGE_SIZE = 50;
 
 // The only breakdown this page reads: the in-window models behind the typeahead.
@@ -136,6 +170,7 @@ const URL_DEFAULTS = {
   source_label: "",
   endpoint: "",
   provider: "",
+  tool: "",
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
 } as const;
@@ -227,14 +262,60 @@ function positive(value: unknown): number {
 // Failing that, assume the subset convention and clamp, which is exact whenever
 // there is no cache usage to misattribute.
 function tokenComposition(entry: UsageEntry): TokenComposition | null {
+  // Per key, not per object: a row can carry meters for its gateway-run tool calls
+  // while its tokens were never metered (an unpriced model still owes for the
+  // searches it ran). Keying off the object's presence would then read every token
+  // as 0 and the bar would vanish from a row that has real tokens.
   const meters = entry.billing_meters ?? null;
-  const totalInput = meters ? positive(meters.total_input_tokens) : positive(entry.prompt_tokens);
-  const cacheRead = meters ? positive(meters.cache_read_tokens) : positive(entry.cache_read_tokens);
-  const cacheWrite = meters ? positive(meters.cache_write_tokens) : positive(entry.cache_write_tokens);
-  const output = meters ? positive(meters.completion_tokens) : positive(entry.completion_tokens);
+  const meter = (key: string, fallback: number | null): number =>
+    meters && typeof meters[key] === "number" ? positive(meters[key]) : positive(fallback);
+  const totalInput = meter("total_input_tokens", entry.prompt_tokens);
+  const cacheRead = meter("cache_read_tokens", entry.cache_read_tokens);
+  const cacheWrite = meter("cache_write_tokens", entry.cache_write_tokens);
+  const output = meter("completion_tokens", entry.completion_tokens);
   const fresh = Math.max(0, totalInput - cacheRead - cacheWrite);
   const total = fresh + cacheRead + cacheWrite + output;
   return total > 0 ? { fresh, cacheRead, cacheWrite, output, total } : null;
+}
+
+// A row's gateway-run tool calls, read out of the reserved `tools` meter namespace.
+// Nested under one key so a caller-named MCP tool can never collide with a token
+// meter (which the billed-token SQL and the bar above both read by name).
+type ToolUsage = { tool: string; billed: number; errors: number; unitRate: number | null };
+
+function toolUsage(entry: UsageEntry): ToolUsage[] {
+  const nested = entry.billing_meters?.tools;
+  if (!nested || typeof nested !== "object") return [];
+  return Object.entries(nested as Record<string, unknown>)
+    .flatMap(([tool, counts]) => {
+      if (!counts || typeof counts !== "object") return [];
+      const record = counts as Record<string, unknown>;
+      const billed = positive(record.billed);
+      const errors = positive(record.errors);
+      if (!billed && !errors) return [];
+      const rate = record.unit_rate;
+      return [{ tool, billed, errors, unitRate: typeof rate === "number" ? rate : null }];
+    })
+    .sort((a, b) => b.billed - a.billed || a.tool.localeCompare(b.tool));
+}
+
+// "web search x3" / "web search x3, 1 failed". The tool name is de-underscored for
+// reading; failures are named rather than folded into the count, because a failed
+// call is not billed and an operator chasing a cost needs that distinction.
+function formatToolUsage(usage: ToolUsage): string {
+  const label = usage.tool.replaceAll("_", " ");
+  const parts = usage.billed ? [`${label} \u00d7${usage.billed}`] : [label];
+  if (usage.errors) parts.push(`${usage.errors} failed`);
+  return parts.join(", ");
+}
+
+
+// Cost attributable to gateway-run tools on this row, from the rate stored with the
+// row rather than the live price, so a historical row reads as it was billed.
+function toolCost(entry: UsageEntry): number | null {
+  const usages = toolUsage(entry).filter((usage) => usage.unitRate !== null);
+  if (!usages.length) return null;
+  return usages.reduce((sum, usage) => sum + usage.billed * (usage.unitRate ?? 0), 0);
 }
 
 // Segment order runs input side first (fresh, then the two cache buckets), then
@@ -388,6 +469,25 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
           </span>
         </DetailField>
         <DetailField label="Cost">{formatUSD(entry.cost)}</DetailField>
+        {toolUsage(entry).length ? (
+          <>
+            <DetailField label="Tools">
+              {toolUsage(entry).map(formatToolUsage).join(" \u00b7 ")}
+            </DetailField>
+            <DetailField label="Tool cost">
+              {toolCost(entry) === null ? (
+                <span
+                  className="text-[var(--otari-warning-ink,var(--otari-muted))]"
+                  title="No per-request price is configured for this tool, so its calls were recorded at zero cost. Set one on the Models screen."
+                >
+                  unpriced
+                </span>
+              ) : (
+                formatUSD(toolCost(entry))
+              )}
+            </DetailField>
+          </>
+        ) : null}
         <DetailField label="Cache read tokens">{formatTokens(entry.cache_read_tokens)}</DetailField>
         <DetailField label="Cache write tokens">{formatTokens(entry.cache_write_tokens)}</DetailField>
         <DetailField label="1h cache writes">{formatTokens(entry.cache_write_1h_tokens ?? null)}</DetailField>
@@ -411,9 +511,11 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
             Billed meters
           </span>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {entry.pricing_breakdown.map((line) => (
+            {sortedBreakdown(entry.pricing_breakdown).map((line) => (
               <DetailField key={line.meter} label={line.meter.replaceAll("_", " ")}>
-                {formatTokens(line.units)} at {formatUSD(line.rate_per_million)} / 1M, {formatUSD(line.cost)}
+                {"unit_rate" in line
+                  ? `${formatTokens(line.units)} at ${formatUnitRate(line.unit_rate)} each, ${formatUSD(line.cost)}`
+                  : `${formatTokens(line.units)} at ${formatUSD(line.rate_per_million)} / 1M, ${formatUSD(line.cost)}`}
               </DetailField>
             ))}
           </div>
@@ -454,6 +556,7 @@ export function ActivityPage() {
   const sessionFilter = url.get("source_label");
   const endpointFilter = url.get("endpoint");
   const providerFilter = url.get("provider");
+  const toolFilter = url.get("tool");
   const page = Math.max(0, url.getNumber("page"));
   // Snap URL-supplied sizes to the nearest offered option: selection latency
   // grows linearly with rows on the page, so an old bookmark with size=500
@@ -508,10 +611,12 @@ export function ActivityPage() {
       source_label: sessionFilter || undefined,
       endpoint: endpointFilter || undefined,
       provider: providerFilter || undefined,
+      tool: (toolFilter || undefined) as UsageFilters["tool"],
       priced,
     }),
     [
       win,
+      toolFilter,
       statusFilter,
       modelFilter,
       userFilter,
@@ -675,6 +780,7 @@ export function ActivityPage() {
       sessionFilter ||
       endpointFilter ||
       providerFilter ||
+      toolFilter ||
       timeFiltered,
   );
 
@@ -697,6 +803,7 @@ export function ActivityPage() {
       source_label: "",
       endpoint: "",
       provider: "",
+      tool: "",
     });
   const filterChips: FilterChip[] = [
     ...(statusFilter ? [{ key: "status", label: "Status", value: labelFrom(STATUS_OPTIONS, statusFilter), onClear: () => url.patch({ status: "" }) }] : []),
@@ -708,6 +815,7 @@ export function ActivityPage() {
     ...(sessionFilter ? [{ key: "session", label: "Session", value: sessionFilter, onClear: () => url.patch({ source_label: "" }) }] : []),
     ...(endpointFilter ? [{ key: "endpoint", label: "Endpoint", value: endpointFilter, onClear: () => url.patch({ endpoint: "" }) }] : []),
     ...(providerFilter ? [{ key: "provider", label: "Provider", value: providerFilter, onClear: () => url.patch({ provider: "" }) }] : []),
+    ...(toolFilter ? [{ key: "tool", label: "Tool", value: labelFrom(TOOL_OPTIONS, toolFilter), onClear: () => url.patch({ tool: "" }) }] : []),
   ];
 
   // Selection targets imported rows only; enforced gateway rows are disabled so
@@ -782,6 +890,7 @@ export function ActivityPage() {
           source_label: filters.source_label,
           endpoint: filters.endpoint,
           provider: filters.provider,
+          tool: filters.tool,
           start_date: filters.start_date,
           end_date: filters.end_date,
           priced: filters.priced,
@@ -879,7 +988,33 @@ export function ActivityPage() {
         ),
       },
       { id: "user", header: "User", cell: (e) => e.user_id ?? "—" },
-      { id: "model", header: "Model", isRowHeader: true, cell: (e) => e.model },
+      {
+        id: "model",
+        header: "Model",
+        isRowHeader: true,
+        // The tool marker lives here rather than in a column of its own: a ninth
+        // column would compete with the token bar for the row's only graphic slot
+        // and push the failure-forward Status pill off a narrow viewport. Text, not
+        // colour alone, so it survives the same accessibility bar as TokenBar.
+        cell: (e) => {
+          const usage = toolUsage(e);
+          if (!usage.length) return e.model;
+          const calls = usage.reduce((sum, u) => sum + u.billed + u.errors, 0);
+          const detail = usage.map(formatToolUsage).join(" \u00b7 ");
+          return (
+            <span className="inline-flex items-center gap-1.5">
+              {e.model}
+              <span
+                className="inline-flex items-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--otari-brand-dark)]"
+                title={detail}
+                aria-label={`Gateway tools: ${detail}`}
+              >
+                {calls} {calls === 1 ? "tool" : "tools"}
+              </span>
+            </span>
+          );
+        },
+      },
       {
         id: "routing",
         header: "Routing",
@@ -958,6 +1093,18 @@ export function ActivityPage() {
               </option>
             ))}
           </FilterSelect>
+          {/* Only offered once the window actually contains tool usage, following the
+              source select below: a filter whose every option returns nothing is
+              noise on the majority of gateways, which run no tools at all. */}
+          {toolFilter || contextSummary.data?.by_tool?.length ? (
+            <FilterSelect id="filter-tool" label="Tool" value={toolFilter} onChange={(value) => url.patch({ tool: value })}>
+              {TOOL_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </FilterSelect>
+          ) : null}
           {/* Provenance only earns a select once there is more than one source
               to choose between: most gateways see only their own traffic, and a
               filter with a single option is noise. A drill-down that arrives

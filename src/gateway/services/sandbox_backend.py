@@ -38,6 +38,8 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from opentelemetry import trace
 
+from gateway.services.tool_usage import ToolUsageTally
+
 if TYPE_CHECKING:
     from types import TracebackType
 
@@ -82,8 +84,12 @@ class SandboxBackend:
         purpose_hint: str | None = None,
         timeout_s: float = _DEFAULT_TIMEOUT_S,
         auth_token: str | None = None,
+        tally: ToolUsageTally | None = None,
     ) -> None:
         self._sandbox_url = sandbox_url.rstrip("/")
+        # Per-request accounting, owned by the route and passed in. None when the
+        # backend runs outside a billed request (tests, direct use).
+        self._tally = tally
         self._purpose_hint = purpose_hint or _DEFAULT_PURPOSE_HINT
         self._timeout_s = timeout_s
         # Optional bearer credential forwarded as `Authorization: Bearer` on every
@@ -158,8 +164,24 @@ class SandboxBackend:
         return [(CODE_EXECUTION_TOOL_NAME, self._purpose_hint)]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        """Execute code and record the call on the request's tally.
+
+        See :class:`gateway.services.tool_usage.ToolUsageTally`: a result carrying
+        the ``[tool error]`` sentinel is counted and never billed.
+        """
         if name != CODE_EXECUTION_TOOL_NAME:
             raise KeyError(f"SandboxBackend does not own tool {name!r}")
+        try:
+            result = await self._exec_tool(arguments)
+        except Exception:
+            if self._tally is not None:
+                self._tally.record_failure(CODE_EXECUTION_TOOL_NAME)
+            raise
+        if self._tally is not None:
+            self._tally.record_result(CODE_EXECUTION_TOOL_NAME, result)
+        return result
+
+    async def _exec_tool(self, arguments: dict[str, Any]) -> str:
         if self._client is None or self._session_id is None:
             raise RuntimeError("SandboxBackend not entered as an async context manager")
 

@@ -53,6 +53,7 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
       { key: "openai", cost: 880, tokens: 7_000_000, requests: 45_100, is_other: false },
       { key: "anthropic", cost: 360.5, tokens: 5_400_000, requests: 38_900, is_other: false },
     ],
+    by_tool: [],
     series: [
       { bucket_start: "2026-07-19T00:00:00Z", cost: 400, tokens: 4_000_000, requests: 28_000 },
       { bucket_start: "2026-07-20T00:00:00Z", cost: 840.5, tokens: 8_400_000, requests: 56_000 },

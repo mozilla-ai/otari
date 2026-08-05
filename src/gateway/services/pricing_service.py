@@ -327,6 +327,62 @@ def flat_request_cost(pricing: ModelPricing | None) -> float:
     return pricing.input_price_per_million / 1_000_000
 
 
+GATEWAY_TOOL_PRICING_PROVIDER = "otari"
+
+
+def gateway_tool_pricing_key(tool: str) -> str:
+    """The ``ModelPricing.model_key`` an operator prices a gateway-run tool under.
+
+    ``model_key`` is a free-form ``provider:model`` string, so a tool the gateway
+    runs itself is priced as ``otari:<tool>`` (for example ``otari:web_search``).
+    Note this is a different key from the one ``POST /v1/search`` uses for the same
+    search: that endpoint prices ``<search-provider>:<tool>`` because it knows which
+    commercial API it called, while the tool loop only knows the operator-configured
+    backend URL.
+    """
+    return f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}"
+
+
+async def price_tool_calls(
+    db: AsyncSession,
+    billable_calls: dict[str, int],
+    *,
+    as_of: datetime | None = None,
+) -> tuple[float, list[dict[str, float | int | str]], list[str]]:
+    """Price a request's successful gateway-run tool calls.
+
+    Returns the total USD cost, one auditable charge line per tool, and the names
+    of the tools that had no pricing row. Charge lines use the same shape
+    ``calculate_metered_cost`` produces so both kinds share
+    ``UsageLog.pricing_breakdown`` and the dashboard's renderer, except that a tool
+    line carries ``unit_rate`` (USD per call) where a token line carries
+    ``rate_per_million``. That key is what tells a reader, and the UI, which unit
+    convention applies.
+
+    A tool with no pricing row contributes units at a zero rate, so the work stays
+    on the row and in the audit trail even when the operator has not priced it.
+    Lookups pass ``use_defaults=False``: MCP tool names come from a caller-supplied
+    server, and the genai-prices fallback matches on a bare name, so a tool named
+    after a real model would otherwise be billed at that model's
+    per-million-token rate divided by a million.
+    """
+    total = 0.0
+    lines: list[dict[str, float | int | str]] = []
+    unpriced: list[str] = []
+    for tool in sorted(billable_calls):
+        units = billable_calls[tool]
+        if units <= 0:
+            continue
+        pricing = await find_model_pricing(db, GATEWAY_TOOL_PRICING_PROVIDER, tool, as_of=as_of, use_defaults=False)
+        if pricing is None:
+            unpriced.append(tool)
+        unit_rate = flat_request_cost(pricing)
+        cost = units * unit_rate
+        total += cost
+        lines.append({"meter": f"{tool}_calls", "units": units, "unit_rate": unit_rate, "cost": cost})
+    return total, lines, unpriced
+
+
 def per_image_cost(n_images: int, pricing: ModelPricing) -> float:
     """USD cost of ``n_images`` generated images.
 

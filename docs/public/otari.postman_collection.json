@@ -2413,9 +2413,15 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+                  "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
                   "disabled": true,
                   "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "disabled": true,
+                  "key": "tool",
                   "value": ""
                 },
                 {
@@ -2437,7 +2443,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&skip=&limit="
+              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&skip=&limit="
             }
           }
         },
@@ -2542,9 +2548,15 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+                  "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
                   "disabled": true,
                   "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "disabled": true,
+                  "key": "tool",
                   "value": ""
                 },
                 {
@@ -2554,7 +2566,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget="
+              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget="
             }
           }
         },
@@ -2680,9 +2692,15 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+                  "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
                   "disabled": true,
                   "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "disabled": true,
+                  "key": "tool",
                   "value": ""
                 },
                 {
@@ -2698,7 +2716,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/series?group_by=&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&bucket="
+              "raw": "{{baseUrl}}/v1/usage/series?group_by=&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&bucket="
             }
           }
         },
@@ -2818,9 +2836,15 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+                  "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
                   "disabled": true,
                   "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "disabled": true,
+                  "key": "tool",
                   "value": ""
                 },
                 {
@@ -2842,7 +2866,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget=&bucket=&dimensions="
+              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&bucket=&dimensions="
             }
           }
         },
@@ -2929,9 +2953,15 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+                  "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
                   "disabled": true,
                   "key": "priced",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+                  "disabled": true,
+                  "key": "tool",
                   "value": ""
                 },
                 {
@@ -2941,7 +2971,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&counts_toward_budget="
+              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget="
             }
           }
         }

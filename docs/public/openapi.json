@@ -5560,6 +5560,17 @@
             ],
             "title": "Status"
           },
+          "tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool"
+          },
           "user_id": {
             "anyOf": [
               {
@@ -6441,6 +6452,17 @@
             ],
             "title": "Status"
           },
+          "tool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool"
+          },
           "user_id": {
             "anyOf": [
               {
@@ -6535,6 +6557,14 @@
             "title": "By Source Label",
             "type": "array"
           },
+          "by_tool": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/UsageToolRow"
+            },
+            "title": "By Tool",
+            "type": "array"
+          },
           "by_user": {
             "items": {
               "$ref": "#/components/schemas/UsageGroupRow"
@@ -6584,6 +6614,40 @@
           "series"
         ],
         "title": "UsageSummary",
+        "type": "object"
+      },
+      "UsageToolRow": {
+        "description": "Spend and volume for one gateway-run tool inside the window.\n\n``calls`` counts billable calls, not requests: one request can run a tool\nseveral times, which is the whole reason a per-tool view exists. ``errors``\ncounts calls that failed and were therefore never billed. ``requests`` is how\nmany requests ran the tool at least once, so the number reconciles with the\nActivity list when the same filter is applied there.",
+        "properties": {
+          "calls": {
+            "title": "Calls",
+            "type": "integer"
+          },
+          "cost": {
+            "title": "Cost",
+            "type": "number"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "requests": {
+            "title": "Requests",
+            "type": "integer"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "calls",
+          "errors",
+          "requests",
+          "cost"
+        ],
+        "title": "UsageToolRow",
         "type": "object"
       },
       "UsageTotals": {
@@ -10847,7 +10911,7 @@
             }
           },
           {
-            "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+            "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
             "in": "query",
             "name": "priced",
             "required": false,
@@ -10860,8 +10924,31 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+              "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
               "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+            "in": "query",
+            "name": "tool",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "any",
+                    "web_search",
+                    "code_execution"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+              "title": "Tool"
             }
           },
           {
@@ -11152,7 +11239,7 @@
             }
           },
           {
-            "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+            "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
             "in": "query",
             "name": "priced",
             "required": false,
@@ -11165,8 +11252,31 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+              "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
               "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+            "in": "query",
+            "name": "tool",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "any",
+                    "web_search",
+                    "code_execution"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+              "title": "Tool"
             }
           },
           {
@@ -11497,7 +11607,7 @@
             }
           },
           {
-            "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+            "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
             "in": "query",
             "name": "priced",
             "required": false,
@@ -11510,8 +11620,31 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+              "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
               "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+            "in": "query",
+            "name": "tool",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "any",
+                    "web_search",
+                    "code_execution"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+              "title": "Tool"
             }
           },
           {
@@ -11841,7 +11974,7 @@
             }
           },
           {
-            "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+            "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
             "in": "query",
             "name": "priced",
             "required": false,
@@ -11854,8 +11987,31 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+              "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
               "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+            "in": "query",
+            "name": "tool",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "any",
+                    "web_search",
+                    "code_execution"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+              "title": "Tool"
             }
           },
           {
@@ -11910,6 +12066,7 @@
                       "endpoint",
                       "provider",
                       "status_code",
+                      "tool",
                       "none"
                     ],
                     "type": "string"
@@ -12167,7 +12324,7 @@
             }
           },
           {
-            "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+            "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
             "in": "query",
             "name": "priced",
             "required": false,
@@ -12180,8 +12337,31 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)",
+              "description": "Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing.",
               "title": "Priced"
+            }
+          },
+          {
+            "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+            "in": "query",
+            "name": "tool",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "any",
+                    "web_search",
+                    "code_execution"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically.",
+              "title": "Tool"
             }
           },
           {

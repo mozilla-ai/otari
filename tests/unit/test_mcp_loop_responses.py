@@ -605,17 +605,28 @@ async def test_stream_runs_owned_function_call_and_continues(monkeypatch: pytest
     monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
 
     pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
-    completed_count = 0
-    async for event in responses_tool_loop_stream(
-        completion_kwargs={"model": "fake", "input_data": "go"},
-        pool=cast(Any, pool),
-        max_iterations=5,
-    ):
-        if event.type == "response.completed":
-            completed_count += 1
-    # Only the final iteration's response.completed is forwarded — the
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
+    ]
+
+    # Only the final iteration's response.completed is forwarded; the
     # intermediate one is dropped because the loop kept iterating.
-    assert completed_count == 1
+    assert [e.type for e in events].count("response.completed") == 1
+    # The gateway's own function_call never reaches the client: it could never be
+    # sent the matching function_call_output, because the loop consumed it.
+    assert not any(e.type.startswith("response.function_call_arguments") for e in events)
+    assert not any(
+        e.type == "response.output_item.added" and getattr(e.item, "type", None) == "function_call" for e in events
+    )
+    # Sequence numbers are continuous across the round trip, so the SDK's stream
+    # helper sees one well-ordered response rather than two restarts.
+    seqs = [e.sequence_number for e in events if getattr(e, "sequence_number", None) is not None]
+    assert seqs == list(range(len(seqs)))
     assert pool.calls == [("fetch_url", {"u": "x"})]
 
 
@@ -694,3 +705,61 @@ async def test_stream_function_call_arguments_accumulate_across_deltas(
     ):
         pass
     assert pool.calls == [("fetch_url", {"u": "x", "n": 3})]
+
+
+@pytest.mark.asyncio
+async def test_stream_announces_gateway_search_as_native_web_search_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A gateway-run search reaches the client as the Responses API's own item.
+
+    The raw ``function_call`` events are swallowed (the client can never be sent
+    their output), so a ``web_search_call`` output item takes their place. That is
+    what an OpenAI-hosted search would have emitted, and unlike the Anthropic
+    equivalent it needs no provider-signed content.
+    """
+    fc = _function_call("call_1", "web_search", "")
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, fc),
+                _function_call_args_done(0, "fc_item_1", "web_search", '{"query": "otari gateway"}'),
+                _output_item_done(0, _function_call("call_1", "web_search", '{"query": "otari gateway"}')),
+                _response_completed(),
+            ),
+            _async_iter(
+                _text_delta("msg_1", 0, "here you go"),
+                _response_completed(),
+            ),
+        ]
+    )
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    pool = _FakePool(tool_names=["web_search"], results={"web_search": "results"})
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
+    ]
+
+    web_search_items = [
+        e.item for e in events if getattr(getattr(e, "item", None), "type", None) == "web_search_call"
+    ]
+    # One added + one done event, carrying the same item.
+    assert len(web_search_items) == 2
+    item = web_search_items[0]
+    assert item.status == "completed"
+    assert item.action.query == "otari gateway"
+    # The raw function_call is not shown; the native item is what the client sees.
+    assert not any(getattr(getattr(e, "item", None), "type", None) == "function_call" for e in events)
+    # Sequence numbers stay continuous once the synthetic events are spliced in.
+    seqs = [e.sequence_number for e in events if getattr(e, "sequence_number", None) is not None]
+    assert seqs == list(range(len(seqs)))
+    assert pool.calls == [("web_search", {"query": "otari gateway"})]

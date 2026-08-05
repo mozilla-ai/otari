@@ -148,6 +148,18 @@ def _maybe_fold_message_delta_usage(event: Any, acc_output_tokens: int) -> Any:
     return event.model_copy(update={"usage": new_usage})
 
 
+def _reindexed(event: Any, visible_index: int) -> Any:
+    """Return ``event`` with its content-block ``index`` set to ``visible_index``.
+
+    A no-op when the index already matches, which is every event of a
+    single-iteration stream, so the common case stays byte-identical and no
+    pydantic copy is made.
+    """
+    if getattr(event, "index", None) == visible_index or not hasattr(event, "model_copy"):
+        return event
+    return event.model_copy(update={"index": visible_index})
+
+
 class _MessagesStreamState:
     """Per-iteration bookkeeping for the Anthropic streaming loop.
 
@@ -165,6 +177,14 @@ class _MessagesStreamState:
         self.stop_reason: str | None = None
         self.deferred_terminal: list[MessageStreamEvent] = []
         self.owned_specs: list[dict[str, Any]] = []
+        # Blocks the gateway runs itself. Their events are swallowed rather than
+        # forwarded: a client shown a ``tool_use`` for ``web_search`` can never be
+        # sent the matching ``tool_result``, because the gateway consumes it.
+        self.hidden_indices: set[int] = set()
+        # Upstream block index -> the index the client sees. Each iteration's
+        # blocks start again at 0 upstream, but the client is being shown one
+        # single message, so forwarded blocks are renumbered.
+        self.visible_index: dict[int, int] = {}
 
 
 class _MessagesToolLoopStrategy:
@@ -238,6 +258,7 @@ class _MessagesToolLoopStrategy:
         result: MessageResponse,
         owned: list[Any],
         pool: ToolBackend,
+        acc: Any = None,
     ) -> None:
         # All-owned: continue the loop. Append the assistant turn (so the model
         # sees its own tool_use blocks) and a user turn carrying tool_result.
@@ -255,14 +276,35 @@ class _MessagesToolLoopStrategy:
         return _MessagesStreamState()
 
     def new_stream_accumulator(self) -> dict[str, int]:
-        # output_tokens from dropped intermediate ``message_delta`` events.
-        # The final iteration's forwarded ``message_delta`` is modified to
-        # carry the cumulative total so streaming usage reporting downstream
-        # sees the full tool-loop output, not just the final round's tokens.
-        return {"output_tokens": 0}
+        # output_tokens: from dropped intermediate ``message_delta`` events. The
+        # final iteration's forwarded ``message_delta`` is modified to carry the
+        # cumulative total so streaming usage reporting downstream sees the full
+        # tool-loop output, not just the final round's tokens.
+        #
+        # started / next_index: the client is shown ONE message even though the
+        # gateway may have consumed several upstream ones, so only the first
+        # ``message_start`` is forwarded and forwarded blocks are renumbered
+        # continuously. Without this a tool-loop stream contains two
+        # ``message_start`` events and reuses block index 0, which every SDK
+        # stream accumulator rejects.
+        return {"output_tokens": 0, "started": 0, "next_index": 0}
 
-    def observe(self, state: _MessagesStreamState, event: MessageStreamEvent) -> StreamAction:
+    def observe(
+        self,
+        state: _MessagesStreamState,
+        event: MessageStreamEvent,
+        pool: ToolBackend,
+        acc: dict[str, int],
+    ) -> tuple[StreamAction, MessageStreamEvent]:
         event_type = getattr(event, "type", None)
+
+        if event_type == "message_start":
+            # One envelope per response, no matter how many upstream messages the
+            # tool loop consumed to produce it.
+            if acc["started"]:
+                return StreamAction.DEFER, event
+            acc["started"] = 1
+            return StreamAction.FORWARD, event
 
         if event_type == "content_block_start":
             block = event.content_block  # type: ignore[union-attr]
@@ -271,8 +313,15 @@ class _MessagesToolLoopStrategy:
                 state.blocks_by_index[idx] = block.model_dump(exclude_none=True)
             else:
                 state.blocks_by_index[idx] = dict(block) if isinstance(block, dict) else {}
-            if state.blocks_by_index[idx].get("type") == "tool_use":
+            recorded = state.blocks_by_index[idx]
+            if recorded.get("type") == "tool_use":
                 state.tool_use_json_bufs[idx] = ""
+                if pool.owns_tool(recorded.get("name", "")):
+                    # Still recorded above: the loop needs the block and its
+                    # buffered arguments to execute the call. Just not shown.
+                    state.hidden_indices.add(idx)
+                    return StreamAction.DEFER, event
+            return StreamAction.FORWARD, _reindexed(event, self._visible_for(state, acc, idx))
 
         elif event_type == "content_block_delta":
             idx = event.index  # type: ignore[union-attr]
@@ -297,13 +346,26 @@ class _MessagesToolLoopStrategy:
         elif event_type == "message_delta":
             state.stop_reason = getattr(event.delta, "stop_reason", None) or state.stop_reason  # type: ignore[union-attr]
             state.deferred_terminal.append(event)
-            return StreamAction.DEFER
+            return StreamAction.DEFER, event
 
         elif event_type == "message_stop":
             state.deferred_terminal.append(event)
-            return StreamAction.BREAK
+            return StreamAction.BREAK, event
 
-        return StreamAction.FORWARD
+        idx = getattr(event, "index", None)
+        if isinstance(idx, int):
+            if idx in state.hidden_indices:
+                return StreamAction.DEFER, event
+            return StreamAction.FORWARD, _reindexed(event, self._visible_for(state, acc, idx))
+        return StreamAction.FORWARD, event
+
+    @staticmethod
+    def _visible_for(state: _MessagesStreamState, acc: dict[str, int], idx: int) -> int:
+        """The client-visible index for an upstream block index, assigned in order."""
+        if idx not in state.visible_index:
+            state.visible_index[idx] = acc["next_index"]
+            acc["next_index"] += 1
+        return state.visible_index[idx]
 
     def stream_exiting(self, state: _MessagesStreamState, pool: ToolBackend) -> bool:
         owned_specs: list[dict[str, Any]] = []
@@ -335,6 +397,11 @@ class _MessagesToolLoopStrategy:
                 usage = getattr(term, "usage", None)
                 if usage is not None:
                     acc["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+
+    def synthetic_events(self, state: _MessagesStreamState, acc: dict[str, int]) -> list[Any]:
+        # This format has no native vocabulary for a server-side tool call, so the
+        # gateway's calls stay invisible on the wire. Documented in docs/tools.md.
+        return []
 
     async def advance_stream_transcript(
         self,

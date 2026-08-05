@@ -37,6 +37,7 @@ from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
+from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.services.log_writer import LogWriter
@@ -141,8 +142,43 @@ def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
     return value, False
 
 
+# Output item types the gateway mints itself to describe work it did server-side.
+# They are stripped back off an inbound ``input`` before the provider sees it: the
+# documented way to continue a Responses conversation is to append the previous
+# ``response.output`` to the next ``input``, and the gateway has no
+# ``previous_response_id`` support to do that server-side, so an echoed turn would
+# otherwise ship a ``web_search_call`` to a provider that never declared a
+# web-search tool. Anthropic's equivalent hazard (an ``encrypted_content`` blob the
+# gateway cannot sign) is why Messages emits no native server-tool blocks at all.
+_GATEWAY_MINTED_ITEM_TYPES = frozenset({"web_search_call"})
+
+
+def _strip_gateway_minted_items(input_data: Any) -> Any:
+    """Drop gateway-minted server-tool items from an inbound ``input``.
+
+    Only touches a list input, and only removes the item types the gateway itself
+    emits. A caller who genuinely used a provider-native web search still had that
+    run upstream, so its items arrive on a response the gateway passed through
+    untouched; those are indistinguishable here and are dropped too. That is the
+    conservative direction: dropping a descriptive item loses nothing the model
+    needs (the search results themselves are in the transcript), while forwarding
+    one risks a 400 from the provider.
+    """
+    if not isinstance(input_data, list):
+        return input_data
+    kept = [
+        item
+        for item in input_data
+        if not (isinstance(item, dict) and item.get("type") in _GATEWAY_MINTED_ITEM_TYPES)
+    ]
+    if len(kept) != len(input_data):
+        logger.debug("Stripped %d gateway-minted output item(s) from the inbound input", len(input_data) - len(kept))
+    return kept
+
+
 def _codex_extra_body(input_data: Any, client_metadata: Any | None) -> tuple[Any, dict[str, Any] | None]:
     """Prepare Codex metadata for OpenAI's raw Responses request body."""
+    input_data = _strip_gateway_minted_items(input_data)
     cleaned_input, input_has_codex_metadata = _split_codex_input_metadata(input_data)
     extra_body: dict[str, Any] = {}
     if input_has_codex_metadata:

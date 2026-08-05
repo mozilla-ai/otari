@@ -11,6 +11,7 @@ import type {
   UsageGroupBy,
   UsageGroupRow,
   UsageSeriesPoint,
+  UsageSummary,
 } from "@/api/types";
 import { ChartLegend, Sparkline, TrendChart, type SeriesDef, type StackedPoint } from "@/components/charts";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
@@ -232,13 +233,81 @@ function BreakdownTable({
   );
 }
 
+// Gateway-run tool spend. A separate table from BreakdownTable because the unit is
+// different: a tool bills per call, and one request can run several, so "requests"
+// and "tokens" would both misdescribe it. Failed calls are shown because they are
+// counted and never billed, which is the first thing to check when a cost looks off.
+function ToolBreakdownTable({
+  rows,
+  totalCost,
+  onDrill,
+  loading,
+}: {
+  rows: UsageSummary["by_tool"];
+  totalCost: number;
+  onDrill: (tool: string) => void;
+  loading: boolean;
+}) {
+  const columns: DataTableColumn<UsageSummary["by_tool"][number]>[] = [
+    {
+      id: "tool",
+      header: "Tool",
+      isRowHeader: true,
+      cell: (row) => {
+        const share = totalCost > 0 ? row.cost / totalCost : 0;
+        return (
+          <div className="flex flex-col gap-1">
+            <span className="truncate text-[var(--otari-ink)]">{row.tool.replaceAll("_", " ")}</span>
+            <span className="h-1 w-full overflow-hidden rounded-full bg-[var(--otari-line)]">
+              <span
+                className="block h-full rounded-full bg-[var(--otari-brand)]"
+                style={{ width: `${Math.min(100, share * 100)}%` }}
+              />
+            </span>
+          </div>
+        );
+      },
+    },
+    { id: "calls", header: "Calls", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatCount(row.calls)}</span> },
+    {
+      id: "failed",
+      header: "Failed",
+      align: "end",
+      cell: (row) => (
+        <span className={row.errors ? "text-red-700" : "text-[var(--otari-muted)]"}>{formatCount(row.errors)}</span>
+      ),
+    },
+    { id: "requests", header: "Requests", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatCount(row.requests)}</span> },
+    { id: "spend", header: "Spend", align: "end", cell: (row) => <span className="text-[var(--otari-ink)]">{formatUsd(row.cost)}</span> },
+  ];
+  return (
+    <DataTable
+      ariaLabel="Spend by gateway-run tool"
+      columns={columns}
+      rows={rows}
+      getRowKey={(row) => row.tool}
+      isLoading={loading}
+      emptyContent="No gateway-run tool calls in this range."
+      onRowAction={(key) => onDrill(String(key))}
+    />
+  );
+}
+
 // ---------- which breakdowns the page asks for ----------
 
 // Every breakdown the page renders, and nothing more (each one is a GROUP BY
 // over the window server-side; tile-only queries pass NO_BREAKDOWNS instead). There is deliberately no API-key spend table:
 // keys identify callers, not workloads, and the User table already answers
 // "who". The chart's group-by can still split by key via /v1/usage/series.
-const PAGE_BREAKDOWNS: SummaryDimension[] = ["model", "user", "source_label", "endpoint", "provider", "source"];
+const PAGE_BREAKDOWNS: SummaryDimension[] = [
+  "model",
+  "user",
+  "source_label",
+  "endpoint",
+  "provider",
+  "source",
+  "tool",
+];
 
 // The typeahead's own summary drops the model filter, so it only needs by_model.
 const MODEL_BREAKDOWN: SummaryDimension[] = ["model"];
@@ -638,6 +707,7 @@ export function UsagePage() {
         }),
     },
   ];
+  const toolRows = data?.by_tool ?? [];
   const [primaryDim, setPrimaryDim] = useState<SummaryDimension>("model");
   const [secondaryDim, setSecondaryDim] = useState<SummaryDimension>("source_label");
   const activePrimary = dimensions.find((d) => d.key === primaryDim) ?? dimensions[0];
@@ -910,6 +980,28 @@ export function UsagePage() {
               />
             </div>
           </div>
+
+          {/* Tools get their own card rather than a tab, and only when the window
+              contains some: on a gateway that runs no tools it would be an empty
+              table asking to be explained, and where it does appear it answers a
+              question none of the other tables can ("what did search cost me"). */}
+          {toolRows.length ? (
+            <div className="rounded-2xl border border-[var(--otari-line)] bg-[var(--otari-surface)] p-4">
+              <div className="mb-3 flex flex-col gap-1">
+                <h2 className="text-sm font-semibold text-[var(--otari-ink)]">Gateway-run tools</h2>
+                <p className="text-xs text-[var(--otari-muted)]">
+                  Tools Otari ran itself, billed per call. MCP tools are not listed here: their names come from your
+                  own server, so they appear on each request instead.
+                </p>
+              </div>
+              <ToolBreakdownTable
+                rows={toolRows}
+                totalCost={totals?.cost ?? 0}
+                onDrill={(tool) => drillTo({ tool: tool as NonNullable<UsageFilters["tool"]> })}
+                loading={summary.isLoading}
+              />
+            </div>
+          ) : null}
 
         </>
       )}

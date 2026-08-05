@@ -111,6 +111,24 @@ def _accumulate_tool_call_deltas(slots: dict[int, dict[str, Any]], deltas: list[
                 slot["function"]["arguments"] += fn.arguments
 
 
+def _with_tool_calls(event: ChatCompletionChunk, tool_calls: list[Any] | None) -> ChatCompletionChunk:
+    """Return ``event`` with its delta's ``tool_calls`` replaced.
+
+    Used to strip gateway-owned fragments out of a chunk that also carries
+    content or foreign fragments, so the client sees only what it can act on.
+    Falls back to the original chunk if the SDK models are frozen, which is a
+    cosmetic regression rather than a correctness one.
+    """
+    try:
+        choice = event.choices[0]
+        new_delta = choice.delta.model_copy(update={"tool_calls": tool_calls})
+        new_choice = choice.model_copy(update={"delta": new_delta})
+        return event.model_copy(update={"choices": [new_choice]})
+    except (AttributeError, TypeError, IndexError):
+        logger.warning("Could not strip gateway tool_calls from a streamed chunk; forwarding as-is")
+        return event
+
+
 def _finalize_tool_calls(slots: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
     return [slots[i] for i in sorted(slots)]
 
@@ -259,9 +277,7 @@ class _ChatToolLoopStrategy:
         # back on the next request.
         choice = result.choices[0]
         sdk_calls = choice.message.tool_calls or []
-        foreign_sdk_calls = [
-            tc for tc in sdk_calls if hasattr(tc, "function") and not pool.owns_tool(tc.function.name)
-        ]
+        foreign_sdk_calls = [tc for tc in sdk_calls if hasattr(tc, "function") and not pool.owns_tool(tc.function.name)]
         try:
             choice.message.tool_calls = foreign_sdk_calls or None
         except (AttributeError, TypeError):
@@ -278,6 +294,7 @@ class _ChatToolLoopStrategy:
         result: ChatCompletion,
         owned: list[Any],
         pool: ToolBackend,
+        acc: Any = None,
     ) -> None:
         transcript.append({"role": "assistant", "tool_calls": owned})
         transcript.extend(await _execute_mcp_calls(pool, owned))
@@ -297,13 +314,32 @@ class _ChatToolLoopStrategy:
         # accounting happens downstream in `streaming_generator`.
         return None
 
-    def observe(self, state: _ChatStreamState, event: ChatCompletionChunk) -> StreamAction:
+    def observe(
+        self,
+        state: _ChatStreamState,
+        event: ChatCompletionChunk,
+        pool: ToolBackend,
+        acc: None,
+    ) -> tuple[StreamAction, ChatCompletionChunk]:
         chunk_is_terminal = False
+        hide = False
+        visible = event
         if event.choices:
             choice = event.choices[0]
             delta = getattr(choice, "delta", None)
             if delta is not None and getattr(delta, "tool_calls", None):
                 _accumulate_tool_call_deltas(state.slots, delta.tool_calls)
+                # Fragments for a gateway-owned call are not forwarded: the client
+                # can never be sent the matching ``tool`` message, because the
+                # gateway consumes the result itself. A fragment carrying only
+                # arguments has no name of its own, so ownership is resolved from
+                # the accumulated slot for its index.
+                foreign = [tc for tc in delta.tool_calls if not self._owned_fragment(state, pool, tc)]
+                if len(foreign) != len(delta.tool_calls):
+                    if foreign or getattr(delta, "content", None):
+                        visible = _with_tool_calls(event, foreign or None)
+                    else:
+                        hide = True
             if choice.finish_reason:
                 # Sticky-tool-calls: a trailing ``stop`` chunk from
                 # Anthropic must not override ``tool_calls`` we've
@@ -313,8 +349,24 @@ class _ChatToolLoopStrategy:
                 chunk_is_terminal = True
         if chunk_is_terminal:
             state.pending_terminal = event
-            return StreamAction.DEFER
-        return StreamAction.FORWARD
+            return StreamAction.DEFER, event
+        if hide:
+            return StreamAction.DEFER, event
+        return StreamAction.FORWARD, visible
+
+    @staticmethod
+    def _owned_fragment(state: _ChatStreamState, pool: ToolBackend, fragment: Any) -> bool:
+        """Whether a streamed tool_call fragment belongs to a gateway-run tool.
+
+        A fragment that carries only arguments has no name of its own, so ownership
+        is resolved from the accumulated slot for its index.
+        """
+        index = getattr(fragment, "index", None)
+        if not isinstance(index, int):
+            return False
+        slot = state.slots.get(index)
+        name = (slot or {}).get("function", {}).get("name") or ""
+        return bool(name) and pool.owns_tool(name)
 
     def stream_exiting(self, state: _ChatStreamState, pool: ToolBackend) -> bool:
         if state.finish_reason != "tool_calls":
@@ -334,6 +386,11 @@ class _ChatToolLoopStrategy:
 
     def accumulate_stream_usage(self, acc: None, state: _ChatStreamState) -> None:
         return None
+
+    def synthetic_events(self, state: _ChatStreamState, acc: None) -> list[Any]:
+        # This format has no native vocabulary for a server-side tool call, so the
+        # gateway's calls stay invisible on the wire. Documented in docs/tools.md.
+        return []
 
     async def advance_stream_transcript(
         self,

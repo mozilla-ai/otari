@@ -110,6 +110,7 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
         result: ResultT,
         owned: list[Any],
         pool: ToolBackend,
+        acc: AccT,
     ) -> None: ...
 
 
@@ -135,7 +136,9 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
 
     def new_stream_accumulator(self) -> AccT: ...
 
-    def observe(self, state: StateT, event: ChunkT) -> StreamAction: ...
+    def observe(
+        self, state: StateT, event: ChunkT, pool: ToolBackend, acc: AccT
+    ) -> tuple[StreamAction, ChunkT]: ...
 
     def stream_exiting(self, state: StateT, pool: ToolBackend) -> bool: ...
 
@@ -149,6 +152,8 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
         state: StateT,
         pool: ToolBackend,
     ) -> None: ...
+
+    def synthetic_events(self, state: StateT, acc: AccT) -> list[ChunkT]: ...
 
 
 def _prepare(
@@ -255,7 +260,7 @@ async def run_tool_loop(
             strategy.fold_usage(result, acc)
             return result
 
-        await strategy.advance_transcript(transcript, result, owned, pool)
+        await strategy.advance_transcript(transcript, result, owned, pool, acc)
 
     raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
@@ -270,8 +275,16 @@ async def run_tool_loop_stream(
     """Streaming tool loop, generic over the wire format.
 
     Every upstream event flows through ``strategy.observe``, which does the
-    format's bookkeeping and decides whether the event is forwarded downstream
-    or deferred as a pending terminal. After each upstream stream ends,
+    format's bookkeeping and returns both what to do with the event and the
+    event to forward. The returned event may differ from the upstream one:
+    a format that stitches several provider messages into one client-visible
+    response has to renumber the indices it forwards, and it must swallow the
+    gateway's own tool calls entirely, since the client can never receive a
+    result for a tool the gateway ran itself.
+
+    ``acc`` is passed to ``observe`` because that stitching is cross-iteration
+    state (has the envelope been opened, which index comes next), while ``state``
+    is per-iteration. After each upstream stream ends,
     ``strategy.stream_exiting`` decides between exiting (the deferred terminal
     events are forwarded, with cumulative usage folded in where the format
     supports it) and continuing (the terminal events are dropped, their usage
@@ -301,11 +314,11 @@ async def run_tool_loop_stream(
 
         async with _stream_scope(stream):
             async for event in stream:
-                action = strategy.observe(state, event)
+                action, visible = strategy.observe(state, event, pool, acc)
                 if action is StreamAction.BREAK:
                     break
                 if action is StreamAction.FORWARD:
-                    yield event
+                    yield visible
 
         if strategy.stream_exiting(state, pool):
             for terminal in strategy.terminal_events(state, acc):
@@ -314,5 +327,10 @@ async def run_tool_loop_stream(
 
         strategy.accumulate_stream_usage(acc, state)
         await strategy.advance_stream_transcript(transcript, state, pool)
+        # A format with a native vocabulary for server-side tool calls announces
+        # the calls the gateway just ran, in place of the raw tool-call events that
+        # were swallowed. Formats without one return nothing.
+        for synthetic in strategy.synthetic_events(state, acc):
+            yield synthetic
 
     raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")

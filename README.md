@@ -225,7 +225,7 @@ export OTARI_AI_TOKEN=gw_xxx
 
 ## Built-in tools
 
-Otari can run two tools itself so any model, including open-weight ones, gets parity with what frontier APIs expose as managed tools: `otari_code_execution` (a sandboxed Python REPL) and `otari_web_search`. Both are opt-in per request via the `tools` array and run behind docker-compose profiles. An `otari_*` type means Otari runs it in its own sandbox; any other type, including the provider-native keywords, is passed through to the provider. Either way Otari still handles routing, observability, and billing.
+Otari can run two tools itself so any model, including open-weight ones, gets parity with what frontier APIs expose as managed tools: `otari_code_execution` (a sandboxed Python REPL) and `otari_web_search`. Both are opt-in per request via the `tools` array and run behind docker-compose profiles. An `otari_*` type means Otari runs it in its own sandbox; any other type, including the provider-native keywords, is passed through to the provider. Either way Otari handles routing and observability. Tools Otari runs itself are billed per call at a rate you set, and appear on the usage row of the request that triggered them; see [docs/tools.md](docs/tools.md).
 
 ```json
 {

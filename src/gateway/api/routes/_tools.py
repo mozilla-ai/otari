@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.core.env import otari_env
 from gateway.log_config import logger
+from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.web_search_backend import WebSearchBackend
 
 if TYPE_CHECKING:
@@ -198,7 +199,12 @@ def _resolve_web_search_purpose_hint(
 
 
 def _build_web_search_backend(
-    *, base_url: str, tool_entry: dict[str, Any], auth_token: str | None = None, config: GatewayConfig | None = None
+    *,
+    base_url: str,
+    tool_entry: dict[str, Any],
+    auth_token: str | None = None,
+    config: GatewayConfig | None = None,
+    tally: ToolUsageTally | None = None,
 ) -> WebSearchBackend:
     """Construct a WebSearchBackend honouring env-level + per-tool config.
 
@@ -212,7 +218,7 @@ def _build_web_search_backend(
         content extraction (snippet-only mode).
       * ``OTARI_WEB_SEARCH_PURPOSE_HINT`` — per-deployment hint override.
     """
-    kwargs: dict[str, Any] = {"base_url": base_url}
+    kwargs: dict[str, Any] = {"base_url": base_url, "tally": tally}
 
     # Operator knobs resolve from the effective config value (dashboard override /
     # env / YAML) first, falling back to the env var so pure-env deployments are

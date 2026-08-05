@@ -5,10 +5,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
+from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing
-from gateway.services.pricing_service import find_model_pricing, normalize_effective_at
+from gateway.services.pricing_service import (
+    GATEWAY_TOOL_PRICING_PROVIDER,
+    find_model_pricing,
+    gateway_tool_pricing_key,
+    normalize_effective_at,
+)
 from gateway.services.provider_kwargs import normalize_pricing_key
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
+from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME
 
 
 async def warn_if_require_pricing_without_pricing(config: GatewayConfig, db: AsyncSession) -> None:
@@ -70,6 +78,52 @@ async def warn_if_search_tools_lack_flat_pricing(config: GatewayConfig, db: Asyn
     )
 
 
+async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSession) -> None:
+    """Warn at startup when a configured gateway-run tool has no per-request rate.
+
+    A gateway-run tool (``otari_web_search`` / ``otari_code_execution``) is priced
+    under ``otari:<tool>``. With ``require_pricing`` on, an unpriced tool is refused
+    at admission, so this warning is what tells the operator *before* the first 402
+    rather than after. With ``require_pricing`` off the tool runs and is recorded at
+    zero cost, which is worth flagging too: the work is real and the invoice is not.
+    """
+    configured: list[str] = []
+    if config.web_search_url or otari_env("WEB_SEARCH_URL"):
+        configured.append(WEB_SEARCH_TOOL_NAME)
+    if config.sandbox_url or otari_env("SANDBOX_URL"):
+        configured.append(CODE_EXECUTION_TOOL_NAME)
+
+    unpriced = [
+        tool
+        for tool in configured
+        # use_defaults=False for the reason the settlement path sets it: a tool is
+        # not a model, so the community dataset can only produce a false match.
+        if await find_model_pricing(db, GATEWAY_TOOL_PRICING_PROVIDER, tool, use_defaults=False) is None
+    ]
+    if not unpriced:
+        return
+
+    keys = ", ".join(gateway_tool_pricing_key(tool) for tool in unpriced)
+    if config.require_pricing:
+        logger.warning(
+            "Gateway tool(s) %s are configured but have no pricing (%s), and require_pricing is on, "
+            "so requests using them will be rejected with HTTP 402. Add a per-request rate "
+            "(config `pricing` section or POST /v1/pricing). The convention is USD per million "
+            "requests, so 10000.0 charges $0.01 per call.",
+            ", ".join(unpriced),
+            keys,
+        )
+    else:
+        logger.warning(
+            "Gateway tool(s) %s are configured but have no pricing (%s). Their calls will be "
+            "recorded at zero cost while still costing the operator money upstream. Add a "
+            "per-request rate; the convention is USD per million requests, so 10000.0 charges "
+            "$0.01 per call.",
+            ", ".join(unpriced),
+            keys,
+        )
+
+
 async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession) -> None:
     """Initialize model pricing from configuration file."""
 
@@ -83,7 +137,7 @@ async def initialize_pricing_from_config(config: GatewayConfig, db: AsyncSession
         model_key = normalize_pricing_key(config, raw_model_key)
         instance = model_key.split(":", 1)[0] if ":" in model_key else model_key
 
-        if instance not in config.providers:
+        if instance not in config.providers and instance != GATEWAY_TOOL_PRICING_PROVIDER:
             logger.warning(
                 "Skipping pricing for '%s': provider '%s' is not listed in the providers section. "
                 "The provider may still work if its credentials come from the environment, but its "

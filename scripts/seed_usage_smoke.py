@@ -18,7 +18,9 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from gateway.models.entities import APIKey, UsageLog, User
+from gateway.models.entities import APIKey, ModelPricing, UsageLog, User
+from gateway.services.pricing_service import gateway_tool_pricing_key
+from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "sqlite:///./smoke.db"
 rng = random.Random(303)  # deterministic
@@ -30,6 +32,11 @@ MODELS = [
     ("gpt-4o-mini", "openai", 0.001, 500),
 ]
 USERS = ["alice", "bob", "carol", "dave"]
+
+# Gateway-run tools, with the per-call rate the seeded rows are billed at. Priced so
+# the dashboard shows a real charge; `otari:code_execution` is deliberately left
+# unpriced so the "unpriced tool" treatment is visible too.
+TOOL_UNIT_RATES = {"web_search": 0.01, "code_execution": None}
 KEYS = [("key-prod", "alice"), ("key-staging", "bob"), ("key-batch", "carol")]
 
 engine = create_engine(URL)
@@ -45,8 +52,22 @@ for kid, owner in KEYS:
         db.add(APIKey(id=kid, key_hash=f"hash-{kid}", key_name=kid, user_id=owner, is_active=True))
 db.flush()
 
+# Price web search so its calls carry a cost (the stored convention is USD per
+# million calls, so a cent per call is 10000).
+if db.query(ModelPricing).filter(ModelPricing.model_key == gateway_tool_pricing_key("web_search")).first() is None:
+    db.add(
+        ModelPricing(
+            model_key=gateway_tool_pricing_key("web_search"),
+            input_price_per_million=TOOL_UNIT_RATES["web_search"] * 1_000_000,
+            output_price_per_million=0.0,
+            effective_at=datetime.now(UTC) - timedelta(days=60),
+        )
+    )
+db.flush()
+
 now = datetime.now(UTC)
 n = 0
+tool_rows = 0
 for _ in range(1500):
     # Weighted toward recent so the "24h" and "7d" presets have plenty; tail reaches
     # ~50 days back so the previous-30d comparison window is populated too.
@@ -58,6 +79,42 @@ for _ in range(1500):
     prompt = rng.randint(200, 4000)
     completion = 0 if is_error else rng.randint(50, 1500)
     cache_read = rng.choice([0, 0, 0, rng.randint(100, 2000)])
+
+    # ~12% of requests run a gateway tool, the way a search-enabled deployment looks:
+    # mostly web search, occasionally code execution, occasionally a failed call.
+    tool_meters: dict[str, dict[str, float]] = {}
+    tool_lines: list[dict[str, float | int | str]] = []
+    tool_cost = 0.0
+    if not is_error and rng.random() < 0.12:
+        tool = "web_search" if rng.random() < 0.8 else "code_execution"
+        billed = rng.randint(1, 4)
+        errors = 1 if rng.random() < 0.15 else 0
+        entry: dict[str, float] = {"billed": billed, "errors": errors}
+        rate = TOOL_UNIT_RATES[tool]
+        if rate is not None:
+            entry["unit_rate"] = rate
+            tool_cost = round(billed * rate, 6)
+            tool_lines.append(
+                {"meter": f"{tool}_calls", "units": billed, "unit_rate": rate, "cost": tool_cost}
+            )
+        tool_meters[tool] = entry
+        tool_rows += 1
+
+    token_cost = None if is_error else round((prompt + completion) / 1000 * unit_cost, 6)
+
+    # Real priced rows carry the normalized token meters the pricing writer emits, and
+    # the dashboard's token bar and the "needs pricing" predicate both read them, so
+    # the seed writes them too rather than looking like a legacy unmetered row.
+    token_meters: dict[str, float] = {}
+    if token_cost is not None:
+        token_meters = {
+            "total_input_tokens": prompt,
+            "fresh_input_tokens": prompt - cache_read,
+            "cache_read_tokens": cache_read,
+            "cache_write_tokens": 0,
+            "cache_write_1h_tokens": 0,
+            "completion_tokens": completion,
+        }
     db.add(
         UsageLog(
             id=str(uuid.uuid4()),
@@ -72,13 +129,20 @@ for _ in range(1500):
             total_tokens=prompt + completion,
             cache_read_tokens=cache_read or None,
             cache_write_tokens=None,
-            cost=None if is_error else round((prompt + completion) / 1000 * unit_cost, 6),
+            cost=token_cost if not tool_cost else round((token_cost or 0.0) + tool_cost, 6),
+            billing_meters=(
+                {**token_meters, **({TOOL_METER_NAMESPACE: tool_meters} if tool_meters else {})} or None
+            ),
+            pricing_breakdown=tool_lines or None,
             status="error" if is_error else "success",
             error_message="provider quota exceeded" if is_error else None,
-            latency_ms=None if is_error else base_latency + rng.randint(-200, 800),
+            # A tool-loop request is slower: it made several provider round trips.
+            latency_ms=None
+            if is_error
+            else base_latency + rng.randint(-200, 800) + (1800 if tool_meters else 0),
         )
     )
     n += 1
 
 db.commit()
-print(f"Seeded {n} usage rows into {URL}")
+print(f"Seeded {n} usage rows into {URL} ({tool_rows} of them ran a gateway tool)")

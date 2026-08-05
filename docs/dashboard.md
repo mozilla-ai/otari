@@ -181,10 +181,20 @@ gateway.
   model's price from the exact selector the caller sent. Later requests are
   costed at those rates; rows already logged keep the cost they were served
   with.
+  A request that used a tool Otari ran itself (`otari_web_search`,
+  `otari_code_execution`, or an MCP tool) is marked next to its model with the
+  number of calls, and the **Tool** filter narrows the log to one of them. The
+  request detail lists the calls, how many failed, and what they cost. Query text
+  is never stored: the log records counts and names only.
 - **Usage**: aggregate usage and analytics, showing spend and volume over time,
   broken down by model and by user, plus a switchable breakdown by session,
   endpoint, provider, or source. Clicking any row opens the Activity log scoped
   to that group, so "spend went up" leads straight to the requests behind it.
+  When the window contains gateway-run tool calls, a **Gateway-run tools** table
+  shows calls, failures, and spend per tool, so "what did search cost me last
+  week" has an answer that is not one request at a time. MCP tools are excluded
+  from that table: their names come from your own server, so they appear per
+  request instead.
 
 ### Copying ids
 
@@ -252,6 +262,10 @@ For how users, keys, and budgets fit together and the management endpoints behin
 
 - **Tools & Guardrails**: configure the backends for built-in tools (for
   example the `otari_web_search` search backend) and request-level guardrails.
+  Each tool Otari runs itself also carries a **price per call** here: those calls
+  cost you money at a search provider or a sandbox, so they are billed onto the
+  request that triggered them. An unpriced tool is refused with a 402 while
+  `require_pricing` is on. See [Built-in tools](tools.md#pricing-a-gateway-run-tool).
 - **Settings**: search and toggle runtime settings, review and apply default
   pricing updates, and rotate the generated master key. Rotating the master key
   issues a fresh `otari-mk-…` value and keeps your current session signed in.

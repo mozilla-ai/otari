@@ -499,8 +499,18 @@ export interface UsageEntry {
   cache_read_tokens: number | null;
   cache_write_tokens: number | null;
   cache_write_1h_tokens?: number | null;
-  billing_meters?: Record<string, number> | null;
-  pricing_breakdown?: Array<{ meter: string; units: number; rate_per_million: number; cost: number }> | null;
+  // Token meters are flat numbers; gateway-run tool counts are nested under the
+  // reserved `tools` key (see ToolUsage in ActivityPage), so the value type is not
+  // number-only.
+  billing_meters?: Record<string, number | Record<string, Record<string, number>>> | null;
+  // A charge line is one of two shapes, discriminated by which rate it carries:
+  // `rate_per_million` for token meters, `unit_rate` for per-call tool meters.
+  // Modelled as a union rather than two optional fields so a token line cannot be
+  // rendered with an undefined rate.
+  pricing_breakdown?: Array<
+    | { meter: string; units: number; rate_per_million: number; cost: number }
+    | { meter: string; units: number; unit_rate: number; cost: number }
+  > | null;
   cost: number | null;
   status: string;
   error_message: string | null;
@@ -547,8 +557,13 @@ export interface UsageFilters {
   // Session/project attribution (a row's `source_label`), so the log can be
   // scoped to the one agent session a breakdown row points at.
   source_label?: string;
-  // Pricing state: true = only priced rows, false = only unpriced (cost null).
+  // Pricing state: true = only rows whose model tokens were priced, false = only
+  // rows that still need pricing. A row charged only for gateway-run tool calls
+  // counts as needing pricing, so a tool charge cannot hide it from that view.
   priced?: boolean;
+  // Gateway-run tool usage. "any" matches any tool (including MCP tools, whose
+  // names come from the caller's server); a name matches that tool specifically.
+  tool?: "any" | "web_search" | "code_execution";
   // Budget participation: false scopes to imported rows (the bulk-op target set).
   counts_toward_budget?: boolean;
 }
@@ -576,6 +591,7 @@ export interface UsageMutationSelection {
   endpoint?: string;
   provider?: string;
   source_label?: string;
+  tool?: "any" | "web_search" | "code_execution";
   start_date?: string;
   end_date?: string;
   priced?: boolean;
@@ -665,7 +681,10 @@ export type SummaryDimension =
   | "source"
   | "source_label"
   | "endpoint"
-  | "provider";
+  | "provider"
+  // Gateway-run tools. Unlike the others this one is not a `by_<name>` GROUP BY over
+  // a column; it aggregates the per-tool meters, so it fills `by_tool`.
+  | "tool";
 
 // Aggregated spend/volume for the Usage & analytics page. `start_date`/`end_date`
 // echo the (clamped) window the server actually aggregated over. A breakdown the
@@ -686,6 +705,10 @@ export interface UsageSummary {
   // API surface (/v1/chat/completions vs /v1/messages vs ...) and upstream provider.
   by_endpoint: UsageGroupRow[];
   by_provider: UsageGroupRow[];
+  // Gateway-run tool spend. `calls` counts billable calls (a request can run a tool
+  // several times), `errors` counts failed calls, which are never billed. MCP tools
+  // are excluded: their names are unbounded, so they show per request instead.
+  by_tool: Array<{ tool: string; calls: number; errors: number; requests: number; cost: number }>;
   series: UsageSeriesPoint[];
 }
 

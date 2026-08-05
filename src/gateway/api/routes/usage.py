@@ -8,11 +8,11 @@ external systems that need to sync usage data (billing, analytics).
 import csv
 import io
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
-from sqlalchemy import ColumnElement, case, func, null, select
+from sqlalchemy import ColumnElement, and_, case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
@@ -23,6 +23,8 @@ from gateway.services.external_usage_service import (
     ExternalIngestResult,
     ingest_external_events,
 )
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAME
+from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 from gateway.services.usage_admin_service import (
     UsageDeleteRequest,
     UsageDeleteResult,
@@ -31,6 +33,7 @@ from gateway.services.usage_admin_service import (
     delete_usage,
     set_usage_price,
 )
+from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME
 
 router = APIRouter(prefix="/v1/usage", tags=["usage"])
 
@@ -84,13 +87,22 @@ _SUMMARY_DIMENSIONS: dict[str, tuple[Any, int]] = {
 # It is the one dimension whose response field is not ``by_<name>``.
 _ERROR_TAXONOMY_DIMENSION = "status_code"
 
+# The gateway-run tools that can be enumerated for a filter or a breakdown. MCP
+# tool names come from a caller-supplied server, so they are unbounded and appear
+# only in a row's own detail, never as a dimension of their own. The ``any``
+# selector still matches them, because it tests the meter namespace itself.
+GATEWAY_TOOL_NAMES: tuple[str, ...] = (WEB_SEARCH_TOOL_NAME, CODE_EXECUTION_TOOL_NAME)
+_ANY_TOOL = "any"
+ToolFilter = Literal["any", "web_search", "code_execution"]
+
 # Keep in step with _SUMMARY_DIMENSIONS; the extra ``none`` is the explicit empty
 # selection (a repeated query param cannot express an empty list on the wire).
 SummaryDimension = Literal[
-    "model", "user", "api_key", "source", "source_label", "endpoint", "provider", "status_code", "none"
+    "model", "user", "api_key", "source", "source_label", "endpoint", "provider", "status_code", "tool", "none"
 ]
 
-_ALL_SUMMARY_DIMENSIONS: set[str] = set(_SUMMARY_DIMENSIONS) | {_ERROR_TAXONOMY_DIMENSION}
+_TOOL_DIMENSION = "tool"
+_ALL_SUMMARY_DIMENSIONS: set[str] = set(_SUMMARY_DIMENSIONS) | {_ERROR_TAXONOMY_DIMENSION, _TOOL_DIMENSION}
 
 
 def _utc_iso(value: datetime) -> str:
@@ -201,7 +213,16 @@ _PROVIDER_DESC = "Filter to a single provider (e.g. 'openai')"
 _SOURCE_DESC = "Filter to a single provenance source (e.g. 'gateway' or 'claude_code')"
 _SOURCE_LABEL_DESC = "Filter to a single session/project label (the source_label carried by imported usage)"
 _API_KEY_DESC = "Filter to a single API key id"
-_PRICED_DESC = "Filter by pricing state: true = only rows with a cost, false = only unpriced rows (cost is null)"
+_PRICED_DESC = (
+    "Filter by token-pricing state: true = only rows whose model tokens were priced, "
+    "false = only rows that still need pricing (no cost at all, or tokens that were "
+    "never metered because the model had no rate). A row charged only for gateway-run "
+    "tool calls still counts as needing pricing."
+)
+_TOOL_DESC = (
+    "Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool "
+    f"name ({', '.join(GATEWAY_TOOL_NAMES)}) matches that tool specifically."
+)
 _COUNTS_DESC = (
     "Filter by budget participation: true = only enforced gateway rows, "
     "false = only imported rows that never touch a budget"
@@ -228,6 +249,7 @@ def _usage_filters(
     source_label: str | None = None,
     api_key_id: str | None = None,
     priced: bool | None = None,
+    tool: str | None = None,
     counts_toward_budget: bool | None = None,
     status_code: int | None = None,
 ) -> list[ColumnElement[bool]]:
@@ -269,9 +291,11 @@ def _usage_filters(
     if api_key_id is not None:
         conditions.append(UsageLog.api_key_id == api_key_id)
     if priced is True:
-        conditions.append(UsageLog.cost.is_not(None))
+        conditions.append(~_needs_pricing_expr())
     elif priced is False:
-        conditions.append(UsageLog.cost.is_(None))
+        conditions.append(_needs_pricing_expr())
+    if tool is not None:
+        conditions.append(_tool_used_expr(tool))
     if counts_toward_budget is not None:
         conditions.append(UsageLog.counts_toward_budget.is_(counts_toward_budget))
     return conditions
@@ -292,6 +316,7 @@ async def list_usage(
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
@@ -319,6 +344,7 @@ async def list_usage(
         source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
+        tool=tool,
         counts_toward_budget=counts_toward_budget,
     )
     stmt = select(UsageLog).where(*conditions).order_by(UsageLog.timestamp.desc()).offset(skip).limit(limit)
@@ -371,6 +397,7 @@ async def count_usage(
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
 ) -> UsageCount:
     """Total number of usage logs matching the given filters.
@@ -394,6 +421,7 @@ async def count_usage(
         source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
+        tool=tool,
         counts_toward_budget=counts_toward_budget,
     )
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
@@ -527,6 +555,23 @@ class UsageSeriesPoint(BaseModel):
     output_tokens: int = 0
 
 
+class UsageToolRow(BaseModel):
+    """Spend and volume for one gateway-run tool inside the window.
+
+    ``calls`` counts billable calls, not requests: one request can run a tool
+    several times, which is the whole reason a per-tool view exists. ``errors``
+    counts calls that failed and were therefore never billed. ``requests`` is how
+    many requests ran the tool at least once, so the number reconciles with the
+    Activity list when the same filter is applied there.
+    """
+
+    tool: str
+    calls: int
+    errors: int
+    requests: int
+    cost: float
+
+
 class UsageSummary(BaseModel):
     """Aggregate spend/volume for the Usage & analytics page.
 
@@ -553,6 +598,9 @@ class UsageSummary(BaseModel):
     # other endpoint reports.
     by_endpoint: list[UsageGroupRow]
     by_provider: list[UsageGroupRow]
+    # Gateway-run tool spend. Empty when the window has none, and MCP tools are
+    # excluded by design (their names are unbounded, see GATEWAY_TOOL_NAMES).
+    by_tool: list[UsageToolRow] = []
     # Failures only, so the taxonomy is not swamped by the successes that carry
     # no status code. Counts sum to ``totals.error_count``, unless a window
     # somehow held more than ``_BREAKDOWN_TOP_N`` distinct codes, in which case
@@ -702,6 +750,73 @@ def _billed_expr(meter: str, fallback: Any) -> Any:
     return func.coalesce(UsageLog.billing_meters[meter].as_integer(), fallback, 0)
 
 
+def _needs_pricing_expr() -> ColumnElement[bool]:
+    """Predicate for "this row still needs pricing".
+
+    Two ways to qualify. Either nothing was charged at all (``cost IS NULL``, how it
+    has always been expressed), or the row carries a cost that came *only* from
+    gateway-run tool calls while its tokens were never metered. The second case
+    exists because a request against an unpriced model can still owe for the searches
+    it ran, and charging it a tool cost would otherwise hide it from the exact view an
+    operator uses to find what needs a rate.
+
+    The tool-namespace test keeps this narrow on purpose: a row with a cost and no
+    meters at all is a row priced before the meter columns existed, and it must keep
+    reading as priced.
+    """
+    token_metered = UsageLog.billing_meters["total_input_tokens"].as_integer().is_not(None)
+    tool_charged = UsageLog.billing_meters[TOOL_METER_NAMESPACE].as_string().is_not(None)
+    return or_(UsageLog.cost.is_(None), and_(tool_charged, ~token_metered))
+
+
+def _tool_calls_expr(tool: str) -> Any:
+    """Billable call count for one gateway-run tool on a row, or NULL."""
+    return UsageLog.billing_meters[(TOOL_METER_NAMESPACE, tool, "billed")].as_integer()
+
+
+def _tool_cost_expr(tool: str) -> Any:
+    """USD charged for one tool on a row, read off its own charge line.
+
+    The row's ``cost`` mixes tokens and tools, so per-tool spend has to come from
+    the line ``price_tool_calls`` wrote. ``pricing_breakdown`` is a JSON *array*,
+    and the tool lines are appended after the token ones, so the position is not
+    fixed; the units and the rate are both on the line, so the product is
+    reconstructed from the meter count instead, which needs no array search.
+    """
+    return _tool_calls_expr(tool) * _tool_unit_rate_expr(tool)
+
+
+def _tool_unit_rate_expr(tool: str) -> Any:
+    """Per-call USD rate recorded on the row for one tool.
+
+    Stored per row rather than looked up live, so a historical row keeps the rate
+    it was actually billed at even after the operator changes the price.
+    """
+    return func.coalesce(
+        UsageLog.billing_meters[(TOOL_METER_NAMESPACE, tool, "unit_rate")].as_float(),
+        0.0,
+    )
+
+
+def _tool_used_expr(tool: str) -> ColumnElement[bool]:
+    """Predicate for "this request ran a gateway tool".
+
+    ``any`` tests the namespace itself so an MCP tool (whose name is supplied by the
+    caller's server and cannot be enumerated here) still matches. A specific name
+    indexes into the namespace. Both compile to the dialect's JSON extraction on
+    SQLite and PostgreSQL; neither is indexable, which is acceptable because every
+    activity query is already bounded by the indexed timestamp window.
+    """
+    if tool == _ANY_TOOL:
+        # ``.as_string()`` is load-bearing: an uncoerced JSON index compares with JSON
+        # semantics, where SQL NULL and JSON null are not the same thing, and
+        # ``IS NOT NULL`` then matches every row. Coercing to text makes a missing key
+        # read as SQL NULL on both SQLite and PostgreSQL.
+        namespace = UsageLog.billing_meters[TOOL_METER_NAMESPACE].as_string()
+        return cast("ColumnElement[bool]", namespace.is_not(None))
+    return cast("ColumnElement[bool]", _tool_calls_expr(tool).is_not(None))
+
+
 # The billed composition aggregates shared by the summary series, the grand
 # totals, and the grouped series, so all three reconcile by construction.
 def _billed_input_sum() -> Any:
@@ -732,9 +847,11 @@ async def _totals(
                 # would make a policy that recovers quickly look slower than one
                 # that never fails.
                 func.avg(case((UsageLog.status != "absorbed", UsageLog.latency_ms))),
-                # Unpriced *served* rows only; see UsageTotals.unpriced_requests.
+                # Unpriced *served* rows only; see UsageTotals.unpriced_requests. The
+                # predicate is shared with the list filter so the tile and the rows it
+                # sends an operator to agree.
                 func.coalesce(
-                    func.sum(case(((UsageLog.status == "success") & UsageLog.cost.is_(None), 1), else_=0)),
+                    func.sum(case(((UsageLog.status == "success") & _needs_pricing_expr(), 1), else_=0)),
                     0,
                 ),
                 _billed_input_sum(),
@@ -847,6 +964,58 @@ def error_class_for(status_code: int | None) -> ErrorClass:
     return "unknown"
 
 
+async def _tool_breakdown(
+    db: AsyncSession,
+    conditions: list[ColumnElement[bool]],
+) -> list[UsageToolRow]:
+    """Per-tool calls, failures, spend, and requests inside the window.
+
+    One aggregate per known tool rather than a ``GROUP BY`` over the meter map:
+    a JSON map's keys cannot be grouped portably across SQLite and PostgreSQL
+    (``json_each`` versus ``jsonb_each``, on a plain ``json`` column), and the set
+    of gateway-run tools is small and fixed. Cost comes from each row's charge
+    line rather than the row total, because a row's ``cost`` also carries tokens.
+
+    Rows with no calls for a tool contribute nothing, so a deployment that never
+    ran a tool gets an empty list and the UI can hide the section entirely.
+
+    ``calls`` and ``errors`` sum over every row including absorbed attempts, because
+    a search run by an attempt that was later abandoned still happened and was still
+    paid for. ``requests`` counts requests, so the two answer different questions on
+    purpose: "how much tool work did we do" and "how many requests used a tool".
+    """
+    out: list[UsageToolRow] = []
+    for tool in GATEWAY_TOOL_NAMES:
+        calls = _tool_calls_expr(tool)
+        errors = UsageLog.billing_meters[(TOOL_METER_NAMESPACE, tool, "errors")].as_integer()
+        row = (
+            await db.execute(
+                select(
+                    func.coalesce(func.sum(calls), 0),
+                    func.coalesce(func.sum(errors), 0),
+                    # Requests, not rows: a request that failed over through a
+                    # routing policy writes an absorbed row per recovered attempt,
+                    # and counting those would report more requests using a tool
+                    # than the Activity list shows for the same filter.
+                    _request_count_expr(),
+                    func.coalesce(func.sum(_tool_cost_expr(tool)), 0.0),
+                ).where(*conditions, calls.is_not(None))
+            )
+        ).one()
+        if not row[0] and not row[1]:
+            continue
+        out.append(
+            UsageToolRow(
+                tool=tool,
+                calls=int(row[0]),
+                errors=int(row[1]),
+                requests=int(row[2]),
+                cost=float(row[3]),
+            )
+        )
+    return sorted(out, key=lambda r: r.cost, reverse=True)
+
+
 async def _errors_by_status_code(
     db: AsyncSession,
     conditions: list[ColumnElement[bool]],
@@ -892,6 +1061,7 @@ async def _summary_context(
     source_label: str | None = None,
     api_key_id: str | None = None,
     priced: bool | None = None,
+    tool: str | None = None,
     counts_toward_budget: bool | None = None,
     status_code: int | None = None,
 ) -> tuple[datetime, datetime, list[ColumnElement[bool]], UsageTotals]:
@@ -913,6 +1083,7 @@ async def _summary_context(
         source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
+        tool=tool,
         counts_toward_budget=counts_toward_budget,
     )
     totals = await _totals(db, conditions, status)
@@ -971,6 +1142,7 @@ async def usage_summary(
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
     dimensions: list[SummaryDimension] | None = Query(default=None, description=_DIMENSIONS_DESC),
@@ -1005,6 +1177,7 @@ async def usage_summary(
         source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
+        tool=tool,
         counts_toward_budget=counts_toward_budget,
     )
     # ``none`` is dropped rather than rejected: it exists only so a caller can send
@@ -1021,6 +1194,7 @@ async def usage_summary(
     errors_by_status_code = (
         await _errors_by_status_code(db, conditions) if _ERROR_TAXONOMY_DIMENSION in requested else []
     )
+    by_tool = await _tool_breakdown(db, conditions) if _TOOL_DIMENSION in requested else []
 
     expr = _bucket_expr(_dialect_name(db), bucket)
     series_rows = (
@@ -1069,6 +1243,7 @@ async def usage_summary(
         by_source_label=breakdowns.get("source_label", []),
         by_endpoint=breakdowns.get("endpoint", []),
         by_provider=breakdowns.get("provider", []),
+        by_tool=by_tool,
         errors_by_status_code=errors_by_status_code,
         series=series,
     )
@@ -1098,6 +1273,7 @@ async def usage_series(
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
 ) -> UsageGroupedSeries:
@@ -1127,6 +1303,7 @@ async def usage_series(
         source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
+        tool=tool,
         counts_toward_budget=counts_toward_budget,
     )
     # Finding-5 guard: /summary densifies then caps at _MAX_SERIES_POINTS; this
@@ -1227,6 +1404,7 @@ async def usage_summary_csv(
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
+    tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
 ) -> Response:
     """Download every breakdown the summary reports, as one CSV.
@@ -1253,6 +1431,7 @@ async def usage_summary_csv(
         source_label=source_label,
         api_key_id=api_key_id,
         priced=priced,
+        tool=tool,
         counts_toward_budget=counts_toward_budget,
     )
     # Driven off the same dimension table as ``/summary`` so a new breakdown lands

@@ -1309,10 +1309,19 @@ class _FakeWebSearchBackend:
     last_auth_token: str | None = None
 
     def __init__(
-        self, *, base_url: str, tool_entry: dict[str, Any], auth_token: str | None = None, config: Any = None
+        self,
+        *,
+        base_url: str,
+        tool_entry: dict[str, Any],
+        auth_token: str | None = None,
+        config: Any = None,
+        tally: Any = None,
     ) -> None:
         type(self).last_tool_entry = dict(tool_entry)
         type(self).last_auth_token = auth_token
+        # The real backend records each call on the request's tally; accept it so
+        # the constructor contract matches, even though this double runs no search.
+        self._tally = tally
 
     async def __aenter__(self) -> "_FakeWebSearchBackend":
         return self
@@ -1706,8 +1715,16 @@ class _FakeSandboxBackend:
 
     last_purpose_hint: str | None = None
 
-    def __init__(self, *, sandbox_url: str, purpose_hint: str | None = None, auth_token: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        sandbox_url: str,
+        purpose_hint: str | None = None,
+        auth_token: str | None = None,
+        tally: Any = None,
+    ) -> None:
         type(self).last_purpose_hint = purpose_hint
+        self._tally = tally
 
     async def __aenter__(self) -> "_FakeSandboxBackend":
         return self

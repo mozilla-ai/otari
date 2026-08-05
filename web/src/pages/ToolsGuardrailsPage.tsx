@@ -1,7 +1,7 @@
 import { Button, Card } from "@heroui/react";
 import { useEffect, useRef, useState } from "react";
 
-import { useTestService, useToolSettings, useUpdateToolSettings } from "@/api/hooks";
+import { usePricing, useSetPricing, useTestService, useToolSettings, useUpdateToolSettings } from "@/api/hooks";
 import type { ToolServiceName, ToolSettingField, UpdateToolSettingsRequest } from "@/api/types";
 import { ErrorBanner, FilterSelect, PageHeader, PageLoading, errorMessage } from "@/components/ui";
 
@@ -14,11 +14,20 @@ function oneField(key: string, value: boolean | number | string | null): UpdateT
 // The services, in display order, with the fields each owns (url first). Fields
 // not listed for a service are still rendered under it via the fallback, but
 // this fixes the order and lets us give each service a short blurb.
-const SERVICES: { key: ToolServiceName; label: string; blurb: string; order: string[] }[] = [
+const SERVICES: {
+  key: ToolServiceName;
+  label: string;
+  blurb: string;
+  order: string[];
+  // The pricing key for a tool Otari runs itself. Present only for the two
+  // gateway-run tools: guardrails is a check, not billable work.
+  pricingKey?: string;
+}[] = [
   {
     key: "web_search",
     label: "Web search",
     blurb: "Backend for otari_web_search tools (a SearXNG instance or a search adapter).",
+    pricingKey: "otari:web_search",
     order: [
       "web_search_url",
       "web_search_engines",
@@ -31,6 +40,7 @@ const SERVICES: { key: ToolServiceName; label: string; blurb: string; order: str
     key: "sandbox",
     label: "Code execution",
     blurb: "Backend for otari_code_execution tools (the sandbox that runs generated code).",
+    pricingKey: "otari:code_execution",
     order: ["sandbox_url", "sandbox_purpose_hint"],
   },
   {
@@ -305,6 +315,97 @@ function NumberRow({
   );
 }
 
+// Per-call price for a tool Otari runs itself.
+//
+// The stored column is `input_price_per_million`, and `flat_request_cost` reads it
+// as USD per *million* calls, so charging a cent a search means storing 10000. That
+// convention is right for the wire and hostile at a keyboard, so this row speaks in
+// dollars per call and does the 1e6 conversion itself. Same reason it lives here
+// rather than on the Models page: a tool is not a model, and the Models editor is
+// labelled per million tokens throughout.
+const PER_MILLION = 1_000_000;
+
+function ToolPriceRow({
+  pricingKey,
+  configured,
+  onSave,
+  saving,
+  saveError,
+  disabled,
+}: {
+  pricingKey: string;
+  configured: number | null;
+  onSave: (perCall: number) => void;
+  saving: boolean;
+  saveError?: string;
+  disabled: boolean;
+}) {
+  const committed = configured === null ? "" : String(configured / PER_MILLION);
+  const [draft, setDraft] = useState(committed);
+
+  useEffect(() => {
+    setDraft(committed);
+  }, [committed]);
+
+  const trimmed = draft.trim();
+  const parsed = Number(trimmed);
+  const valid = trimmed !== "" && Number.isFinite(parsed) && parsed >= 0;
+  const changed = valid && trimmed !== committed;
+
+  return (
+    <div className={ROW_CLASS}>
+      <div className="flex flex-col gap-0.5">
+        <span className="text-sm font-medium text-[var(--otari-ink)]">Price per call</span>
+        <span className="text-xs text-[var(--otari-muted)]">
+          {configured === null ? (
+            <>
+              Not priced. Calls are recorded but billed nothing, and with{" "}
+              <code className="font-mono">require_pricing</code> on they are refused. Stored as{" "}
+              <code className="font-mono">{pricingKey}</code>.
+            </>
+          ) : (
+            <>
+              Charged per call and added to the request that ran it. Stored as{" "}
+              <code className="font-mono">{pricingKey}</code>.
+            </>
+          )}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5 sm:col-start-2 sm:justify-self-end">
+        <span className="text-xs text-[var(--otari-muted)]">USD</span>
+        <input
+          type="number"
+          min="0"
+          step="0.0001"
+          inputMode="decimal"
+          aria-label={`Price per call for ${pricingKey}`}
+          value={draft}
+          disabled={disabled}
+          placeholder="0.00"
+          onChange={(event) => setDraft(event.target.value)}
+          className={`w-full text-right tabular-nums sm:w-28 ${INPUT_CLASS}`}
+        />
+      </div>
+      <div className={ACTIONS_CELL}>
+        <Button
+          size="sm"
+          variant="primary"
+          aria-label={`Save price for ${pricingKey}`}
+          isDisabled={disabled || !changed || saving}
+          onPress={() => onSave(parsed)}
+        >
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
+      {saveError ? (
+        <div className={MESSAGE_CELL}>
+          <SaveError message={saveError} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // A nullable boolean (web_search_extract) has three meaningful states: default
 // (backend decides, currently on), on, or off. A tri-state select is honest
 // about "default" in a way a two-state toggle cannot be.
@@ -373,6 +474,45 @@ function ServiceRow({
 
 export function ToolsGuardrailsPage() {
   const query = useToolSettings();
+  const pricing = usePricing();
+  const setPricing = useSetPricing();
+  const [pricedTool, setPricedTool] = useState<string | null>(null);
+  const [priceErrors, setPriceErrors] = useState<Record<string, string>>({});
+
+  // Latest rate per key. /v1/pricing is history-shaped (one row per effective_at),
+  // and the newest row is the one in force.
+  const currentRates = new Map<string, number>();
+  for (const row of pricing.data ?? []) {
+    const seen = currentRates.get(row.model_key);
+    if (seen === undefined) currentRates.set(row.model_key, row.input_price_per_million);
+  }
+
+  const savePrice = (key: string, perCall: number) => {
+    setPricedTool(key);
+    setPriceErrors((prev) => ({ ...prev, [key]: "" }));
+    setPricing.mutate(
+      {
+        model_key: key,
+        // The stored convention is USD per million calls; the row above collects
+        // dollars per call, so scale here and nowhere else.
+        input_price_per_million: perCall * PER_MILLION,
+        output_price_per_million: 0,
+      },
+      {
+        onSuccess: () => {
+          setPricedTool(null);
+          showToast("Price saved");
+        },
+        onError: (error: unknown) => {
+          setPricedTool(null);
+          setPriceErrors((prev) => ({
+            ...prev,
+            [key]: error instanceof Error ? error.message : "Could not save the price",
+          }));
+        },
+      },
+    );
+  };
   const update = useUpdateToolSettings();
   const [toast, showToast] = useSaveToast();
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -422,6 +562,16 @@ export function ToolsGuardrailsPage() {
             <p className="text-sm text-[var(--otari-muted)]">{service.blurb}</p>
             <Card>
               <Card.Content className="flex flex-col divide-y divide-[var(--otari-line)] px-5 py-1">
+                {service.pricingKey ? (
+                  <ToolPriceRow
+                    pricingKey={service.pricingKey}
+                    configured={currentRates.get(service.pricingKey) ?? null}
+                    onSave={(perCall) => savePrice(service.pricingKey as string, perCall)}
+                    saving={pricedTool === service.pricingKey}
+                    saveError={priceErrors[service.pricingKey] || undefined}
+                    disabled={pricing.isLoading}
+                  />
+                ) : null}
                 {fields.map((field) => (
                   <ServiceRow
                     key={field.key}
