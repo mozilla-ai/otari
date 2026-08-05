@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Seed a running gateway with routing policies and traffic, to click through.
 
-Creates a set of policies covering the shapes the feature supports, then drives
-enough traffic to populate the Activity and Usage pages. Nothing here forces a
+Creates a set of policies covering the shapes the feature supports, teaches the
+learned one a handful of scored examples, then drives enough traffic to populate
+the Activity and Usage pages. Nothing here forces a
 first-attempt failure, so an ``absorbed`` attempt row appears only if a candidate
 really does fail; point ``--model`` at something broken to see one on demand.
 
@@ -80,9 +81,21 @@ def main() -> int:
     parser.add_argument(
         "--cheap-model",
         default=None,
-        help="Cheaper model for the budget tier-down policy. Defaults to --model.",
+        help=(
+            "Cheaper model for the tier-down and learned policies. Defaults to --model, which makes the "
+            "learned policy's candidate pool a duplicate pair, so that policy is skipped unless this is set."
+        ),
     )
     parser.add_argument("--requests", type=int, default=6, help="How many requests to send per policy.")
+    parser.add_argument(
+        "--examples",
+        type=int,
+        default=8,
+        help=(
+            "Minimum scored examples to teach the learned policy. Raised to the gateway's seed count if "
+            "that is higher, since a pool below it never routes. Each example costs an embedding call."
+        ),
+    )
     args = parser.parse_args()
 
     cheap = args.cheap_model or args.model
@@ -125,6 +138,27 @@ def main() -> int:
                 ],
                 "on_failure": [args.fallback_model],
             },
+        ),
+        # Learned routing: the router ranks the pool per request and falls back to
+        # the default whenever it declines. Refused with a 400 unless both candidates
+        # have pricing, which is the point of that check. Only added when the two
+        # models actually differ: a pool that lists one model twice is refused as a
+        # duplicate, so with no --cheap-model this policy is skipped rather than
+        # reported as a failure the operator cannot act on.
+        *(
+            [
+                (
+                    "demo-learned",
+                    {
+                        "select": [
+                            {"router": "knn", "candidates": [cheap, args.model]},
+                            {"default": args.model},
+                        ],
+                    },
+                )
+            ]
+            if cheap != args.model
+            else []
         ),
         # A guardrail the caller cannot skip. on_unavailable=monitor so a gateway
         # without a guardrails service running still serves these requests.
@@ -176,8 +210,46 @@ def main() -> int:
                     print(f"  {name}: first failure {status}: {json.dumps(body)[:200]}")
         print(f"  {name}: {served} served, {failed} failed")
 
+    # Teaching in one call, and enough examples to cross the gateway's seed count:
+    # the point of the demo is a policy that routes, and a pool below the seed count
+    # serves the default on every request, which looks identical to a broken router.
+    if cheap != args.model:
+        status, body = call(url, key, "GET", f"/v1/routing/status?user_id={DEMO_USER}")
+        seed = body.get("seed_count", 20) if 200 <= status < 300 and isinstance(body, dict) else 20
+        count = max(args.examples, seed)
+        print(f"\nTeaching demo-learned ({count} examples, seed count {seed})")
+        examples: list[dict[str, Any]] = []
+        for index in range(count):
+            easy = index % 2 == 0
+            examples.append(
+                {
+                    "prompt": (
+                        f"What is {index + 3} plus {index + 4}?"
+                        if easy
+                        else f"Prove, in {index + 3} steps, why entropy increases in a closed system."
+                    ),
+                    # Easy prompts: both answered fine, so cost decides. Hard prompts:
+                    # only the stronger model is good enough.
+                    "scores": {cheap: 1.0, args.model: 1.0} if easy else {cheap: 0.0, args.model: 1.0},
+                }
+            )
+        status, body = call(
+            url,
+            key,
+            "POST",
+            "/v1/routing/preferences/rank",
+            {"user_id": DEMO_USER, "examples": examples},
+        )
+        if report(f"{count} examples recorded", status, body) and isinstance(body, dict):
+            for pool in body.get("pools", []):
+                name = pool["task_id"] or "default pool"
+                state = "routing" if pool["warm"] else "still warming up"
+                print(f"     {name}: {pool['records']}/{body['seed_count']} ({state})")
+    else:
+        print("\nSkipping demo-learned: pass --cheap-model to give the router two models to choose between.")
+
     print("\nDone. Open the dashboard and look at:")
-    print("  Routing   the four policies, their chains, and the dry run")
+    print("  Routing   the policies, their chains, the dry run, and Router on the learned row")
     print("  Activity  the Routing column, and any `absorbed` row from a fallover")
     print("  Usage     spend for the traffic above")
     return 0

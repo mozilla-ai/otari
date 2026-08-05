@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._helpers import latest_user_text
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
 from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
     DB_UNAVAILABLE_DETAIL,
@@ -416,6 +416,9 @@ async def create_message(
             ),
             master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
             user_forbidden_detail=_USER_FORBIDDEN,
+            routing_signal=lambda: routing_signal_from_messages(
+                request.messages, raw_request, has_tools=bool(request.tools)
+            ),
             normalize_messages=_normalize,
         )
     except HTTPException as exc:

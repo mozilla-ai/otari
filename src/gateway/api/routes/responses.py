@@ -15,7 +15,7 @@ from pydantic import ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
-from gateway.api.routes._helpers import latest_user_text, text_from_content
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content
 from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
@@ -425,6 +425,9 @@ async def create_response(
         estimate_max_output_tokens=max_output_tokens,
         master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
         user_forbidden_detail=_USER_FORBIDDEN,
+        routing_signal=lambda: routing_signal_from_text(
+            _responses_input_text(request_body.input), raw_request, has_tools=bool(request_body.tools)
+        ),
         normalize_messages=_normalize,
     )
 

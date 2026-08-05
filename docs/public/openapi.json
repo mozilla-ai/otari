@@ -1794,6 +1794,24 @@
             "title": "Name",
             "type": "string"
           },
+          "router_backend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Router Backend"
+          },
+          "router_candidates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Router Candidates",
+            "type": "array"
+          },
           "selection_reason": {
             "title": "Selection Reason",
             "type": "string"
@@ -2450,6 +2468,38 @@
           "name"
         ],
         "title": "KnownProviderSummarySchema",
+        "type": "object"
+      },
+      "LearnedPolicy": {
+        "description": "A policy whose selection depends on the router, for the status overview.",
+        "properties": {
+          "backend": {
+            "title": "Backend",
+            "type": "string"
+          },
+          "candidates": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "default_target": {
+            "title": "Default Target",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "backend",
+          "candidates",
+          "default_target"
+        ],
+        "title": "LearnedPolicy",
         "type": "object"
       },
       "McpServerConfig": {
@@ -3360,6 +3410,24 @@
         "title": "PolicyResponse",
         "type": "object"
       },
+      "PoolStatus": {
+        "properties": {
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          },
+          "warm": {
+            "title": "Warm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "records",
+          "warm"
+        ],
+        "title": "PoolStatus",
+        "type": "object"
+      },
       "PricingRefreshChangeResponse": {
         "description": "One default model price changed by a pending refresh.",
         "properties": {
@@ -3851,6 +3919,89 @@
           "providers"
         ],
         "title": "ProvidersResponse",
+        "type": "object"
+      },
+      "RankRequest": {
+        "description": "Record how well each candidate did, for one or many prompts.\n\nA batch because of the arithmetic: a pool routes nothing until it holds\n``router_seed_count`` examples (20 by default) and the vote reads the ``k``\nnearest (5 by default), so a useful first teaching pass is dozens of examples\nacross the kinds of prompt you care about.",
+        "properties": {
+          "examples": {
+            "description": "The scored prompts to record.",
+            "items": {
+              "$ref": "#/components/schemas/ScoredExample"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Examples",
+            "type": "array"
+          },
+          "user_id": {
+            "description": "Whose routing memory these examples belong to.",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "examples"
+        ],
+        "title": "RankRequest",
+        "type": "object"
+      },
+      "RankResponse": {
+        "properties": {
+          "pools": {
+            "items": {
+              "$ref": "#/components/schemas/RecordedPool"
+            },
+            "title": "Pools",
+            "type": "array"
+          },
+          "recorded": {
+            "title": "Recorded",
+            "type": "integer"
+          },
+          "seed_count": {
+            "title": "Seed Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "recorded",
+          "seed_count",
+          "pools"
+        ],
+        "title": "RankResponse",
+        "type": "object"
+      },
+      "RecordedPool": {
+        "description": "How warm one pool is after the write.",
+        "properties": {
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "warm": {
+            "title": "Warm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "task_id",
+          "records",
+          "warm"
+        ],
+        "title": "RecordedPool",
         "type": "object"
       },
       "ReencryptProviderCredentialsResponse": {
@@ -4394,6 +4545,116 @@
         "title": "RotateMasterKeyResponse",
         "type": "object"
       },
+      "RouterStatus": {
+        "description": "How warm this user's routing memory is, and what depends on it.\n\nRouting memory has no single warmth: it is a set of independent pools.\n``default_pool`` is what a request with no ``Otari-Router-Task`` header votes\nover (every record the user has, labelled or not) and ``tasks`` lists each\npartition, which only requests carrying that label use. Each crosses\n``seed_count`` on its own.",
+        "properties": {
+          "alpha": {
+            "title": "Alpha",
+            "type": "number"
+          },
+          "confidence_floor": {
+            "title": "Confidence Floor",
+            "type": "number"
+          },
+          "default_pool": {
+            "$ref": "#/components/schemas/PoolStatus"
+          },
+          "embedding_model": {
+            "title": "Embedding Model",
+            "type": "string"
+          },
+          "granularity": {
+            "title": "Granularity",
+            "type": "string"
+          },
+          "k": {
+            "title": "K",
+            "type": "integer"
+          },
+          "policies": {
+            "items": {
+              "$ref": "#/components/schemas/LearnedPolicy"
+            },
+            "title": "Policies",
+            "type": "array"
+          },
+          "seed_count": {
+            "title": "Seed Count",
+            "type": "integer"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskPool"
+            },
+            "title": "Tasks",
+            "type": "array"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "embedding_model",
+          "seed_count",
+          "granularity",
+          "alpha",
+          "k",
+          "confidence_floor",
+          "default_pool",
+          "tasks",
+          "policies"
+        ],
+        "title": "RouterStatus",
+        "type": "object"
+      },
+      "ScoredExample": {
+        "description": "One prompt and how well each candidate answered it.",
+        "properties": {
+          "label_source": {
+            "default": "human",
+            "description": "Provenance of the scores: 'human' or 'judge'.",
+            "title": "Label Source",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "The prompt that was tried.",
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "scores": {
+            "additionalProperties": {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            "description": "Selector -> quality in [0.0, 1.0], where 1.0 is a great answer. Ties are fine and meaningful: two models that both answered well is exactly the case where the router should take the cheaper one.",
+            "minProperties": 1,
+            "title": "Scores",
+            "type": "object"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Partition this example belongs to, matching the Otari-Router-Task header requests send. Omit to file it in the user's default pool.",
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "prompt",
+          "scores"
+        ],
+        "title": "ScoredExample",
+        "type": "object"
+      },
       "SearchRequest": {
         "description": "A search request, following LiteLLM's ``/v1/search`` body.",
         "example": {
@@ -4760,6 +5021,29 @@
           "instance"
         ],
         "title": "StoredProviderResponse",
+        "type": "object"
+      },
+      "TaskPool": {
+        "properties": {
+          "records": {
+            "title": "Records",
+            "type": "integer"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "warm": {
+            "title": "Warm",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "task_id",
+          "records",
+          "warm"
+        ],
+        "title": "TaskPool",
         "type": "object"
       },
       "TestProviderRequest": {
@@ -10378,6 +10662,109 @@
           }
         ],
         "summary": "Delete Policy",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/v1/routing/preferences/rank": {
+      "post": {
+        "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.",
+        "operationId": "rank_candidates_v1_routing_preferences_rank_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RankRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RankResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Rank Candidates",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
+    "/v1/routing/status": {
+      "get": {
+        "description": "Report how warm one user's routing memory is, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over.",
+        "operationId": "routing_memory_status_v1_routing_status_get",
+        "parameters": [
+          {
+            "description": "Whose routing memory to report on.",
+            "in": "query",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "description": "Whose routing memory to report on.",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouterStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Routing Memory Status",
         "tags": [
           "routing"
         ]

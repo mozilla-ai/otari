@@ -260,6 +260,20 @@ See [Routing policies](routing.md).
 Master key on every verb, including `explain`: the response enumerates a policy's
 targets, which is what a policy exists to keep off the wire.
 
+### Learned routing
+
+Teaching the router a policy can name with `select: [{router: knn, candidates: [...]}]`.
+Routing memory is per user, so `user_id` names whose it is. There is deliberately no
+endpoint that fans a prompt out to the candidates for you: seeing what each answers is
+what `POST /v1/chat/completions` already does, and going through it means those calls
+are budget-checked and logged. See
+[learned routing](routing.md#let-a-router-choose-learned-routing).
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `POST` | `/v1/routing/preferences/rank` | Record a batch of scored `examples` under `user_id`: each has a `prompt`, `scores` (selector to quality in `[0, 1]`), an optional `task_id` partition, and an optional `label_source`. Writes the examples the router votes over and returns each touched pool's progress toward the seed count. Up to 100 per call. A score key that no learned policy could route to is refused, because such records are unmatchable and cannot be deleted. | Master key |
+| `GET` | `/v1/routing/status` | For `user_id`: records and warmth per pool (the default pool plus each task partition), the router's tuning, and which policies depend on it. | Master key |
+
 ### Pricing
 
 | Method | Path | Description | Auth |

@@ -134,6 +134,7 @@ from gateway.services.routing import (
     compile_policy,
     needs_budget_state,
 )
+from gateway.services.routing.decide import RoutingSignal, decide_ordering
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
     SandboxBackend,
@@ -861,11 +862,15 @@ async def _compile_request_plan(
     allowlist: list[str] | None,
     endpoint: str,
     started_at: float,
+    routing_signal: Callable[[], RoutingSignal] | None = None,
 ) -> CompiledPlan | None:
     """Compile ``model`` into a plan when it names a routing policy, else ``None``.
 
     Budget numbers are fetched only when a condition in the policy actually reads
-    them, so a plain failover policy costs no extra query.
+    them, so a plain failover policy costs no extra query. A policy naming a
+    router gets one more step: the backend ranks its candidates for this request
+    and the ranking becomes the plan. That step is the only asynchronous part of
+    routing, which is why it happens here and not in the compiler.
 
     An empty plan is a 403 whose caller-facing detail names the policy and nothing
     else (a policy exists partly to keep its targets off the wire); the enumerated
@@ -879,6 +884,20 @@ async def _compile_request_plan(
     if needs_budget_state(spec) and user_id is not None:
         budget = await get_budget_state(db, user_id)
 
+    # The signal is built here rather than by the endpoint because flattening the
+    # prompt is not free on a long conversation, and only a policy with a router
+    # ever reads it. Every other request pays three header lookups and nothing.
+    router_ordering = None
+    if spec.router_backend is not None:
+        router_ordering = await decide_ordering(
+            config,
+            spec,
+            policy_name=model,
+            user_id=user_id,
+            allowlist=allowlist,
+            signal=routing_signal() if routing_signal is not None else None,
+        )
+
     try:
         return compile_policy(
             config,
@@ -888,6 +907,7 @@ async def _compile_request_plan(
             key_id=api_key_id,
             allowlist=allowlist,
             budget=budget,
+            router_ordering=router_ordering,
         )
     except NoEligibleCandidatesError as exc:
         logger.warning("%s", exc.operator_detail)
@@ -921,6 +941,7 @@ async def resolve_request_context(
     master_key_user_required_detail: str,
     user_forbidden_detail: str,
     estimate_cache_write_ttl: Literal["5m", "1h"] | None = None,
+    routing_signal: Callable[[], RoutingSignal] | None = None,
     normalize_messages: Callable[
         [str, LLMProvider | None, str, str | None], Awaitable[tuple[int, CompletionUsage | None]]
     ]
@@ -936,6 +957,12 @@ async def resolve_request_context(
     before the missing-pricing gate so user/blocked/budget rejections
     (404/403) take precedence over the 402; it is refunded if the request is
     then rejected for missing pricing.
+
+    ``routing_signal`` (standalone only) builds what a policy's router backend
+    reads: the prompt text plus the routing headers, in a format-neutral value the
+    endpoint knows how to flatten. A factory rather than a value because only a
+    policy with a router consults it. Omit it and such a policy serves its default
+    target, which is the correct behavior for a surface that has no prompt.
 
     ``normalize_messages`` (standalone only) is an optional hook the file
     feature uses to resolve uploaded attachments into the wire payload before
@@ -1063,6 +1090,7 @@ async def resolve_request_context(
             allowlist=key_allowlist,
             endpoint=adapter.endpoint,
             started_at=started_at,
+            routing_signal=routing_signal,
         )
         if plan is not None:
             head = plan.head

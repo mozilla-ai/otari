@@ -8,6 +8,9 @@ import type {
   ExplainPolicyResponse,
   RoutingPolicyResponse,
   SetRoutingPolicyRequest,
+  RankCandidatesRequest,
+  RankCandidatesResponse,
+  RouterStatus,
   ApiKey,
   Budget,
   BudgetResetLog,
@@ -62,6 +65,7 @@ const SETTINGS = "settings";
 const TOOL_SETTINGS = "tool-settings";
 const ALIASES = "aliases";
 const ROUTING_POLICIES = "routing-policies";
+const ROUTER_STATUS = "router-status";
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
 // key would fire a live provider call on every save.
@@ -337,6 +341,42 @@ export function useExplainPolicy() {
         method: "POST",
         body: JSON.stringify(body),
       }),
+  });
+}
+
+// --- Learned routing ------------------------------------------------------
+
+/** How warm a user's routing memory is.
+ *
+ *  Keyed by user because warmth is per user: the records hold that user's
+ *  prompts, so a global learned policy warms once per caller. Disabled until a
+ *  user is chosen rather than defaulting to one, because "whose memory" has no
+ *  sensible default.
+ */
+export function useRouterStatus(userId: string | null) {
+  return useQuery({
+    queryKey: [ROUTER_STATUS, userId],
+    queryFn: () =>
+      apiFetch<RouterStatus>(`/v1/routing/status?user_id=${encodeURIComponent(userId ?? "")}`),
+    enabled: userId !== null && userId !== "",
+    staleTime: 30_000,
+  });
+}
+
+/** Record how well each candidate did, which is what the router later votes over. */
+export function useRankCandidates() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: RankCandidatesRequest) =>
+      apiFetch<RankCandidatesResponse>("/v1/routing/preferences/rank", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      // One more example may have crossed the seed count, which changes whether
+      // the policy routes at all.
+      void queryClient.invalidateQueries({ queryKey: [ROUTER_STATUS] });
+    },
   });
 }
 

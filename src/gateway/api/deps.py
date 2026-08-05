@@ -18,6 +18,7 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, is_v
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
+from gateway.services.routing import clear_router_backend_cache
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -72,6 +73,10 @@ def reset_config() -> None:
     """Reset the legacy module-level config fallback. Intended for testing only."""
     global _config  # noqa: PLW0603
     _config = None
+    # Router backends are cached per config signature and hold a per-process
+    # decision cache, so a test that swaps config must not inherit the previous
+    # one's trace stickiness.
+    clear_router_backend_cache()
 
 
 def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:

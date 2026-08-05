@@ -615,6 +615,105 @@ class BatchRecord(Base):
     results_accounted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class RoutingMemory(Base):
+    """One record per scored example: a prompt embedding plus the quality each
+    candidate model earned on it.
+
+    The kNN router (:mod:`gateway.services.knn_router`) retrieves the nearest
+    neighbors of an incoming request's task embedding within one user's records
+    and votes on the cheapest candidate that is still good enough. One record is
+    one example (one prompt), so the vote is over distinct prompts; ``qualities``
+    maps each model to its ``[0, 1]`` score for this prompt. Records are written
+    by the preference-collection flow, never by live traffic (passive learning is
+    a fast-follow).
+
+    Vectors are stored as a JSON list of floats for SQLite/PostgreSQL
+    portability and scanned linearly in Python. That holds into the low thousands
+    of records per user (the ``router_max_records_per_user`` cap); pgvector or an
+    ANN index is the documented next step past that (`docs/routing-scaling.md`).
+    ``embedding_model`` tags each row so changing the embedding model invalidates
+    stale vectors instead of mixing incomparable spaces.
+
+    Scoped by ``user_id``, which is the identity the request is routed and billed
+    under, so one user's examples never steer another's traffic. CASCADE: the
+    records are derived training data, worthless once the user is gone.
+    """
+
+    __tablename__ = "routing_memory"
+    __table_args__ = (
+        Index("ix_routing_memory_user_model", "user_id", "embedding_model"),
+        Index("ix_routing_memory_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    embedding_model: Mapped[str] = mapped_column()
+    embedding: Mapped[list[float]] = mapped_column(JSON)
+    qualities: Mapped[dict[str, float]] = mapped_column(JSON)
+    task_id: Mapped[str | None] = mapped_column(default=None, index=True)
+    label_source: Mapped[str] = mapped_column(default="human")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert model to dictionary.
+
+        The embedding itself is deliberately left out: it is thousands of floats
+        that no management surface renders, and the prompt it came from is on the
+        :class:`RouterPreference` audit row.
+        """
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "embedding_model": self.embedding_model,
+            "qualities": self.qualities,
+            "task_id": self.task_id,
+            "label_source": self.label_source,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class RouterPreference(Base):
+    """An audit record of one preference-collection scoring.
+
+    Each ``/v1/routing/preferences/rank`` submission writes one row here for
+    provenance plus one :class:`RoutingMemory` row. The routing-memory row keeps
+    only the embedding, so this is where the prompt text and the raw per-model
+    scores live: enough to recompute the memory if the scoring changes, and to
+    tell a human label from a judge's.
+    """
+
+    __tablename__ = "router_preferences"
+    __table_args__ = (Index("ix_router_preferences_user_created", "user_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    prompt: Mapped[str] = mapped_column()
+    task_id: Mapped[str | None] = mapped_column(default=None)
+    scores: Mapped[dict[str, float]] = mapped_column(JSON)
+    label_source: Mapped[str] = mapped_column(default="human")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert model to dictionary."""
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "prompt": self.prompt,
+            "task_id": self.task_id,
+            "scores": self.scores,
+            "label_source": self.label_source,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class BudgetResetLog(Base):
     """Budget reset log model for tracking budget resets."""
 

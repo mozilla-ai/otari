@@ -42,6 +42,7 @@ __all__ = [
     "CompiledPlan",
     "DroppedCandidate",
     "NoEligibleCandidatesError",
+    "RouterOrdering",
     "compile_policy",
     "needs_budget_state",
 ]
@@ -84,6 +85,26 @@ class NoEligibleCandidatesError(Exception):
 
 
 @dataclass(frozen=True)
+class RouterOrdering:
+    """What a router backend decided for one request.
+
+    Passed *into* the compiler rather than fetched by it. Routing is asynchronous
+    (an embedding call and a query over stored examples) and the compiler is pure
+    and synchronous on purpose, so the I/O stays in the request pipeline and the
+    ordering arrives as a value. That also means ``explain`` and the tests can
+    simulate a router without one existing.
+
+    ``selectors`` is the pool in the router's preferred order, best first. Empty
+    means the router declined, which is a normal outcome (a cold pool, a
+    low-confidence neighborhood) and compiles to the policy's default target.
+    """
+
+    selectors: list[str]
+    confidence: float = 0.0
+    rationale: str = ""
+
+
+@dataclass(frozen=True)
 class DroppedCandidate:
     """A candidate that did not make it into the plan."""
 
@@ -102,6 +123,14 @@ class CompiledPlan:
     attempts: list[Attempt]
     guardrails: list[GuardrailConfig] = field(default_factory=list)
     dropped: list[DroppedCandidate] = field(default_factory=list)
+    router_ordering: RouterOrdering | None = None
+    """The router decision this plan used, when a router entry supplied one.
+
+    Kept on the plan so the rationale and confidence can be logged and shown in
+    the activity log. A policy with a router that declined has ``None`` here and a
+    ``default`` selection reason, which is how "the router chose the strong model"
+    and "the router did not run" stay distinguishable after the fact.
+    """
 
     @property
     def head(self) -> Attempt:
@@ -146,22 +175,6 @@ def _matches(when: WhenClause, *, user_id: str | None, key_id: str | None, budge
     return True
 
 
-_warned_routers: set[tuple[str, str]] = set()
-
-
-def _warn_missing_router(policy_name: str, router: str) -> bool:
-    """Whether this ``(policy, router)`` pair still owes a warning.
-
-    Unbounded in principle, bounded in practice: the pairs come from policy
-    documents, so the set is the size of the config, not of the traffic.
-    """
-    key = (policy_name, router)
-    if key in _warned_routers:
-        return False
-    _warned_routers.add(key)
-    return True
-
-
 def _select_head(
     spec: PolicySpec,
     *,
@@ -169,37 +182,42 @@ def _select_head(
     user_id: str | None,
     key_id: str | None,
     budget: BudgetState,
-) -> tuple[str, str]:
-    """The head selector and the reason it was chosen.
+    router_ordering: RouterOrdering | None,
+) -> list[tuple[str, str]]:
+    """The selected candidates, in order, each with the reason it is there.
 
-    Entries are evaluated in order; the first whose ``when`` matches wins. The
-    ``default`` entry is last (enforced by the schema), so it is the fallthrough.
+    Normally one head candidate: entries are evaluated in order and the first whose
+    ``when`` matches wins, with the ``default`` entry (last, enforced by the schema)
+    as the fallthrough.
+
+    A ``router`` entry is the exception, and returns several. The router ranked the
+    whole pool, and the walker can try candidates in order, so the ranking *is* the
+    plan: its pick leads, the rest follow ahead of ``on_failure``. Nothing is
+    discarded, so a routed request that fails over lands on the router's second
+    choice rather than jumping straight to the operator's failure chain.
     """
     for entry in spec.select:
         if entry.default is not None:
-            return entry.default, "default"
+            return [(entry.default, "default")]
         if entry.router is not None:
-            # Router backends are not wired yet. Falling through to the default
-            # is the safe reading: a router is an optimization, and it must never
-            # be the reason a request cannot be served.
+            if router_ordering is not None and router_ordering.selectors:
+                reason = f"router:{entry.router}"
+                return [(selector, reason) for selector in router_ordering.selectors]
+            # No ordering: the router declined, this build has no such backend, or
+            # this surface (``explain``, the model catalog) has no request to route.
+            # Falling through to the default is the safe reading in all three: a
+            # router is an optimization, and must never be the reason a request
+            # cannot be served.
             #
-            # Warned once per (policy, router) rather than per request: this
-            # compiles on every request through the policy, so an unconditional
-            # warning is one line of log per request forever, which buries real
-            # ones. The condition is static config, so the first line says
-            # everything the thousandth would.
-            if _warn_missing_router(policy_name, entry.router):
-                logger.warning(
-                    "Routing policy '%s' names router '%s', which is not available yet; using the default "
-                    "target. This is logged once per router per process.",
-                    policy_name,
-                    entry.router,
-                )
+            # Nothing is logged here on purpose. Only the caller knows which of the
+            # three happened, and warning about all of them made ``explain`` (which
+            # has no request by design) report a misconfiguration. The
+            # unknown-backend warning lives in ``services/routing/decide``.
             continue
         if entry.when is not None and _matches(entry.when, user_id=user_id, key_id=key_id, budget=budget):
             assert entry.target is not None  # schema: a `when` entry always carries a target
-            return entry.target, f"condition:{','.join(entry.when.conditions())}"
-    return spec.default_target, "default"
+            return [(entry.target, f"condition:{','.join(entry.when.conditions())}")]
+    return [(spec.default_target, "default")]
 
 
 def compile_policy(
@@ -211,22 +229,36 @@ def compile_policy(
     key_id: str | None = None,
     allowlist: list[str] | None = None,
     budget: BudgetState | None = None,
+    router_ordering: RouterOrdering | None = None,
 ) -> CompiledPlan:
     """Turn ``spec`` into an ordered plan for one request.
 
-    Order: the selected head candidate, then ``on_failure`` in declared order.
-    Each selector is resolved locally (so the attempt carries this gateway's own
-    credentials), then filtered by the caller's allow-list, deduplicated, and
-    capped.
+    Order: the selected candidate (or the router's whole ranking), then
+    ``on_failure`` in declared order. Each selector is resolved locally (so the
+    attempt carries this gateway's own credentials), then filtered by the caller's
+    allow-list, deduplicated, and capped.
+
+    ``router_ordering`` is the decision a router backend already made for this
+    request; see :class:`RouterOrdering` for why it arrives as an argument. Omit
+    it and a policy with a router compiles to its default target, which is what
+    every synchronous surface (``explain``, the CLI) shows.
 
     Raises :class:`NoEligibleCandidatesError` when nothing survives. That error
     derives its own status from why the candidates went: 403 when access rules
     filtered them, 502 when none of them resolve to a configured provider.
     """
     budget = budget or BudgetState()
-    head, reason = _select_head(spec, policy_name=policy_name, user_id=user_id, key_id=key_id, budget=budget)
+    selected = _select_head(
+        spec,
+        policy_name=policy_name,
+        user_id=user_id,
+        key_id=key_id,
+        budget=budget,
+        router_ordering=router_ordering,
+    )
+    routed = selected[0][1].startswith("router:")
 
-    ordered: list[tuple[str, str]] = [(head, reason)]
+    ordered: list[tuple[str, str]] = list(selected)
     ordered.extend((selector, "on_failure") for selector in spec.on_failure)
 
     attempts: list[Attempt] = []
@@ -287,6 +319,7 @@ def compile_policy(
     return CompiledPlan(
         policy_name=policy_name,
         attempts=attempts,
+        router_ordering=router_ordering if routed else None,
         guardrails=[
             GuardrailConfig(
                 profile=guardrail.profile,

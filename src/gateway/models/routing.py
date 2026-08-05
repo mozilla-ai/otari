@@ -170,6 +170,14 @@ class SelectEntry(BaseModel):
     target: str | None = Field(default=None, description="Selector to use when `when` matches.")
     default: str | None = Field(default=None, description="Fallthrough selector. Exactly one entry must set this.")
     router: str | None = Field(default=None, description="Router backend that supplies the candidate ordering.")
+    candidates: list[str] | None = Field(
+        default=None,
+        description=(
+            "Selectors the router may order, for a `router` entry. Required there and meaningless "
+            "elsewhere. The policy's `default` target is appended as the last resort if it is not "
+            "already listed, so a router that declines can never leave the plan empty."
+        ),
+    )
 
     @model_validator(mode="after")
     def _exactly_one_destination(self) -> SelectEntry:
@@ -190,6 +198,39 @@ class SelectEntry(BaseModel):
                 "a `router` entry cannot carry a `when` clause: the router supplies the whole ordering, "
                 "so combining it with a condition has no defined meaning"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _candidates_belong_to_routers(self) -> SelectEntry:
+        """``candidates`` is the router's pool, so it only means something there.
+
+        Required rather than optional, and at least two entries: a router asked to
+        order one model has no decision to make, and an operator who wrote that
+        believes they configured routing. Refusing says so at write time instead of
+        serving the default forever and looking like a broken router.
+        """
+        if self.router is None:
+            if self.candidates is not None:
+                raise ValueError(
+                    "`candidates` only applies to a `router` entry: it is the pool the router orders. "
+                    "A static entry names its one model in `target` or `default`."
+                )
+            return self
+        if not self.candidates:
+            raise ValueError(
+                f"a `router` entry needs `candidates`: the pool router '{self.router}' orders. "
+                "Without it there is nothing to route among."
+            )
+        if len(self.candidates) < 2:
+            raise ValueError(
+                "a `router` entry needs at least 2 `candidates`: ordering a single model is not a "
+                "routing decision. Name the models the router may choose between, cheapest included."
+            )
+        seen: set[str] = set()
+        for selector in self.candidates:
+            if selector in seen:
+                raise ValueError(f"'{selector}' is listed twice in `candidates`; each candidate appears once")
+            seen.add(selector)
         return self
 
     @property
@@ -266,12 +307,17 @@ class PolicySpec(BaseModel):
 
     @model_validator(mode="after")
     def _candidate_count_within_cap(self) -> PolicySpec:
-        # One head candidate plus the failure chain. A router entry contributes an
-        # unknown number at request time and is capped by the compiler instead.
-        total = 1 + len(self.on_failure)
+        # A router entry contributes its whole ordered pool at request time (the
+        # walker cascades through it), so the cap counts the pool rather than one
+        # head candidate. Without a router it is the selected candidate plus the
+        # failure chain, as before.
+        pool = self.router_candidates
+        selected = len(pool) if pool else 1
+        total = selected + len(self.on_failure)
         if total > MAX_CANDIDATES:
+            detail = f"{selected} routed candidate(s) + on_failure" if pool else "1 selected + on_failure"
             raise ValueError(
-                f"a policy may have at most {MAX_CANDIDATES} candidates (1 selected + on_failure); this one has {total}"
+                f"a policy may have at most {MAX_CANDIDATES} candidates ({detail}); this one has {total}"
             )
         return self
 
@@ -282,6 +328,22 @@ class PolicySpec(BaseModel):
             if entry.router is not None:
                 return entry.router
         return None
+
+    @property
+    def router_candidates(self) -> list[str]:
+        """The router's pool, with the default target guaranteed present as the tail.
+
+        Empty for a policy with no router. The default target is appended rather
+        than assumed: it is what serves when the router declines, so it has to be
+        in the plan even if the operator left it out of ``candidates``.
+        """
+        for entry in self.select:
+            if entry.router is not None and entry.candidates:
+                pool = list(entry.candidates)
+                if self.default_target not in pool:
+                    pool.append(self.default_target)
+                return pool
+        return []
 
     @property
     def is_dynamic(self) -> bool:
@@ -302,12 +364,21 @@ class PolicySpec(BaseModel):
         raise AssertionError("validated spec always has exactly one default entry")
 
     def static_selectors(self) -> list[str]:
-        """Every statically declared selector, in plan order, deduplicated."""
+        """Every statically declared selector, in plan order, deduplicated.
+
+        A router's ``candidates`` count as static: they are written in the policy,
+        so they get the same startup and write-time checks (resolvable, not another
+        policy or alias) as any other target. What the router decides at request
+        time is only their *order*.
+        """
         ordered: list[str] = []
         for entry in self.select:
             selector = entry.selector
             if selector is not None and selector not in ordered:
                 ordered.append(selector)
+            for candidate in entry.candidates or []:
+                if candidate not in ordered:
+                    ordered.append(candidate)
         for selector in self.on_failure:
             if selector not in ordered:
                 ordered.append(selector)

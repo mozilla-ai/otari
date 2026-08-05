@@ -100,7 +100,10 @@ export interface PolicySelectEntry {
   target?: string;
   /** The fallthrough. Exactly one entry carries it, and it must come last. */
   default?: string;
+  /** A router backend that ranks `candidates` per request, e.g. "knn". */
   router?: string;
+  /** The pool a `router` entry orders. Required there, meaningless elsewhere. */
+  candidates?: string[];
 }
 
 export interface PolicyGuardrail {
@@ -168,6 +171,74 @@ export interface ExplainPolicyResponse {
   candidates: ExplainCandidate[];
   dropped: ExplainDropped[];
   guardrails: Record<string, unknown>[];
+  /** Set when the policy defers to a router. The plan above is then the decline
+   *  path: explain dispatches nothing, so it cannot rank. */
+  router_backend?: string | null;
+  router_candidates?: string[];
+}
+
+// --- Learned routing (the kNN router a policy can name) --------------------
+
+/** One pool of routing memory, and whether it has enough examples to route. */
+export interface RouterPool {
+  records: number;
+  warm: boolean;
+}
+
+export interface RouterTaskPool extends RouterPool {
+  task_id: string;
+}
+
+/** A policy whose ordering comes from a router, as reported by /v1/routing/status. */
+export interface LearnedPolicy {
+  name: string;
+  backend: string;
+  candidates: string[];
+  default_target: string;
+}
+
+/** How warm one user's routing memory is. Warmth is per user because the records
+ *  hold that user's prompts, so a global learned policy warms once per user. */
+export interface RouterStatus {
+  user_id: string;
+  embedding_model: string;
+  seed_count: number;
+  granularity: string;
+  alpha: number;
+  k: number;
+  confidence_floor: number;
+  default_pool: RouterPool;
+  tasks: RouterTaskPool[];
+  policies: LearnedPolicy[];
+}
+
+export interface ScoredExample {
+  prompt: string;
+  /** Selector -> quality in [0, 1]. Ties are meaningful: two good answers is
+   *  exactly when the router should take the cheaper model. */
+  scores: Record<string, number>;
+  task_id?: string | null;
+  label_source?: string;
+}
+
+export interface RankCandidatesRequest {
+  user_id: string;
+  /** A batch, because a pool needs `seed_count` examples (20 by default) before it
+   *  routes at all. */
+  examples: ScoredExample[];
+}
+
+export interface RecordedPool {
+  task_id: string | null;
+  records: number;
+  warm: boolean;
+}
+
+export interface RankCandidatesResponse {
+  recorded: number;
+  seed_count: number;
+  /** Every pool the request wrote into, with its progress toward the seed count. */
+  pools: RecordedPool[];
 }
 
 export interface CreateAliasRequest {

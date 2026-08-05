@@ -299,8 +299,11 @@ def routing_explain(
     if policy_name is None:
         click.echo("Configured policies:")
         for name, listed in cfg.routing.policies.items():
-            shape = "dynamic" if listed.is_dynamic else "static"
-            click.echo(f"  {name}  ({shape}, {1 + len(listed.on_failure)} candidate(s))")
+            shape = f"router:{listed.router_backend}" if listed.router_backend else (
+                "dynamic" if listed.is_dynamic else "static"
+            )
+            candidates = len(listed.router_candidates) or 1
+            click.echo(f"  {name}  ({shape}, {candidates + len(listed.on_failure)} candidate(s))")
         click.echo("\nPass a policy name to see its compiled plan.")
         return
 
@@ -333,6 +336,16 @@ def routing_explain(
         )
     for dropped in plan.dropped:
         click.echo(f"  x  {dropped.selector}    dropped: {dropped.detail}")
+    if spec.router_backend is not None:
+        # The plan above is the *decline* path, because a router needs a live
+        # request (a prompt to embed, stored examples to compare it against) and
+        # this command deliberately touches neither. Saying so beats printing a
+        # one-candidate plan that looks like the router was ignored.
+        click.echo(
+            f"  router: '{spec.router_backend}' ranks {', '.join(spec.router_candidates)} at request time. "
+            f"The plan above is what serves when it declines (cold pool, low confidence, tools present, "
+            f"or Otari-Router: off)."
+        )
     if plan.guardrails:
         click.echo("  guardrails (always enforced):")
         for guardrail in plan.guardrails:
