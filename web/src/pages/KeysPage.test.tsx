@@ -39,6 +39,7 @@ function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
     is_active: true,
     allowed_models: null,
     exclude_from_budget: false,
+    ignore_user_mismatch: false,
     metadata: {},
     ...overrides,
   };
@@ -327,6 +328,25 @@ describe("KeysPage", () => {
     expect(JSON.parse(String(post?.[1]?.body)).exclude_from_budget).toBe(true);
   });
 
+  it("creates a key that ignores a mismatched user field when the toggle is checked", async () => {
+    const fetchMock = mockApi({ keys: [] });
+    const user = userEvent.setup();
+    renderPage(<KeysPage />);
+
+    await screen.findByText("No API keys yet");
+    await user.click(screen.getByRole("button", { name: "Create your first key" }));
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Advanced" }));
+    await user.click(screen.getByLabelText("Ignore a mismatched user field on this key"));
+    await user.click(screen.getByRole("button", { name: "Create key" }));
+
+    const post = fetchMock.mock.calls.find(
+      ([u, init]) => String(u).endsWith("/v1/keys") && (init?.method ?? "") === "POST",
+    );
+    expect(JSON.parse(String(post?.[1]?.body)).ignore_user_mismatch).toBe(true);
+  });
+
   it("renders a Budget-exempt chip for exempt keys", async () => {
     mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot", exclude_from_budget: true })] });
     renderPage(<KeysPage />);
@@ -448,6 +468,22 @@ describe("KeysPage", () => {
       ([u, init]) => String(u).includes("/v1/keys/key-1") && (init?.method ?? "") === "PATCH",
     );
     expect(JSON.parse(String(patch?.[1]?.body)).exclude_from_budget).toBe(true);
+  });
+
+  it("toggles ignore_user_mismatch on an existing key via PATCH", async () => {
+    const fetchMock = mockApi({ keys: [apiKey({ id: "key-1", key_name: "ci-bot", ignore_user_mismatch: false })] });
+    const user = userEvent.setup();
+    renderPage(<KeysPage />);
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    await user.click(await screen.findByLabelText("Ignore a mismatched user field on this key"));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    const patch = fetchMock.mock.calls.find(
+      ([u, init]) => String(u).includes("/v1/keys/key-1") && (init?.method ?? "") === "PATCH",
+    );
+    expect(JSON.parse(String(patch?.[1]?.body)).ignore_user_mismatch).toBe(true);
   });
 
   it("resets the edit form when switching to a different key row", async () => {

@@ -172,6 +172,35 @@ def test_update_api_key_metadata(
     assert data["metadata"] == new_metadata
 
 
+def test_ignore_user_mismatch_defaults_off_and_round_trips(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The per-key user-mismatch opt-out defaults off and survives create/patch/read."""
+    created = client.post("/v1/keys", json={"key_name": "strict"}, headers=master_key_header)
+    assert created.status_code == 200
+    assert created.json()["ignore_user_mismatch"] is False
+
+    lenient = client.post(
+        "/v1/keys",
+        json={"key_name": "claude-code", "ignore_user_mismatch": True},
+        headers=master_key_header,
+    )
+    assert lenient.status_code == 200
+    assert lenient.json()["ignore_user_mismatch"] is True
+
+    key_id = created.json()["id"]
+    patched = client.patch(
+        f"/v1/keys/{key_id}",
+        json={"ignore_user_mismatch": True},
+        headers=master_key_header,
+    )
+    assert patched.status_code == 200
+    assert patched.json()["ignore_user_mismatch"] is True
+
+    fetched = client.get(f"/v1/keys/{key_id}", headers=master_key_header)
+    assert fetched.json()["ignore_user_mismatch"] is True
+
+
 def test_delete_api_key(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Test deleting an API key."""
     create_response = client.post(

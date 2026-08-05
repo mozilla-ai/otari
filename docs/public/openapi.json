@@ -1164,6 +1164,12 @@
             "description": "Optional expiration timestamp",
             "title": "Expires At"
           },
+          "ignore_user_mismatch": {
+            "default": false,
+            "description": "When true, a request on this key naming a different 'user' is accepted instead of rejected, even while the gateway-wide reject_user_mismatch is on. Spend still binds to this key's own user.",
+            "title": "Ignore User Mismatch",
+            "type": "boolean"
+          },
           "key_name": {
             "anyOf": [
               {
@@ -1238,6 +1244,10 @@
             "title": "Id",
             "type": "string"
           },
+          "ignore_user_mismatch": {
+            "title": "Ignore User Mismatch",
+            "type": "boolean"
+          },
           "is_active": {
             "title": "Is Active",
             "type": "boolean"
@@ -1296,6 +1306,7 @@
           "is_active",
           "allowed_models",
           "exclude_from_budget",
+          "ignore_user_mismatch",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -2242,6 +2253,10 @@
             "title": "Id",
             "type": "string"
           },
+          "ignore_user_mismatch": {
+            "title": "Ignore User Mismatch",
+            "type": "boolean"
+          },
           "is_active": {
             "title": "Is Active",
             "type": "boolean"
@@ -2307,6 +2322,7 @@
           "is_active",
           "allowed_models",
           "exclude_from_budget",
+          "ignore_user_mismatch",
           "metadata"
         ],
         "title": "KeyInfo",
@@ -4994,6 +5010,17 @@
               }
             ],
             "title": "Expires At"
+          },
+          "ignore_user_mismatch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ignore User Mismatch"
           },
           "is_active": {
             "anyOf": [

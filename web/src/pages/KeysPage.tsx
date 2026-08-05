@@ -341,6 +341,30 @@ function BudgetExemptToggle({ checked, onChange }: { checked: boolean; onChange:
   );
 }
 
+// Access-control adjacent: same deliberate-checkbox treatment as the budget
+// exemption, since it relaxes a check that otherwise applies to every key.
+function UserMismatchToggle({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <label className="flex items-start gap-2 rounded-lg border border-[var(--otari-line)] p-3 text-sm">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 accent-[var(--otari-brand)]"
+        aria-label="Ignore a mismatched user field on this key"
+      />
+      <span className="flex flex-col gap-0.5">
+        <span className="font-medium text-[var(--otari-ink)]">Ignore mismatched <code>user</code> field</span>
+        <span className="text-xs text-[var(--otari-muted)]">
+          Accept requests on this key that name a different <code>user</code> instead of rejecting them (403). For
+          clients that send telemetry there rather than an identity, such as Claude Code. Spend still binds to this
+          key&apos;s owner.
+        </span>
+      </span>
+    </label>
+  );
+}
+
 function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated: (result: CreateKeyResponse) => void }) {
   const create = useCreateKey();
   const users = useUsers();
@@ -350,6 +374,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [userId, setUserId] = useState("");
   const [allowedModels, setAllowedModels] = useState<string[] | null>(null);
   const [excludeFromBudget, setExcludeFromBudget] = useState(false);
+  const [ignoreUserMismatch, setIgnoreUserMismatch] = useState(false);
   const [scopeValid, setScopeValid] = useState(true);
 
   const expiresInPast = expiresAt !== "" && new Date(expiresAt).getTime() < Date.now();
@@ -366,6 +391,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels,
       exclude_from_budget: excludeFromBudget,
+      ignore_user_mismatch: ignoreUserMismatch,
     };
     create.mutate(body, {
       onSuccess: (result) => {
@@ -427,6 +453,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
               }}
             />
             <BudgetExemptToggle checked={excludeFromBudget} onChange={setExcludeFromBudget} />
+            <UserMismatchToggle checked={ignoreUserMismatch} onChange={setIgnoreUserMismatch} />
           </div>
         ) : null}
         <div className="flex gap-2">
@@ -449,6 +476,7 @@ function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void 
   const [expiresAt, setExpiresAt] = useState(toDatetimeLocal(apiKey.expires_at));
   const [allowedModels, setAllowedModels] = useState<string[] | null>(apiKey.allowed_models);
   const [excludeFromBudget, setExcludeFromBudget] = useState(apiKey.exclude_from_budget);
+  const [ignoreUserMismatch, setIgnoreUserMismatch] = useState(apiKey.ignore_user_mismatch);
   const [scopeValid, setScopeValid] = useState(true);
 
   const submit = () => {
@@ -461,6 +489,7 @@ function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void 
           expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
           allowed_models: allowedModels,
           exclude_from_budget: excludeFromBudget,
+          ignore_user_mismatch: ignoreUserMismatch,
         },
       },
       { onSuccess: onClose },
@@ -496,6 +525,7 @@ function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void 
           }}
         />
         <BudgetExemptToggle checked={excludeFromBudget} onChange={setExcludeFromBudget} />
+        <UserMismatchToggle checked={ignoreUserMismatch} onChange={setIgnoreUserMismatch} />
         <div className="flex gap-2">
           <Button variant="primary" isDisabled={update.isPending || !scopeValid} onPress={submit}>
             {update.isPending ? "Saving…" : "Save changes"}

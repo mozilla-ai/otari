@@ -15,6 +15,14 @@ def _make_error(detail: str, status_code: int = 400) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail)
 
 
+def _make_key(user_id: str | None, *, ignore_user_mismatch: bool = False) -> MagicMock:
+    """A key stub with the attributes resolve_user_id reads, all set explicitly."""
+    api_key = MagicMock()
+    api_key.user_id = user_id
+    api_key.ignore_user_mismatch = ignore_user_mismatch
+    return api_key
+
+
 def test_resolve_user_id_master_key_with_user() -> None:
     user_id = resolve_user_id(
         user_id_from_request="user-1",
@@ -44,8 +52,7 @@ def test_resolve_user_id_master_key_without_user() -> None:
 
 def test_resolve_user_id_rejects_mismatched_request_user() -> None:
     """A non-master key naming a *different* user is rejected (IDOR fix)."""
-    api_key = MagicMock()
-    api_key.user_id = "key-user"
+    api_key = _make_key("key-user")
     with pytest.raises(HTTPException) as exc_info:
         resolve_user_id(
             user_id_from_request="someone-else",
@@ -62,8 +69,7 @@ def test_resolve_user_id_rejects_mismatched_request_user() -> None:
 
 def test_resolve_user_id_lenient_mode_binds_mismatch_to_key_user() -> None:
     """With reject_mismatch=False, a foreign user is ignored and bound to the key's user."""
-    api_key = MagicMock()
-    api_key.user_id = "key-user"
+    api_key = _make_key("key-user")
     user_id = resolve_user_id(
         user_id_from_request="someone-else",
         api_key=api_key,
@@ -78,10 +84,26 @@ def test_resolve_user_id_lenient_mode_binds_mismatch_to_key_user() -> None:
     assert user_id == "key-user"
 
 
+def test_resolve_user_id_per_key_flag_binds_mismatch_to_key_user() -> None:
+    """A key flagged ignore_user_mismatch is lenient while the gateway stays strict."""
+    api_key = _make_key("key-user", ignore_user_mismatch=True)
+    user_id = resolve_user_id(
+        user_id_from_request='{"device_id":"abc","session_id":"def"}',
+        api_key=api_key,
+        is_master_key=False,
+        master_key_error=_make_error("master key requires user"),
+        no_api_key_error=_make_error("no api key"),
+        no_user_error=_make_error("no user"),
+        forbidden_user_error=_make_error("forbidden user", 403),
+        reject_mismatch=True,
+    )
+    # Spend still binds to the key's own user, exactly as in gateway-wide lenient mode.
+    assert user_id == "key-user"
+
+
 def test_resolve_user_id_allows_matching_request_user() -> None:
     """Echoing the key's own user id is allowed and binds to that user."""
-    api_key = MagicMock()
-    api_key.user_id = "key-user"
+    api_key = _make_key("key-user")
     user_id = resolve_user_id(
         user_id_from_request="key-user",
         api_key=api_key,
@@ -95,8 +117,7 @@ def test_resolve_user_id_allows_matching_request_user() -> None:
 
 
 def test_resolve_user_id_falls_back_to_api_key() -> None:
-    api_key = MagicMock()
-    api_key.user_id = "key-user"
+    api_key = _make_key("key-user")
     user_id = resolve_user_id(
         user_id_from_request=None,
         api_key=api_key,
@@ -125,8 +146,7 @@ def test_resolve_user_id_no_api_key() -> None:
 
 
 def test_resolve_user_id_api_key_without_user() -> None:
-    api_key = MagicMock()
-    api_key.user_id = None
+    api_key = _make_key(None)
     with pytest.raises(HTTPException) as exc_info:
         resolve_user_id(
             user_id_from_request=None,

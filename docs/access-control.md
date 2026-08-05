@@ -62,7 +62,11 @@ Manage keys with `GET /v1/keys`, `GET /v1/keys/{key_id}`, `PATCH /v1/keys/{key_i
 
 ### Requests that name another user
 
-By default a non-master key that names a `user` other than its own in the request body is rejected with `403`. This is the `reject_user_mismatch` setting (default `true`). Set it to `false` when a trusted client (for example Claude Code, which attaches its own `user_id`) must be allowed to pass a different label; spend is still bound to the key's own user. The master key may always bill an arbitrary user.
+By default a non-master key that names a `user` other than its own in the request body is rejected with `403`. This is the `reject_user_mismatch` setting (default `true`), and it applies to every non-master key on the deployment.
+
+When one client has to be allowed through (for example Claude Code, whose `metadata.user_id` is a telemetry blob rather than a user id), scope the exception to its key with `ignore_user_mismatch: true` at create time or via `PATCH /v1/keys/{key_id}`, and leave the gateway-wide default strict. Turning `reject_user_mismatch` off relaxes the check for all keys instead.
+
+Either way spend stays bound to the key's own user and the client value is forwarded to the provider as an end-user tag only, so leniency never lets a key charge another user. The master key may always bill an arbitrary user.
 
 ## Budgets
 
