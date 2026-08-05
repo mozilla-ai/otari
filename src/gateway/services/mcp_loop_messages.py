@@ -267,7 +267,7 @@ class _MessagesToolLoopStrategy:
         if event_type == "content_block_start":
             block = event.content_block  # type: ignore[union-attr]
             idx = event.index  # type: ignore[union-attr]
-            if hasattr(block, "model_dump"):
+            if block is not None and hasattr(block, "model_dump"):
                 state.blocks_by_index[idx] = block.model_dump(exclude_none=True)
             else:
                 state.blocks_by_index[idx] = dict(block) if isinstance(block, dict) else {}

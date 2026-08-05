@@ -193,7 +193,7 @@ wheels = [
 
 [[package]]
 name = "any-llm-sdk"
-version = "1.22.1"
+version = "1.24.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -204,9 +204,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/de/a29738e1c8702a79a514f9521430fe77686fb9f9122980f4899a7baf58b5/any_llm_sdk-1.22.1.tar.gz", hash = "sha256:b07c6fcef6d7fc13e0f0419bc1464f9316b17e663c34382fb7722a906241f635", size = 164931, upload-time = "2026-07-22T15:43:29.12Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/54/38/da47437de8f3447f8aa1acee55f71d3a9a0c4f53369ad0355cf6d1871c1f/any_llm_sdk-1.24.0.tar.gz", hash = "sha256:06391e27e0d81a0ea70580d8f8535c308d943079a8be62e65ffeb621dcb92ea9", size = 180139, upload-time = "2026-08-05T14:37:39.96Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/03/5a/85c558cc9fb6fd8a7fd3e7523c9c20545316190d22372026ddbf53cdc0c9/any_llm_sdk-1.22.1-py3-none-any.whl", hash = "sha256:950339b68ca1d99fb123c523d246140e1c947b0ff26e3fb9bc37194a49f3b509", size = 217209, upload-time = "2026-07-22T15:43:27.664Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/72/ab48a0e533669f483ef97018f664ba8dec659a8446c9ca3c7d3d2d519137/any_llm_sdk-1.24.0-py3-none-any.whl", hash = "sha256:bfdc633172330b2a76f178dd0fbb207b87cf2bed06bbe9460c0691c24435f597", size = 233211, upload-time = "2026-08-05T14:37:38.495Z" },
 ]
 
 [package.optional-dependencies]
@@ -952,7 +952,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.19.0" },
     { name = "alembic", specifier = ">=1.13.0" },
-    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.22.1" },
+    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.24.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "boto3", marker = "extra == 's3'", specifier = ">=1.42.0" },
     { name = "click", specifier = ">=8.1.0" },
@@ -2305,14 +2305,14 @@ wheels = [
 
 [[package]]
 name = "openresponses-types"
-version = "2.3.0.post1"
+version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d9/26/b612c3215f5599714fa94d63eb5ee59b4eb66dbdeeaf86bb4d848359484d/openresponses_types-2.3.0.post1.tar.gz", hash = "sha256:11b8896d3621d2ac2439f6ff106f34ddcb1bbd517c317a6c852a9df2e98a0753", size = 19254, upload-time = "2026-01-22T20:02:03.933Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/db/eb/cb4a855a27c6cf04af2d47c896b6549040a86bb75e6a59cb687a8bcf19aa/openresponses_types-2.4.0.tar.gz", hash = "sha256:cd55e7fa17230d8edd46e254ef34666ca6f250b7efa3712a110aac546c7dc8d5", size = 22101, upload-time = "2026-08-05T12:22:46.167Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/5f/e16dad89ed24f586da5b01b9b206d3adbf21fe1af8e4dc55d5b93158fde6/openresponses_types-2.3.0.post1-py3-none-any.whl", hash = "sha256:88f6abcef9cad839203abff420dd080978bf6eb33cc06ddc5d78da4ccdba7613", size = 13847, upload-time = "2026-01-22T20:02:02.582Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/ef/2605d7219b0fa648e66ab15043bae492f4e8d3c4de4fdad85fc5eadb95a3/openresponses_types-2.4.0-py3-none-any.whl", hash = "sha256:186406592bc115bf12d9ee88320f8051ab1ade0a8fa8941fd1e44b0be16684f1", size = 15097, upload-time = "2026-08-05T12:22:45.044Z" },
 ]
 
 [[package]]

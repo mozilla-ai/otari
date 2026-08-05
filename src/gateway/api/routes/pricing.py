@@ -20,7 +20,7 @@ from gateway.services.pricing_refresh_service import (
     reject_price_refresh,
 )
 from gateway.services.pricing_service import normalize_effective_at
-from gateway.services.provider_kwargs import normalize_pricing_key, split_selector
+from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
 
 router = APIRouter(prefix="/v1/pricing", tags=["pricing"])
 
@@ -162,7 +162,7 @@ def _candidate_model_keys(raw_key: str) -> list[str]:
     except (ValueError, AnyLLMError):
         return candidates
 
-    provider_value = provider.value if provider else None
+    provider_value = provider_key(provider)
     if not provider_value:
         return candidates
 

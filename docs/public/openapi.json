@@ -2452,6 +2452,20 @@
       "MessagesRequest": {
         "description": "Anthropic Messages API-compatible request.\n\nThe wire fields are derived from any-llm's ``MessagesParams`` (see\n``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,\n``guardrails``, ``tools_header``, ``max_tool_iterations``) opt the request\ninto gateway-managed MCP / sandbox / web_search / guardrails without\nchanging the upstream wire shape. They're stripped before the request is\nforwarded.",
         "properties": {
+          "betas": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Betas"
+          },
           "cache_control": {
             "anyOf": [
               {
@@ -2463,6 +2477,18 @@
               }
             ],
             "title": "Cache Control"
+          },
+          "context_management": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Management"
           },
           "guardrails": {
             "anyOf": [
@@ -3869,6 +3895,21 @@
               }
             ],
             "title": "Background"
+          },
+          "context_management": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Management"
           },
           "conversation": {
             "anyOf": [

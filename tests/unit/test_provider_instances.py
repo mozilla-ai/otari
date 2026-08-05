@@ -18,6 +18,7 @@ from gateway.services.provider_kwargs import (
     get_provider_kwargs,
     keyless_placeholder_api_key,
     normalize_pricing_key,
+    provider_key,
     resolve_provider_selector,
     split_selector,
 )
@@ -393,6 +394,21 @@ def test_normalize_pricing_key_orphaned_instance_does_not_raise() -> None:
     # (e.g. a stored provider that could not be decrypted and was skipped) must be
     # returned unchanged, not raise AnyLLMError and 500 the models listing.
     assert normalize_pricing_key(GatewayConfig(), "home-lab:qwen3") == "home-lab:qwen3"
+
+
+# ---------------------------------------------------------------------------
+# provider_key
+# ---------------------------------------------------------------------------
+
+
+def test_provider_key_from_enum_member() -> None:
+    assert provider_key(LLMProvider.OPENAI) == "openai"
+
+
+def test_provider_key_from_registry_only_name() -> None:
+    # any-llm >= 1.24 returns a bare name for a gateway that has a registry entry
+    # but no LLMProvider member, so pricing/budget keys must accept that form.
+    assert provider_key("some-registry-gateway") == "some-registry-gateway"
 
 
 # ---------------------------------------------------------------------------

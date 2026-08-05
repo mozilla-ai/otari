@@ -17,6 +17,7 @@ from gateway.models.entities import Budget, BudgetResetLog, ModelPricing, User
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.metered_pricing import estimate_metered_cost
 from gateway.services.pricing_service import find_model_pricing
+from gateway.services.provider_kwargs import provider_key
 from gateway.types.budget_state import BudgetState
 
 
@@ -129,8 +130,7 @@ async def _is_model_free(db: AsyncSession, model: str) -> bool:
     """
     try:
         provider, model_name = AnyLLM.split_model_provider(model)
-        provider_str = provider.value if provider else None
-        pricing = await find_model_pricing(db, provider_str, model_name)
+        pricing = await find_model_pricing(db, provider_key(provider) or None, model_name)
         if pricing:
             return pricing.input_price_per_million == 0 and pricing.output_price_per_million == 0
     except (AnyLLMError, ValueError, SQLAlchemyError) as e:

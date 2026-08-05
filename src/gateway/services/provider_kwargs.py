@@ -140,6 +140,16 @@ class ResolvedProvider:
         return f"{self.provider.value}:{self.model}"
 
 
+def provider_key(provider: str | LLMProvider) -> str:
+    """The wire name of an any-llm provider.
+
+    ``AnyLLM.split_model_provider`` returns an ``LLMProvider`` member where one
+    exists and a bare name for registry-only gateways (any-llm >= 1.24), so
+    callers that only need the name go through here instead of ``.value``.
+    """
+    return provider.value if isinstance(provider, LLMProvider) else provider
+
+
 def split_selector(model_selector: str) -> tuple[str, str] | None:
     """Split a selector on its first ``:`` or ``/`` delimiter.
 
@@ -211,7 +221,11 @@ def resolve_provider_selector(
             alias=model_selector if alias is not None else None,
         )
 
-    provider, model = AnyLLM.split_model_provider(selector)
+    # A registry-only gateway (a name with no ``LLMProvider`` member) is not
+    # something otari can key pricing/budgets on, so it is rejected here exactly
+    # as an unknown provider was before any-llm widened this return type.
+    split_provider, model = AnyLLM.split_model_provider(selector)
+    provider = LLMProvider(split_provider)
     return ResolvedProvider(
         instance=provider.value,
         provider=provider,
@@ -255,4 +269,4 @@ def normalize_pricing_key(config: GatewayConfig, raw_key: str) -> str:
     # rather than 500 the whole listing.
     except (ValueError, AnyLLMError):
         return raw_key
-    return f"{provider.value}:{model}"
+    return f"{provider_key(provider)}:{model}"
