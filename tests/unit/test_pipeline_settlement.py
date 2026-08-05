@@ -342,6 +342,46 @@ def _build_platform(stream: AsyncIterator[ChatCompletionChunk]) -> Any:
     )
 
 
+@pytest.mark.parametrize("yields_chunk", [True, False], ids=["no-usage-chunk", "zero-chunk"])
+@pytest.mark.asyncio
+async def test_platform_stream_without_usage_reports_final_success(
+    monkeypatch: pytest.MonkeyPatch,
+    yields_chunk: bool,
+) -> None:
+    reports: list[dict[str, Any]] = []
+
+    async def completed_report() -> None:
+        return None
+
+    def fake_report(**kwargs: Any) -> Any:
+        reports.append(kwargs)
+        return completed_report()
+
+    def fake_schedule(report: Any, correlation_id: str) -> None:
+        assert correlation_id == "corr-1"
+        report.close()
+
+    monkeypatch.setattr(pipeline, "_report_platform_usage", fake_report)
+    monkeypatch.setattr(pipeline, "_schedule_usage_report", fake_schedule)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        if yields_chunk:
+            yield _chunk()
+
+    await _drain(_build_platform(stream()))
+
+    assert len(reports) == 1
+    report = reports[0]
+    assert isinstance(report.pop("config"), GatewayConfig)
+    assert report == {
+        "correlation_id": "corr-1",
+        "outcome": "success",
+        "usage": None,
+        "session_label": None,
+        "is_final_attempt": True,
+    }
+
+
 @pytest.mark.asyncio
 async def test_platform_usage_report_task_is_tracked_until_done(
     monkeypatch: pytest.MonkeyPatch,

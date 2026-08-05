@@ -257,7 +257,7 @@ Content-Type: application/json
   "correlation_id": "01HX1...",       // = the attempt_id from the resolve response
   "status": "success" | "error",
   "is_final_attempt": true,            // no later planned fallback will run
-  "usage": {                           // present on success only
+  "usage": {                           // present on success when usage is available
     "prompt_tokens": 13,
     "completion_tokens": 7,
     "total_tokens": 20,
@@ -271,6 +271,10 @@ Content-Type: application/json
                                        // label (see below). Omitted when absent.
 }
 ```
+
+A successful attempt that completes without provider usage data still sends a
+final report, but omits `usage` so the platform can record it as unavailable
+rather than as an explicit zero-token result.
 
 `session_label` is an optional caller-supplied label for cost attribution (per
 run, experiment, or conversation). A caller sets it on the request body

@@ -2062,8 +2062,23 @@ def build_streaming_response(
             await reconcile_reservation(db, reservation, actual_cost or 0.0)
 
     async def _on_no_usage() -> None:
-        # Stream completed but the provider sent no usage data. Settle the
+        # Stream completed but the provider sent no usage data. Report the
+        # terminal success upstream in hybrid mode; standalone settles the
         # reservation per stream_missing_usage_policy instead of billing $0.
+        if platform_active:
+            assert platform_correlation_id is not None
+            _schedule_usage_report(
+                _report_platform_usage(
+                    config=config,
+                    correlation_id=platform_correlation_id,
+                    outcome="success",
+                    usage=None,
+                    session_label=session_label,
+                    is_final_attempt=True,
+                ),
+                platform_correlation_id,
+            )
+            return
         if db is None or log_writer is None or reservation is None:
             return
         policy = config.stream_missing_usage_policy

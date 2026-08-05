@@ -356,6 +356,29 @@ async def test_report_platform_usage_forwards_session_label(
 
 
 @pytest.mark.asyncio
+async def test_report_platform_usage_omits_unavailable_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = cast(
+        GatewayConfig,
+        SimpleNamespace(
+            platform={"base_url": "http://platform", "usage_max_retries": 3},
+            platform_token="gw-test",
+        ),
+    )
+    post_mock = AsyncMock(return_value=httpx.Response(204))
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+
+    await _platform._report_platform_usage(
+        config,
+        "corr-1",
+        "success",
+        None,
+        is_final_attempt=True,
+    )
+
+    assert "usage" not in post_mock.call_args.kwargs["body"]
+
+
+@pytest.mark.asyncio
 async def test_report_platform_usage_forwards_final_attempt_marker(monkeypatch: pytest.MonkeyPatch) -> None:
     config = cast(
         GatewayConfig,

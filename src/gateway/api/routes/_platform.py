@@ -828,14 +828,14 @@ async def _report_platform_usage(
     if normalized_label:
         payload["session_label"] = normalized_label
     if outcome == "success":
-        token_usage = usage or CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
-        payload["usage"] = {
-            "prompt_tokens": token_usage.prompt_tokens,
-            "completion_tokens": token_usage.completion_tokens,
-            "total_tokens": token_usage.total_tokens,
-            "cache_read_tokens": cache_read_tokens_of(token_usage),
-            "cache_write_tokens": cache_write_tokens_of(token_usage),
-        }
+        if usage is not None:
+            payload["usage"] = {
+                "prompt_tokens": usage.prompt_tokens,
+                "completion_tokens": usage.completion_tokens,
+                "total_tokens": usage.total_tokens,
+                "cache_read_tokens": cache_read_tokens_of(usage),
+                "cache_write_tokens": cache_write_tokens_of(usage),
+            }
     elif error_class is not None:
         payload["error_class"] = error_class
 
