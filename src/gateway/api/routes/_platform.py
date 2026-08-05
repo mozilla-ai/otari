@@ -794,7 +794,8 @@ async def _report_platform_usage(
     usage: CompletionUsage | None,
     error_class: str | None = None,
     session_label: str | None = None,
-    is_final_attempt: bool = False,
+    *,
+    is_final_attempt: bool,
 ) -> None:
     """POST a usage record back to the platform with bounded retries.
 

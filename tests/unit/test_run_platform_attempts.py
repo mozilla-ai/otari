@@ -216,7 +216,13 @@ async def test_report_platform_usage_does_not_retry_on_402(monkeypatch: pytest.M
     sleep_mock = AsyncMock()
     monkeypatch.setattr(asyncio, "sleep", sleep_mock)
 
-    await _platform._report_platform_usage(config, "corr-1", "success", None)
+    await _platform._report_platform_usage(
+        config,
+        "corr-1",
+        "success",
+        None,
+        is_final_attempt=True,
+    )
 
     assert post_mock.call_count == 1
     sleep_mock.assert_not_awaited()
@@ -254,7 +260,14 @@ async def test_report_platform_usage_forwards_session_label(
     post_mock = AsyncMock(return_value=httpx.Response(204))
     monkeypatch.setattr(_platform, "_post_platform", post_mock)
 
-    await _platform._report_platform_usage(config, "corr-1", "success", None, session_label=session_label)
+    await _platform._report_platform_usage(
+        config,
+        "corr-1",
+        "success",
+        None,
+        session_label=session_label,
+        is_final_attempt=True,
+    )
 
     body = post_mock.call_args.kwargs["body"]
     if expected is None:

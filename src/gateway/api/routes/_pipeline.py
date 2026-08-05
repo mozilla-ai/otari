@@ -2373,7 +2373,7 @@ async def _flush_pending_usage_reports(
                         usage,
                         error_class,
                         session_label,
-                        is_final_attempt,
+                        is_final_attempt=is_final_attempt,
                     )
                     for attempt_id, outcome, usage, error_class, is_final_attempt in pending_error_reports
                 ),
@@ -2489,7 +2489,7 @@ async def run_streaming_with_fallback(
             None,
             failure.error_class,
             session_label,
-            failure.is_final_attempt,
+            is_final_attempt=failure.is_final_attempt,
         )
         pending_error_reports.append(
             (attempt.attempt_id, "error", None, failure.error_class, failure.is_final_attempt)
@@ -2660,7 +2660,7 @@ async def run_platform_non_stream(
             usage,
             error_class,
             session_label,
-            is_final_attempt,
+            is_final_attempt=is_final_attempt,
         )
         if outcome != "success":
             pending_error_reports.append((attempt.attempt_id, outcome, usage, error_class, is_final_attempt))
