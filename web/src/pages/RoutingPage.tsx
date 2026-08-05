@@ -40,6 +40,26 @@ function useGuardrailsConfigured(): { configured: boolean; isLoading: boolean } 
   return { configured: settings.isLoading || value !== "", isLoading: settings.isLoading };
 }
 
+/** Whether this form can represent a spec without losing part of it.
+ *
+ *  The editor reconstructs a spec from four pieces of state, so anything it does
+ *  not model (a `user_id`/`key_id` condition, a comparator other than `gte`, a
+ *  `budget_remaining_usd` threshold, a router entry) would be silently dropped on
+ *  save. Offering Edit on such a policy would quietly destroy the operator's
+ *  config, so those are shown read-only until the form covers them. Refusing to
+ *  edit is recoverable; a silent lossy save is not.
+ */
+function isEditableInForm(spec: PolicySpec): boolean {
+  return spec.select.every((entry) => {
+    if (entry.default !== undefined) return entry.when === undefined;
+    if (entry.router !== undefined) return false;
+    const when = entry.when;
+    if (when === undefined || entry.target === undefined) return false;
+    const keys = Object.keys(when);
+    return keys.length === 1 && keys[0] === "budget_used_pct" && when.budget_used_pct?.gte !== undefined;
+  });
+}
+
 /** The fallthrough target of a spec, which every valid spec has exactly one of. */
 function defaultTargetOf(spec: PolicySpec): string {
   return spec.select.find((entry) => entry.default !== undefined)?.default ?? "";
@@ -577,10 +597,16 @@ export function RoutingPage() {
           policy.source === "config" ? (
             <span className="text-xs text-[var(--otari-muted)]">set in config.yml</span>
           ) : (
-            <div className="flex justify-end gap-2">
-              <Button size="sm" variant="ghost" onPress={() => setEditing(policy)}>
-                Edit
-              </Button>
+            <div className="flex items-center justify-end gap-2">
+              {isEditableInForm(policy.spec) ? (
+                <Button size="sm" variant="ghost" onPress={() => setEditing(policy)}>
+                  Edit
+                </Button>
+              ) : (
+                <span className="text-xs text-[var(--otari-muted)]">
+                  Uses options this form cannot show yet. Edit it through the API so nothing is lost.
+                </span>
+              )}
               <ConfirmButton
                 confirmLabel="Confirm"
                 isPending={deletePolicy.isPending}

@@ -117,7 +117,6 @@ export interface PolicySpec {
   select: PolicySelectEntry[];
   on_failure?: string[];
   guardrails?: PolicyGuardrail[];
-  limits?: Record<string, number | null>;
 }
 
 export interface RoutingPolicyResponse {

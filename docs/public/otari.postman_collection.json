@@ -2365,7 +2365,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single status (e.g. 'success' or 'error')",
+                  "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
                   "disabled": true,
                   "key": "status",
                   "value": ""
@@ -2494,7 +2494,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single status (e.g. 'success' or 'error')",
+                  "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
                   "disabled": true,
                   "key": "status",
                   "value": ""
@@ -2632,7 +2632,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single status (e.g. 'success' or 'error')",
+                  "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
                   "disabled": true,
                   "key": "status",
                   "value": ""
@@ -2770,7 +2770,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single status (e.g. 'success' or 'error')",
+                  "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
                   "disabled": true,
                   "key": "status",
                   "value": ""
@@ -2881,7 +2881,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single status (e.g. 'success' or 'error')",
+                  "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
                   "disabled": true,
                   "key": "status",
                   "value": ""

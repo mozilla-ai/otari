@@ -186,7 +186,10 @@ class UsageCount(BaseModel):
 _START_DESC = "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)"
 _END_DESC = "Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds)"
 _USER_DESC = "Filter to a single user"
-_STATUS_DESC = "Filter to a single status (e.g. 'success' or 'error')"
+_STATUS_DESC = (
+    "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy "
+    "recovered from, excluded from error_count and request_count)"
+)
 _STATUS_CODE_DESC = (
     "Filter to a single failure status code (e.g. 429 for provider rate limits, "
     "402 for missing-pricing rejections). Only error rows carry one, so this "
@@ -720,7 +723,11 @@ async def _totals(db: AsyncSession, conditions: list[ColumnElement[bool]]) -> Us
                 func.coalesce(func.sum(UsageLog.cache_write_1h_tokens), 0),
                 _request_count_expr(),
                 func.coalesce(func.sum(case((UsageLog.status == "error", 1), else_=0)), 0),
-                func.avg(UsageLog.latency_ms),
+                # Averaged over requests, not attempts: an absorbed row carries the
+                # time spent on a candidate that did not serve, and folding it in
+                # would make a policy that recovers quickly look slower than one
+                # that never fails.
+                func.avg(case((UsageLog.status != "absorbed", UsageLog.latency_ms))),
                 # Unpriced *served* rows only; see UsageTotals.unpriced_requests.
                 func.coalesce(
                     func.sum(case(((UsageLog.status == "success") & UsageLog.cost.is_(None), 1), else_=0)),

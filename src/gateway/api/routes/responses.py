@@ -493,6 +493,7 @@ async def create_response(
             model=model,
             session_label=request_body.session_label,
             display_model=resolved.alias,
+            base_request_fields=base_request_fields,
         )
 
     # ------------------------------------------------------------------
@@ -525,6 +526,7 @@ async def create_response(
         provider=billing_instance,
         model=model,
         display_model=resolved.alias,
+        base_request_fields=base_request_fields,
     )
 
     return result.model_dump(exclude_none=True)

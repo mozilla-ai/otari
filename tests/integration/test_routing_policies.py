@@ -16,7 +16,7 @@ The invariants worth defending, and why:
 """
 
 from collections.abc import Generator
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -57,6 +57,31 @@ def _completion(model: str) -> ChatCompletion:
         model=model,
         object="chat.completion",
         usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+    )
+
+
+def _message_response() -> Any:
+    """A minimal valid Anthropic Message, for the /v1/messages dispatch path."""
+    from any_llm.types.messages import MessageResponse, MessageUsage, TextBlock
+
+    return MessageResponse(
+        id="msg_test",
+        type="message",
+        role="assistant",
+        model="claude-haiku-4-5",
+        content=[TextBlock(type="text", text="ok", citations=None)],
+        stop_reason=cast(Any, "end_turn"),
+        stop_sequence=None,
+        usage=MessageUsage(
+            input_tokens=5,
+            output_tokens=2,
+            cache_creation_input_tokens=None,
+            cache_read_input_tokens=None,
+            cache_creation=None,
+            server_tool_use=None,
+            service_tier=None,
+        ),
+        container=None,
     )
 
 
@@ -822,3 +847,248 @@ def test_a_dynamic_stored_policy_reports_no_single_price(client: TestClient) -> 
     assert entries["listed-dynamic"]["pricing"] is None
     # Reuses the existing field rather than inventing a second way to say it.
     assert entries["listed-dynamic"]["pricing_source"] == "dynamic"
+
+
+# ---------------------------------------------------------------------------
+# Mandated guardrails actually reach the guardrail runner
+#
+# The regression this guards is that the whole feature was once a no-op: the
+# compiler built the guardrail list and no route ever read it, so the schema, the
+# CLI, the dashboard, and the docs all described enforcement that never happened.
+# Asserting a 200 is not enough, because a guardrail that never runs also returns
+# 200. These assert the runner was actually handed the mandate.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def guarded_client(routing_config: GatewayConfig) -> Generator[TestClient]:
+    guarded = routing_config.model_copy(
+        update={
+            "routing": RoutingConfig.model_validate(
+                {
+                    "policies": {
+                        "guarded": {
+                            "select": [{"default": "openai:gpt-5-mini"}],
+                            "guardrails": [
+                                {"profile": "prompt-injection", "mode": "block", "on_unavailable": "block"}
+                            ],
+                        }
+                    }
+                }
+            )
+        }
+    )
+    yield from _build_client(guarded)
+
+
+def test_a_policy_guardrail_is_handed_to_the_guardrail_runner(guarded_client: TestClient) -> None:
+    _create_user(guarded_client)
+    seen: list[Any] = []
+
+    async def capture(guardrails: Any, text: str, **kwargs: Any) -> None:
+        seen.append(guardrails)
+
+    with (
+        patch("gateway.api.routes._pipeline.apply_input_guardrails", new=capture),
+        patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))),
+    ):
+        resp = guarded_client.post(
+            "/v1/chat/completions",
+            json={"model": "guarded", "messages": [{"role": "user", "content": "hi"}], "user": "test-user"},
+            headers=HEADERS,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert len(seen) == 1
+    assert seen[0] is not None, "the policy's guardrail never reached the runner"
+    assert [g.profile for g in seen[0]] == ["prompt-injection"]
+    assert seen[0][0].mode == "block"
+
+
+def test_a_caller_cannot_weaken_a_policy_guardrail_over_the_wire(guarded_client: TestClient) -> None:
+    _create_user(guarded_client)
+    seen: list[Any] = []
+
+    async def capture(guardrails: Any, text: str, **kwargs: Any) -> None:
+        seen.append(guardrails)
+
+    with (
+        patch("gateway.api.routes._pipeline.apply_input_guardrails", new=capture),
+        patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))),
+    ):
+        resp = guarded_client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "guarded",
+                "messages": [{"role": "user", "content": "hi"}],
+                "user": "test-user",
+                "guardrails": [{"profile": "prompt-injection", "mode": "monitor", "on_unavailable": "monitor"}],
+            },
+            headers=HEADERS,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert [g.profile for g in seen[0]] == ["prompt-injection"]
+    assert seen[0][0].mode == "block"
+    assert seen[0][0].on_unavailable == "block"
+
+
+def test_a_blocking_policy_guardrail_refuses_the_request(guarded_client: TestClient) -> None:
+    """End to end: a mandated block guardrail that flags stops the provider call."""
+    _create_user(guarded_client)
+    provider = AsyncMock(return_value=_completion("gpt-5-mini"))
+
+    async def flagged(guardrails: Any, input_text: str, *, default_url: str | None) -> Any:
+        from gateway.services.guardrails import GuardrailResult, GuardrailVerdict
+
+        return GuardrailVerdict(
+            results=[GuardrailResult(profile=g.profile, mode=g.mode, valid=False) for g in guardrails]
+        )
+
+    with (
+        patch("gateway.api.routes._helpers.run_input_guardrails", new=flagged),
+        patch("gateway.api.routes.chat.acompletion", new=provider),
+    ):
+        resp = guarded_client.post(
+            "/v1/chat/completions",
+            json={"model": "guarded", "messages": [{"role": "user", "content": "hi"}], "user": "test-user"},
+            headers=HEADERS,
+        )
+
+    assert resp.status_code == 403, resp.text
+    provider.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Reach and attribution on every completion endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_a_terminal_failure_names_the_candidate_that_actually_failed(client: TestClient) -> None:
+    """A 401 does not fail over, so the request stops on candidate 1. Attributing
+    it to the end of the plan would blame a provider that was never called, in a
+    row that feeds the by-provider breakdown and the error taxonomy.
+    """
+    _create_user(client)
+    calls: list[str] = []
+
+    async def unauthorized(**kwargs: Any) -> ChatCompletion:
+        calls.append(kwargs["model"])
+        raise _http_error(401)
+
+    with patch("gateway.api.routes.chat.acompletion", new=unauthorized):
+        _chat(client, "fast")
+
+    assert calls == ["openai:gpt-5-mini"]
+    errors = [r for r in _usage_rows(client) if r["status"] == "error"]
+    assert len(errors) == 1
+    assert errors[0]["provider"] == "openai"
+    assert errors[0]["model"] == "gpt-5-mini"
+    assert errors[0]["attempt_position"] == 1
+
+
+def test_a_streamed_fallover_correlates_both_of_its_rows(client: TestClient) -> None:
+    """request_group_id exists to tie an absorbed attempt to the row that served.
+    On the streaming path the serving row once carried no attribution at all, so
+    the correlation the migration is for did not happen.
+    """
+    _create_user(client)
+
+    async def flaky_stream(**kwargs: Any) -> Any:
+        if kwargs["model"] == "openai:gpt-5-mini":
+            raise _http_error(503)
+
+        async def chunks() -> Any:
+            from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+
+            yield ChatCompletionChunk(
+                id="c1",
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                created=0,
+                model="claude-haiku-4-5",
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return chunks()
+
+    with patch("gateway.api.routes.chat.acompletion", new=flaky_stream):
+        assert _chat(client, "fast", stream=True).status_code == 200
+
+    rows = _usage_rows(client)
+    served = [r for r in rows if r["status"] == "success"]
+    absorbed = [r for r in rows if r["status"] == "absorbed"]
+    assert len(served) == 1 and len(absorbed) == 1
+    assert served[0]["policy_name"] == "fast"
+    assert served[0]["attempt_position"] == 2
+    assert served[0]["request_group_id"] is not None
+    assert served[0]["request_group_id"] == absorbed[0]["request_group_id"]
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["non-stream", "stream"])
+def test_messages_endpoint_fails_over(client: TestClient, stream: bool) -> None:
+    _create_user(client)
+    calls: list[str] = []
+
+    async def flaky(**kwargs: Any) -> Any:
+        calls.append(kwargs["model"])
+        if kwargs["model"] == "openai:gpt-5-mini":
+            raise _http_error(503)
+        if not stream:
+            return _message_response()
+
+        async def chunks() -> Any:
+            from any_llm.types.completion import ChatCompletionChunk, ChoiceDelta, ChunkChoice
+
+            yield ChatCompletionChunk(
+                id="c1",
+                choices=[ChunkChoice(delta=ChoiceDelta(content="hi"), index=0, finish_reason=None)],
+                created=0,
+                model="claude-haiku-4-5",
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return chunks()
+
+    with patch("gateway.api.routes.messages.amessages", new=flaky):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "fast",
+                "max_tokens": 16,
+                "stream": stream,
+                "messages": [{"role": "user", "content": "hi"}],
+                # /v1/messages takes the billed user in metadata, not a top-level field.
+                "metadata": {"user_id": "test-user"},
+            },
+            headers=HEADERS,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+
+
+def test_responses_endpoint_fails_over(client: TestClient) -> None:
+    _create_user(client)
+    calls: list[str] = []
+
+    async def flaky(**kwargs: Any) -> Any:
+        calls.append(f"{kwargs['provider'].value}:{kwargs['model']}")
+        if kwargs["model"] == "gpt-5-mini":
+            raise _http_error(503)
+        from any_llm.types.responses import Response as ProviderResponse
+
+        return ProviderResponse.model_construct(
+            id="resp-1", object="response", created_at=0, model="claude-haiku-4-5", output=[], usage=None
+        )
+
+    with patch("gateway.api.routes.responses.aresponses", new=flaky):
+        resp = client.post(
+            "/v1/responses",
+            json={"model": "fast", "input": "hi", "user": "test-user"},
+            headers=HEADERS,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]

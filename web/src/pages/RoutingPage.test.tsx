@@ -252,3 +252,24 @@ describe("RoutingPage", () => {
     expect(screen.getByRole("button", { name: "Create policy" })).toBeDisabled();
   });
 });
+
+  it("does not offer Edit for a policy the form would silently truncate", async () => {
+    // The editor models only a `budget_used_pct.gte` condition. Offering Edit on a
+    // policy built through the API with anything else would drop it on save, which
+    // is worse than not offering the button.
+    mockApi([
+      policy("api-authored", {
+        select: [
+          { when: { key_id: "k-1" }, target: "openai:gpt-5-nano" },
+          { default: "openai:gpt-5-mini" },
+        ],
+      }),
+    ]);
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("api-authored")).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(within(row).getByText(/cannot show yet/)).toBeInTheDocument();
+    // Delete stays available: removing a policy is never lossy.
+    expect(within(row).getByRole("button", { name: "Delete" })).toBeInTheDocument();
+  });

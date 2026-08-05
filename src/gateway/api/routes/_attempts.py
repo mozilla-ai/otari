@@ -114,12 +114,19 @@ async def walk_attempts(
     classify_error: Callable[[BaseException], tuple[bool, str]] = classify_local_attempt_error,
     build_kwargs: Callable[[Attempt, dict[str, Any]], dict[str, Any]] | None = None,
     on_absorbed: Callable[[Attempt, BaseException, int], Awaitable[None]] | None = None,
+    on_terminal: Callable[[Attempt], None] | None = None,
 ) -> tuple[Attempt, T]:
     """Try each attempt in order; return ``(chosen, result)`` for the first success.
 
     ``run_attempt`` receives the attempt, its merged call kwargs, and a
     ``mark_locked_in`` callback that tool-loop callers fire once the upstream has
     produced its first assistant message.
+
+    ``on_terminal`` is called with the candidate the walk actually stopped on,
+    before the terminal error is raised. The caller cannot infer it: only a
+    retryable exhaustion reaches the last candidate, while a non-retryable status
+    or a tool-loop lock-in stops the walk early, and attributing the failure to
+    the end of the plan would name a provider that was never called.
 
     ``on_absorbed`` is awaited for each attempt the walk *recovers* from, i.e. a
     retryable failure with another candidate left to try. It exists so the caller can
@@ -203,6 +210,8 @@ async def walk_attempts(
                 reason = "timeout" if error_class == "timeout" else "upstream_error"
                 record_abandoned_attempt(attempt.instance, attempt.model, reason, attempt.position)
             if locked_in or not retryable:
+                if on_terminal is not None:
+                    on_terminal(attempt)
                 raise _provider_failure_http_exc(exc, fallback_detail="LLM provider error") from exc
             failures.append(AttemptFailure(attempt.position, attempt.instance, attempt.model, error_class))
             # Only a failure with somewhere left to go is "absorbed"; the last one is
@@ -223,6 +232,10 @@ async def walk_attempts(
         return attempt, result
 
     logger.error("All attempts failed policy=%s failures=%s", policy_name, failures)
+    # Exhaustion did reach the end of the plan, so the last candidate is the one
+    # that failed last.
+    if on_terminal is not None:
+        on_terminal(attempts[-1])
     single = len(attempts) <= 1
     if last_exc is not None and upstream_exception_shape(last_exc)[0] == "timeout":
         detail = "LLM provider timeout" if single else ALL_ATTEMPTS_TIMED_OUT_DETAIL

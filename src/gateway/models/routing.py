@@ -33,7 +33,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 __all__ = [
     "MAX_CANDIDATES",
     "PolicyGuardrail",
-    "PolicyLimits",
     "PolicySpec",
     "RoutingConfig",
     "SelectEntry",
@@ -228,20 +227,6 @@ class PolicyGuardrail(BaseModel):
     validate_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
-class PolicyLimits(BaseModel):
-    """Per-policy overrides for the streaming first-chunk deadlines.
-
-    Field names match the existing global keys exactly, so an operator who knows
-    one knows the other, and neither of the two less-used knobs is lost.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    streaming_first_chunk_timeout_ms: int | None = Field(default=None, gt=0)
-    streaming_first_chunk_timeout_ms_tool_loop: int | None = Field(default=None, gt=0)
-    streaming_final_attempt_extra_first_chunk_timeout_ms: int | None = Field(default=None, ge=0)
-
-
 class PolicySpec(BaseModel):
     """One named routing policy."""
 
@@ -254,7 +239,11 @@ class PolicySpec(BaseModel):
         description="Selectors to try, in order, after a retryable failure on the selected candidate.",
     )
     guardrails: list[PolicyGuardrail] = Field(default_factory=list)
-    limits: PolicyLimits | None = None
+    # No `limits` yet, deliberately. The only per-request deadline that exists is
+    # the streaming first-chunk timeout, and it is applied solely by the hybrid
+    # walker; standalone streaming (where policies apply) has none, so a
+    # per-policy override would validate, store, and do nothing. It belongs here
+    # once standalone streaming grows a deadline of its own.
 
     @model_validator(mode="after")
     def _one_default_and_it_comes_last(self) -> PolicySpec:

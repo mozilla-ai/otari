@@ -22,6 +22,9 @@ otari.db
 otari-dev.db
 smoke.db
 otari-smoke.db
+# SQLite WAL sidecars, which sit next to any of the *.db files above.
+*.db-shm
+*.db-wal
 
 .DS_Store
 

@@ -10703,7 +10703,7 @@
             }
           },
           {
-            "description": "Filter to a single status (e.g. 'success' or 'error')",
+            "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
             "in": "query",
             "name": "status",
             "required": false,
@@ -10716,7 +10716,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single status (e.g. 'success' or 'error')",
+              "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
               "title": "Status"
             }
           },
@@ -11008,7 +11008,7 @@
             }
           },
           {
-            "description": "Filter to a single status (e.g. 'success' or 'error')",
+            "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
             "in": "query",
             "name": "status",
             "required": false,
@@ -11021,7 +11021,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single status (e.g. 'success' or 'error')",
+              "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
               "title": "Status"
             }
           },
@@ -11353,7 +11353,7 @@
             }
           },
           {
-            "description": "Filter to a single status (e.g. 'success' or 'error')",
+            "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
             "in": "query",
             "name": "status",
             "required": false,
@@ -11366,7 +11366,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single status (e.g. 'success' or 'error')",
+              "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
               "title": "Status"
             }
           },
@@ -11697,7 +11697,7 @@
             }
           },
           {
-            "description": "Filter to a single status (e.g. 'success' or 'error')",
+            "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
             "in": "query",
             "name": "status",
             "required": false,
@@ -11710,7 +11710,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single status (e.g. 'success' or 'error')",
+              "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
               "title": "Status"
             }
           },
@@ -12023,7 +12023,7 @@
             }
           },
           {
-            "description": "Filter to a single status (e.g. 'success' or 'error')",
+            "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
             "in": "query",
             "name": "status",
             "required": false,
@@ -12036,7 +12036,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single status (e.g. 'success' or 'error')",
+              "description": "Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count)",
               "title": "Status"
             }
           },

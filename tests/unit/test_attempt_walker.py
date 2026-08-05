@@ -9,7 +9,7 @@ misconfiguration.
 """
 
 import asyncio
-from typing import Any
+from typing import Any, Literal, cast
 
 import httpx
 import pytest
@@ -307,3 +307,111 @@ async def test_a_401_does_not_advance_the_plan() -> None:
             max_tool_iterations=10,
         )
     assert second_ran is False
+
+
+# ---------------------------------------------------------------------------
+# Policy guardrail merge
+#
+# A policy's guardrails are the operator's mandate. The caller may add to them
+# and may tighten one, but must never be able to weaken one, which is the whole
+# reason a policy can carry guardrails at all.
+# ---------------------------------------------------------------------------
+
+
+def _request_context(plan: Any) -> Any:
+    """A real RequestContext, so these exercise the production type."""
+    import time
+
+    from gateway.api.routes._pipeline import RequestContext
+    from gateway.core.config import GatewayConfig
+
+    return RequestContext(
+        config=GatewayConfig(),
+        db=None,
+        # No settlement happens in these tests; the merge reads only `ctx.plan`.
+        log_writer=cast(Any, None),
+        hybrid_mode=False,
+        route=None,
+        user_token=None,
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+        started_at=time.monotonic(),
+        plan=plan,
+    )
+
+
+def _ctx_with_guardrails(*guardrails: Any) -> Any:
+    from gateway.services.routing import CompiledPlan
+
+    return _request_context(
+        CompiledPlan(policy_name="p", attempts=[_attempt(1, "m")], guardrails=list(guardrails))
+    )
+
+
+def _guardrail(
+    profile: str,
+    mode: Literal["block", "monitor"] = "block",
+    on_unavailable: Literal["block", "monitor"] = "block",
+) -> Any:
+    from gateway.models.guardrails import GuardrailConfig
+
+    return GuardrailConfig(profile=profile, mode=mode, on_unavailable=on_unavailable)
+
+
+def test_a_mandated_guardrail_is_applied_when_the_caller_asked_for_nothing() -> None:
+    from gateway.api.routes._pipeline import merge_policy_guardrails
+
+    merged = merge_policy_guardrails(_ctx_with_guardrails(_guardrail("prompt-injection")), None)
+
+    assert merged is not None
+    assert [g.profile for g in merged] == ["prompt-injection"]
+    assert merged[0].mode == "block"
+
+
+def test_a_caller_cannot_weaken_a_mandated_guardrail() -> None:
+    from gateway.api.routes._pipeline import merge_policy_guardrails
+
+    merged = merge_policy_guardrails(
+        _ctx_with_guardrails(_guardrail("prompt-injection", mode="block", on_unavailable="block")),
+        [_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor")],
+    )
+
+    assert merged is not None and len(merged) == 1
+    assert merged[0].mode == "block"
+    assert merged[0].on_unavailable == "block"
+
+
+def test_a_caller_may_tighten_a_mandated_guardrail() -> None:
+    from gateway.api.routes._pipeline import merge_policy_guardrails
+
+    merged = merge_policy_guardrails(
+        _ctx_with_guardrails(_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor")),
+        [_guardrail("prompt-injection", mode="block", on_unavailable="block")],
+    )
+
+    assert merged is not None
+    assert merged[0].mode == "block"
+    assert merged[0].on_unavailable == "block"
+
+
+def test_a_caller_may_add_their_own_guardrails_alongside_a_mandate() -> None:
+    from gateway.api.routes._pipeline import merge_policy_guardrails
+
+    merged = merge_policy_guardrails(
+        _ctx_with_guardrails(_guardrail("prompt-injection")),
+        [_guardrail("pii", mode="monitor")],
+    )
+
+    assert merged is not None
+    assert sorted(g.profile for g in merged) == ["pii", "prompt-injection"]
+
+
+def test_an_unrouted_request_keeps_exactly_the_callers_guardrails() -> None:
+    from gateway.api.routes._pipeline import merge_policy_guardrails
+
+    unrouted = _request_context(None)
+    caller = [_guardrail("pii", mode="monitor")]
+    assert merge_policy_guardrails(unrouted, caller) is caller
+    assert merge_policy_guardrails(unrouted, None) is None

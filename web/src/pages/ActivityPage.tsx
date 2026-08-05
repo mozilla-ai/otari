@@ -101,6 +101,10 @@ const STATUS_OPTIONS: { label: string; value: string }[] = [
   { label: "All", value: "" },
   { label: "Success", value: "success" },
   { label: "Error", value: "error" },
+  // An attempt a routing policy recovered from. Listed because the rows are
+  // rendered and styled distinctly, so an operator who spots one has to be able
+  // to filter to the rest of them.
+  { label: "Absorbed", value: "absorbed" },
 ];
 
 const PRICED_OPTIONS: { label: string; value: string }[] = [

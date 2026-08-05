@@ -489,6 +489,7 @@ async def create_message(
             model=resolved.model,
             session_label=request.session_label,
             display_model=resolved.alias,
+            base_request_fields=request_fields,
         )
 
     # ------------------------------------------------------------------

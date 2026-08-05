@@ -165,5 +165,3 @@ providers:
 #         # on_unavailable: block fails closed, which makes the guardrails service
 #         # a hard dependency of every request through this policy.
 #         - {profile: prompt-injection, mode: block, on_unavailable: block}
-#       limits:
-#         streaming_first_chunk_timeout_ms: 8000

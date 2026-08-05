@@ -745,6 +745,24 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
     if ctx.db is None or ctx.reservation is None or ctx.estimate_inputs is None:
         return
     pricing = await find_model_pricing(ctx.db, attempt.instance, attempt.model)
+    # `require_pricing` is a billing safety gate: it refuses a request the gateway
+    # cannot price, because it then cannot debit it. The gate at admission prices
+    # only the head candidate, so without this an unpriced model that 402s when
+    # named directly would serve, and log cost=null, simply by being reached as a
+    # fallback. A budget-exempt request is never debited, so the gate does not
+    # apply to it, matching the admission-time rule.
+    if ctx.reservation.counts_toward_budget and pricing_required_but_missing(
+        pricing, require_pricing=ctx.config.require_pricing
+    ):
+        logger.warning(
+            "Fallback candidate %s:%s has no pricing and require_pricing is on; stopping the chain",
+            attempt.instance,
+            attempt.model,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=no_pricing_error_detail(f"{attempt.instance}:{attempt.model}"),
+        )
     repriced = estimate_cost(
         pricing,
         prompt_chars=ctx.estimate_inputs.prompt_chars,
@@ -1291,6 +1309,46 @@ async def _validate_mcp_server_urls(
         raise adapter.error(400, str(exc), ErrorKind.INVALID_REQUEST) from exc
 
 
+def merge_policy_guardrails(
+    ctx: RequestContext, requested: list[GuardrailConfig] | None
+) -> list[GuardrailConfig] | None:
+    """Combine a policy's mandated guardrails with the caller's own.
+
+    Union by profile, with the stricter setting winning on every axis: a caller
+    may *add* guardrails and may tighten one, but can never weaken what the
+    operator mandated. `block` beats `monitor` for both `mode` and
+    `on_unavailable`, since each is a choice between enforcing and observing.
+
+    The operator's entry also owns the URL and the validate kwargs for a profile
+    it mandates, so a caller cannot point a mandated check at a service of their
+    choosing.
+
+    Returns `None` when neither side asked for anything, which is the shape
+    `apply_input_guardrails` treats as "no guardrails ran".
+    """
+    mandated = ctx.plan.guardrails if ctx.plan is not None else []
+    if not mandated:
+        return requested
+    merged: dict[str, GuardrailConfig] = {}
+    # Caller entries first so a mandated profile of the same name overwrites them.
+    for guardrail in requested or []:
+        merged[guardrail.profile] = guardrail
+    for guardrail in mandated:
+        caller = merged.get(guardrail.profile)
+        if caller is None:
+            merged[guardrail.profile] = guardrail
+            continue
+        merged[guardrail.profile] = guardrail.model_copy(
+            update={
+                "mode": "block" if "block" in (guardrail.mode, caller.mode) else "monitor",
+                "on_unavailable": (
+                    "block" if "block" in (guardrail.on_unavailable, caller.on_unavailable) else "monitor"
+                ),
+            }
+        )
+    return list(merged.values())
+
+
 async def prepare_gateway_tools(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -1322,7 +1380,12 @@ async def prepare_gateway_tools(
     reservation taken by :func:`resolve_request_context` before propagating.
     """
     try:
-        await apply_input_guardrails(guardrails, guardrail_text, response=response, config=ctx.config)
+        # A policy's guardrails are merged in here rather than at each route, so
+        # every completion endpoint enforces a mandate identically and none can
+        # forget to. `guardrails` as passed is the caller's own list.
+        await apply_input_guardrails(
+            merge_policy_guardrails(ctx, guardrails), guardrail_text, response=response, config=ctx.config
+        )
 
         if mcp_server_ids and not ctx.hybrid_mode:
             raise adapter.error(400, MCP_SERVER_IDS_HYBRID_ONLY_DETAIL, ErrorKind.INVALID_REQUEST)
@@ -1941,8 +2004,15 @@ def build_streaming_response(
     platform_request_id: str | None = None,
     session_label: str | None = None,
     display_model: str | None = None,
+    attribution: RoutingAttribution | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
+
+    ``attribution`` is carried onto every usage row these callbacks write, so a
+    streamed request through a routing policy is as legible after the fact as a
+    non-streamed one. Without it the serving row of a streamed fallover would
+    carry no ``request_group_id``, and the absorbed attempt it belongs to would be
+    an orphan.
 
     This is the only place the streaming settlement callbacks are built, so
     every format and both the single-attempt and platform-fallback paths get
@@ -1985,6 +2055,7 @@ def build_streaming_response(
             usage_override=usage_data,
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=_handle_counts_toward_budget(reservation),
+            attribution=attribution,
         )
         if reservation is not None:
             await reconcile_reservation(db, reservation, actual_cost or 0.0)
@@ -2006,6 +2077,7 @@ def build_streaming_response(
                 user_id=user_id,
                 latency_ms=_elapsed_ms(started_at),
                 counts_toward_budget=reservation.counts_toward_budget,
+                attribution=attribution,
             )
             await refund_reservation(db, reservation)
             return
@@ -2025,6 +2097,7 @@ def build_streaming_response(
             cost_override=reservation.estimate,
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=reservation.counts_toward_budget,
+            attribution=attribution,
         )
         await reconcile_reservation(db, reservation, reservation.estimate)
 
@@ -2056,6 +2129,7 @@ def build_streaming_response(
             status_code=failure_status_code(exc),
             latency_ms=_elapsed_ms(started_at),
             counts_toward_budget=_handle_counts_toward_budget(reservation),
+            attribution=attribution,
         )
         if reservation is not None:
             await refund_reservation(db, reservation)
@@ -2195,6 +2269,10 @@ async def run_single_attempt_stream(
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
                 await log_absorbed_attempt(ctx, adapter, attempt, exc)
 
+            # The walk reports which candidate it stopped on, so the failure row
+            # names the provider that actually failed rather than the end of the plan.
+            stopped_on: list[Attempt] = []
+
             try:
                 chosen, stream = await walk_attempts(
                     attempts=ctx.plan.attempts,
@@ -2204,13 +2282,18 @@ async def run_single_attempt_stream(
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=adapter.local_attempt_kwargs,
                     on_absorbed=_absorbed,
+                    on_terminal=stopped_on.append,
                 )
             except HTTPException as exhausted:
-                await log_exhausted_plan(ctx, adapter, exhausted)
+                await log_exhausted_plan(ctx, adapter, exhausted, stopped_on[0] if stopped_on else None)
                 raise
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
+            stream_attribution = _attribution_for(ctx, chosen)
         else:
             stream = await open_stream(adapter=adapter, tool_ctx=tool_ctx, call_kwargs=call_kwargs)
+            # A single-candidate policy still names a policy and a reason, and
+            # both belong on the row.
+            stream_attribution = _attribution_for(ctx, ctx.plan.head) if ctx.plan is not None else None
     except HTTPException:
         await release_reservation(ctx)
         raise
@@ -2250,6 +2333,7 @@ async def run_single_attempt_stream(
         platform_request_id=platform_request_id,
         session_label=session_label,
         display_model=display_model,
+        attribution=stream_attribution,
     )
 
 
@@ -2623,22 +2707,26 @@ def _attribution_for(ctx: RequestContext, attempt: Attempt, *, absorbed: bool = 
     )
 
 
-def _failure_attribution(ctx: RequestContext) -> RoutingAttribution | None:
+def _failure_attribution(ctx: RequestContext, stopped_on: Attempt | None = None) -> RoutingAttribution | None:
     """Attribution for a request that failed outright.
 
-    Attributed to the *last* candidate in the plan: a terminal failure means the
-    walk reached the end, so that is the attempt whose error the caller saw. A
-    single-candidate plan attributes to its only attempt, which is the same thing.
+    Attributed to the candidate the walk actually stopped on, which the walker
+    reports through ``on_terminal``. Defaulting to the end of the plan would be
+    wrong for every early stop: a 400/401/403/422 or a tool-loop lock-in on the
+    first candidate ends the request there, and naming the last candidate would
+    blame a provider that was never called, in a row that feeds the by-provider
+    breakdown and the error taxonomy.
     """
     if ctx.plan is None:
         return None
-    return _attribution_for(ctx, ctx.plan.attempts[-1])
+    return _attribution_for(ctx, stopped_on or ctx.plan.attempts[-1])
 
 
 async def log_exhausted_plan(
     ctx: RequestContext,
     adapter: FormatAdapter[Any, Any],
     exc: HTTPException,
+    stopped_on: Attempt | None = None,
 ) -> None:
     """Record the failure of a plan whose every candidate failed.
 
@@ -2651,7 +2739,7 @@ async def log_exhausted_plan(
     """
     if ctx.db is None or ctx.plan is None:
         return
-    last = ctx.plan.attempts[-1]
+    last = stopped_on or ctx.plan.attempts[-1]
     await log_usage(
         db=ctx.db,
         log_writer=ctx.log_writer,
@@ -2664,7 +2752,7 @@ async def log_exhausted_plan(
         status_code=exc.status_code,
         latency_ms=_elapsed_ms(ctx.started_at),
         counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
-        attribution=_failure_attribution(ctx),
+        attribution=_failure_attribution(ctx, last),
     )
 
 
@@ -2763,6 +2851,10 @@ async def run_standalone_non_stream(
             async def _absorbed(attempt: Attempt, exc: BaseException, _total: int) -> None:
                 await log_absorbed_attempt(ctx, adapter, attempt, exc)
 
+            # The walk reports which candidate it stopped on, so the failure row
+            # names the provider that actually failed rather than the end of the plan.
+            stopped_on: list[Attempt] = []
+
             try:
                 chosen, result = await walk_attempts(
                     attempts=ctx.plan.attempts,
@@ -2772,9 +2864,10 @@ async def run_standalone_non_stream(
                     policy_name=ctx.plan.policy_name,
                     build_kwargs=adapter.local_attempt_kwargs,
                     on_absorbed=_absorbed,
+                    on_terminal=stopped_on.append,
                 )
             except HTTPException as exhausted:
-                await log_exhausted_plan(ctx, adapter, exhausted)
+                await log_exhausted_plan(ctx, adapter, exhausted, stopped_on[0] if stopped_on else None)
                 raise
             provider, model, display_model = chosen.instance, chosen.model, chosen.display_model
             attribution = _attribution_for(ctx, chosen)

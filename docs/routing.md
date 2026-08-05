@@ -192,9 +192,11 @@ that is wrong whenever the policy does its job.
 | Only one candidate survived filtering | Answers exactly as naming that model directly would |
 | No candidate is permitted for the caller | 403 naming the policy. The per-candidate reasons go to the activity log, not to the caller: a policy exists partly to keep its targets private |
 | A pricier fallback would exceed the remaining budget | The chain stops rather than overshooting the cap |
+| A fallback candidate has no pricing, with `require_pricing` on | The chain stops with a 402. The gate applies to every candidate, not only the selected one, so a policy cannot be a way around it |
 
-Streaming fails over while opening the upstream connection, which is before any
-bytes reach the client. Once the stream is open, a mid-body failure propagates:
+Failover applies on all three completion endpoints, streaming and not. Streaming
+fails over while opening the upstream connection, which is before any bytes reach
+the client. Once the stream is open, a mid-body failure propagates:
 the client already has part of a response, and swapping models mid-answer is not
 something a caller can be expected to handle.
 

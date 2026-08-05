@@ -197,7 +197,14 @@ def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id:
         try:
             config.validate_alias(name, selector, alias_names=indirections)
         except ValueError as exc:
-            detail = str(exc).replace(f"aliases.{name}", f"routing policy '{name}'", 1)
+            # `validate_alias` phrases both its target errors and its *name* errors
+            # in alias terms, so both are rewritten; otherwise a policy named "a:b"
+            # would be refused with a message about aliases.
+            detail = (
+                str(exc)
+                .replace(f"aliases.{name}", f"routing policy '{name}'", 1)
+                .replace("alias name", "routing policy name", 1)
+            )
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail) from exc
     if spec.default_target in spec.on_failure:
         raise HTTPException(
