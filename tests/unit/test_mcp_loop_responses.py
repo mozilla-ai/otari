@@ -14,6 +14,7 @@ from typing import Any, cast
 import pytest
 from any_llm.types.responses import Response, ResponseStreamEvent
 from openai.types.responses import (
+    ResponseCompactionItem,
     ResponseCompletedEvent,
     ResponseFunctionCallArgumentsDeltaEvent,
     ResponseFunctionCallArgumentsDoneEvent,
@@ -81,6 +82,14 @@ def _function_call(
         call_id=call_id,
         name=name,
         arguments=arguments,
+    )
+
+
+def _compaction(item_id: str = "cmp_1") -> ResponseCompactionItem:
+    return ResponseCompactionItem(
+        id=item_id,
+        type="compaction",
+        encrypted_content=f"opaque-{item_id}",
     )
 
 
@@ -221,6 +230,43 @@ async def test_loop_executes_owned_function_call_and_completes(monkeypatch: pyte
     assert output_item["call_id"] == "call_1"
     assert output_item["output"] == "ok"
     assert out.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_loop_replays_and_returns_compaction_from_hidden_iteration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compaction = _compaction()
+    responses = iter(
+        [
+            _response(output=[compaction, _function_call("call_1", "fetch_url", "{}")]),
+            _response(output=[], status="completed"),
+        ]
+    )
+    captured_inputs: list[list[Any]] = []
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured_inputs.append(list(kwargs["input_data"]))
+        return next(responses)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    out = await responses_tool_loop(
+        completion_kwargs={"model": "fake", "input_data": "go"},
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+        max_iterations=5,
+    )
+
+    replay = captured_inputs[1][-3:]
+    assert [item["type"] for item in replay] == [
+        "compaction",
+        "function_call",
+        "function_call_output",
+    ]
+    assert replay[0]["encrypted_content"] == "opaque-cmp_1"
+    assert [getattr(item, "type", None) for item in out.output] == ["compaction"]
+    assert isinstance(out.output[0], ResponseCompactionItem)
+    assert out.output[0].encrypted_content == "opaque-cmp_1"
 
 
 @pytest.mark.asyncio
@@ -628,6 +674,63 @@ async def test_stream_runs_owned_function_call_and_continues(monkeypatch: pytest
     seqs = [e.sequence_number for e in events if getattr(e, "sequence_number", None) is not None]
     assert seqs == list(range(len(seqs)))
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_replays_and_returns_compaction_from_hidden_iteration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    compaction = _compaction()
+    function_call = _function_call("call_1", "fetch_url", "{}")
+    iter_streams = iter(
+        [
+            _async_iter(
+                _output_item_added(0, compaction),
+                _output_item_done(0, compaction),
+                _output_item_added(1, function_call),
+                _function_call_args_done(1, "fc_item_1", "fetch_url", "{}"),
+                _output_item_done(1, function_call),
+                _response_completed(output=[compaction, function_call]),
+            ),
+            _async_iter(
+                _text_delta("msg_1", 0, "done"),
+                _response_completed(),
+            ),
+        ]
+    )
+    captured_inputs: list[list[Any]] = []
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        captured_inputs.append(list(kwargs["input_data"]))
+        return next(iter_streams)
+
+    monkeypatch.setattr(responses_loop_module, "aresponses", fake_aresponses)
+
+    events = [
+        event
+        async for event in responses_tool_loop_stream(
+            completion_kwargs={"model": "fake", "input_data": "go"},
+            pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+            max_iterations=5,
+        )
+    ]
+
+    replay = captured_inputs[1][-3:]
+    assert [item["type"] for item in replay] == [
+        "compaction",
+        "function_call",
+        "function_call_output",
+    ]
+    assert replay[0]["encrypted_content"] == "opaque-cmp_1"
+    assert [
+        event.type
+        for event in events
+        if getattr(getattr(event, "item", None), "type", None) == "compaction"
+    ] == ["response.output_item.added", "response.output_item.done"]
+    completed = next(event for event in events if event.type == "response.completed")
+    assert [getattr(item, "type", None) for item in completed.response.output] == ["compaction"]
+    assert isinstance(completed.response.output[0], ResponseCompactionItem)
+    assert completed.response.output[0].encrypted_content == "opaque-cmp_1"
 
 
 @pytest.mark.asyncio
