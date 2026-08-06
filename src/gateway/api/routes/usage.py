@@ -350,11 +350,7 @@ def _usage_filters(
         # A one-id lookup stays an equality test so it uses the index the same way
         # a single-row fetch would; the IN form is for the dashboard's batched
         # page lookup.
-        conditions.append(
-            UsageLog.request_group_id == request_group_id[0]
-            if len(request_group_id) == 1
-            else UsageLog.request_group_id.in_(request_group_id)
-        )
+        conditions.append(_match_any(UsageLog.request_group_id, request_group_id))
     if priced is True:
         conditions.append(~_needs_pricing_expr())
     elif priced is False:

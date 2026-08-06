@@ -190,7 +190,7 @@ describe("PageLoading", () => {
 });
 
 describe("FilterMultiComboBox", () => {
-  function Harness({ onChange }: { onChange?: (values: string[]) => void }) {
+  function Harness({ onChange, maxValues }: { onChange?: (values: string[]) => void; maxValues?: number }) {
     const [values, setValues] = useState<string[]>([]);
     return (
       <FilterMultiComboBox
@@ -205,6 +205,7 @@ describe("FilterMultiComboBox", () => {
           { value: "claude-sonnet-5", label: "claude-sonnet-5" },
         ]}
         placeholder="All models"
+        maxValues={maxValues}
       />
     );
   }
@@ -239,7 +240,27 @@ describe("FilterMultiComboBox", () => {
     await user.click(input);
     await user.type(input, "claude");
     expect(screen.queryByRole("option", { name: "gpt-5.6" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "claude-sonnet-5" })).toBeInTheDocument();
     // Typing alone filters nothing: only a picked option becomes a filter value.
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("stops at the value ceiling the endpoints accept", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} maxValues={1} />);
+
+    const input = screen.getByRole("combobox", { name: "Model" });
+    await user.click(input);
+    await user.click(await screen.findByRole("option", { name: "gpt-5.6" }));
+    expect(onChange).toHaveBeenLastCalledWith(["gpt-5.6"]);
+
+    // Past the ceiling the remaining options are inert rather than a pick that
+    // 422s every query on the page, and the input says the set is full.
+    expect(input).toHaveAttribute("placeholder", "1 selected (max)");
+    const remaining = await screen.findByRole("option", { name: "claude-sonnet-5" });
+    expect(remaining).toHaveAttribute("aria-disabled", "true");
+    await user.click(remaining);
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 });

@@ -428,12 +428,9 @@ export function UsagePage() {
     label: k.key_name ?? `${k.id.slice(0, 8)}…`,
   }));
   const keyLabel = (id: string) => keyOptions.find((o) => o.value === id)?.label ?? id;
-  // Keep selected-but-not-in-list models visible (e.g. one whose traffic left the
-  // window after it was picked), so a selection never silently leaves the picker.
-  const modelOptionList = [...modelFilters, ...modelOptions.filter((m) => !modelFilters.includes(m))].map((m) => ({
-    value: m,
-    label: m,
-  }));
+  // Just the in-window models: a picked one needs no place in this list, because
+  // the picker hides what is already selected and the chips carry the raw name.
+  const modelOptionList = modelOptions.map((m) => ({ value: m, label: m }));
 
   // The default 30d window is the baseline (like the old "All" was), so it does
   // not count as a user-applied time filter: clearing returns to it, and an

@@ -558,6 +558,7 @@ export function FilterMultiComboBox({
   options,
   placeholder,
   maxVisible = 50,
+  maxValues = 50,
 }: {
   label: string;
   values: string[];
@@ -567,9 +568,14 @@ export function FilterMultiComboBox({
   // input reports the size of the selection instead.
   placeholder?: string;
   maxVisible?: number;
+  // Ceiling on the selection, matching what the analytics endpoints accept for
+  // one repeatable filter. Stopping here keeps a 51st pick from failing every
+  // query on the page with a 422 the operator cannot read.
+  maxValues?: number;
 }) {
   const [text, setText] = useState("");
 
+  const atLimit = values.length >= maxValues;
   const query = text.trim().toLowerCase();
   const visible = options
     .filter((o) => !values.includes(o.value))
@@ -585,10 +591,13 @@ export function FilterMultiComboBox({
       // Never a committed selection of its own: the picked values live in
       // `values`, so the input stays a search box.
       selectedKey={null}
+      // At the ceiling the remaining options are offered but inert, so the list
+      // reads as "full" rather than silently swallowing a click.
+      disabledKeys={atLimit ? visible.map((o) => o.value) : []}
       onSelectionChange={(key) => {
         if (key == null) return;
         const next = String(key);
-        if (!values.includes(next)) onChange([...values, next]);
+        if (!atLimit && !values.includes(next)) onChange([...values, next]);
         setText("");
       }}
       className="flex flex-col gap-1"
@@ -596,7 +605,11 @@ export function FilterMultiComboBox({
       <Label className="text-xs font-medium text-[var(--otari-muted)]">{label}</Label>
       <ComboBox.InputGroup>
         <Input
-          placeholder={values.length === 0 ? placeholder : `${values.length} selected`}
+          placeholder={
+            values.length === 0
+              ? placeholder
+              : `${values.length} selected${atLimit ? " (max)" : ""}`
+          }
           autoComplete="off"
         />
         <ComboBox.Trigger />
