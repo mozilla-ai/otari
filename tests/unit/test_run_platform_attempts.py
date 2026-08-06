@@ -72,6 +72,45 @@ async def test_empty_attempts_raises_500_with_explicit_diagnostic() -> None:
 
 
 @pytest.mark.asyncio
+async def test_cancelled_request_unwinds_instead_of_becoming_a_provider_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A disconnected caller is not a provider failure in hybrid mode.
+
+    ``CancelledError`` derives from ``BaseException``, so the broad catch that
+    lets a non-``Exception`` provider client fall through to the next candidate
+    would otherwise classify a cancellation as ``unknown``, count an abandoned
+    attempt against a provider that answered fine, and convert it into an
+    HTTPException that suppresses the cancellation. The guard re-raises the
+    cancellation ahead of the broad catch, mirroring the standalone walker.
+    """
+    abandoned: list[tuple[str, str, str, int]] = []
+    monkeypatch.setattr(
+        "gateway.api.routes._platform.record_abandoned_attempt",
+        lambda provider, model, reason, position: abandoned.append((provider, model, reason, position)),
+    )
+
+    attempts = [_single_attempt("openai", "gpt-primary"), _single_attempt("openai", "gpt-fallback")]
+
+    async def _run_attempt(_kwargs: dict[str, Any], _on_first_response: Any) -> Any:
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await run_platform_attempts(
+            route=ResolvedRoute(request_id="r", fallback_enabled=True, attempts=attempts),
+            attempts=attempts,
+            base_request_fields={},
+            run_attempt=_run_attempt,
+            extract_usage=lambda _r: None,
+            classify_error=lambda _exc: (False, "unknown"),
+            report_attempt_outcome=lambda *_args: None,
+            on_success=lambda _attempt: None,
+            max_tool_iterations=1,
+        )
+    assert abandoned == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("error_class", "expected_reason"),
     [("conn_err", "upstream_error"), ("timeout", "timeout")],
