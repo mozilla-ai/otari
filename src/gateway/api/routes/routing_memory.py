@@ -37,7 +37,7 @@ from typing import Annotated
 
 from any_llm.exceptions import AnyLLMError
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,6 +63,34 @@ class ScoredExample(BaseModel):
     """One prompt and how well each candidate answered it."""
 
     prompt: str = Field(min_length=1, description="The prompt that was tried.")
+
+    @field_validator("prompt")
+    @classmethod
+    def _prompt_has_content(cls, value: str) -> str:
+        """Refuse a blank prompt rather than counting it and storing nothing.
+
+        ``record_preference`` returns 0 for a prompt with no content, so a
+        whitespace-only one wrote an audit row, no routing-memory row, and a
+        ``recorded`` count that silently disagreed with both.
+        """
+        if not value.strip():
+            raise ValueError("prompt cannot be blank")
+        return value
+
+    @field_validator("task_id")
+    @classmethod
+    def _normalize_task_id(cls, value: str | None) -> str | None:
+        """Trim the partition label, and treat blank as absent.
+
+        The request side already does this: ``Otari-Router-Task`` is trimmed and a
+        blank header means the default pool. Storing `" support "` verbatim created a
+        partition that ``Otari-Router-Task: support`` could never reach, and
+        ``/status`` listed it as a real pool.
+        """
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
     scores: dict[str, Annotated[float, Field(ge=0.0, le=1.0)]] = Field(
         min_length=1,
         description=(
