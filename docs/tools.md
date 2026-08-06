@@ -129,6 +129,11 @@ client that echoes the block straight to Anthropic instead of through Otari woul
 be rejected there. Responses accepts the same trade-off for its minted
 `web_search_call` items, which are likewise stripped off an inbound `input`.
 
+When a model asks for a gateway search *and* one of your own tools in the same
+message, the search still runs but no native blocks are emitted for it: that
+message is handed back to you so you can dispatch your tool, and the round ends
+there rather than continuing into the turn the blocks would have belonged to.
+
 ## Code execution
 
 Brings up a sandboxed Python REPL container Otari dispatches `otari_code_execution` calls to.

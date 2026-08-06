@@ -7,7 +7,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.api.deps import reset_config
 from gateway.core.config import GatewayConfig
+from gateway.core.database import reset_db
 from gateway.main import create_app
 
 AUTH = {"Authorization": "Bearer sk-test-master"}
@@ -19,6 +21,10 @@ def _no_tool_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     for name in ("OTARI_WEB_SEARCH_URL", "OTARI_SANDBOX_URL", "OTARI_WEB_SEARCH_INTERCEPT"):
         monkeypatch.delenv(name, raising=False)
     yield
+    # Each test builds its own app; drop the process-global config/engine so a
+    # hybrid-mode app cannot leak its mode (or a missing engine) into the next test.
+    reset_config()
+    reset_db()
 
 
 def _client(tmp_path: Path, **overrides: Any) -> TestClient:
@@ -110,3 +116,28 @@ def test_available_reflects_the_env_url_for_a_pure_env_deployment(
         tools = _tools(client)
 
     assert tools["otari_web_search"]["available"] is True
+
+
+def _hybrid_client(monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> TestClient:
+    """A hybrid-mode app: no ``init_db``, so nothing here may touch the local DB."""
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+    config = GatewayConfig(
+        mode="hybrid",
+        platform={"base_url": "http://platform.test/api/v1"},
+        **overrides,
+    )
+    return TestClient(create_app(config))
+
+
+def test_not_registered_in_hybrid_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Standalone-only, and a 404 rather than a 500.
+
+    Hybrid mode never initializes the local database, so a route whose auth
+    dependency opens a session would 500 before the handler ran. It is also the
+    wrong answer to give there: the platform owns the per-workspace tool policy, so
+    this gateway's own configuration does not decide what the caller can call.
+    """
+    with _hybrid_client(monkeypatch, web_search_url="http://searxng:8080") as client:
+        response = client.get("/v1/tools", headers={"Authorization": "Bearer platform-user-token"})
+
+    assert response.status_code == 404, response.text

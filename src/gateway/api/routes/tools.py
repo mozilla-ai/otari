@@ -12,10 +12,11 @@ unavailable rather than hidden (a client seeing ``available: false`` learns the
 tool exists and the operator has not configured it, which is the actionable
 distinction).
 
-Registered in both runtime modes: hybrid mode serves the completion endpoints
-too. Note that hybrid mode additionally enforces a per-workspace policy the
-gateway cannot see from here, so an advertised tool may still be refused with a
-403 at request time.
+Standalone-only, like every other non-completion router. Hybrid mode could not
+answer this honestly: there the platform owns the per-workspace tool policy
+(``_resolve_platform_web_search``), so a tool this gateway has configured may
+still be refused with a 403 for the caller asking. Reporting ``available: true``
+from local config alone would be worse than not answering.
 """
 
 from typing import Annotated, Any, Literal

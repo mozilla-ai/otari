@@ -478,7 +478,7 @@ function HowToCallCard({ tool }: { tool: ManagedTool }) {
       <div className="flex flex-wrap items-center gap-2">
         <code className="text-sm font-medium text-[var(--otari-ink)]">{tool.id}</code>
         {tool.available ? null : (
-          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
             No backend configured
           </span>
         )}

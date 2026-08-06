@@ -1340,6 +1340,19 @@ class ToolContext:
         return self.use_web_search and declares_native_web_search(self.web_search_tool_entry)
 
     @property
+    def intercepts_web_search(self) -> bool:
+        """Whether this deployment claims the provider-named web-search keywords.
+
+        The same two conditions :func:`prepare_gateway_tools` applies before it
+        extracts one: the opt-in, *and* a backend to intercept to. Both matter to a
+        caller of this property, because it is also the precondition for a
+        gateway-minted server-tool block existing at all: with the toggle on but no
+        backend, the keyword was forwarded and any block in the transcript came from
+        the provider that ran the search (see ``routes/messages.py``).
+        """
+        return _web_search_intercept_enabled(self.config) and self.web_search_url is not None
+
+    @property
     def use_tool_loop(self) -> bool:
         return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search
 

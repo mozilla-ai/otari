@@ -38,6 +38,11 @@ services:
       - OTARI_WEB_SEARCH_MAX_RESULTS=${OTARI_WEB_SEARCH_MAX_RESULTS:-}
       - OTARI_WEB_SEARCH_EXTRACT=${OTARI_WEB_SEARCH_EXTRACT:-}
       - OTARI_WEB_SEARCH_PURPOSE_HINT=${OTARI_WEB_SEARCH_PURPOSE_HINT:-}
+      # Run a provider-named web-search declaration (bare `web_search`,
+      # `web_search_<date>`) against the backend above instead of forwarding it,
+      # so a client that only speaks a provider's vocabulary (Claude Code, the
+      # Anthropic SDK) reaches it. Off unless set — see docs/tools.md.
+      - OTARI_WEB_SEARCH_INTERCEPT=${OTARI_WEB_SEARCH_INTERCEPT:-}
       # In-network URL of the guardrails service — the otari-anyguardrails
       # container, which exposes POST /validate over `any-guardrail`. Callers
       # opt a request in per-request via the top-level `guardrails` field; the

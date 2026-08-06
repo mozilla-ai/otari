@@ -118,6 +118,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
             "web_search_engines",
             "web_search_max_results",
             "web_search_extract",
+            "web_search_intercept",
             "web_search_allow_private_hosts",
             "mcp_allow_loopback",
             "mcp_allow_private_hosts",

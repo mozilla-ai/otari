@@ -41,7 +41,7 @@ from gateway.api.routes._platform import (
     _resolve_platform_credentials,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import _strip_gateway_fields, _web_search_intercept_enabled
+from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
@@ -130,9 +130,11 @@ _GATEWAY_MINTED_BLOCK_TYPES = frozenset({"server_tool_use", "web_search_tool_res
 def _strip_gateway_minted_blocks(messages: Any) -> Any:
     """Drop gateway-minted server-tool blocks from inbound ``messages``.
 
-    Only applied when web-search interception is enabled, which is the only way a
-    transcript can contain a gateway-minted block. That keeps a deployment which
-    never opted in byte-identical: a genuine provider-run search's blocks (Anthropic
+    Only applied when web-search interception is *active* (opted in, with a backend
+    configured), which is the only way a transcript can contain a gateway-minted
+    block. That keeps a deployment which never opted in byte-identical, and one that
+    opted in without a backend too, since there the keyword was forwarded and the
+    search really did run upstream. A genuine provider-run search's blocks (Anthropic
     ran it, Anthropic signed it) still round-trip untouched.
 
     A ``server_tool_use`` and its ``web_search_tool_result`` are always dropped as a
@@ -501,7 +503,7 @@ async def create_message(
     )
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
-    if _web_search_intercept_enabled(config) and request_fields.get("messages"):
+    if tool_ctx.intercepts_web_search and request_fields.get("messages"):
         request_fields["messages"] = _strip_gateway_minted_blocks(request_fields["messages"])
 
     # ------------------------------------------------------------------
