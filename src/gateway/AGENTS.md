@@ -37,6 +37,16 @@ ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, Usag
   - `db.rollback()` on `SQLAlchemyError`,
   - re-raise mapped API/domain errors.
 - Reuse repository helpers (e.g., `get_active_user`) for shared query logic.
+- Conditions shared between a route's read filters and a service's write selection live in `core/sql.py` (e.g. `match_any`, `MAX_FILTER_VALUES`), not duplicated on each side: a service may not import the API layer, so `core` is the only place both can reach.
+
+## Usage filters: read and mutate must agree
+A bulk usage mutation (`DELETE /v1/usage`, `POST /v1/usage/set-price`) can target rows two ways: an explicit `ids` list, or `by_filter` plus filter fields. The dashboard sizes its "select all N matching" affordance from `GET /v1/usage/count` and then sends the filter fields, so the server re-derives the target set from the body rather than from the count. Three consequences, each of which has been violated at least once:
+
+- **Every filter that scopes the table must exist on `UsageSelection`.** One left out widens the delete past the rows the operator was shown (a session drill-down would wipe every other session).
+- **A filter's accepted value space must match on both sides.** `model` / `user_id` / `api_key_id` are repeatable, so the selection body takes lists too; a body that could only express one value would target every value of that dimension.
+- **The bounds must match as well.** The read endpoints cap a repeatable filter at `MAX_FILTER_VALUES`, so the selection body carries the same ceiling. Without it a value set `/count` refuses (422) was still deletable, on an unbounded `IN` list. Annotate the bound on the list arm (`str | Annotated[list[str], Field(max_length=...)] | None`); on the union it would also cap a single value's character length and reject a long `provider:model` name.
+
+The imported-only guards in `_selection_conditions` (`source != "gateway"` plus `counts_toward_budget = False`) bound the damage but do not substitute for any of the above: they keep a mutation off gateway rows, not off the wrong imported rows.
 
 ## Logging
 - Use module logger from `gateway.log_config`.

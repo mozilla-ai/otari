@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.models.entities import UsageLog, User
 
 DELETE_PATH = "/v1/usage"
@@ -240,6 +241,124 @@ def test_ops_skip_budget_exempt_gateway_rows(
     assert resp.json() == {"matched": 0, "updated": 0, "unchanged": 0}
     db_session.expire_all()
     assert _get(db_session, "gw-exempt").cost == 0.5  # type: ignore[union-attr]
+
+
+def test_delete_by_filter_scopes_to_the_named_models_only(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A multi-value filter deletes exactly its values, never the rest.
+
+    This is the load-bearing case for repeatable filters on a destructive op: the
+    operator confirms a count taken over the same filter set, so a body that widened
+    a dimension (or ignored the extra values) would delete rows the table never
+    showed. Three models, two named: the third must survive untouched.
+    """
+    _make_log(db_session, log_id="m-gpt", counts_toward_budget=False, model="openai/gpt-4")
+    _make_log(db_session, log_id="m-claude", counts_toward_budget=False, model="anthropic/claude")
+    _make_log(db_session, log_id="m-gemini", counts_toward_budget=False, model="google/gemini")
+    db_session.commit()
+
+    # The count the operator would have been shown agrees with what the delete removes.
+    count = client.get(
+        COUNT_PATH,
+        headers=master_key_header,
+        params={"model": ["openai/gpt-4", "anthropic/claude"], "counts_toward_budget": False},
+    ).json()
+    assert count["total"] == 2
+
+    resp = client.request(
+        "DELETE",
+        DELETE_PATH,
+        json={"by_filter": True, "model": ["openai/gpt-4", "anthropic/claude"]},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 2}
+
+    db_session.expire_all()
+    assert _get(db_session, "m-gpt") is None
+    assert _get(db_session, "m-claude") is None
+    assert _get(db_session, "m-gemini") is not None
+
+
+def test_delete_by_filter_scopes_to_the_named_users_only(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _make_log(db_session, log_id="u-alice", counts_toward_budget=False, user_id="alice")
+    _make_log(db_session, log_id="u-bob", counts_toward_budget=False, user_id="bob")
+    _make_log(db_session, log_id="u-carol", counts_toward_budget=False, user_id="carol")
+    db_session.commit()
+
+    resp = client.request(
+        "DELETE", DELETE_PATH, json={"by_filter": True, "user_id": ["alice", "bob"]}, headers=master_key_header
+    )
+    assert resp.json() == {"deleted": 2}
+
+    db_session.expire_all()
+    assert _get(db_session, "u-carol") is not None
+
+
+def test_set_price_by_filter_prices_the_named_models_only(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _make_log(db_session, log_id="p-gpt", counts_toward_budget=False, model="openai/gpt-4", cost=None)
+    _make_log(db_session, log_id="p-claude", counts_toward_budget=False, model="anthropic/claude", cost=None)
+    _make_log(db_session, log_id="p-gemini", counts_toward_budget=False, model="google/gemini", cost=None)
+    db_session.commit()
+
+    resp = client.post(
+        SET_PRICE_PATH,
+        json={
+            "by_filter": True,
+            "model": ["openai/gpt-4", "anthropic/claude"],
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 1.0,
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["matched"] == 2
+
+    db_session.expire_all()
+    assert _get(db_session, "p-gpt").cost is not None  # type: ignore[union-attr]
+    assert _get(db_session, "p-claude").cost is not None  # type: ignore[union-attr]
+    # The model left out of the filter keeps its unpriced state.
+    assert _get(db_session, "p-gemini").cost is None  # type: ignore[union-attr]
+
+
+def test_by_filter_rejects_more_values_than_the_read_endpoints_accept(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The destructive body stops where /v1/usage/count stops.
+
+    The count an operator confirms comes from the read endpoints, which 422 past
+    MAX_FILTER_VALUES. A body that accepted more would delete over a filter set no
+    count could ever have been shown for, on an unbounded IN list.
+    """
+    too_many = [f"m{index}" for index in range(MAX_FILTER_VALUES + 1)]
+    assert client.get(COUNT_PATH, headers=master_key_header, params={"model": too_many}).status_code == 422
+
+    resp = client.request(
+        "DELETE", DELETE_PATH, json={"by_filter": True, "model": too_many}, headers=master_key_header
+    )
+    assert resp.status_code == 422
+
+    at_cap = too_many[:MAX_FILTER_VALUES]
+    assert (
+        client.request(
+            "DELETE", DELETE_PATH, json={"by_filter": True, "model": at_cap}, headers=master_key_header
+        ).status_code
+        == 200
+    )
+    # A single long value is not a list of 51: the bound is on the value count, so a
+    # provider-qualified model name well past 50 characters still filters.
+    long_name = f"openai/{'x' * 80}"
+    assert (
+        client.request(
+            "DELETE", DELETE_PATH, json={"by_filter": True, "model": long_name}, headers=master_key_header
+        ).status_code
+        == 200
+    )
 
 
 def test_delete_requires_master_key(client: TestClient) -> None:
