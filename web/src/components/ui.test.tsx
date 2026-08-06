@@ -190,7 +190,15 @@ describe("PageLoading", () => {
 });
 
 describe("FilterMultiComboBox", () => {
-  function Harness({ onChange, maxValues }: { onChange?: (values: string[]) => void; maxValues?: number }) {
+  function Harness({
+    onChange,
+    maxValues,
+    allowsCustom,
+  }: {
+    onChange?: (values: string[]) => void;
+    maxValues?: number;
+    allowsCustom?: boolean;
+  }) {
     const [values, setValues] = useState<string[]>([]);
     return (
       <FilterMultiComboBox
@@ -206,6 +214,7 @@ describe("FilterMultiComboBox", () => {
         ]}
         placeholder="All models"
         maxValues={maxValues}
+        allowsCustom={allowsCustom}
       />
     );
   }
@@ -242,6 +251,49 @@ describe("FilterMultiComboBox", () => {
     expect(screen.queryByRole("option", { name: "gpt-5.6" })).not.toBeInTheDocument();
     expect(await screen.findByRole("option", { name: "claude-sonnet-5" })).toBeInTheDocument();
     // Typing alone filters nothing: only a picked option becomes a filter value.
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("commits typed text on Enter when custom values are allowed", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} allowsCustom />);
+
+    const input = screen.getByRole("combobox", { name: "Model" });
+    await user.click(input);
+    await user.type(input, "unlisted-model");
+    await user.keyboard("{Enter}");
+
+    expect(onChange).toHaveBeenLastCalledWith(["unlisted-model"]);
+  });
+
+  it("does not also commit the query when Enter picks a highlighted option", async () => {
+    // One press must add one value. Arrowing onto an option and pressing Enter
+    // selects it; committing the partial text beside it would add "claude" as well.
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} allowsCustom />);
+
+    const input = screen.getByRole("combobox", { name: "Model" });
+    await user.click(input);
+    await user.type(input, "claude");
+    await user.keyboard("{ArrowDown}");
+    await user.keyboard("{Enter}");
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(["claude-sonnet-5"]);
+  });
+
+  it("ignores Enter on typed text when custom values are not allowed", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+
+    const input = screen.getByRole("combobox", { name: "Model" });
+    await user.click(input);
+    await user.type(input, "not-an-option");
+    await user.keyboard("{Enter}");
+
     expect(onChange).not.toHaveBeenCalled();
   });
 

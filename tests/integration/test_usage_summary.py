@@ -568,6 +568,36 @@ def test_usage_list_and_count_filter_by_session_and_provider(
     assert openai_rows[0]["provider"] == "openai"
 
 
+def test_usage_list_and_count_filter_by_several_values(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # The request log takes the same repeatable filters as the analytics endpoints, so
+    # a drill-down carrying a multi-value comparison lands on exactly those rows, and
+    # /count agrees with the list so the paginator total matches what is shown.
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(db_session, user_id="listmulti", timestamp=now, model="gpt-4")
+    _make_log(db_session, user_id="listmulti", timestamp=now, model="claude")
+    _make_log(db_session, user_id="listmulti", timestamp=now, model="gemini")
+    db_session.commit()
+
+    params = {"user_id": "listmulti", "model": ["gpt-4", "claude"]}
+    rows = client.get("/v1/usage", headers=master_key_header, params=params).json()
+    assert sorted(row["model"] for row in rows) == ["claude", "gpt-4"]
+
+    count = client.get("/v1/usage/count", headers=master_key_header, params=params).json()
+    assert count["total"] == len(rows) == 2
+
+    # Two users, one model: the other dimension still narrows as usual.
+    _make_log(db_session, user_id="listmulti2", timestamp=now, model="gpt-4")
+    db_session.commit()
+    both = client.get(
+        "/v1/usage/count",
+        headers=master_key_header,
+        params={"user_id": ["listmulti", "listmulti2"], "model": "gpt-4"},
+    ).json()
+    assert both["total"] == 2
+
+
 def test_summary_series_day_buckets_are_canonical_utc(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:

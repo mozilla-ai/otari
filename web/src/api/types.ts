@@ -594,9 +594,11 @@ export interface UsageMutationSelection {
   ids?: string[];
   by_filter?: boolean;
   source?: string;
-  model?: string;
-  user_id?: string;
-  api_key_id?: string;
+  // Multi-value like the read filters, so a set the operator filtered on scopes the
+  // mutation to exactly those rows rather than every value of the dimension.
+  model?: string | string[];
+  user_id?: string | string[];
+  api_key_id?: string | string[];
   status?: string;
   // Every scoping filter the Activity log honors must be repeatable here: the
   // "all matching" path re-derives the target set server-side, so a filter the

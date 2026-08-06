@@ -242,6 +242,89 @@ def test_ops_skip_budget_exempt_gateway_rows(
     assert _get(db_session, "gw-exempt").cost == 0.5  # type: ignore[union-attr]
 
 
+def test_delete_by_filter_scopes_to_the_named_models_only(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A multi-value filter deletes exactly its values, never the rest.
+
+    This is the load-bearing case for repeatable filters on a destructive op: the
+    operator confirms a count taken over the same filter set, so a body that widened
+    a dimension (or ignored the extra values) would delete rows the table never
+    showed. Three models, two named: the third must survive untouched.
+    """
+    _make_log(db_session, log_id="m-gpt", counts_toward_budget=False, model="openai/gpt-4")
+    _make_log(db_session, log_id="m-claude", counts_toward_budget=False, model="anthropic/claude")
+    _make_log(db_session, log_id="m-gemini", counts_toward_budget=False, model="google/gemini")
+    db_session.commit()
+
+    # The count the operator would have been shown agrees with what the delete removes.
+    count = client.get(
+        COUNT_PATH,
+        headers=master_key_header,
+        params={"model": ["openai/gpt-4", "anthropic/claude"], "counts_toward_budget": False},
+    ).json()
+    assert count["total"] == 2
+
+    resp = client.request(
+        "DELETE",
+        DELETE_PATH,
+        json={"by_filter": True, "model": ["openai/gpt-4", "anthropic/claude"]},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 2}
+
+    db_session.expire_all()
+    assert _get(db_session, "m-gpt") is None
+    assert _get(db_session, "m-claude") is None
+    assert _get(db_session, "m-gemini") is not None
+
+
+def test_delete_by_filter_scopes_to_the_named_users_only(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _make_log(db_session, log_id="u-alice", counts_toward_budget=False, user_id="alice")
+    _make_log(db_session, log_id="u-bob", counts_toward_budget=False, user_id="bob")
+    _make_log(db_session, log_id="u-carol", counts_toward_budget=False, user_id="carol")
+    db_session.commit()
+
+    resp = client.request(
+        "DELETE", DELETE_PATH, json={"by_filter": True, "user_id": ["alice", "bob"]}, headers=master_key_header
+    )
+    assert resp.json() == {"deleted": 2}
+
+    db_session.expire_all()
+    assert _get(db_session, "u-carol") is not None
+
+
+def test_set_price_by_filter_prices_the_named_models_only(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _make_log(db_session, log_id="p-gpt", counts_toward_budget=False, model="openai/gpt-4", cost=None)
+    _make_log(db_session, log_id="p-claude", counts_toward_budget=False, model="anthropic/claude", cost=None)
+    _make_log(db_session, log_id="p-gemini", counts_toward_budget=False, model="google/gemini", cost=None)
+    db_session.commit()
+
+    resp = client.post(
+        SET_PRICE_PATH,
+        json={
+            "by_filter": True,
+            "model": ["openai/gpt-4", "anthropic/claude"],
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 1.0,
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["matched"] == 2
+
+    db_session.expire_all()
+    assert _get(db_session, "p-gpt").cost is not None  # type: ignore[union-attr]
+    assert _get(db_session, "p-claude").cost is not None  # type: ignore[union-attr]
+    # The model left out of the filter keeps its unpriced state.
+    assert _get(db_session, "p-gemini").cost is None  # type: ignore[union-attr]
+
+
 def test_delete_requires_master_key(client: TestClient) -> None:
     resp = client.request("DELETE", DELETE_PATH, json={"ids": ["x"]})
     assert resp.status_code == 401

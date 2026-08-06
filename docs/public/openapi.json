@@ -5548,6 +5548,12 @@
                 "type": "string"
               },
               {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -5600,6 +5606,12 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               {
                 "type": "null"
@@ -5689,6 +5701,12 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               {
                 "type": "null"
@@ -6406,6 +6424,12 @@
                 "type": "string"
               },
               {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -6487,6 +6511,12 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               {
                 "type": "null"
@@ -6581,6 +6611,12 @@
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               },
               {
                 "type": "null"
@@ -10863,20 +10899,24 @@
             }
           },
           {
-            "description": "Filter to a single user",
+            "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "user_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single user",
+              "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
               "title": "User Id"
             }
           },
@@ -10917,20 +10957,24 @@
             }
           },
           {
-            "description": "Filter to a single model",
+            "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "model",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single model",
+              "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
               "title": "Model"
             }
           },
@@ -11007,20 +11051,24 @@
             }
           },
           {
-            "description": "Filter to a single API key id",
+            "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "api_key_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single API key id",
+              "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
               "title": "Api Key Id"
             }
           },
@@ -11213,20 +11261,24 @@
             }
           },
           {
-            "description": "Filter to a single user",
+            "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "user_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single user",
+              "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
               "title": "User Id"
             }
           },
@@ -11267,20 +11319,24 @@
             }
           },
           {
-            "description": "Filter to a single model",
+            "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "model",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single model",
+              "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
               "title": "Model"
             }
           },
@@ -11357,20 +11413,24 @@
             }
           },
           {
-            "description": "Filter to a single API key id",
+            "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
             "in": "query",
             "name": "api_key_id",
             "required": false,
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Filter to a single API key id",
+              "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
               "title": "Api Key Id"
             }
           },

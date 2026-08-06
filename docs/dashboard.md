@@ -195,16 +195,20 @@ gateway.
   number of calls, and the **Tool** filter narrows the log to one of them. The
   request detail lists the calls, how many failed, and what they cost. Query text
   is never stored: the log records counts and names only.
+  The **User**, **Model**, and **API key** filters here take several values too, so
+  a drill-down from Usage arrives intact and a comparison can be read as one list.
+  The Model box also accepts a name that is not in its suggestions: press Enter to
+  add it, since the suggestions only cover models with traffic in the window. When
+  "select all N matching" is used for a bulk delete or reprice, the selection is
+  scoped to exactly the values shown in the chips.
 - **Usage**: aggregate usage and analytics, showing spend and volume over time,
   broken down by model and by user, plus a switchable breakdown by session,
   endpoint, provider, or source. The **User**, **Model**, and **API key** pickers
   each take several values, so a chart can compare a set ("these two models across
   this team's keys") rather than one entity at a time; every pick becomes its own
   chip, and the chip's ✕ removes just that value. Clicking any row opens the
-  Activity log scoped to that group, so "spend went up" leads straight to the
-  requests behind it. The Activity log filters one value per dimension, so a
-  picker holding several values is left off that drill-down; the chips there show
-  what was carried over.
+  Activity log scoped to that group, carrying the whole selection with it, so
+  "spend went up" leads straight to the requests behind it.
   When the window contains gateway-run tool calls, a **Gateway-run tools** table
   shows calls, failures, and spend per tool, so "what did search cost me last
   week" has an answer that is not one request at a time. MCP tools are excluded

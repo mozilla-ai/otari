@@ -1,6 +1,6 @@
 import { Button, Card, ComboBox, Input, Label, ListBox, ListBoxItem, Spinner, Tooltip } from "@heroui/react";
 import { useEffect, useId, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
@@ -559,6 +559,7 @@ export function FilterMultiComboBox({
   placeholder,
   maxVisible = 50,
   maxValues = 50,
+  allowsCustom = false,
 }: {
   label: string;
   values: string[];
@@ -572,6 +573,10 @@ export function FilterMultiComboBox({
   // one repeatable filter. Stopping here keeps a 51st pick from failing every
   // query on the page with a 422 the operator cannot read.
   maxValues?: number;
+  // When true, Enter adds whatever was typed, so a filter whose value space is not
+  // enumerable (any model name the log might hold, not just the ones a windowed
+  // suggestion list knows) can still be filtered on. The options stay suggestions.
+  allowsCustom?: boolean;
 }) {
   const [text, setText] = useState("");
 
@@ -582,9 +587,28 @@ export function FilterMultiComboBox({
     .filter((o) => !query || o.value.toLowerCase().includes(query) || o.label.toLowerCase().includes(query))
     .slice(0, maxVisible);
 
+  const add = (value: string) => {
+    if (atLimit || values.includes(value)) return;
+    onChange([...values, value]);
+  };
+
+  // Free text commits on Enter: react-aria fires no selection for a value that is
+  // not in the list, so the key event is the only signal. Skipped while an option is
+  // highlighted (aria-activedescendant), because that Enter belongs to the option
+  // and committing the partial query beside it would add two values from one press.
+  const onInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (!allowsCustom || event.key !== "Enter") return;
+    if (event.currentTarget.getAttribute("aria-activedescendant")) return;
+    const typed = text.trim();
+    if (!typed) return;
+    add(typed);
+    setText("");
+  };
+
   return (
     <ComboBox.Root
       allowsEmptyCollection
+      allowsCustomValue={allowsCustom}
       menuTrigger="focus"
       inputValue={text}
       onInputChange={setText}
@@ -596,8 +620,7 @@ export function FilterMultiComboBox({
       disabledKeys={atLimit ? visible.map((o) => o.value) : []}
       onSelectionChange={(key) => {
         if (key == null) return;
-        const next = String(key);
-        if (!atLimit && !values.includes(next)) onChange([...values, next]);
+        add(String(key));
         setText("");
       }}
       className="flex flex-col gap-1"
@@ -611,6 +634,7 @@ export function FilterMultiComboBox({
               : `${values.length} selected${atLimit ? " (max)" : ""}`
           }
           autoComplete="off"
+          onKeyDown={onInputKeyDown}
         />
         <ComboBox.Trigger />
       </ComboBox.InputGroup>

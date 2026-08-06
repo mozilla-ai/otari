@@ -696,15 +696,14 @@ describe("UsagePage", () => {
     expect(screen.getByRole("button", { name: "Remove Model filter gpt-5.6" })).toBeInTheDocument();
   });
 
-  it("drops a multi-value filter when drilling into the request log", async () => {
+  it("carries a whole multi-value filter into the request log", async () => {
     const user = userEvent.setup();
     mockApi(summary());
     renderPage(<UsagePage />);
     await screen.findByText("gpt-5.6");
 
-    // The Activity log filters one value per dimension, so a two-user comparison
-    // cannot travel with the drill: it is left off rather than narrowed to one of
-    // the two, and Activity's own chips show what it did apply.
+    // A two-user comparison travels as repeated params, so the log opens on exactly
+    // the traffic the chart was showing rather than on a wider or arbitrary slice.
     const userInput = screen.getByRole("combobox", { name: "User" });
     await user.click(userInput);
     await user.click(await screen.findByRole("option", { name: /alice/ }));
@@ -716,7 +715,8 @@ describe("UsagePage", () => {
 
     const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
     expect(loc).toContain("model=gpt-5.6");
-    expect(loc).not.toContain("user_id");
+    expect(loc).toContain("user_id=alice");
+    expect(loc).toContain("user_id=bob");
   });
 });
 

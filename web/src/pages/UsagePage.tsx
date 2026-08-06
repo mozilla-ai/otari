@@ -515,23 +515,20 @@ export function UsagePage() {
 
   // Drill from a breakdown row into the Activity log, pre-filtering on the picked
   // dimension plus the current time window. The bounds are absolute instants, so
-  // Activity reads the same window without any local/UTC reinterpretation.
-  const drillTo = (params: Record<string, string | undefined>) => {
+  // Activity reads the same window without any local/UTC reinterpretation. A
+  // multi-value filter travels whole, as repeated params: Activity reads the same
+  // sets, so the log opens on exactly the traffic the chart was showing.
+  const drillTo = (params: Record<string, string | string[] | undefined>) => {
     const search = new URLSearchParams();
     if (winStart) search.set("start_date", winStart);
     if (winEnd) search.set("end_date", winEnd);
-    for (const [k, v] of Object.entries(params)) {
-      if (v) search.set(k, v);
+    for (const [key, value] of Object.entries(params)) {
+      for (const one of typeof value === "string" ? [value] : (value ?? [])) {
+        if (one) search.append(key, one);
+      }
     }
     navigate(`/activity?${search.toString()}`);
   };
-
-  // The Activity log filters one value per dimension (its bulk delete / set-price
-  // selection is expressed that way, so widening it there could let a bulk op reach
-  // past the rows on screen). A drill therefore carries an entity filter only while
-  // it holds a single value; a multi-value one is dropped rather than narrowed to an
-  // arbitrary member, and Activity's own chips show the scope it did apply.
-  const carried = (values: string[]) => (values.length === 1 ? values[0] : undefined);
 
   const errorRate = totals && totals.request_count > 0 ? totals.error_count / totals.request_count : 0;
 
@@ -683,14 +680,14 @@ export function UsagePage() {
       key: "model",
       label: "Model",
       rows: data?.by_model ?? [],
-      drill: (key) => drillTo({ model: key, user_id: carried(userFilters), api_key_id: carried(apiKeyFilters) }),
+      drill: (key) => drillTo({ model: key, user_id: userFilters, api_key_id: apiKeyFilters }),
     },
     {
       key: "user",
       label: "User",
       rows: data?.by_user ?? [],
       drill: (key) =>
-        drillTo({ user_id: key, model: carried(modelFilters), api_key_id: carried(apiKeyFilters) }),
+        drillTo({ user_id: key, model: modelFilters, api_key_id: apiKeyFilters }),
     },
   ];
 
@@ -705,21 +702,21 @@ export function UsagePage() {
       rows: data?.by_source_label ?? [],
       unknownLabel: "(no session)",
       drill: (key) =>
-        drillTo({ source_label: key, model: carried(modelFilters), user_id: carried(userFilters), api_key_id: carried(apiKeyFilters) }),
+        drillTo({ source_label: key, model: modelFilters, user_id: userFilters, api_key_id: apiKeyFilters }),
     },
     {
       key: "endpoint",
       label: "Endpoint",
       rows: data?.by_endpoint ?? [],
       drill: (key) =>
-        drillTo({ endpoint: key, model: carried(modelFilters), user_id: carried(userFilters), api_key_id: carried(apiKeyFilters) }),
+        drillTo({ endpoint: key, model: modelFilters, user_id: userFilters, api_key_id: apiKeyFilters }),
     },
     {
       key: "provider",
       label: "Provider",
       rows: data?.by_provider ?? [],
       drill: (key) =>
-        drillTo({ provider: key, model: carried(modelFilters), user_id: carried(userFilters), api_key_id: carried(apiKeyFilters) }),
+        drillTo({ provider: key, model: modelFilters, user_id: userFilters, api_key_id: apiKeyFilters }),
     },
     {
       key: "source",
@@ -728,9 +725,9 @@ export function UsagePage() {
       drill: (key) =>
         drillTo({
           source: key,
-          model: carried(modelFilters),
-          user_id: carried(userFilters),
-          api_key_id: carried(apiKeyFilters),
+          model: modelFilters,
+          user_id: userFilters,
+          api_key_id: apiKeyFilters,
         }),
     },
   ];

@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
@@ -35,5 +35,50 @@ describe("useUrlState.get", () => {
     const { result } = renderHook(() => useUrlState(DEFAULTS), { wrapper: wrapperFor("/?status=error") });
     expect(result.current.get("status")).toBe("error");
     expect(result.current.get("size")).toBe("50");
+  });
+});
+
+const MULTI_DEFAULTS = { model: "", user_id: "" } as const;
+
+describe("useUrlState.getAll", () => {
+  it("reads every value of a repeated param, in order", () => {
+    const { result } = renderHook(() => useUrlState(MULTI_DEFAULTS), {
+      wrapper: wrapperFor("/?model=gpt-4o&model=claude-sonnet-5"),
+    });
+    expect(result.current.getAll("model")).toEqual(["gpt-4o", "claude-sonnet-5"]);
+  });
+
+  it("reads a single value as a one-element set", () => {
+    const { result } = renderHook(() => useUrlState(MULTI_DEFAULTS), { wrapper: wrapperFor("/?model=gpt-4o") });
+    expect(result.current.getAll("model")).toEqual(["gpt-4o"]);
+  });
+
+  it("treats an absent or blank param as no filter", () => {
+    // `?model=` is what a cleared filter can leave behind; it must not become a
+    // filter on the empty string, which would match nothing and read as "no rows".
+    const { result } = renderHook(() => useUrlState(MULTI_DEFAULTS), { wrapper: wrapperFor("/?model=") });
+    expect(result.current.getAll("model")).toEqual([]);
+    expect(result.current.getAll("user_id")).toEqual([]);
+  });
+});
+
+describe("useUrlState.patch with arrays", () => {
+  it("writes one param per value and drops the key when the set is empty", () => {
+    const { result } = renderHook(() => useUrlState(MULTI_DEFAULTS), {
+      wrapper: wrapperFor("/?model=gpt-4o&user_id=alice"),
+    });
+
+    act(() => result.current.patch({ model: ["gpt-4o", "claude-sonnet-5"] }));
+    expect(result.current.getAll("model")).toEqual(["gpt-4o", "claude-sonnet-5"]);
+    // The untouched key is left alone.
+    expect(result.current.getAll("user_id")).toEqual(["alice"]);
+
+    // A shorter set replaces the old one wholesale rather than appending, so a
+    // removed value actually disappears.
+    act(() => result.current.patch({ model: ["claude-sonnet-5"] }));
+    expect(result.current.getAll("model")).toEqual(["claude-sonnet-5"]);
+
+    act(() => result.current.patch({ model: [] }));
+    expect(result.current.getAll("model")).toEqual([]);
   });
 });

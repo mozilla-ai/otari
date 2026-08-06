@@ -33,15 +33,32 @@ export function useUrlParam(key: string, defaultValue = ""): [string, (value: st
 
 export interface UrlState<K extends string> {
   get: (key: K) => string;
+  /** Every value of a repeatable key (`?model=a&model=b`), empty when it is absent. */
+  getAll: (key: K) => string[];
   getNumber: (key: K) => number;
-  /** Apply several key changes in one history entry; "" or the default drops a key. */
-  patch: (updates: Partial<Record<K, string | number>>) => void;
+  /**
+   * Apply several key changes in one history entry; "" or the default drops a key.
+   * An array writes the key once per value, and an empty array drops it.
+   */
+  patch: (updates: Partial<Record<K, string | number | string[]>>) => void;
 }
 
 export function useUrlState<K extends string>(defaults: Record<K, string>): UrlState<K> {
   const [params, setParams] = useSearchParams();
 
   const get = useCallback((key: K) => params.get(key) ?? defaults[key], [params, defaults]);
+
+  // Blank values are dropped so `?model=` reads as no filter, matching `get`'s
+  // treatment of it (a filter on the empty string is never what a URL like that
+  // means). Falls back to the key's default only when nothing is present at all.
+  const getAll = useCallback(
+    (key: K) => {
+      const values = params.getAll(key).filter((value) => value !== "");
+      if (values.length > 0) return values;
+      return defaults[key] ? [defaults[key]] : [];
+    },
+    [params, defaults],
+  );
 
   const getNumber = useCallback(
     (key: K) => {
@@ -58,11 +75,20 @@ export function useUrlState<K extends string>(defaults: Record<K, string>): UrlS
   );
 
   const patch = useCallback(
-    (updates: Partial<Record<K, string | number>>) => {
+    (updates: Partial<Record<K, string | number | string[]>>) => {
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev);
           for (const [key, raw] of Object.entries(updates)) {
+            if (Array.isArray(raw)) {
+              // Rewritten wholesale rather than appended to: the caller passes the
+              // filter's complete value set, so a removed value has to disappear.
+              next.delete(key);
+              for (const value of raw) {
+                if (value !== "") next.append(key, value);
+              }
+              continue;
+            }
             const value = String(raw);
             if (value === "" || value === defaults[key as K]) {
               next.delete(key);
@@ -78,5 +104,5 @@ export function useUrlState<K extends string>(defaults: Record<K, string>): UrlS
     [setParams, defaults],
   );
 
-  return { get, getNumber, patch };
+  return { get, getAll, getNumber, patch };
 }

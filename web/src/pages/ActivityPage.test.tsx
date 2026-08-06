@@ -109,7 +109,15 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageE
       }
       return jsonResponse(rows);
     }
-    if (url.includes("/v1/users") || url.includes("/v1/keys")) {
+    if (url.includes("/v1/users")) {
+      // Alias-free so an option's name and a chip's label are the bare user id,
+      // which keeps the filter assertions readable.
+      return jsonResponse([
+        { user_id: "alice", alias: null },
+        { user_id: "bob", alias: null },
+      ]);
+    }
+    if (url.includes("/v1/keys")) {
       return jsonResponse([]);
     }
     return jsonResponse([]);
@@ -603,6 +611,56 @@ describe("ActivityPage", () => {
     expect(latest).toContain("status=error");
   });
 
+  it("seeds a multi-value filter from a drill-down and keeps every value", async () => {
+    // The analytics page drills with repeated params. Reading only the first would
+    // silently show a narrower slice than the chart the operator clicked.
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?user_id=alice&user_id=bob&model=gpt-4o");
+
+    await screen.findByText("gpt-4o");
+    const latest = listCalls(calls).at(-1)!;
+    expect(latest).toContain("user_id=alice");
+    expect(latest).toContain("user_id=bob");
+
+    // Both values are chips, each clearing only itself.
+    expect(screen.getByRole("button", { name: "Remove User filter alice" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove User filter bob" })).toBeInTheDocument();
+  });
+
+  it("adds a second value to a filter from the picker", async () => {
+    const user = userEvent.setup();
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?user_id=alice");
+    await screen.findByText("gpt-4o");
+
+    const userInput = screen.getByRole("combobox", { name: "User" });
+    await user.click(userInput);
+    await user.click(await screen.findByRole("option", { name: /bob/ }));
+
+    await waitFor(() => {
+      const latest = listCalls(calls).at(-1)!;
+      expect(latest).toContain("user_id=alice");
+      expect(latest).toContain("user_id=bob");
+    });
+  });
+
+  it("takes a free-text model value on Enter, since any model may appear in the log", async () => {
+    // The model suggestions come from a windowed summary, so a model the log holds
+    // but the breakdown folded away would be unfilterable if the picker were
+    // options-only. Enter commits whatever was typed.
+    const user = userEvent.setup();
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />);
+    await screen.findByText("gpt-4o");
+
+    const modelInput = screen.getByRole("combobox", { name: "Model" });
+    await user.click(modelInput);
+    await user.type(modelInput, "some-unlisted-model");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(listCalls(calls).at(-1)!).toContain("model=some-unlisted-model"));
+  });
+
   it("snaps URL-supplied page sizes to the nearest offered option", async () => {
     // An old size=500 bookmark must not resurrect second-long selection
     // clicks, and a hand-edited size=-5 must not reach the API as a bad limit.
@@ -701,6 +759,39 @@ describe("ActivityPage", () => {
       expect(body.provider).toBe("anthropic");
       expect(body.endpoint).toBe("external");
     });
+  });
+
+  it("carries a multi-value filter into an 'all matching' delete", async () => {
+    // The dangerous case for repeatable filters: the operator confirms a count taken
+    // over two models, so the delete body has to name both. A body that dropped the
+    // extra value (or sent one of the two) would delete a different set than the
+    // count promised, in the one direction that loses rows.
+    const user = userEvent.setup();
+    const { calls } = mockApi({
+      rows: [entry({ id: "imp-1", model: "imported-model", counts_toward_budget: false })],
+      total: 5,
+    });
+    renderPage(<ActivityPage />, "/activity?model=gpt-4o&model=claude-sonnet-5");
+
+    const row = (await screen.findByText("imported-model")).closest("tr")!;
+    await user.click(within(row).getByRole("checkbox"));
+    await user.click(await screen.findByRole("button", { name: /Select all 5 matching/ }));
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      const del = calls.find((c) => c.url.endsWith("/v1/usage") && c.method === "DELETE");
+      expect(del).toBeTruthy();
+      const body = JSON.parse(del!.body ?? "{}");
+      expect(body.by_filter).toBe(true);
+      expect(body.model).toEqual(["gpt-4o", "claude-sonnet-5"]);
+    });
+
+    // The count that sized "all matching" was scoped to the same two models.
+    const counts = calls.filter((c) => c.url.includes("/v1/usage/count"));
+    expect(counts.some((c) => c.url.includes("model=gpt-4o") && c.url.includes("model=claude-sonnet-5"))).toBe(true);
   });
 
   it("sets a manual price on the selected imported rows", async () => {
@@ -843,11 +934,12 @@ describe("ActivityPage", () => {
     await screen.findByText("gpt-4o");
 
     // A chip per active entity filter (model + status); the time range is not a chip.
-    expect(screen.getByRole("button", { name: "Remove Model filter" })).toBeInTheDocument();
+    // The entity filters hold sets, so their chips name the value they clear.
+    expect(screen.getByRole("button", { name: "Remove Model filter gpt-4o" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Remove Status filter" })).toBeInTheDocument();
 
     // Removing the model chip drops just that filter from the query.
-    await user.click(screen.getByRole("button", { name: "Remove Model filter" }));
+    await user.click(screen.getByRole("button", { name: "Remove Model filter gpt-4o" }));
     await waitFor(() => expect(listCalls(calls).some((url) => !url.includes("model=gpt-4o"))).toBe(true));
   });
 

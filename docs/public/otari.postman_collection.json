@@ -2359,7 +2359,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single user",
+                  "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "user_id",
                   "value": ""
@@ -2377,7 +2377,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single model",
+                  "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "model",
                   "value": ""
@@ -2407,7 +2407,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single API key id",
+                  "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
                   "value": ""
@@ -2500,7 +2500,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single user",
+                  "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "user_id",
                   "value": ""
@@ -2518,7 +2518,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single model",
+                  "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "model",
                   "value": ""
@@ -2548,7 +2548,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single API key id",
+                  "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
                   "value": ""
