@@ -92,6 +92,7 @@ def _message_response(
     content: list[Any] | None = None,
     input_tokens: int = 1,
     output_tokens: int = 1,
+    iterations: list[dict[str, Any]] | None = None,
 ) -> MessageResponse:
     return MessageResponse(
         id="msg_1",
@@ -101,14 +102,14 @@ def _message_response(
         content=content or [],
         stop_reason=cast(Any, stop_reason),
         stop_sequence=None,
-        usage=MessageUsage(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_creation_input_tokens=None,
-            cache_read_input_tokens=None,
-            cache_creation=None,
-            server_tool_use=None,
-            service_tier=None,
+        usage=MessageUsage.model_validate(
+            {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cache_creation_input_tokens": None,
+                "cache_read_input_tokens": None,
+                "iterations": iterations,
+            }
         ),
         container=None,
     )
@@ -294,12 +295,37 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
                 content=[_tool_use("tu_1", "fetch_url", {})],
                 input_tokens=10,
                 output_tokens=2,
+                iterations=[
+                    {
+                        "type": "compaction",
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                    },
+                    {
+                        "type": "message",
+                        "input_tokens": 10,
+                        "output_tokens": 2,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                    },
+                ],
             ),
             _message_response(
                 stop_reason="end_turn",
                 content=[_text_block("done")],
                 input_tokens=12,
                 output_tokens=3,
+                iterations=[
+                    {
+                        "type": "message",
+                        "input_tokens": 12,
+                        "output_tokens": 3,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                    }
+                ],
             ),
         ]
     )
@@ -317,6 +343,11 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
     assert out.usage is not None
     assert out.usage.input_tokens == 22
     assert out.usage.output_tokens == 5
+    assert [iteration.type for iteration in out.usage.iterations or []] == [
+        "compaction",
+        "message",
+        "message",
+    ]
 
 
 @pytest.mark.asyncio

@@ -85,7 +85,14 @@ def _compaction_response() -> MessageResponse:
                         "output_tokens": 20,
                         "cache_creation_input_tokens": 0,
                         "cache_read_input_tokens": 0,
-                    }
+                    },
+                    {
+                        "type": "message",
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                    },
                 ],
             },
             "context_management": {
@@ -906,7 +913,14 @@ def test_context_management_stream_contract(
                                 "output_tokens": 20,
                                 "cache_creation_input_tokens": 0,
                                 "cache_read_input_tokens": 0,
-                            }
+                            },
+                            {
+                                "type": "message",
+                                "input_tokens": 10,
+                                "output_tokens": 5,
+                                "cache_creation_input_tokens": 0,
+                                "cache_read_input_tokens": 0,
+                            },
                         ],
                     },
                     "context_management": {

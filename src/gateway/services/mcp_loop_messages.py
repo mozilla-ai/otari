@@ -114,6 +114,12 @@ def _content_to_dicts(content: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+class _MessagesUsageAccumulator(TypedDict):
+    input: int
+    output: int
+    iterations: list[Any]
+
+
 def _fold_usage(result: MessageResponse, input_total: int, output_total: int) -> None:
     """Replace ``result.usage`` token counts with the loop's running totals.
 
@@ -253,16 +259,19 @@ class _MessagesToolLoopStrategy:
         result: MessageResponse = await amessages(**kwargs)  # type: ignore[assignment]
         return result
 
-    def new_usage_accumulator(self) -> dict[str, int]:
-        return {"input": 0, "output": 0}
+    def new_usage_accumulator(self) -> _MessagesUsageAccumulator:
+        return {"input": 0, "output": 0, "iterations": []}
 
-    def accumulate_usage(self, acc: dict[str, int], result: MessageResponse) -> None:
+    def accumulate_usage(self, acc: _MessagesUsageAccumulator, result: MessageResponse) -> None:
         if result.usage:
             acc["input"] += result.usage.input_tokens or 0
             acc["output"] += result.usage.output_tokens or 0
+            acc["iterations"].extend(result.usage.iterations or [])
 
-    def fold_usage(self, result: MessageResponse, acc: dict[str, int]) -> None:
+    def fold_usage(self, result: MessageResponse, acc: _MessagesUsageAccumulator) -> None:
         _fold_usage(result, acc["input"], acc["output"])
+        if result.usage is not None and acc["iterations"]:
+            result.usage.iterations = acc["iterations"]
 
     def exit_before_split(self, result: MessageResponse) -> bool:
         return False
