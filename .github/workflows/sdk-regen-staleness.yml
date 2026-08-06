@@ -13,10 +13,14 @@ name: SDK Regen PR Staleness
 
 on:
   schedule:
-    # Daily at 13:00 UTC. Weekly undercut the failing-checks trigger: detecting a
-    # red PR "immediately" is still up to seven days late if the check only runs
-    # on Mondays. The job is a handful of API reads, so daily is cheap.
-    - cron: '0 13 * * *'
+    # Mondays at 13:00 UTC. Deliberately weekly, not daily, even though the
+    # failing-checks trigger below would detect a break sooner if polled more
+    # often. The script reuses only a currently-open tracking issue, so a
+    # condition that flaps red/green opens a fresh issue each cycle, and CI is
+    # flaky enough (a GitHub Actions outage alone can redden every job) that
+    # daily polling would turn transient failures into recurring alerts. Weekly
+    # trades detection latency for an alert that stays worth reading.
+    - cron: '0 13 * * 1'
   workflow_dispatch:
     inputs:
       max_age_days:
