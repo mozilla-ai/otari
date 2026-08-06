@@ -1141,7 +1141,7 @@ async def test_native_blocks_prepended_to_final_content(monkeypatch: pytest.Monk
 
     # The pair comes before the model's answer, because the search happened first.
     assert [b.type for b in result.content] == ["server_tool_use", "web_search_tool_result", "text"]
-    server_use, tool_result, _text = result.content
+    server_use, tool_result, _text = (cast(Any, block) for block in result.content)
     assert server_use.name == "web_search"
     assert server_use.input == {"query": "python release"}
     # The result block is paired to its server_tool_use by id, as a client expects.
@@ -1198,7 +1198,7 @@ async def test_hits_without_a_url_are_dropped_from_citations(monkeypatch: pytest
         emit_native_web_search=True,
     )
 
-    citations = result.content[1].content
+    citations = cast(Any, result.content[1]).content
     assert [c.url for c in citations] == ["https://ok"]
 
 
@@ -1316,7 +1316,7 @@ async def test_stream_emits_native_blocks_with_gapless_indices(monkeypatch: pyte
     assert [e.index for e in events if e.type == "content_block_stop"] == [0, 1, 2]
     # The query survives without any input_json_delta: the start event carries the
     # complete block, and the SDK only overwrites ``input`` when a delta arrives.
-    assert starts[0].content_block.input == {"query": "python"}
+    assert cast(Any, starts[0].content_block).input == {"query": "python"}
     # The gateway's own tool_use block still never reaches the client.
     assert not any(getattr(getattr(e, "content_block", None), "type", None) == "tool_use" for e in events)
 

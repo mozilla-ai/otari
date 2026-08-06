@@ -18,7 +18,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 from anthropic.types import ServerToolUseBlock, WebSearchResultBlock, WebSearchToolResultBlock
 from any_llm import amessages
@@ -97,7 +97,10 @@ def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list
     return [
         ServerToolUseBlock(
             id=tool_use_id,
-            name=WEB_SEARCH_TOOL_NAME,
+            # Anthropic types this field as a Literal of its own server-tool names.
+            # The gateway's tool name is one of them, but the shared constant is a
+            # plain ``str``, so narrow it here rather than duplicating the literal.
+            name=cast('Literal["web_search"]', WEB_SEARCH_TOOL_NAME),
             input={"query": query},
             type="server_tool_use",
         ),
