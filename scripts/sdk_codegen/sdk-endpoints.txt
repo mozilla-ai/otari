@@ -1,0 +1,142 @@
+# Endpoint-coverage drift manifest for the otari SDKs.
+#
+# CANONICAL COPY. This file is the single source of truth. The codegen workflow
+# (.github/workflows/otari-sdk-codegen.yml) pushes it into all four SDK repos
+# alongside the generated core, so the copies there are generated artifacts.
+# Edit this file; never edit the copies, they are overwritten on every regen.
+#
+# tests/unit/test_sdk_endpoint_coverage.py checks it against
+# docs/public/openapi.json from the same commit: every "METHOD path" the spec
+# exposes (excluding /health* meta routes) must appear under [covered] or
+# [excluded], and every entry here must still exist in the spec. So adding a
+# gateway endpoint fails the gateway's own build until it is classified here.
+# That is the point: drift fails in the repo that causes it, at the moment it
+# is caused, rather than surfacing later in four downstream repos.
+#
+#   [covered]   a public SDK wrapper surfaces this endpoint
+#   [excluded]  deliberately not surfaced; give a reason
+#
+# Lines are "METHOD /path" with an optional "# reason" trailer; blank lines and
+# comment lines are ignored.
+
+[covered]
+# Inference
+POST /v1/chat/completions
+POST /v1/responses
+POST /v1/messages
+POST /v1/messages/count_tokens
+POST /v1/embeddings
+POST /v1/moderations
+POST /v1/rerank
+GET /v1/models
+# Batches
+POST /v1/batches
+GET /v1/batches
+GET /v1/batches/{batch_id}
+POST /v1/batches/{batch_id}/cancel
+GET /v1/batches/{batch_id}/results
+# Control plane: keys
+POST /v1/keys
+GET /v1/keys
+GET /v1/keys/{key_id}
+PATCH /v1/keys/{key_id}
+DELETE /v1/keys/{key_id}
+# Control plane: users
+POST /v1/users
+GET /v1/users
+GET /v1/users/{user_id}
+PATCH /v1/users/{user_id}
+DELETE /v1/users/{user_id}
+GET /v1/users/{user_id}/usage
+# Control plane: budgets
+POST /v1/budgets
+GET /v1/budgets
+GET /v1/budgets/{budget_id}
+PATCH /v1/budgets/{budget_id}
+DELETE /v1/budgets/{budget_id}
+# Control plane: pricing
+POST /v1/pricing
+GET /v1/pricing
+GET /v1/pricing/{model_key}
+GET /v1/pricing/{model_key}/history
+DELETE /v1/pricing/{model_key}
+# Control plane: usage
+GET /v1/usage
+# Images
+POST /v1/images/generations
+# Audio
+POST /v1/audio/speech
+POST /v1/audio/transcriptions
+
+[excluded]
+GET /v1/models/{model_id}      # redundant, list_models covers discovery
+# Files API: added to the gateway spec, not yet wrapped by any SDK shell.
+POST /v1/files                       # not yet wrapped
+GET /v1/files                        # not yet wrapped
+GET /v1/files/{file_id}              # not yet wrapped
+GET /v1/files/{file_id}/content      # not yet wrapped
+DELETE /v1/files/{file_id}           # not yet wrapped
+
+# Dashboard / admin management surface: present in the gateway spec, not yet
+# wrapped by any SDK shell. Deferred here so the drift gate stays green; move to
+# [covered] when a shell surfaces them. Kept identical across all four SDKs.
+# Model aliases
+GET /v1/aliases                                 # not yet wrapped
+POST /v1/aliases                                # not yet wrapped
+DELETE /v1/aliases/{name}                       # not yet wrapped
+# Provider credentials (runtime provider management)
+GET /v1/provider-credentials                    # not yet wrapped
+POST /v1/provider-credentials                   # not yet wrapped
+POST /v1/provider-credentials/test              # not yet wrapped
+PATCH /v1/provider-credentials/{instance}       # not yet wrapped
+DELETE /v1/provider-credentials/{instance}      # not yet wrapped
+POST /v1/provider-credentials/{instance}/test   # not yet wrapped
+# Providers catalogue
+GET /v1/providers                               # not yet wrapped
+GET /v1/providers/catalog                       # not yet wrapped
+# Runtime settings
+GET /v1/settings                                # not yet wrapped
+PATCH /v1/settings                              # not yet wrapped
+# Model discovery / metadata
+GET /v1/models/discoverable                     # not yet wrapped
+GET /v1/models/metadata                         # not yet wrapped
+# Other control-plane extensions of already-covered resources
+GET /v1/usage/count                             # not yet wrapped
+POST /v1/keys/{key_id}/rotate                   # not yet wrapped
+GET /v1/budgets/{budget_id}/reset-logs          # not yet wrapped
+
+# --- Second wave of gateway endpoints (added after the initial manifest) ---
+# Dashboard session auth: browser cookie flow for the admin UI, not an SDK surface.
+POST /v1/auth/session                           # dashboard-only
+DELETE /v1/auth/session                         # dashboard-only
+# OTLP ingest: OpenTelemetry collector receivers, not an SDK surface.
+POST /v1/logs                                   # otel ingest
+POST /v1/traces                                 # otel ingest
+# Usage analytics and maintenance
+GET /v1/usage/summary                           # not yet wrapped
+GET /v1/usage/summary.csv                       # not yet wrapped
+GET /v1/usage/series                            # not yet wrapped
+DELETE /v1/usage                                # not yet wrapped
+POST /v1/usage/external-events                  # not yet wrapped
+POST /v1/usage/set-price                        # not yet wrapped
+# Routing policies
+GET /v1/routing/policies                        # not yet wrapped
+POST /v1/routing/policies                       # not yet wrapped
+DELETE /v1/routing/policies/{name}              # not yet wrapped
+POST /v1/routing/policies/explain               # not yet wrapped
+# Pricing refresh workflow
+POST /v1/pricing/refresh                        # not yet wrapped
+POST /v1/pricing/refresh/confirm                # not yet wrapped
+POST /v1/pricing/refresh/reject                 # not yet wrapped
+# Providers
+GET /v1/providers/catalog/{provider_id}         # not yet wrapped
+GET /v1/providers/health                        # not yet wrapped
+POST /v1/provider-credentials/reencrypt         # not yet wrapped
+# Built-in tool settings and search
+GET /v1/tool-settings                           # not yet wrapped
+PATCH /v1/tool-settings                         # not yet wrapped
+POST /v1/tool-settings/{service}/test           # not yet wrapped
+POST /v1/search                                 # not yet wrapped
+POST /v1/search/{search_tool_name}              # not yet wrapped
+# Settings
+POST /v1/settings/master-key/rotate             # not yet wrapped
