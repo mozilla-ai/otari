@@ -93,8 +93,10 @@ class CountTokensRequest(BaseModel):
 
     A subset of :class:`MessagesRequest`: the input fields that affect the token
     count, minus ``max_tokens`` and the streaming/sampling controls, since the
-    endpoint only counts input tokens. Clients such as Claude Code call this on
-    every turn to keep their prompt within the model's context window.
+    endpoint only counts input tokens. ``context_management`` and ``betas`` are
+    accepted for wire compatibility, but the local estimate does not apply
+    provider-side context edits. Clients such as Claude Code call this on every
+    turn to keep their prompt within the model's context window.
     """
 
     model: str
@@ -105,6 +107,8 @@ class CountTokensRequest(BaseModel):
     thinking: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     cache_control: dict[str, Any] | None = None
+    context_management: dict[str, Any] | None = None
+    betas: list[str] | None = None
 
 
 class CountTokensResponse(BaseModel):

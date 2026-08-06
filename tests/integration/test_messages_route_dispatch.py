@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from any_llm.types.messages import (
     ContentBlockDeltaEvent,
+    ContentBlockStartEvent,
     MessageDelta,
     MessageDeltaEvent,
     MessageDeltaUsage,
@@ -30,6 +31,11 @@ from any_llm.types.messages import (
     TextDelta,
 )
 from fastapi.testclient import TestClient
+
+_CONTEXT_MANAGEMENT = {
+    "edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]
+}
+_BETAS = ["compact-2026-01-12"]
 
 
 def _text_response(
@@ -56,6 +62,42 @@ def _text_response(
             service_tier=None,
         ),
         container=None,
+    )
+
+
+def _compaction_response() -> MessageResponse:
+    return MessageResponse.model_validate(
+        {
+            "id": "msg_compaction",
+            "type": "message",
+            "role": "assistant",
+            "model": "claude-opus-5",
+            "content": [{"type": "compaction", "content": "Conversation summary"}],
+            "stop_reason": "compaction",
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "iterations": [
+                    {
+                        "type": "compaction",
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                    }
+                ],
+            },
+            "context_management": {
+                "applied_edits": [
+                    {
+                        "type": "clear_tool_uses_20250919",
+                        "cleared_input_tokens": 42,
+                        "cleared_tool_uses": 2,
+                    }
+                ]
+            },
+        }
     )
 
 
@@ -132,6 +174,39 @@ def test_cache_control_and_non_stream_usage_round_trip(
     usage = resp.json()["usage"]
     assert usage["cache_creation_input_tokens"] == 13
     assert usage["cache_read_input_tokens"] == 8
+
+
+def test_context_management_non_stream_contract(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Context management reaches any-llm and beta response data reaches the client."""
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _compaction_response()
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-opus-5",
+                "messages": [{"role": "user", "content": "Summarize when needed"}],
+                "max_tokens": 100,
+                "context_management": _CONTEXT_MANAGEMENT,
+                "betas": _BETAS,
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["context_management"] == _CONTEXT_MANAGEMENT
+    assert captured["betas"] == _BETAS
+    body = resp.json()
+    assert body["content"] == [{"type": "compaction", "content": "Conversation summary"}]
+    assert body["context_management"]["applied_edits"][0]["cleared_input_tokens"] == 42
+    assert body["usage"]["iterations"][0]["type"] == "compaction"
 
 
 def test_gateway_internal_fields_are_stripped_from_upstream_kwargs(
@@ -777,6 +852,102 @@ def test_stream_cache_usage_reaches_client(
     usage = message_start["message"]["usage"]
     assert usage["cache_creation_input_tokens"] == 13
     assert usage["cache_read_input_tokens"] == 8
+
+
+def test_context_management_stream_contract(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Compaction events and telemetry survive the streaming route unchanged."""
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        captured.update(kwargs)
+        return _stream_iter(
+            MessageStartEvent.model_validate(
+                {
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg_compaction",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": "claude-opus-5",
+                        "content": [],
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {"input_tokens": 10, "output_tokens": 0},
+                    },
+                }
+            ),
+            ContentBlockStartEvent.model_validate(
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "compaction", "content": None},
+                }
+            ),
+            ContentBlockDeltaEvent.model_validate(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "compaction_delta", "content": "Conversation summary"},
+                }
+            ),
+            MessageDeltaEvent.model_validate(
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "compaction", "stop_sequence": None},
+                    "usage": {
+                        "output_tokens": 5,
+                        "iterations": [
+                            {
+                                "type": "compaction",
+                                "input_tokens": 100,
+                                "output_tokens": 20,
+                                "cache_creation_input_tokens": 0,
+                                "cache_read_input_tokens": 0,
+                            }
+                        ],
+                    },
+                    "context_management": {
+                        "applied_edits": [
+                            {
+                                "type": "clear_thinking_20251015",
+                                "cleared_input_tokens": 21,
+                                "cleared_thinking_turns": 1,
+                            }
+                        ]
+                    },
+                }
+            ),
+            _stream_message_stop(),
+        )
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-opus-5",
+                "messages": [{"role": "user", "content": "Summarize when needed"}],
+                "max_tokens": 100,
+                "stream": True,
+                "context_management": _CONTEXT_MANAGEMENT,
+                "betas": _BETAS,
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["context_management"] == _CONTEXT_MANAGEMENT
+    assert captured["betas"] == _BETAS
+    payloads = [json.loads(line.removeprefix("data: ")) for line in resp.text.splitlines() if line.startswith("data: ")]
+    compaction_start = next(payload for payload in payloads if payload["type"] == "content_block_start")
+    assert compaction_start["content_block"] == {"type": "compaction"}
+    compaction_delta = next(payload for payload in payloads if payload["type"] == "content_block_delta")
+    assert compaction_delta["delta"] == {"type": "compaction_delta", "content": "Conversation summary"}
+    message_delta = next(payload for payload in payloads if payload["type"] == "message_delta")
+    assert message_delta["context_management"]["applied_edits"][0]["cleared_input_tokens"] == 21
+    assert message_delta["usage"]["iterations"][0]["type"] == "compaction"
 
 
 def test_stream_mcp_servers_dispatches_through_tool_loop_stream(

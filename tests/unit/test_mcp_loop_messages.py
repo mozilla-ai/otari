@@ -231,6 +231,61 @@ async def test_loop_executes_owned_tool_and_completes(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_loop_replays_compaction_block_with_context_management(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context_management = {
+        "edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]
+    }
+    responses = iter(
+        [
+            MessageResponse.model_validate(
+                {
+                    "id": "msg_compaction_tool",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "fake",
+                    "content": [
+                        {"type": "compaction", "content": "Conversation summary"},
+                        {"type": "tool_use", "id": "tu_1", "name": "fetch_url", "input": {"u": "x"}},
+                    ],
+                    "stop_reason": "tool_use",
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 10, "output_tokens": 2},
+                }
+            ),
+            _message_response(stop_reason="end_turn", content=[_text_block("done")]),
+        ]
+    )
+    calls: list[dict[str, Any]] = []
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        calls.append(kwargs)
+        return next(responses)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    out = await anthropic_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [{"role": "user", "content": "fetch x"}],
+            "max_tokens": 100,
+            "context_management": context_management,
+            "betas": ["compact-2026-01-12"],
+        },
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+        max_iterations=5,
+    )
+
+    assert out.stop_reason == "end_turn"
+    assert calls[1]["context_management"] == context_management
+    assert calls[1]["betas"] == ["compact-2026-01-12"]
+    assistant_content = calls[1]["messages"][-2]["content"]
+    assert assistant_content[0] == {"type": "compaction", "content": "Conversation summary"}
+    assert assistant_content[1]["type"] == "tool_use"
+
+
+@pytest.mark.asyncio
 async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = iter(
         [
