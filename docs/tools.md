@@ -121,18 +121,22 @@ plain-text result they always have.
 `web_search_tool_result` requires `encrypted_content`, an Anthropic-signed blob
 only Anthropic can produce. Otari sends it **empty** rather than forging one, so
 the block carries the URL, title, and page age a citations panel needs and nothing
-it cannot legitimately provide. Because clients echo the previous assistant turn
-back to continue a conversation, both minted block types are stripped off an
-inbound `messages` array (only when interception is on, which is the only way one
-can be present), so an echoed turn never ships an unsignable block upstream. A
-client that echoes the block straight to Anthropic instead of through Otari would
-be rejected there. Responses accepts the same trade-off for its minted
-`web_search_call` items, which are likewise stripped off an inbound `input`.
+it cannot legitimately provide.
+
+That empty field doubles as provenance. Because clients echo the previous assistant
+turn back to continue a conversation, Otari strips its own minted blocks off an
+inbound `messages` array so an echoed turn never ships an unsignable block upstream.
+Only blocks carrying gateway provenance are removed: a search a provider ran and
+signed itself round-trips untouched, and the `server_tool_use` dropped is the one our
+result answers, matched by `tool_use_id`, so a provider's pair is never split. A
+client that echoes a minted block straight to Anthropic instead of through Otari
+would be rejected there. Responses accepts a blunter version of the same trade-off
+for its minted `web_search_call` items, which have no provenance marker available and
+are stripped off an inbound `input` wholesale.
 
 When a model asks for a gateway search *and* one of your own tools in the same
-message, the search still runs but no native blocks are emitted for it: that
-message is handed back to you so you can dispatch your tool, and the round ends
-there rather than continuing into the turn the blocks would have belonged to.
+message, the search runs and its blocks are emitted alongside the call you have to
+dispatch, so you get both the citations and your own `tool_use`.
 
 ## Code execution
 

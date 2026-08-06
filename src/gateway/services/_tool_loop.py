@@ -100,7 +100,9 @@ class ToolLoopStrategy(Protocol, Generic[ResultT, AccT]):
 
     def exit_after_split(self, result: ResultT) -> bool: ...
 
-    async def execute_owned(self, pool: ToolBackend, owned: list[Any]) -> list[dict[str, Any]]: ...
+    async def execute_owned(
+        self, pool: ToolBackend, owned: list[Any], acc: AccT | None = None
+    ) -> list[dict[str, Any]]: ...
 
     def filter_owned(self, result: ResultT, owned: list[Any], pool: ToolBackend) -> None: ...
 
@@ -254,7 +256,7 @@ async def run_tool_loop(
         owned, has_foreign = strategy.split_owned(result, pool)
         if has_foreign:
             if owned:
-                await strategy.execute_owned(pool, owned)
+                await strategy.execute_owned(pool, owned, acc)
                 strategy.filter_owned(result, owned, pool)
             strategy.fold_usage(result, acc)
             return result

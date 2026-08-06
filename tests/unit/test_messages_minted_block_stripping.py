@@ -128,3 +128,113 @@ def test_gate_is_off_when_opted_in_without_a_backend(monkeypatch: pytest.MonkeyP
     config = GatewayConfig(web_search_intercept=True)
     assert config.web_search_url is None
     assert _tool_ctx(config).intercepts_web_search is False
+
+
+# --- provenance: only our own blocks are stripped -----------------------------
+
+
+def _provider_pair() -> list[dict[str, Any]]:
+    """What Anthropic returns when it ran the search itself: signed content."""
+    return [
+        {"type": "server_tool_use", "id": "srvtoolu_prov", "name": "web_search", "input": {"query": "x"}},
+        {
+            "type": "web_search_tool_result",
+            "tool_use_id": "srvtoolu_prov",
+            "content": [
+                {
+                    "type": "web_search_result",
+                    "url": "https://a",
+                    "title": "A",
+                    "encrypted_content": "ErcBCioIAxgCIiQ4ZDhkOGQ4ZC1hYmNk",
+                }
+            ],
+        },
+    ]
+
+
+def _gateway_pair(tool_use_id: str = "srvtoolu_gw") -> list[dict[str, Any]]:
+    """What the gateway mints: the same shape with encrypted_content empty."""
+    return [
+        {"type": "server_tool_use", "id": tool_use_id, "name": "web_search", "input": {"query": "y"}},
+        {
+            "type": "web_search_tool_result",
+            "tool_use_id": tool_use_id,
+            "content": [{"type": "web_search_result", "url": "https://b", "title": "B", "encrypted_content": ""}],
+        },
+    ]
+
+
+def test_provider_signed_blocks_survive() -> None:
+    """A search Anthropic ran and signed must round-trip untouched, even with
+    interception on: stripping it would break the citations chain Anthropic owns."""
+    messages: list[dict[str, Any]] = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": [*_provider_pair(), {"type": "text", "text": "answer"}]},
+    ]
+
+    assert _strip_gateway_minted_blocks(messages) == messages
+
+
+def test_gateway_pair_is_stripped_and_provider_pair_kept_in_one_turn() -> None:
+    """A transcript can hold both: one search the provider ran, one the gateway did."""
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "assistant",
+            "content": [*_provider_pair(), *_gateway_pair(), {"type": "text", "text": "answer"}],
+        }
+    ]
+
+    kept = _strip_gateway_minted_blocks(messages)[0]["content"]
+
+    assert kept == [*_provider_pair(), {"type": "text", "text": "answer"}]
+
+
+def test_a_providers_server_tool_use_is_never_orphaned() -> None:
+    """The server_tool_use dropped is the one our result answers, matched by id, so a
+    provider's pair is never split into an orphan the API would reject."""
+    messages: list[dict[str, Any]] = [
+        {"role": "assistant", "content": [*_provider_pair(), *_gateway_pair()]}
+    ]
+
+    kept = _strip_gateway_minted_blocks(messages)[0]["content"]
+
+    ids = [b.get("id") for b in kept if b.get("type") == "server_tool_use"]
+    result_ids = [b.get("tool_use_id") for b in kept if b.get("type") == "web_search_tool_result"]
+    assert ids == ["srvtoolu_prov"]
+    assert result_ids == ["srvtoolu_prov"]
+
+
+def test_a_result_with_no_hits_is_treated_as_ours() -> None:
+    """A gateway search that found nothing usable produces an empty content list."""
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "server_tool_use", "id": "srvtoolu_gw", "name": "web_search", "input": {}},
+                {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_gw", "content": []},
+                {"type": "text", "text": "nothing found"},
+            ],
+        }
+    ]
+
+    kept = _strip_gateway_minted_blocks(messages)[0]["content"]
+    assert kept == [{"type": "text", "text": "nothing found"}]
+
+
+def test_a_provider_error_result_is_kept() -> None:
+    """The error shape is a dict, not a hit list, and only a provider produces it."""
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "server_tool_use", "id": "srvtoolu_prov", "name": "web_search", "input": {}},
+                {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": "srvtoolu_prov",
+                    "content": {"type": "web_search_tool_result_error", "error_code": "max_uses_exceeded"},
+                },
+            ],
+        }
+    ]
+
+    assert _strip_gateway_minted_blocks(messages) == messages

@@ -1366,3 +1366,112 @@ async def test_stream_emits_no_native_blocks_by_default(monkeypatch: pytest.Monk
         "message_delta",
         "message_stop",
     ]
+
+
+@pytest.mark.asyncio
+async def test_mixed_batch_still_emits_native_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A search alongside a caller's tool still gets its pair.
+
+    The round exits so the caller can dispatch its own tool, but the gateway did run
+    the search, so a native client is owed the blocks describing it.
+    """
+    mixed = _message_response(
+        stop_reason="tool_use",
+        content=[_search_use("tu_1", "python"), _tool_use("tu_2", "get_weather", {"city": "Lisbon"})],
+    )
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for([mixed]))
+    pool = _FakeSearchPool(results=[{"url": "https://python.org", "title": "Python"}])
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        emit_native_web_search=True,
+    )
+
+    types = [b.type for b in result.content]
+    # The pair is prepended; the caller's tool_use survives so it can dispatch it.
+    assert types == ["server_tool_use", "web_search_tool_result", "tool_use"]
+    assert cast(Any, result.content[2]).name == "get_weather"
+    # The gateway's own tool_use was filtered out: the client can never answer it.
+    assert not any(getattr(b, "name", None) == "web_search" and b.type == "tool_use" for b in result.content)
+    assert pool.calls == [("web_search", {"query": "python"})]
+
+
+@pytest.mark.asyncio
+async def test_mixed_batch_emits_no_native_blocks_when_not_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mixed = _message_response(
+        stop_reason="tool_use",
+        content=[_search_use("tu_1", "python"), _tool_use("tu_2", "get_weather", {})],
+    )
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for([mixed]))
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, _FakeSearchPool()),
+        max_iterations=5,
+    )
+
+    assert [b.type for b in result.content] == ["tool_use"]
+
+
+@pytest.mark.asyncio
+async def test_stream_mixed_batch_emits_native_blocks_before_the_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Streaming mixed batch: the pair goes out before message_delta / message_stop."""
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return _async_iter(
+            _msg_start_event(),
+            _tool_use_block_start(0, "tu_1", "web_search"),
+            _input_json_delta(0, '{"query": "python"}'),
+            _content_block_stop(0),
+            _tool_use_block_start(1, "tu_2", "get_weather"),
+            _input_json_delta(1, "{}"),
+            _content_block_stop(1),
+            _msg_delta_event("tool_use"),
+            _msg_stop_event(),
+        )
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = _FakeSearchPool(results=[{"url": "https://python.org", "title": "Python"}])
+
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+            pool=cast(Any, pool),
+            max_iterations=5,
+            emit_native_web_search=True,
+        )
+    ]
+
+    types = [e.type for e in events]
+    # The caller's tool_use is forwarded (renumbered to 0), then the gateway's pair,
+    # then the terminal events.
+    assert types == [
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "content_block_start",
+        "content_block_stop",
+        "content_block_start",
+        "content_block_stop",
+        "message_delta",
+        "message_stop",
+    ]
+    starts = [e for e in events if e.type == "content_block_start"]
+    assert [cast(Any, e.content_block).type for e in starts] == [
+        "tool_use",
+        "server_tool_use",
+        "web_search_tool_result",
+    ]
+    # Gapless indices, and the terminal events stay last.
+    assert [e.index for e in starts] == [0, 1, 2]
+    assert types[-2:] == ["message_delta", "message_stop"]
+    # The search really ran.
+    assert pool.calls == [("web_search", {"query": "python"})]

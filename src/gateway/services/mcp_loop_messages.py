@@ -407,8 +407,14 @@ class _MessagesToolLoopStrategy:
         # exit rather than try to execute them.
         return result.stop_reason != "tool_use"
 
-    async def execute_owned(self, pool: ToolBackend, owned: list[Any]) -> list[dict[str, Any]]:
-        return await _execute_tool_uses(pool, owned)
+    async def execute_owned(
+        self, pool: ToolBackend, owned: list[Any], acc: _MessagesUsageAccumulator | None = None
+    ) -> list[dict[str, Any]]:
+        # Reached on the mixed-batch exit, where the owned subset runs for its side
+        # effects. Collect its native blocks too: ``fold_usage`` runs on that path and
+        # prepends them, so a native client still sees the search it paid for.
+        native_sink = self._native_sink(acc["native_blocks"]) if acc is not None else None
+        return await _execute_tool_uses(pool, owned, native_blocks=native_sink)
 
     def filter_owned(self, result: MessageResponse, owned: list[Any], pool: ToolBackend) -> None:
         # Mixed batch: the owned subset was executed for its side effects;
@@ -580,14 +586,24 @@ class _MessagesToolLoopStrategy:
         # Matches the non-streaming loop, which executes the owned subset and filters
         # it out of the returned content.
         if state.stop_reason == "tool_use" and state.owned_specs:
-            await _execute_stream_owned(state, pool)
+            # Collected, not discarded: the search ran, so a native client is owed the
+            # pair describing it even though this round exits for the caller to
+            # dispatch its own tool. ``terminal_events`` emits them.
+            await _execute_stream_owned(state, pool, native_blocks=self._native_sink(state.native_blocks))
 
     def terminal_events(
         self,
         state: _MessagesStreamState,
         acc: _MessagesStreamAccumulator,
     ) -> list[MessageStreamEvent]:
-        return [_maybe_fold_message_delta(term, acc) for term in state.deferred_terminal]
+        # Any native blocks a mixed-batch exit collected go out first: they describe
+        # work that happened before the message ended, and message_delta /
+        # message_stop must stay last.
+        blocks, state.native_blocks = state.native_blocks, []
+        return [
+            *self._native_block_events(blocks, acc),
+            *(_maybe_fold_message_delta(term, acc) for term in state.deferred_terminal),
+        ]
 
     def accumulate_stream_usage(self, acc: _MessagesStreamAccumulator, state: _MessagesStreamState) -> None:
         for term in state.deferred_terminal:
@@ -600,6 +616,23 @@ class _MessagesToolLoopStrategy:
             context_management = getattr(term, "context_management", None)
             if context_management is not None:
                 acc["applied_edits"].extend(getattr(context_management, "applied_edits", None) or [])
+
+    @staticmethod
+    def _native_block_events(blocks: list[Any], acc: _MessagesStreamAccumulator) -> list[Any]:
+        """content_block start/stop pairs for ``blocks``, numbered off ``acc``.
+
+        Each block gets a ``content_block_start`` carrying the complete block plus a
+        ``content_block_stop``, and no ``input_json_delta``: the SDK accumulator
+        appends the start event's block wholesale and only overwrites ``input`` when a
+        delta actually arrives, so a start/stop pair preserves the query.
+        """
+        events: list[Any] = []
+        for block in blocks:
+            index = acc["next_index"]
+            acc["next_index"] += 1
+            events.append(ContentBlockStartEvent(content_block=block, index=index, type="content_block_start"))
+            events.append(ContentBlockStopEvent(index=index, type="content_block_stop"))
+        return events
 
     def synthetic_events(self, state: _MessagesStreamState, acc: _MessagesStreamAccumulator) -> list[Any]:
         """Announce this iteration's gateway-run searches as native content blocks.
@@ -615,14 +648,8 @@ class _MessagesToolLoopStrategy:
         appends the start event's block wholesale and only overwrites ``input`` when a
         delta actually arrives, so a start/stop pair preserves the query.
         """
-        events: list[Any] = []
         blocks, state.native_blocks = state.native_blocks, []
-        for block in blocks:
-            index = acc["next_index"]
-            acc["next_index"] += 1
-            events.append(ContentBlockStartEvent(content_block=block, index=index, type="content_block_start"))
-            events.append(ContentBlockStopEvent(index=index, type="content_block_stop"))
-        return events
+        return self._native_block_events(blocks, acc)
 
     async def advance_stream_transcript(
         self,
