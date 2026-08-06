@@ -191,8 +191,8 @@ def _canonical(config: GatewayConfig, selector: str, user_id: str | None = None)
     return f"{resolved.instance}:{resolved.model}"
 
 
-def _validated_scores(config: GatewayConfig, user_id: str, examples: list[ScoredExample]) -> None:
-    """Refuse a score key no learned policy could ever ask about.
+def _validated_scores(config: GatewayConfig, user_id: str, examples: list[ScoredExample]) -> dict[str, str]:
+    """Refuse a score key no learned policy could ever ask about, and normalize the rest.
 
     The failure this prevents is the worst one the feature has. A mistyped selector
     is otherwise accepted with a 200, counts toward the seed count, and produces
@@ -206,39 +206,70 @@ def _validated_scores(config: GatewayConfig, user_id: str, examples: list[Scored
     candidates (plus their default targets) for this user, canonicalized so
     ``provider/model`` and ``instance:model`` spellings compare equal.
 
-    When no learned policy resolves for the user, only resolvability is enforced:
-    teaching a pool before writing the policy that reads it is a legitimate order of
-    operations, and refusing it would make the API demand a specific sequence.
+    Accepting those spellings is only safe if the stored key is the one the router
+    looks up, and the router matches ``qualities`` keys against the policy's
+    candidate selectors *by exact string*. So the returned map rewrites every
+    accepted key to the spelling its policy uses; without it, a key spelled
+    ``openai/gpt-4o`` against a policy naming ``openai:gpt-4o`` passes validation
+    and then never matches, which is the failure above with a 200 in front of it.
+
+    When no learned policy resolves for the user, only resolvability is enforced
+    and keys are stored as sent: teaching a pool before writing the policy that
+    reads it is a legitimate order of operations, and refusing it would make the
+    API demand a specific sequence.
     """
-    known: set[str] = set()
+    known: dict[str, str] = {}
     for spec in effective_policies(config, user_id).values():
         if spec.router_backend is None:
             continue
         for selector in [*spec.router_candidates, spec.default_target]:
             canonical = _canonical(config, selector, user_id)
             if canonical is not None:
-                known.add(canonical)
+                known.setdefault(canonical, selector)
 
+    normalized: dict[str, str] = {}
     rejected: list[str] = []
     for example in examples:
         for selector in example.scores:
-            if selector in rejected:
+            if selector in rejected or selector in normalized:
                 continue
             canonical = _canonical(config, selector, user_id)
             if canonical is None or (known and canonical not in known):
                 rejected.append(selector)
-    if not rejected:
-        return
+                continue
+            normalized[selector] = known.get(canonical, selector)
+    if rejected:
+        expected = (
+            f" Candidates this user's learned policies can use: {', '.join(sorted(known.values()))}."
+            if known
+            else ""
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"These score keys do not name a model any learned policy can route to: "
+                f"{', '.join(rejected)}. Records keyed on them would be unmatchable, so the pool would "
+                f"report warm and never route, and nothing can delete them afterwards.{expected}"
+            ),
+        )
 
-    expected = f" Candidates this user's learned policies can use: {', '.join(sorted(known))}." if known else ""
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=(
-            f"These score keys do not name a model any learned policy can route to: "
-            f"{', '.join(rejected)}. Records keyed on them would be unmatchable, so the pool would "
-            f"report warm and never route, and nothing can delete them afterwards.{expected}"
-        ),
-    )
+    # Two spellings of one candidate in one example would collapse onto a single
+    # stored key, so one of the two scores would win silently. Refuse instead.
+    for example in examples:
+        seen: dict[str, str] = {}
+        for selector in example.scores:
+            target = normalized[selector]
+            if target in seen and seen[target] != selector:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"Score keys '{seen[target]}' and '{selector}' name the same model "
+                        f"('{target}'), so one of their scores would be discarded. Score each "
+                        "candidate once."
+                    ),
+                )
+            seen[target] = selector
+    return normalized
 
 
 def _learned_policies(config: GatewayConfig, user_id: str | None) -> list[LearnedPolicy]:
@@ -294,19 +325,24 @@ async def rank_candidates(
     A failed embedding is a 502 that names the model, not a 500. Every example in
     the batch is embedded, so this is the call an operator makes most often and the
     one most likely to meet a misconfigured ``router_embedding_model``.
+
+    Score keys are stored in the spelling the policy uses (see
+    :func:`_validated_scores`), because the router matches them against its
+    candidate selectors by exact string.
     """
     backend = _knn(config)
     await _require_user(db, request.user_id)
-    _validated_scores(config, request.user_id, request.examples)
+    normalized = _validated_scores(config, request.user_id, request.examples)
 
     recorded = 0
     touched: set[str | None] = set()
     for example in request.examples:
+        scores = {normalized[selector]: score for selector, score in example.scores.items()}
         try:
             written = await backend.record_preference(
                 user_id=request.user_id,
                 prompt=example.prompt,
-                scores=example.scores,
+                scores=scores,
                 task_id=example.task_id,
                 label_source=example.label_source,
             )

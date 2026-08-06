@@ -619,7 +619,7 @@ class RoutingMemory(Base):
     """One record per scored example: a prompt embedding plus the quality each
     candidate model earned on it.
 
-    The kNN router (:mod:`gateway.services.knn_router`) retrieves the nearest
+    The kNN router (:mod:`gateway.services.routing.knn`) retrieves the nearest
     neighbors of an incoming request's task embedding within one user's records
     and votes on the cheapest candidate that is still good enough. One record is
     one example (one prompt), so the vote is over distinct prompts; ``qualities``

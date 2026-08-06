@@ -280,6 +280,36 @@ def test_a_warm_policy_routes_an_easy_prompt_to_the_cheap_candidate(client: Test
     assert served[0]["selection_reason"] == "router:knn"
 
 
+def test_a_score_key_in_another_spelling_still_routes(client: TestClient) -> None:
+    """A score key `/rank` accepted must be a key the router can match.
+
+    `provider/model` and `instance:model` name the same model and `/rank` accepts
+    either, but the router looks `qualities` up by the policy's own spelling. Stored
+    verbatim, an accepted alternate spelling makes that candidate invisible: the pool
+    reports warm, the router scores only the models whose spelling happened to match,
+    and it confidently serves the strong one forever.
+    """
+    slash_cheap = CHEAP.replace(":", "/")
+    for prompt in ("what is 2 plus 2", "add 3 and 4"):
+        assert _rank(client, prompt, {slash_cheap: 1.0, STRONG: 1.0}).status_code == 200
+    for prompt in ("prove why the sky appears blue", "explain why entropy increases"):
+        assert _rank(client, prompt, {slash_cheap: 0.0, STRONG: 1.0}).status_code == 200
+
+    resp, calls = _chat(client, "smart", "what is the capital of France")
+
+    assert resp.status_code == 200, resp.text
+    assert calls == [CHEAP]
+
+
+def test_two_spellings_of_one_candidate_in_one_example_are_refused(client: TestClient) -> None:
+    # Both keys would collapse onto the policy's spelling, so one score would be
+    # dropped silently. Saying so beats picking a winner.
+    resp = _rank(client, "what is 2 plus 2", {CHEAP: 1.0, CHEAP.replace(":", "/"): 0.0})
+
+    assert resp.status_code == 400, resp.text
+    assert "name the same model" in resp.json()["detail"]
+
+
 def test_a_warm_policy_keeps_a_hard_prompt_on_the_strong_candidate(client: TestClient) -> None:
     _teach(client)
 
