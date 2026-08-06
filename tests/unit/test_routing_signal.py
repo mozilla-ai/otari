@@ -126,6 +126,28 @@ def test_continuation_is_detected_from_an_assistant_turn() -> None:
     assert routing_signal_from_messages(_CONVO, _request({}), has_tools=True).is_continuation is True
 
 
+def test_the_responses_signal_includes_instructions() -> None:
+    """`instructions` is part of the task, so it has to be in the signal.
+
+    The same `input` under "answer in one word" and "write a proof" are different
+    jobs with different quality bars. Embedding only `input` gave both the same
+    routing decision and, under trace-sticky granularity, the same conversation
+    identity. Guardrails read `input` alone because they screen what the user sent;
+    routing reads what the model was asked to do.
+    """
+    from types import SimpleNamespace
+
+    from gateway.api.routes.responses import _routing_text
+
+    terse = SimpleNamespace(instructions="Answer in one word.", input="What is 2 plus 2?")
+    proof = SimpleNamespace(instructions="Write a rigorous proof.", input="What is 2 plus 2?")
+    assert _routing_text(terse) != _routing_text(proof)
+    assert "Answer in one word." in _routing_text(terse)
+    assert "What is 2 plus 2?" in _routing_text(terse)
+    # No instructions is still the input alone, with no stray separator.
+    assert _routing_text(SimpleNamespace(instructions=None, input="hi")) == "hi"
+
+
 def test_text_form_uses_one_blob_for_every_signal() -> None:
     # The responses API has no turn structure to draw an opener from.
     signal = routing_signal_from_text("do the thing", _request({}), has_tools=False)
