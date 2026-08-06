@@ -82,10 +82,15 @@ export function OverviewIndex() {
   }
   // A failed providers query leaves the setup state unknown, so it stays neutral
   // (no getting-started block) and the error is reported instead of swallowed.
+  // Its refetch goes down with it: the query is cached for minutes and does not
+  // refetch on focus, so without this the page's Refresh could not clear the
+  // banner and a recovered backend would need a full reload to be noticed.
   return (
     <OverviewPage
       needsSetup={providers.isSuccess && providers.data.providers.length === 0}
       setupError={providers.error}
+      refreshSetup={providers.refetch}
+      setupFetching={providers.isFetching}
     />
   );
 }
@@ -93,9 +98,13 @@ export function OverviewIndex() {
 export function OverviewPage({
   needsSetup = false,
   setupError,
+  refreshSetup,
+  setupFetching = false,
 }: {
   needsSetup?: boolean;
   setupError?: unknown;
+  refreshSetup?: () => void;
+  setupFetching?: boolean;
 }) {
   const w = useWindows();
 
@@ -157,6 +166,7 @@ export function OverviewPage({
   // midnight on focus, but the numbers within a day are only as fresh as the
   // last fetch, so give the operator a way to pull the latest.
   const refresh = () => {
+    refreshSetup?.();
     void today.refetch();
     void period.refetch();
     void previous.refetch();
@@ -167,6 +177,7 @@ export function OverviewPage({
     void recent.refetch();
   };
   const isRefreshing =
+    setupFetching ||
     today.isFetching ||
     period.isFetching ||
     previous.isFetching ||
