@@ -579,7 +579,7 @@ export function RoutingPage() {
   const aliases = useAliases();
   const deletePolicy = useDeleteRoutingPolicy();
   const deleteAlias = useDeleteAlias();
-  // A "Make an alias" link from the Models page arrives as ?target=provider:model.
+  // A deep link may pre-fill the add form with ?target=provider:model.
   const [searchParams] = useSearchParams();
   const initialTarget = searchParams.get("target") ?? "";
   const [adding, setAdding] = useState(initialTarget !== "");

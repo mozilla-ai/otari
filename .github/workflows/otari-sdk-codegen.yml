@@ -112,6 +112,14 @@ jobs:
           mkdir -p "$(dirname "$target")"
           cp -r "dist/${{ matrix.language }}" "$target"
 
+      - name: Sync the endpoint-coverage manifest into the SDK repo
+        # scripts/sdk_codegen/sdk-endpoints.txt is the canonical copy, validated
+        # against docs/public/openapi.json by tests/unit/test_sdk_endpoint_coverage.py
+        # in this repo. Pushing it here makes the SDK copies generated artifacts,
+        # so the four repos cannot drift apart the way they did when each was
+        # hand-maintained under a "keep these identical" comment.
+        run: cp scripts/sdk_codegen/sdk-endpoints.txt sdk-repo/sdk-endpoints.txt
+
       - name: Open PR on ${{ matrix.sdk_repo }}
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:

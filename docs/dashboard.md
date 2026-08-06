@@ -224,7 +224,11 @@ hand.
 
 - **Providers**: add, edit, test, and delete provider credentials at runtime
   (standalone only). Stored keys are encrypted with `OTARI_SECRET_KEY`; config
-  providers appear read-only. See the first-run walkthrough above.
+  providers appear read-only. See the first-run walkthrough above. The add and
+  edit forms also take **Client options (JSON)**, the `client_args` passed to the
+  provider's client (a request timeout, custom headers); on the known-provider
+  form they sit under Advanced. A backend that can take longer than 10 minutes to
+  answer a non-streaming request needs an explicit `{"timeout": 1800}` here.
 - **Models**: browse the model catalogue and set per-model pricing, with specs
   and modality metadata where available (from models.dev). The copy control next
   to a model puts its full `provider:model` id on your clipboard, which is what

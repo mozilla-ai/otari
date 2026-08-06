@@ -1,6 +1,6 @@
 import { Button, Card, Chip } from "@heroui/react";
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import type { Selection, SortDescriptor } from "react-aria-components";
 
 import {
@@ -550,18 +550,16 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
 }
 
 // The persistent detail panel beside the table shows the selected model's
-// pricing, specs, modalities, and capabilities; it also offers to alias it.
+// pricing, specs, modalities, and capabilities.
 function ModelDetailPanel({
   row,
   metadata,
   metadataAvailable,
-  onMakeAlias,
   onClose,
 }: {
   row: ModelRow;
   metadata: ModelMetadata | undefined;
   metadataAvailable: boolean;
-  onMakeAlias: (key: string) => void;
   onClose: () => void;
 }) {
   const inputModalities = metadata?.input_modalities ?? [];
@@ -607,9 +605,6 @@ function ModelDetailPanel({
             {row.isDiscovered ? null : <span className="text-xs text-[var(--otari-muted)]">not discovered</span>}
           </div>
           <PanelPriceEditor key={row.key} row={row} />
-          <Button size="sm" variant="outline" onPress={() => onMakeAlias(row.key)}>
-            Make an alias
-          </Button>
         </PanelSection>
 
         <PanelSection title="Specs">
@@ -1048,7 +1043,6 @@ function DiscoveredErrors({
 }
 
 export function ModelsPage() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const models = useModels();
   const pricing = usePricing();
@@ -1598,7 +1592,6 @@ export function ModelsPage() {
                 row={selectedRow}
                 metadata={metadataByKey[selectedRow.key]}
                 metadataAvailable={metadataAvailable}
-                onMakeAlias={(key) => navigate(`/routing?target=${encodeURIComponent(key)}`)}
                 onClose={() => setSelectedKey(null)}
               />
             </aside>
