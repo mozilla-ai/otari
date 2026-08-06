@@ -911,8 +911,22 @@
         "type": "object"
       },
       "CountTokensRequest": {
-        "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the input fields that affect the token\ncount, minus ``max_tokens`` and the streaming/sampling controls, since the\nendpoint only counts input tokens. Clients such as Claude Code call this on\nevery turn to keep their prompt within the model's context window.",
+        "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the input fields that affect the token\ncount, minus ``max_tokens`` and the streaming/sampling controls, since the\nendpoint only counts input tokens. ``context_management`` and ``betas`` are\naccepted for wire compatibility, but the local estimate does not apply\nprovider-side context edits. Clients such as Claude Code call this on every\nturn to keep their prompt within the model's context window.",
         "properties": {
+          "betas": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Betas"
+          },
           "cache_control": {
             "anyOf": [
               {
@@ -924,6 +938,18 @@
               }
             ],
             "title": "Cache Control"
+          },
+          "context_management": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Management"
           },
           "messages": {
             "items": {

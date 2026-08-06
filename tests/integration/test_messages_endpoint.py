@@ -11,6 +11,7 @@ from any_llm.types.messages import (
 )
 from fastapi.testclient import TestClient
 
+from gateway.api.routes.messages import CountTokensRequest
 from gateway.core.config import API_KEY_HEADER
 
 
@@ -348,6 +349,33 @@ def test_count_tokens_basic(
     data = response.json()
     assert isinstance(data["input_tokens"], int)
     assert data["input_tokens"] > 0
+
+
+def test_count_tokens_accepts_context_management_and_betas(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Token-count requests accept the same context-management controls as messages."""
+    assert "context_management" in CountTokensRequest.model_fields
+    assert "betas" in CountTokensRequest.model_fields
+
+    response = client.post(
+        "/v1/messages/count_tokens",
+        json={
+            "model": "anthropic:claude-opus-5",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "context_management": {
+                "edits": [
+                    {"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}
+                ]
+            },
+            "betas": ["compact-2026-01-12"],
+        },
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["input_tokens"] > 0
 
 
 def test_count_tokens_requires_auth(client: TestClient) -> None:

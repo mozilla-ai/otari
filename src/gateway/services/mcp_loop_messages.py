@@ -17,9 +17,10 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from any_llm import amessages
+from any_llm.types.messages import BetaContextManagementResponse
 
 from gateway.log_config import logger
 from gateway.services._tool_loop import StreamAction, run_tool_loop, run_tool_loop_stream
@@ -113,6 +114,12 @@ def _content_to_dicts(content: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+class _MessagesUsageAccumulator(TypedDict):
+    input: int
+    output: int
+    iterations: list[Any]
+
+
 def _fold_usage(result: MessageResponse, input_total: int, output_total: int) -> None:
     """Replace ``result.usage`` token counts with the loop's running totals.
 
@@ -126,26 +133,45 @@ def _fold_usage(result: MessageResponse, input_total: int, output_total: int) ->
     result.usage.output_tokens = output_total
 
 
-def _maybe_fold_message_delta_usage(event: Any, acc_output_tokens: int) -> Any:
-    """Return ``event`` with cumulative output_tokens folded in.
+class _MessagesStreamAccumulator(TypedDict):
+    output_tokens: int
+    started: int
+    next_index: int
+    iterations: list[Any]
+    applied_edits: list[Any]
 
-    Pass-through for any event type other than ``message_delta``. For a
-    ``message_delta`` carrying a usage block, replaces ``output_tokens`` with
-    ``current + acc_output_tokens`` so the stream consumer sees the full
-    tool-loop output count instead of only the final iteration's. No-op when
-    ``acc_output_tokens`` is zero (single-iteration streams stay byte-exact).
-    """
-    if acc_output_tokens <= 0:
-        return event
+
+def _maybe_fold_message_delta(event: Any, acc: _MessagesStreamAccumulator) -> Any:
+    """Fold usage and context-management telemetry from hidden iterations."""
     if getattr(event, "type", None) != "message_delta":
         return event
     usage = getattr(event, "usage", None)
     if usage is None or not hasattr(usage, "model_copy"):
         return event
-    new_usage = usage.model_copy(
-        update={"output_tokens": (getattr(usage, "output_tokens", 0) or 0) + acc_output_tokens}
-    )
-    return event.model_copy(update={"usage": new_usage})
+
+    usage_update: dict[str, Any] = {}
+    if acc["output_tokens"] > 0:
+        usage_update["output_tokens"] = (getattr(usage, "output_tokens", 0) or 0) + acc["output_tokens"]
+    if acc["iterations"]:
+        usage_update["iterations"] = [*acc["iterations"], *(getattr(usage, "iterations", None) or [])]
+
+    event_update: dict[str, Any] = {}
+    if usage_update:
+        event_update["usage"] = usage.model_copy(update=usage_update)
+    if acc["applied_edits"]:
+        context_management = getattr(event, "context_management", None)
+        applied_edits = [
+            *acc["applied_edits"],
+            *(getattr(context_management, "applied_edits", None) or []),
+        ]
+        if context_management is not None and hasattr(context_management, "model_copy"):
+            event_update["context_management"] = context_management.model_copy(
+                update={"applied_edits": applied_edits}
+            )
+        else:
+            event_update["context_management"] = BetaContextManagementResponse(applied_edits=applied_edits)
+
+    return event.model_copy(update=event_update) if event_update else event
 
 
 def _reindexed(event: Any, visible_index: int) -> Any:
@@ -233,16 +259,19 @@ class _MessagesToolLoopStrategy:
         result: MessageResponse = await amessages(**kwargs)  # type: ignore[assignment]
         return result
 
-    def new_usage_accumulator(self) -> dict[str, int]:
-        return {"input": 0, "output": 0}
+    def new_usage_accumulator(self) -> _MessagesUsageAccumulator:
+        return {"input": 0, "output": 0, "iterations": []}
 
-    def accumulate_usage(self, acc: dict[str, int], result: MessageResponse) -> None:
+    def accumulate_usage(self, acc: _MessagesUsageAccumulator, result: MessageResponse) -> None:
         if result.usage:
             acc["input"] += result.usage.input_tokens or 0
             acc["output"] += result.usage.output_tokens or 0
+            acc["iterations"].extend(result.usage.iterations or [])
 
-    def fold_usage(self, result: MessageResponse, acc: dict[str, int]) -> None:
+    def fold_usage(self, result: MessageResponse, acc: _MessagesUsageAccumulator) -> None:
         _fold_usage(result, acc["input"], acc["output"])
+        if result.usage is not None and acc["iterations"]:
+            result.usage.iterations = acc["iterations"]
 
     def exit_before_split(self, result: MessageResponse) -> bool:
         return False
@@ -300,11 +329,10 @@ class _MessagesToolLoopStrategy:
     def new_stream_state(self) -> _MessagesStreamState:
         return _MessagesStreamState()
 
-    def new_stream_accumulator(self) -> dict[str, int]:
-        # output_tokens: from dropped intermediate ``message_delta`` events. The
-        # final iteration's forwarded ``message_delta`` is modified to carry the
-        # cumulative total so streaming usage reporting downstream sees the full
-        # tool-loop output, not just the final round's tokens.
+    def new_stream_accumulator(self) -> _MessagesStreamAccumulator:
+        # output_tokens and telemetry come from dropped intermediate
+        # ``message_delta`` events. The final forwarded delta carries the
+        # accumulated values so clients see the complete logical response.
         #
         # started / next_index: the client is shown ONE message even though the
         # gateway may have consumed several upstream ones, so only the first
@@ -312,14 +340,20 @@ class _MessagesToolLoopStrategy:
         # continuously. Without this a tool-loop stream contains two
         # ``message_start`` events and reuses block index 0, which every SDK
         # stream accumulator rejects.
-        return {"output_tokens": 0, "started": 0, "next_index": 0}
+        return {
+            "output_tokens": 0,
+            "started": 0,
+            "next_index": 0,
+            "iterations": [],
+            "applied_edits": [],
+        }
 
     def observe(
         self,
         state: _MessagesStreamState,
         event: MessageStreamEvent,
         pool: ToolBackend,
-        acc: dict[str, int],
+        acc: _MessagesStreamAccumulator,
     ) -> tuple[StreamAction, MessageStreamEvent]:
         event_type = getattr(event, "type", None)
 
@@ -359,6 +393,10 @@ class _MessagesToolLoopStrategy:
                 state.tool_use_json_bufs[idx] += getattr(delta, "partial_json", "") or ""
             elif dtype == "text_delta":
                 block_dict["text"] = (block_dict.get("text") or "") + (getattr(delta, "text", "") or "")
+            elif dtype == "compaction_delta":
+                block_dict["content"] = (block_dict.get("content") or "") + (
+                    getattr(delta, "content", "") or ""
+                )
             elif dtype == "thinking_delta":
                 block_dict["thinking"] = (block_dict.get("thinking") or "") + (
                     getattr(delta, "thinking", "") or ""
@@ -385,7 +423,7 @@ class _MessagesToolLoopStrategy:
         return StreamAction.FORWARD, event
 
     @staticmethod
-    def _visible_for(state: _MessagesStreamState, acc: dict[str, int], idx: int) -> int:
+    def _visible_for(state: _MessagesStreamState, acc: _MessagesStreamAccumulator, idx: int) -> int:
         """The client-visible index for an upstream block index, assigned in order."""
         if idx not in state.visible_index:
             state.visible_index[idx] = acc["next_index"]
@@ -419,19 +457,26 @@ class _MessagesToolLoopStrategy:
         if state.stop_reason == "tool_use" and state.owned_specs:
             await _execute_stream_owned(state, pool)
 
-    def terminal_events(self, state: _MessagesStreamState, acc: dict[str, int]) -> list[MessageStreamEvent]:
-        return [_maybe_fold_message_delta_usage(term, acc["output_tokens"]) for term in state.deferred_terminal]
+    def terminal_events(
+        self,
+        state: _MessagesStreamState,
+        acc: _MessagesStreamAccumulator,
+    ) -> list[MessageStreamEvent]:
+        return [_maybe_fold_message_delta(term, acc) for term in state.deferred_terminal]
 
-    def accumulate_stream_usage(self, acc: dict[str, int], state: _MessagesStreamState) -> None:
-        # All-owned continuation: fold this iteration's output_tokens (from
-        # the dropped terminal) into the running total for the final fold.
+    def accumulate_stream_usage(self, acc: _MessagesStreamAccumulator, state: _MessagesStreamState) -> None:
         for term in state.deferred_terminal:
-            if getattr(term, "type", None) == "message_delta":
-                usage = getattr(term, "usage", None)
-                if usage is not None:
-                    acc["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+            if getattr(term, "type", None) != "message_delta":
+                continue
+            usage = getattr(term, "usage", None)
+            if usage is not None:
+                acc["output_tokens"] += getattr(usage, "output_tokens", 0) or 0
+                acc["iterations"].extend(getattr(usage, "iterations", None) or [])
+            context_management = getattr(term, "context_management", None)
+            if context_management is not None:
+                acc["applied_edits"].extend(getattr(context_management, "applied_edits", None) or [])
 
-    def synthetic_events(self, state: _MessagesStreamState, acc: dict[str, int]) -> list[Any]:
+    def synthetic_events(self, state: _MessagesStreamState, acc: _MessagesStreamAccumulator) -> list[Any]:
         # This format has no native vocabulary for a server-side tool call, so the
         # gateway's calls stay invisible on the wire. Documented in docs/tools.md.
         return []

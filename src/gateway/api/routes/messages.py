@@ -93,8 +93,10 @@ class CountTokensRequest(BaseModel):
 
     A subset of :class:`MessagesRequest`: the input fields that affect the token
     count, minus ``max_tokens`` and the streaming/sampling controls, since the
-    endpoint only counts input tokens. Clients such as Claude Code call this on
-    every turn to keep their prompt within the model's context window.
+    endpoint only counts input tokens. ``context_management`` and ``betas`` are
+    accepted for wire compatibility, but the local estimate does not apply
+    provider-side context edits. Clients such as Claude Code call this on every
+    turn to keep their prompt within the model's context window.
     """
 
     model: str
@@ -105,6 +107,8 @@ class CountTokensRequest(BaseModel):
     thinking: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
     cache_control: dict[str, Any] | None = None
+    context_management: dict[str, Any] | None = None
+    betas: list[str] | None = None
 
 
 class CountTokensResponse(BaseModel):
@@ -172,19 +176,29 @@ _ERROR_KIND_TO_ANTHROPIC_TYPE = {
 }
 
 
+def _billable_messages_usage(usage: Any) -> GatewayUsage:
+    """Use per-iteration totals when Anthropic reports compaction sampling."""
+    billable_parts = list(getattr(usage, "iterations", None) or []) or [usage]
+    input_tokens = sum((getattr(part, "input_tokens", None) or 0) for part in billable_parts)
+    output_tokens = sum((getattr(part, "output_tokens", None) or 0) for part in billable_parts)
+    return GatewayUsage(
+        prompt_tokens=input_tokens,
+        completion_tokens=output_tokens,
+        total_tokens=input_tokens + output_tokens,
+        cache_read_tokens=sum(
+            (getattr(part, "cache_read_input_tokens", None) or 0) for part in billable_parts
+        ),
+        cache_write_tokens=sum(
+            (getattr(part, "cache_creation_input_tokens", None) or 0) for part in billable_parts
+        ),
+        cache_write_1h_tokens=sum(_cache_write_1h_tokens(part) for part in billable_parts),
+        cache_tokens_in_prompt=False,
+    )
+
+
 def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
     if isinstance(event, MessageDeltaEvent):
-        input_tokens = event.usage.input_tokens or 0
-        output_tokens = event.usage.output_tokens or 0
-        return GatewayUsage(
-            prompt_tokens=input_tokens,
-            completion_tokens=output_tokens,
-            total_tokens=input_tokens + output_tokens,
-            cache_read_tokens=event.usage.cache_read_input_tokens or 0,
-            cache_write_tokens=event.usage.cache_creation_input_tokens or 0,
-            cache_write_1h_tokens=_cache_write_1h_tokens(event.usage),
-            cache_tokens_in_prompt=False,
-        )
+        return _billable_messages_usage(event.usage)
     if isinstance(event, MessageStartEvent):
         usage = event.message.usage
         input_tokens = usage.input_tokens or 0
@@ -270,15 +284,7 @@ class _MessagesAdapter:
     def extract_usage(self, result: MessageResponse) -> CompletionUsage | None:
         if not result.usage:
             return None
-        return GatewayUsage(
-            prompt_tokens=result.usage.input_tokens,
-            completion_tokens=result.usage.output_tokens,
-            total_tokens=result.usage.input_tokens + result.usage.output_tokens,
-            cache_read_tokens=result.usage.cache_read_input_tokens or 0,
-            cache_write_tokens=result.usage.cache_creation_input_tokens or 0,
-            cache_write_1h_tokens=_cache_write_1h_tokens(result.usage),
-            cache_tokens_in_prompt=False,
-        )
+        return _billable_messages_usage(result.usage)
 
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
         return await amessages(**kwargs)  # type: ignore[return-value]

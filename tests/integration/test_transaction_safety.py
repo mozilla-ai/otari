@@ -140,6 +140,15 @@ async def test_is_model_free_catches_unsupported_provider_error(async_db: AsyncS
 
 
 @pytest.mark.asyncio
+async def test_is_model_free_accepts_string_provider_from_any_llm(async_db: AsyncSession) -> None:
+    """_is_model_free stays fail-closed when any-llm returns a registry-only string provider."""
+    with patch("gateway.services.budget_service.AnyLLM.split_model_provider", return_value=("registry-only", "model")):
+        result = await _is_model_free(async_db, "registry-only:model")
+
+    assert result is False
+
+
+@pytest.mark.asyncio
 async def test_is_model_free_catches_sqlalchemy_error(async_db: AsyncSession) -> None:
     """_is_model_free returns False on SQLAlchemy errors during pricing lookup."""
     with patch(

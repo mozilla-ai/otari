@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -271,5 +271,49 @@ describe("OverviewIndex routing", () => {
     expect(screen.getByText("Overview")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add your first provider" }));
     expect(await screen.findByTestId("loc")).toHaveTextContent("/providers");
+  });
+
+  it("reports a failed provider query instead of silently rendering a normal overview", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/providers/health")) {
+        return jsonResponse({ providers: [], healthy: 1, total: 1, checked_at: null });
+      }
+      if (url.includes("/v1/usage/summary")) return jsonResponse(summary({}));
+      if (url.includes("/v1/providers")) return jsonResponse({ detail: "providers exploded" }, 500);
+      return jsonResponse([]);
+    });
+    renderPage(<OverviewIndex />);
+
+    // The failure is surfaced, and the setup state stays neutral: no
+    // getting-started block claiming the gateway is fresh, and no silent success.
+    expect(await screen.findByText(/providers exploded/)).toBeInTheDocument();
+    expect(screen.queryByText("Get started with Otari")).not.toBeInTheDocument();
+  });
+
+  it("clears the provider-query banner when Refresh retries it", async () => {
+    // The providers query is cached for minutes and never refetches on focus, so
+    // the page's Refresh has to drive it or the banner outlives the outage.
+    let failProviders = true;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/providers/health")) {
+        return jsonResponse({ providers: [], healthy: 1, total: 1, checked_at: null });
+      }
+      if (url.includes("/v1/usage/summary")) return jsonResponse(summary({}));
+      if (url.includes("/v1/providers")) {
+        return failProviders
+          ? jsonResponse({ detail: "providers exploded" }, 500)
+          : jsonResponse({ providers: [{ provider: "openai" }] });
+      }
+      return jsonResponse([]);
+    });
+    const user = userEvent.setup();
+    renderPage(<OverviewIndex />);
+
+    expect(await screen.findByText(/providers exploded/)).toBeInTheDocument();
+    failProviders = false;
+    await user.click(screen.getByRole("button", { name: /refresh/i }));
+    await waitFor(() => expect(screen.queryByText(/providers exploded/)).not.toBeInTheDocument());
   });
 });
