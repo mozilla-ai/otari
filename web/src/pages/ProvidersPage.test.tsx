@@ -721,6 +721,44 @@ describe("ProvidersPage", () => {
     ).toBe(false);
   });
 
+  it("holds Advanced open while invalid client options are blocking the submit", async () => {
+    // Otherwise collapsing the section leaves "Add provider" disabled with the
+    // reason, and the field to fix it, off screen.
+    mockApi({
+      stored: [],
+      catalog: [
+        {
+          id: "openai",
+          name: "OpenAI",
+          env_key: "OPENAI_API_KEY",
+          default_api_base: "https://api.openai.com/v1",
+          requires_api_key: true,
+          env_key_present: true,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Add your first provider" }));
+    await user.type(screen.getByPlaceholderText("Search providers…"), "OpenAI");
+    await user.click(await screen.findByRole("option", { name: /OpenAI/ }));
+    // Close the combobox popover, which otherwise aria-hides the rest of the form.
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Advanced (API base, rename, client options)" }));
+    await user.type(screen.getByLabelText("Client options (JSON)"), "oops");
+    expect(await screen.findByText("Not valid JSON.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Hide advanced" }));
+    expect(screen.getByLabelText("Client options (JSON)")).toBeInTheDocument();
+    expect(screen.getByText("Not valid JSON.")).toBeInTheDocument();
+
+    // The hide the operator asked for takes effect once the section is no longer
+    // the thing blocking the submit.
+    await user.clear(screen.getByLabelText("Client options (JSON)"));
+    await waitFor(() => expect(screen.queryByLabelText("Client options (JSON)")).not.toBeInTheDocument());
+  });
+
   it("prefills stored client options on edit and clears them when emptied", async () => {
     const fetchMock = mockApi({ stored: [storedProvider("homelab", "1234", true, { timeout: 1800 })] });
     const user = userEvent.setup();

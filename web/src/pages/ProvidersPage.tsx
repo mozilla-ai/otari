@@ -120,7 +120,10 @@ function ClientArgsField({
       <Label className="text-sm font-medium text-[var(--otari-ink)]">Client options (JSON)</Label>
       <TextArea rows={3} placeholder={'{"timeout": 1800}'} spellCheck={false} className="font-mono text-xs" />
       <Description className={error ? "text-xs text-red-700" : "text-xs text-[var(--otari-muted)]"}>
-        {error ?? "Passed to the provider's client, e.g. a request timeout in seconds or custom headers."}
+        {error ??
+          // Unlike the API key, these are stored and returned unencrypted, so say
+          // so before someone puts a token in a custom header here.
+          "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. Stored in plain text, so keep secrets out."}
       </Description>
     </TextField>
   );
@@ -305,8 +308,14 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
     (!needsKey || apiKey.trim() !== "") &&
     clientArgs.ok &&
     !create.isPending;
+  // Hold the section open while something inside it is what's blocking submit,
+  // so collapsing it can't leave a disabled button with its reason off screen.
+  // A hide requested meanwhile is remembered and applies once the field is fixed.
+  const advancedOpen = showAdvanced || !clientArgs.ok || nameHasDelimiter;
 
   const submit = () => {
+    // The clientArgs.ok half is already covered by canSubmit; it is repeated to
+    // narrow the union so `.value` is reachable.
     if (!canSubmit || !clientArgs.ok) return;
     create.mutate(
       {
@@ -356,9 +365,9 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         className="self-start text-xs font-medium text-[var(--otari-brand-dark)]"
         onClick={() => setShowAdvanced((v) => !v)}
       >
-        {showAdvanced ? "Hide advanced" : "Advanced (API base, rename, client options)"}
+        {advancedOpen ? "Hide advanced" : "Advanced (API base, rename, client options)"}
       </button>
-      {showAdvanced ? (
+      {advancedOpen ? (
         <div className="flex flex-col gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
