@@ -356,9 +356,11 @@ class GatewayConfig(BaseSettings):
         description=(
             "When True (default), a non-master key whose request names a 'user' other than its own "
             "is rejected with 403. When False, the client-supplied 'user' is still forwarded to the "
-            "provider (OpenAI-style end-user tag) but spend is always bound to the key's own user — "
-            "use this if clients send arbitrary 'user' values for abuse tracking. The master key may "
-            "always bill an arbitrary user regardless of this setting."
+            "provider (OpenAI-style end-user tag) but spend is always bound to the key's own user; "
+            "use this if clients send arbitrary 'user' values for abuse tracking. This setting "
+            "applies to every non-master key on the deployment: to relax the check for one client "
+            "only, set ignore_user_mismatch on its key instead. The master key may always bill an "
+            "arbitrary user regardless of this setting."
         ),
     )
     budget_estimate_default_output_tokens: int = Field(

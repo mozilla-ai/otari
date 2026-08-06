@@ -97,7 +97,7 @@ def test_resolve_user_id_per_key_flag_binds_mismatch_to_key_user() -> None:
         forbidden_user_error=_make_error("forbidden user", 403),
         reject_mismatch=True,
     )
-    # Spend still binds to the key's own user, exactly as in gateway-wide lenient mode.
+    # Spend still binds to the key's own user, just as in gateway-wide lenient mode.
     assert user_id == "key-user"
 
 
