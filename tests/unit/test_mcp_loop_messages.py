@@ -11,13 +11,13 @@ from typing import Any, cast
 
 import pytest
 from any_llm.types.messages import (
+    CompactionBlock,
+    CompactionDelta,
     ContentBlockDeltaEvent,
     ContentBlockStartEvent,
     ContentBlockStopEvent,
     InputJSONDelta,
-    MessageDelta,
     MessageDeltaEvent,
-    MessageDeltaUsage,
     MessageResponse,
     MessageStartEvent,
     MessageStopEvent,
@@ -92,6 +92,7 @@ def _message_response(
     content: list[Any] | None = None,
     input_tokens: int = 1,
     output_tokens: int = 1,
+    iterations: list[dict[str, Any]] | None = None,
 ) -> MessageResponse:
     return MessageResponse(
         id="msg_1",
@@ -101,14 +102,14 @@ def _message_response(
         content=content or [],
         stop_reason=cast(Any, stop_reason),
         stop_sequence=None,
-        usage=MessageUsage(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_creation_input_tokens=None,
-            cache_read_input_tokens=None,
-            cache_creation=None,
-            server_tool_use=None,
-            service_tier=None,
+        usage=MessageUsage.model_validate(
+            {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "cache_creation_input_tokens": None,
+                "cache_read_input_tokens": None,
+                "iterations": iterations,
+            }
         ),
         container=None,
     )
@@ -231,6 +232,61 @@ async def test_loop_executes_owned_tool_and_completes(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
+async def test_loop_replays_compaction_block_with_context_management(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context_management = {
+        "edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]
+    }
+    responses = iter(
+        [
+            MessageResponse.model_validate(
+                {
+                    "id": "msg_compaction_tool",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "fake",
+                    "content": [
+                        {"type": "compaction", "content": "Conversation summary"},
+                        {"type": "tool_use", "id": "tu_1", "name": "fetch_url", "input": {"u": "x"}},
+                    ],
+                    "stop_reason": "tool_use",
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 10, "output_tokens": 2},
+                }
+            ),
+            _message_response(stop_reason="end_turn", content=[_text_block("done")]),
+        ]
+    )
+    calls: list[dict[str, Any]] = []
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        calls.append(kwargs)
+        return next(responses)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    out = await anthropic_tool_loop(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [{"role": "user", "content": "fetch x"}],
+            "max_tokens": 100,
+            "context_management": context_management,
+            "betas": ["compact-2026-01-12"],
+        },
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+        max_iterations=5,
+    )
+
+    assert out.stop_reason == "end_turn"
+    assert calls[1]["context_management"] == context_management
+    assert calls[1]["betas"] == ["compact-2026-01-12"]
+    assistant_content = calls[1]["messages"][-2]["content"]
+    assert assistant_content[0] == {"type": "compaction", "content": "Conversation summary"}
+    assert assistant_content[1]["type"] == "tool_use"
+
+
+@pytest.mark.asyncio
 async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.MonkeyPatch) -> None:
     responses = iter(
         [
@@ -239,12 +295,37 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
                 content=[_tool_use("tu_1", "fetch_url", {})],
                 input_tokens=10,
                 output_tokens=2,
+                iterations=[
+                    {
+                        "type": "compaction",
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                    },
+                    {
+                        "type": "message",
+                        "input_tokens": 10,
+                        "output_tokens": 2,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                    },
+                ],
             ),
             _message_response(
                 stop_reason="end_turn",
                 content=[_text_block("done")],
                 input_tokens=12,
                 output_tokens=3,
+                iterations=[
+                    {
+                        "type": "message",
+                        "input_tokens": 12,
+                        "output_tokens": 3,
+                        "cache_creation_input_tokens": 0,
+                        "cache_read_input_tokens": 0,
+                    }
+                ],
             ),
         ]
     )
@@ -262,6 +343,11 @@ async def test_loop_accumulates_usage_across_iterations(monkeypatch: pytest.Monk
     assert out.usage is not None
     assert out.usage.input_tokens == 22
     assert out.usage.output_tokens == 5
+    assert [iteration.type for iteration in out.usage.iterations or []] == [
+        "compaction",
+        "message",
+        "message",
+    ]
 
 
 @pytest.mark.asyncio
@@ -506,17 +592,27 @@ def _msg_start_event() -> MessageStartEvent:
     )
 
 
-def _msg_delta_event(stop_reason: str, output_tokens: int = 1) -> MessageDeltaEvent:
-    return MessageDeltaEvent(
-        type="message_delta",
-        delta=MessageDelta(stop_reason=cast(Any, stop_reason), stop_sequence=None),
-        usage=MessageDeltaUsage(
-            input_tokens=None,
-            output_tokens=output_tokens,
-            cache_creation_input_tokens=None,
-            cache_read_input_tokens=None,
-            server_tool_use=None,
-        ),
+def _msg_delta_event(
+    stop_reason: str,
+    output_tokens: int = 1,
+    *,
+    iterations: list[dict[str, Any]] | None = None,
+    applied_edits: list[dict[str, Any]] | None = None,
+) -> MessageDeltaEvent:
+    return MessageDeltaEvent.model_validate(
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": stop_reason, "stop_sequence": None},
+            "usage": {
+                "input_tokens": None,
+                "output_tokens": output_tokens,
+                "cache_creation_input_tokens": None,
+                "cache_read_input_tokens": None,
+                "server_tool_use": None,
+                "iterations": iterations,
+            },
+            "context_management": {"applied_edits": applied_edits} if applied_edits is not None else None,
+        }
     )
 
 
@@ -537,6 +633,22 @@ def _text_delta(index: int, text: str) -> ContentBlockDeltaEvent:
         type="content_block_delta",
         index=index,
         delta=cast(Any, TextDelta(type="text_delta", text=text)),
+    )
+
+
+def _compaction_block_start(index: int) -> ContentBlockStartEvent:
+    return ContentBlockStartEvent(
+        type="content_block_start",
+        index=index,
+        content_block=cast(Any, CompactionBlock(type="compaction", content=None)),
+    )
+
+
+def _compaction_delta(index: int, content: str) -> ContentBlockDeltaEvent:
+    return ContentBlockDeltaEvent(
+        type="content_block_delta",
+        index=index,
+        delta=cast(Any, CompactionDelta(type="compaction_delta", content=content)),
     )
 
 
@@ -655,6 +767,114 @@ async def test_stream_runs_owned_tool_and_continues(monkeypatch: pytest.MonkeyPa
     # sent the matching tool_result, because the loop consumed it.
     assert not any(getattr(getattr(e, "content_block", None), "type", None) == "tool_use" for e in events)
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_replays_compaction_content_when_tool_loop_continues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context_management = {
+        "edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]
+    }
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _compaction_block_start(0),
+                _compaction_delta(0, "Conversation "),
+                _compaction_delta(0, "summary"),
+                _content_block_stop(0),
+                _tool_use_block_start(1, "tu_1", "fetch_url"),
+                _input_json_delta(1, '{"u": "x"}'),
+                _content_block_stop(1),
+                _msg_delta_event(
+                    "tool_use",
+                    output_tokens=3,
+                    iterations=[
+                        {
+                            "type": "compaction",
+                            "input_tokens": 100,
+                            "output_tokens": 20,
+                            "cache_creation_input_tokens": 0,
+                            "cache_read_input_tokens": 0,
+                        }
+                    ],
+                    applied_edits=[
+                        {
+                            "type": "clear_tool_uses_20250919",
+                            "cleared_input_tokens": 42,
+                            "cleared_tool_uses": 2,
+                        }
+                    ],
+                ),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "done"),
+                _content_block_stop(0),
+                _msg_delta_event(
+                    "end_turn",
+                    output_tokens=5,
+                    iterations=[
+                        {
+                            "type": "message",
+                            "input_tokens": 10,
+                            "output_tokens": 5,
+                            "cache_creation_input_tokens": 0,
+                            "cache_read_input_tokens": 0,
+                        }
+                    ],
+                    applied_edits=[
+                        {
+                            "type": "clear_thinking_20251015",
+                            "cleared_input_tokens": 21,
+                            "cleared_thinking_turns": 1,
+                        }
+                    ],
+                ),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+    calls: list[dict[str, Any]] = []
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        calls.append(kwargs)
+        return next(iter_streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={
+                "model": "fake",
+                "messages": [{"role": "user", "content": "go"}],
+                "max_tokens": 100,
+                "context_management": context_management,
+                "betas": ["compact-2026-01-12"],
+            },
+            pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+            max_iterations=5,
+        )
+    ]
+
+    assistant_content = calls[1]["messages"][-2]["content"]
+    assert assistant_content[0] == {"type": "compaction", "content": "Conversation summary"}
+    assert assistant_content[1]["type"] == "tool_use"
+    assert calls[1]["context_management"] == context_management
+    assert calls[1]["betas"] == ["compact-2026-01-12"]
+
+    final_delta = next(event for event in events if event.type == "message_delta")
+    assert final_delta.usage.output_tokens == 8
+    assert [iteration.type for iteration in final_delta.usage.iterations or []] == ["compaction", "message"]
+    assert final_delta.context_management is not None
+    assert [edit.type for edit in final_delta.context_management.applied_edits] == [
+        "clear_tool_uses_20250919",
+        "clear_thinking_20251015",
+    ]
 
 
 @pytest.mark.asyncio

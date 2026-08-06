@@ -41,6 +41,8 @@ from .conftest import MODEL_NAME
 _PRICING = {"input_price_per_million": 2.5, "output_price_per_million": 10.0}
 _INPUT_TOKENS = 42
 _OUTPUT_TOKENS = 7
+_COMPACTION_INPUT_TOKENS = 100
+_COMPACTION_OUTPUT_TOKENS = 20
 
 
 def _seed_budgeted_user(client: TestClient, headers: dict[str, str], user_id: str) -> None:
@@ -93,17 +95,19 @@ def _text_delta(text: str) -> ContentBlockDeltaEvent:
     )
 
 
-def _message_delta() -> MessageDeltaEvent:
+def _message_delta(*, iterations: list[dict[str, Any]] | None = None) -> MessageDeltaEvent:
     # The trailing usage-bearing event any-llm now emits on streaming (#256).
     return MessageDeltaEvent(
         type="message_delta",
         delta=MessageDelta(stop_reason=cast(Any, "end_turn"), stop_sequence=None),
-        usage=MessageDeltaUsage(
-            input_tokens=None,
-            output_tokens=_OUTPUT_TOKENS,
-            cache_creation_input_tokens=None,
-            cache_read_input_tokens=None,
-            server_tool_use=None,
+        usage=MessageDeltaUsage.model_validate(
+            {
+                "input_tokens": None,
+                "output_tokens": _OUTPUT_TOKENS,
+                "cache_creation_input_tokens": None,
+                "cache_read_input_tokens": None,
+                "iterations": iterations,
+            }
         ),
     )
 
@@ -113,6 +117,33 @@ async def _stream_with_usage(**_kwargs: Any) -> AsyncIterator[MessageStreamEvent
         yield _message_start()
         yield _text_delta("hello")
         yield _message_delta()
+        yield MessageStopEvent(type="message_stop")
+
+    return _gen()
+
+
+async def _stream_with_compaction_usage(**_kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+    async def _gen() -> AsyncIterator[MessageStreamEvent]:
+        yield _message_start()
+        yield _text_delta("hello")
+        yield _message_delta(
+            iterations=[
+                {
+                    "type": "compaction",
+                    "input_tokens": _COMPACTION_INPUT_TOKENS,
+                    "output_tokens": _COMPACTION_OUTPUT_TOKENS,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                },
+                {
+                    "type": "message",
+                    "input_tokens": _INPUT_TOKENS,
+                    "output_tokens": _OUTPUT_TOKENS,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                },
+            ]
+        )
         yield MessageStopEvent(type="message_stop")
 
     return _gen()
@@ -166,4 +197,38 @@ def test_messages_streaming_records_tokens_and_cost(
     assert row.status == "success"
     assert row.prompt_tokens == _INPUT_TOKENS
     assert row.completion_tokens == _OUTPUT_TOKENS
+    assert row.cost is not None and row.cost > 0.0
+
+
+def test_messages_streaming_bills_compaction_iterations(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    user_id = "stream-usage-messages-compaction"
+    _seed_budgeted_user(client, master_key_header, user_id)
+    _configure_pricing(client, master_key_header, MODEL_NAME)
+
+    with patch("gateway.api.routes.messages.amessages", new=_stream_with_compaction_usage):
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": MODEL_NAME,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 64,
+                "stream": True,
+                "metadata": {"user_id": user_id},
+            },
+            headers=master_key_header,
+        )
+        assert response.status_code == 200, response.text
+        body = response.text
+
+    assert "message_stop" in body
+
+    row = _poll_usage_row(db_session_factory, user_id)
+    assert row is not None, "streaming /v1/messages must bill compaction usage"
+    assert row.status == "success"
+    assert row.prompt_tokens == _INPUT_TOKENS + _COMPACTION_INPUT_TOKENS
+    assert row.completion_tokens == _OUTPUT_TOKENS + _COMPACTION_OUTPUT_TOKENS
     assert row.cost is not None and row.cost > 0.0

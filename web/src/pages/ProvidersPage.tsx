@@ -747,7 +747,16 @@ function OnboardingPanel({
           <Step n={3} title="Send your first request">
             Point your app at <code>/v1</code> on this gateway with the API key printed in the server logs
             (<code>gw-…</code>). See the{" "}
-            <a href="/welcome" className="font-medium text-[var(--otari-brand-dark)]">
+            {/* /welcome is served by the gateway itself, not by a HashRouter route, so this
+                stays a plain path anchor: a router Link would resolve to /#/welcome, which
+                the catch-all route sends back to the overview. It leaves the SPA, so open a
+                new tab and the operator keeps the dashboard (as the guide's links do). */}
+            <a
+              href="/welcome"
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium text-[var(--otari-brand-dark)]"
+            >
               quickstart
             </a>
             .
