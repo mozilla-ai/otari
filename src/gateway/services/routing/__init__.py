@@ -31,6 +31,7 @@ from gateway.services.routing.compiler import (
     RouterOrdering,
     compile_policy,
     needs_budget_state,
+    selection_consults_router,
 )
 from gateway.types.budget_state import BudgetState
 
@@ -49,4 +50,5 @@ __all__ = [
     "compile_policy",
     "get_router_backend",
     "needs_budget_state",
+    "selection_consults_router",
 ]

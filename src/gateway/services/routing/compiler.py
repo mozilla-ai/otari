@@ -45,6 +45,7 @@ __all__ = [
     "RouterOrdering",
     "compile_policy",
     "needs_budget_state",
+    "selection_consults_router",
 ]
 
 
@@ -173,6 +174,35 @@ def _matches(when: WhenClause, *, user_id: str | None, key_id: str | None, budge
         if key_id is None or key_id not in allowed:
             return False
     return True
+
+
+def selection_consults_router(
+    spec: PolicySpec,
+    *,
+    user_id: str | None = None,
+    key_id: str | None = None,
+    budget: BudgetState | None = None,
+) -> bool:
+    """Whether this request would actually reach the policy's ``router`` entry.
+
+    Entries are evaluated in order, so a ``when`` entry ahead of the router wins
+    outright and the router's ranking is discarded. Asking first keeps the caller
+    from paying for a ranking (an embedding call and a scan of the user's stored
+    examples) whose result nothing reads, and keeps the router's decision log line
+    off requests it did not decide.
+
+    Pure and synchronous like the rest of this module: it reads the same facts
+    ``_select_head`` does, so the two cannot disagree about which entry wins.
+    """
+    budget = budget or BudgetState()
+    for entry in spec.select:
+        if entry.default is not None:
+            return False
+        if entry.router is not None:
+            return True
+        if entry.when is not None and _matches(entry.when, user_id=user_id, key_id=key_id, budget=budget):
+            return False
+    return False
 
 
 def _select_head(

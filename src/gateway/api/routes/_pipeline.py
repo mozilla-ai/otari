@@ -133,6 +133,7 @@ from gateway.services.routing import (
     NoEligibleCandidatesError,
     compile_policy,
     needs_budget_state,
+    selection_consults_router,
 )
 from gateway.services.routing.decide import RoutingSignal, decide_ordering
 from gateway.services.sandbox_backend import (
@@ -887,8 +888,15 @@ async def _compile_request_plan(
     # The signal is built here rather than by the endpoint because flattening the
     # prompt is not free on a long conversation, and only a policy with a router
     # ever reads it. Every other request pays three header lookups and nothing.
+    #
+    # Only asked when the router entry is the one this request would reach: a `when`
+    # entry ahead of it wins outright, and ranking for a plan that discards the
+    # ranking is a paid embedding call plus a scan of the user's examples, followed
+    # by a log line claiming a decision the request did not use.
     router_ordering = None
-    if spec.router_backend is not None:
+    if spec.router_backend is not None and selection_consults_router(
+        spec, user_id=user_id, key_id=api_key_id, budget=budget
+    ):
         router_ordering = await decide_ordering(
             config,
             spec,

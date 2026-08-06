@@ -22,7 +22,13 @@ import pytest
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import PolicySpec
-from gateway.services.routing import NoEligibleCandidatesError, RouterOrdering, compile_policy
+from gateway.services.routing import (
+    BudgetState,
+    NoEligibleCandidatesError,
+    RouterOrdering,
+    compile_policy,
+    selection_consults_router,
+)
 
 
 @pytest.fixture
@@ -184,3 +190,34 @@ def test_a_routed_candidate_the_caller_may_not_use_is_still_dropped(config: Gate
 
     assert [attempt.model for attempt in plan.attempts] == ["gpt-5-mini"]
     assert [dropped.reason for dropped in plan.dropped] == ["not_allowed"]
+
+
+def test_a_condition_ahead_of_the_router_means_the_router_is_not_consulted() -> None:
+    """Order decides whether the router runs at all.
+
+    A ``when`` entry ahead of the router wins outright and the ranking is thrown
+    away, so asking a backend for one costs a paid embedding call plus a scan of the
+    caller's examples for nothing, and logs a decision the request did not use. The
+    pipeline gates on this before it ranks.
+    """
+    spec = PolicySpec.model_validate(
+        {
+            "select": [
+                {"when": {"budget_used_pct": {"gte": 80}}, "target": "openai:gpt-5-nano"},
+                {"router": "knn", "candidates": ["openai:gpt-5-nano", "openai:gpt-5-mini"]},
+                {"default": "openai:gpt-5-mini"},
+            ]
+        }
+    )
+
+    assert not selection_consults_router(spec, budget=BudgetState(used_pct=95.0))
+    # Under the threshold the condition does not match, so the router is next in line.
+    assert selection_consults_router(spec, budget=BudgetState(used_pct=10.0))
+
+
+def test_a_policy_with_no_router_never_consults_one() -> None:
+    assert not selection_consults_router(_spec("openai:gpt-5-mini"))
+
+
+def test_a_bare_router_policy_always_consults_it() -> None:
+    assert selection_consults_router(_router_spec())
