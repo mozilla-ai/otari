@@ -330,6 +330,35 @@ async def test_nothing_usable_declines_rather_than_asking(config: GatewayConfig,
 
 
 @pytest.mark.asyncio
+async def test_a_backend_that_raises_declines_rather_than_failing_the_request(
+    config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A router is an optimization, so it can never be why a request fails.
+
+    Backends decline on the failures they can name, but ranking also reads the
+    database, so the guard lives here: one place that covers every backend and every
+    failure rather than the ones each backend thought of. Declining costs the caller
+    the cheaper model, not the request.
+    """
+
+    class _Broken:
+        async def rank(self, ctx: RoutingContext) -> RoutingDecision:
+            raise RuntimeError("the examples table is on fire")
+
+    monkeypatch.setattr(
+        "gateway.services.routing.decide.get_router_backend", lambda config, name: _Broken()
+    )
+
+    ordering = await decide_ordering(
+        config, _spec(), policy_name="smart", user_id="u", allowlist=None, signal=_signal()
+    )
+
+    assert ordering is not None
+    assert ordering.selectors == []
+    assert "RuntimeError" in ordering.rationale
+
+
+@pytest.mark.asyncio
 async def test_the_request_headers_reach_the_backend(config: GatewayConfig, recorder: _Recorder) -> None:
     await decide_ordering(
         config,

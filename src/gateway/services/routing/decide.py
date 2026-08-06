@@ -115,20 +115,35 @@ async def decide_ordering(
     if not pool:
         return RouterOrdering([], rationale="no candidate in the pool is usable by this caller")
 
-    decision = await backend.rank(
-        RoutingContext(
-            user_id=user_id or "",
-            default_model=default_model,
-            candidate_pool=pool,
-            task_signal=signal.task_signal,
-            trace_signal=signal.trace_signal,
-            trace_anchor=signal.trace_anchor,
-            task_id=signal.task_id,
-            has_tools=signal.has_tools,
-            is_trace_continuation=signal.is_continuation,
-            trace_key=signal.conversation_id,
-        )
+    context = RoutingContext(
+        user_id=user_id or "",
+        default_model=default_model,
+        candidate_pool=pool,
+        task_signal=signal.task_signal,
+        trace_signal=signal.trace_signal,
+        trace_anchor=signal.trace_anchor,
+        task_id=signal.task_id,
+        has_tools=signal.has_tools,
+        is_trace_continuation=signal.is_continuation,
+        trace_key=signal.conversation_id,
     )
+    try:
+        decision = await backend.rank(context)
+    except Exception as exc:
+        # A router is an optimization, so it must never be the reason a request
+        # cannot be served. Backends already decline on the failures they can name
+        # (cold pool, embedding error, missing pricing), but ranking also reads the
+        # database, and a broad guard here is what makes the claim true for every
+        # backend and every failure rather than for the ones each backend thought
+        # of. Declining costs the caller the cheaper model, not the request.
+        logger.warning(
+            "Router '%s' on policy '%s' failed (%s); serving '%s'",
+            backend_name,
+            policy_name,
+            type(exc).__name__,
+            spec.default_target,
+        )
+        return RouterOrdering([], rationale=f"router error ({type(exc).__name__})")
     # One line per routed request, at info: which model the money went to and why
     # is the first thing an operator asks when a bill or a quality complaint
     # arrives, and the decision is not otherwise reconstructable.
