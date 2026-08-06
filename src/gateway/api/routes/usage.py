@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.core.sql import match_any
+from gateway.core.sql import MAX_FILTER_VALUES, match_any
 from gateway.models.entities import APIKey, UsageLog
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,
@@ -66,12 +66,6 @@ _SESSION_BREAKDOWN_TOP_N = 250
 # the largest page size (1000) rather than a plan's candidate count; it exists to
 # keep a caller from posting an unbounded IN list.
 _MAX_REQUEST_GROUPS = 1000
-
-# How many values one repeatable entity filter (model / user / API key) may carry
-# on the analytics endpoints. Far above what a chart can distinguish (a stacked
-# series folds past eight groups), so it never binds a real comparison; it is
-# there to keep a caller from posting an unbounded IN list.
-_MAX_FILTER_VALUES = 50
 
 Bucket = Literal["hour", "day"]
 SeriesGroupBy = Literal["model", "user_id", "api_key_id", "source"]
@@ -253,15 +247,15 @@ _COUNTS_DESC = (
 # set of rows than the operator was shown.
 _USER_MULTI_DESC = (
     "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of "
-    f"them. At most {_MAX_FILTER_VALUES} per call."
+    f"them. At most {MAX_FILTER_VALUES} per call."
 )
 _MODEL_MULTI_DESC = (
     "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. "
-    f"At most {_MAX_FILTER_VALUES} per call."
+    f"At most {MAX_FILTER_VALUES} per call."
 )
 _API_KEY_MULTI_DESC = (
     "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values "
-    f"match any of them. At most {_MAX_FILTER_VALUES} per call."
+    f"match any of them. At most {MAX_FILTER_VALUES} per call."
 )
 _DIMENSIONS_DESC = (
     "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the "
@@ -349,17 +343,17 @@ async def list_usage(
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[
-        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
+        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
     ] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
-    model: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
+    model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: Annotated[
-        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
+        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
@@ -439,17 +433,17 @@ async def count_usage(
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[
-        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
+        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
     ] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
-    model: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
+    model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: Annotated[
-        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
+        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
@@ -1194,17 +1188,17 @@ async def usage_summary(
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[
-        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
+        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
     ] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
-    model: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
+    model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: Annotated[
-        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
+        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
@@ -1332,17 +1326,17 @@ async def usage_series(
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[
-        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
+        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
     ] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
-    model: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
+    model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: Annotated[
-        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
+        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
@@ -1467,17 +1461,17 @@ async def usage_summary_csv(
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: Annotated[
-        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
+        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
     ] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
-    model: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
+    model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
     api_key_id: Annotated[
-        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
+        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
     ] = None,
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),

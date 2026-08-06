@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.models.entities import UsageLog, User
 
 DELETE_PATH = "/v1/usage"
@@ -323,6 +324,41 @@ def test_set_price_by_filter_prices_the_named_models_only(
     assert _get(db_session, "p-claude").cost is not None  # type: ignore[union-attr]
     # The model left out of the filter keeps its unpriced state.
     assert _get(db_session, "p-gemini").cost is None  # type: ignore[union-attr]
+
+
+def test_by_filter_rejects_more_values_than_the_read_endpoints_accept(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """The destructive body stops where /v1/usage/count stops.
+
+    The count an operator confirms comes from the read endpoints, which 422 past
+    MAX_FILTER_VALUES. A body that accepted more would delete over a filter set no
+    count could ever have been shown for, on an unbounded IN list.
+    """
+    too_many = [f"m{index}" for index in range(MAX_FILTER_VALUES + 1)]
+    assert client.get(COUNT_PATH, headers=master_key_header, params={"model": too_many}).status_code == 422
+
+    resp = client.request(
+        "DELETE", DELETE_PATH, json={"by_filter": True, "model": too_many}, headers=master_key_header
+    )
+    assert resp.status_code == 422
+
+    at_cap = too_many[:MAX_FILTER_VALUES]
+    assert (
+        client.request(
+            "DELETE", DELETE_PATH, json={"by_filter": True, "model": at_cap}, headers=master_key_header
+        ).status_code
+        == 200
+    )
+    # A single long value is not a list of 51: the bound is on the value count, so a
+    # provider-qualified model name well past 50 characters still filters.
+    long_name = f"openai/{'x' * 80}"
+    assert (
+        client.request(
+            "DELETE", DELETE_PATH, json={"by_filter": True, "model": long_name}, headers=master_key_header
+        ).status_code
+        == 200
+    )
 
 
 def test_delete_requires_master_key(client: TestClient) -> None:

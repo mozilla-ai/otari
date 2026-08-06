@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.api.routes.usage import _MAX_FILTER_VALUES
+from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.models.entities import APIKey, UsageLog, User
 
 SUMMARY_PATH = "/v1/usage/summary"
@@ -465,21 +465,34 @@ def test_summary_filters_by_several_models_users_and_keys(
     assert one_user["totals"]["cost"] == pytest.approx(0.40)
 
 
-def test_summary_and_series_cap_the_number_of_filter_values(
+def test_every_read_endpoint_caps_the_number_of_filter_values(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    # The cap exists so a caller cannot post an unbounded IN list; it sits far above
-    # any comparison a chart can render.
-    too_many = [f"m{index}" for index in range(_MAX_FILTER_VALUES + 1)]
-    assert client.get(SUMMARY_PATH, headers=master_key_header, params={"model": too_many}).status_code == 422
-    assert (
-        client.get(
-            SERIES_PATH, headers=master_key_header, params={"group_by": "model", "model": too_many}
-        ).status_code
-        == 422
-    )
-    at_cap = too_many[:_MAX_FILTER_VALUES]
-    assert client.get(SUMMARY_PATH, headers=master_key_header, params={"model": at_cap}).status_code == 200
+    """Every endpoint taking a repeatable filter bounds it, at the same value.
+
+    The cap keeps a caller from posting an unbounded IN list, and it has to hold
+    across the whole read surface: the bulk-mutation body carries the same ceiling,
+    and that only means anything if the count an operator confirms is subject to it
+    too. Sits far above any comparison a chart can render.
+    """
+    too_many = [f"m{index}" for index in range(MAX_FILTER_VALUES + 1)]
+    at_cap = too_many[:MAX_FILTER_VALUES]
+    for path, extra in (
+        (SUMMARY_PATH, {}),
+        (SERIES_PATH, {"group_by": "model"}),
+        (CSV_PATH, {}),
+        ("/v1/usage", {}),
+        ("/v1/usage/count", {}),
+    ):
+        over = client.get(path, headers=master_key_header, params={**extra, "model": too_many})
+        assert over.status_code == 422, path
+        ok = client.get(path, headers=master_key_header, params={**extra, "model": at_cap})
+        assert ok.status_code == 200, path
+
+    # The bound counts values, not characters: a long provider-qualified model name
+    # is a single value and must still filter.
+    long_name = "openai:" + "a" * 80
+    assert client.get(SUMMARY_PATH, headers=master_key_header, params={"model": long_name}).status_code == 200
 
 
 def test_grouped_series_filters_by_several_models(

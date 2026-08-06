@@ -19,7 +19,7 @@ neither operation can desync a budget, matching the boundary the ingest path est
 """
 
 from datetime import datetime
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import ColumnElement, delete, func, select
@@ -27,7 +27,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.sql import match_any
+from gateway.core.sql import MAX_FILTER_VALUES, match_any
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing, UsageLog
@@ -41,6 +41,12 @@ _MAX_IDS = 1000
 # Load matched rows for repricing in chunks under SQLite's default bound on bind
 # variables in one IN() (999), mirroring the ingest path.
 _REPRICE_CHUNK = 500
+
+# A repeatable entity filter's values, bounded the way the read endpoints bound
+# theirs (see MAX_FILTER_VALUES). The bound is annotated on the list itself rather
+# than on the ``str | list[str]`` field: on the union it would also cap a single
+# value's character length, rejecting a long provider-qualified model name.
+_CappedValues = Annotated[list[str], Field(max_length=MAX_FILTER_VALUES)]
 
 
 class UsageSelection(BaseModel):
@@ -58,10 +64,13 @@ class UsageSelection(BaseModel):
     # The three entity filters accept several values, matching the repeatable form
     # the read endpoints take. They have to: "all N matching" is counted from the
     # filters the operator was shown and re-derived here, so a filter this body
-    # could not express would target more rows than the table displayed.
-    model: str | list[str] | None = None
-    user_id: str | list[str] | None = None
-    api_key_id: str | list[str] | None = None
+    # could not express would target more rows than the table displayed. They carry
+    # the read endpoints' ceiling for the mirror of that reason: a value set /count
+    # rejects (422) but a delete accepted would run destructively over rows no count
+    # could have been shown for.
+    model: str | _CappedValues | None = None
+    user_id: str | _CappedValues | None = None
+    api_key_id: str | _CappedValues | None = None
     status: str | None = None
     endpoint: str | None = None
     provider: str | None = None

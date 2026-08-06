@@ -48,14 +48,19 @@ export function useUrlState<K extends string>(defaults: Record<K, string>): UrlS
 
   const get = useCallback((key: K) => params.get(key) ?? defaults[key], [params, defaults]);
 
-  // Blank values are dropped so `?model=` reads as no filter, matching `get`'s
-  // treatment of it (a filter on the empty string is never what a URL like that
-  // means). Falls back to the key's default only when nothing is present at all.
+  // Values are trimmed and blanks dropped, so `?model=` or `?model=%20` reads as no
+  // filter rather than a filter on whitespace (which would match nothing and look
+  // like an empty result set). The default applies only when the key is absent
+  // entirely: present-but-blank is a cleared filter, the same reading `get` gives it.
   const getAll = useCallback(
     (key: K) => {
-      const values = params.getAll(key).filter((value) => value !== "");
-      if (values.length > 0) return values;
-      return defaults[key] ? [defaults[key]] : [];
+      if (!params.has(key)) {
+        return defaults[key] ? [defaults[key]] : [];
+      }
+      return params
+        .getAll(key)
+        .map((value) => value.trim())
+        .filter((value) => value !== "");
     },
     [params, defaults],
   );

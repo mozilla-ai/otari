@@ -53,12 +53,28 @@ describe("useUrlState.getAll", () => {
     expect(result.current.getAll("model")).toEqual(["gpt-4o"]);
   });
 
-  it("treats an absent or blank param as no filter", () => {
+  it("treats an absent, blank, or whitespace param as no filter", () => {
     // `?model=` is what a cleared filter can leave behind; it must not become a
     // filter on the empty string, which would match nothing and read as "no rows".
     const { result } = renderHook(() => useUrlState(MULTI_DEFAULTS), { wrapper: wrapperFor("/?model=") });
     expect(result.current.getAll("model")).toEqual([]);
     expect(result.current.getAll("user_id")).toEqual([]);
+
+    // A hand-edited whitespace value is the same thing, and trimming it keeps a chip
+    // from rendering with a blank label.
+    const spaced = renderHook(() => useUrlState(MULTI_DEFAULTS), { wrapper: wrapperFor("/?model=%20&model=gpt-4o") });
+    expect(spaced.result.current.getAll("model")).toEqual(["gpt-4o"]);
+  });
+
+  it("applies a non-empty default only when the key is absent", () => {
+    // Present-but-blank means the operator cleared the filter, so the default must
+    // not resurrect it. Matches how `get` reads the same URL.
+    const withDefault = { source: "gateway" } as const;
+    const absent = renderHook(() => useUrlState(withDefault), { wrapper: wrapperFor("/") });
+    expect(absent.result.current.getAll("source")).toEqual(["gateway"]);
+
+    const cleared = renderHook(() => useUrlState(withDefault), { wrapper: wrapperFor("/?source=") });
+    expect(cleared.result.current.getAll("source")).toEqual([]);
   });
 });
 

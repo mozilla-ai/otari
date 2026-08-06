@@ -10,6 +10,15 @@ from typing import Any, cast
 
 from sqlalchemy import ColumnElement
 
+# How many values one repeatable entity filter (model / user / API key) may carry.
+# Far above what a chart can distinguish (a stacked series folds past eight groups),
+# so it never binds a real comparison; it is there to keep a caller from posting an
+# unbounded IN list. Shared by the read endpoints and the bulk-mutation selection
+# body for the same reason ``match_any`` is shared: the count an operator confirms
+# is taken over the read filters and the mutation re-derives its target set from the
+# body, so a value set one side rejects and the other accepts breaks that agreement.
+MAX_FILTER_VALUES = 50
+
 
 def match_any(column: Any, value: str | list[str]) -> ColumnElement[bool]:
     """Match a column against one value or any of several.
