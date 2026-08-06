@@ -1,8 +1,9 @@
 """Integration tests for the aggregated usage summary + CSV export endpoints.
 
-Runs against whatever backend the suite is configured for (SQLite by default,
-PostgreSQL when TEST_DATABASE_URL / testcontainers provides one), so the same
-assertions pin the cross-dialect bucketing and reconciliation contract.
+Runs against the PostgreSQL the suite is configured for (``TEST_DATABASE_URL``, or
+a testcontainer). The bucketing expressions are dialect-aware (see
+``_bucket_expr``), and these assertions pin the bucketing and reconciliation
+contract they produce.
 """
 
 from __future__ import annotations
