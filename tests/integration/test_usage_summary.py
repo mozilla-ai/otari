@@ -17,7 +17,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.models.entities import UsageLog, User
+from gateway.api.routes.usage import _MAX_FILTER_VALUES
+from gateway.models.entities import APIKey, UsageLog, User
 
 SUMMARY_PATH = "/v1/usage/summary"
 CSV_PATH = "/v1/usage/summary.csv"
@@ -26,6 +27,13 @@ CSV_PATH = "/v1/usage/summary.csv"
 def _ensure_user(db: Session, user_id: str) -> None:
     if db.query(User).filter(User.user_id == user_id).first() is None:
         db.add(User(user_id=user_id, alias=user_id, spend=0.0, blocked=False))
+        db.flush()
+
+
+def _ensure_api_key(db: Session, key_id: str, user_id: str | None) -> None:
+    # usage_logs.api_key_id is a real FK, so a row attributed to a key needs one.
+    if db.query(APIKey).filter(APIKey.id == key_id).first() is None:
+        db.add(APIKey(id=key_id, key_hash=f"hash-{key_id}", key_name=key_id, user_id=user_id))
         db.flush()
 
 
@@ -54,6 +62,8 @@ def _make_log(
 ) -> None:
     if user_id is not None:
         _ensure_user(db, user_id)
+    if api_key_id is not None:
+        _ensure_api_key(db, api_key_id, user_id)
     db.add(
         UsageLog(
             id=str(uuid.uuid4()),
@@ -413,6 +423,108 @@ def test_summary_filters_by_session_endpoint_and_provider(
         SUMMARY_PATH, headers=master_key_header, params={"user_id": "scope", "provider": "openai"}
     ).json()
     assert by_provider["totals"]["request_count"] == 1
+
+
+def test_summary_filters_by_several_models_users_and_keys(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The three entity filters are repeatable: several values match any of them.
+
+    The analytics page compares a handful of models / users / keys in one chart, so
+    a single-value filter would force one request per value and make the tiles
+    disagree with the comparison the operator asked for.
+    """
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(db_session, user_id="multi-a", timestamp=now, model="gpt-4", api_key_id="key-a", cost=0.10)
+    _make_log(db_session, user_id="multi-b", timestamp=now, model="claude", api_key_id="key-b", cost=0.20)
+    _make_log(db_session, user_id="multi-c", timestamp=now, model="gemini", api_key_id="key-c", cost=0.40)
+    db_session.commit()
+
+    everyone = ["multi-a", "multi-b", "multi-c"]
+
+    two_users = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": everyone[:2]}).json()
+    assert two_users["totals"]["request_count"] == 2
+    assert two_users["totals"]["cost"] == pytest.approx(0.30)
+    assert {row["key"] for row in two_users["by_user"]} == {"multi-a", "multi-b"}
+
+    two_models = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": everyone, "model": ["gpt-4", "gemini"]}
+    ).json()
+    assert two_models["totals"]["request_count"] == 2
+    assert two_models["totals"]["cost"] == pytest.approx(0.50)
+
+    two_keys = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": everyone, "api_key_id": ["key-a", "key-b"]}
+    ).json()
+    assert two_keys["totals"]["request_count"] == 2
+    assert two_keys["totals"]["cost"] == pytest.approx(0.30)
+
+    # A single value keeps working unchanged (the wire form every existing caller sends).
+    one_user = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "multi-c"}).json()
+    assert one_user["totals"]["request_count"] == 1
+    assert one_user["totals"]["cost"] == pytest.approx(0.40)
+
+
+def test_summary_and_series_cap_the_number_of_filter_values(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    # The cap exists so a caller cannot post an unbounded IN list; it sits far above
+    # any comparison a chart can render.
+    too_many = [f"m{index}" for index in range(_MAX_FILTER_VALUES + 1)]
+    assert client.get(SUMMARY_PATH, headers=master_key_header, params={"model": too_many}).status_code == 422
+    assert (
+        client.get(
+            SERIES_PATH, headers=master_key_header, params={"group_by": "model", "model": too_many}
+        ).status_code
+        == 422
+    )
+    at_cap = too_many[:_MAX_FILTER_VALUES]
+    assert client.get(SUMMARY_PATH, headers=master_key_header, params={"model": at_cap}).status_code == 200
+
+
+def test_grouped_series_filters_by_several_models(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # /series claims filter parity with /summary, so the stacked chart must scope to
+    # the same value set the tiles beside it were computed over.
+    ts = datetime(2025, 9, 1, 12, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="multiser", timestamp=ts, model="gpt-4", cost=0.10, total_tokens=15)
+    _make_log(db_session, user_id="multiser", timestamp=ts, model="claude", cost=0.20, total_tokens=15)
+    _make_log(db_session, user_id="multiser", timestamp=ts, model="gemini", cost=0.40, total_tokens=15)
+    db_session.commit()
+
+    body = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "model",
+            "user_id": "multiser",
+            "model": ["gpt-4", "claude"],
+            "start_date": "2025-09-01T00:00:00Z",
+            "end_date": "2025-09-02T00:00:00Z",
+        },
+    ).json()
+
+    assert {g["key"] for g in body["groups"]} == {"gpt-4", "claude"}
+    assert sum(p["cost"] for p in body["points"]) == pytest.approx(0.30)
+
+
+def test_csv_export_filters_by_several_users(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # The export takes the same window and filters as /summary, so a multi-value
+    # comparison can be downloaded rather than re-filtered by hand.
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(db_session, user_id="csv-a", timestamp=now, model="gpt-4", cost=0.10)
+    _make_log(db_session, user_id="csv-b", timestamp=now, model="claude", cost=0.20)
+    _make_log(db_session, user_id="csv-c", timestamp=now, model="gemini", cost=0.40)
+    db_session.commit()
+
+    resp = client.get(CSV_PATH, headers=master_key_header, params={"user_id": ["csv-a", "csv-b"]})
+    assert resp.status_code == 200
+    rows = list(csv.DictReader(io.StringIO(resp.text)))
+    users = {row["key"] for row in rows if row["dimension"] == "user"}
+    assert users == {"csv-a", "csv-b"}
 
 
 def test_usage_list_and_count_filter_by_session_and_provider(

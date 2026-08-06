@@ -197,8 +197,14 @@ gateway.
   is never stored: the log records counts and names only.
 - **Usage**: aggregate usage and analytics, showing spend and volume over time,
   broken down by model and by user, plus a switchable breakdown by session,
-  endpoint, provider, or source. Clicking any row opens the Activity log scoped
-  to that group, so "spend went up" leads straight to the requests behind it.
+  endpoint, provider, or source. The **User**, **Model**, and **API key** pickers
+  each take several values, so a chart can compare a set ("these two models across
+  this team's keys") rather than one entity at a time; every pick becomes its own
+  chip, and the chip's ✕ removes just that value. Clicking any row opens the
+  Activity log scoped to that group, so "spend went up" leads straight to the
+  requests behind it. The Activity log filters one value per dimension, so a
+  picker holding several values is left off that drill-down; the chips there show
+  what was carried over.
   When the window contains gateway-run tool calls, a **Gateway-run tools** table
   shows calls, failures, and spend per tool, so "what did search cost me last
   week" has an answer that is not one request at a time. MCP tools are excluded

@@ -66,6 +66,12 @@ _SESSION_BREAKDOWN_TOP_N = 250
 # keep a caller from posting an unbounded IN list.
 _MAX_REQUEST_GROUPS = 1000
 
+# How many values one repeatable entity filter (model / user / API key) may carry
+# on the analytics endpoints. Far above what a chart can distinguish (a stacked
+# series folds past eight groups), so it never binds a real comparison; it is
+# there to keep a caller from posting an unbounded IN list.
+_MAX_FILTER_VALUES = 50
+
 Bucket = Literal["hour", "day"]
 SeriesGroupBy = Literal["model", "user_id", "api_key_id", "source"]
 
@@ -241,6 +247,24 @@ _COUNTS_DESC = (
     "Filter by budget participation: true = only enforced gateway rows, "
     "false = only imported rows that never touch a budget"
 )
+# The analytics endpoints take the three entity filters repeatably, so one chart
+# can compare a handful of models / users / keys instead of one at a time. The raw
+# list and count endpoints keep the single-value form: they back the request log,
+# whose bulk delete / set-price selection is expressed as a single value per
+# dimension, and widening them there would let a bulk op reach past the rows the
+# operator was shown.
+_USER_MULTI_DESC = (
+    "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of "
+    f"them. At most {_MAX_FILTER_VALUES} per call."
+)
+_MODEL_MULTI_DESC = (
+    "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. "
+    f"At most {_MAX_FILTER_VALUES} per call."
+)
+_API_KEY_MULTI_DESC = (
+    "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values "
+    f"match any of them. At most {_MAX_FILTER_VALUES} per call."
+)
 _DIMENSIONS_DESC = (
     "Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the "
     "'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in "
@@ -250,18 +274,35 @@ _DIMENSIONS_DESC = (
 )
 
 
+def _match_any(column: Any, value: str | list[str]) -> ColumnElement[bool]:
+    """Match a column against one value or any of several.
+
+    A single value stays an equality test so it uses the column's index the way a
+    one-value filter always did; several become an ``IN``. An empty list would
+    match nothing, so callers skip the condition entirely rather than emitting
+    ``IN ()``.
+    """
+    if isinstance(value, str):
+        condition = column == value
+    elif len(value) == 1:
+        condition = column == value[0]
+    else:
+        condition = column.in_(value)
+    return cast("ColumnElement[bool]", condition)
+
+
 def _usage_filters(
     *,
     start_date: datetime | None,
     end_date: datetime | None,
-    user_id: str | None,
+    user_id: str | list[str] | None,
     status: str | None,
-    model: str | None,
+    model: str | list[str] | None,
     endpoint: str | None,
     provider: str | None = None,
     source: str | None = None,
     source_label: str | None = None,
-    api_key_id: str | None = None,
+    api_key_id: str | list[str] | None = None,
     priced: bool | None = None,
     tool: str | None = None,
     counts_toward_budget: bool | None = None,
@@ -278,8 +319,8 @@ def _usage_filters(
         conditions.append(UsageLog.timestamp >= start_date)
     if end_date is not None:
         conditions.append(UsageLog.timestamp < end_date)
-    if user_id is not None:
-        conditions.append(UsageLog.user_id == user_id)
+    if user_id is not None and user_id != []:
+        conditions.append(_match_any(UsageLog.user_id, user_id))
     if status is not None:
         conditions.append(UsageLog.status == status)
     if status_code is not None:
@@ -293,8 +334,8 @@ def _usage_filters(
             # window. An explicit ``status`` wins, so the combination stays a
             # literal query rather than a silently contradictory one.
             conditions.append(UsageLog.status == "error")
-    if model is not None:
-        conditions.append(UsageLog.model == model)
+    if model is not None and model != []:
+        conditions.append(_match_any(UsageLog.model, model))
     if endpoint is not None:
         conditions.append(UsageLog.endpoint == endpoint)
     if provider is not None:
@@ -303,8 +344,8 @@ def _usage_filters(
         conditions.append(UsageLog.source == source)
     if source_label is not None:
         conditions.append(UsageLog.source_label == source_label)
-    if api_key_id is not None:
-        conditions.append(UsageLog.api_key_id == api_key_id)
+    if api_key_id is not None and api_key_id != []:
+        conditions.append(_match_any(UsageLog.api_key_id, api_key_id))
     if request_group_id:
         # A one-id lookup stays an equality test so it uses the index the same way
         # a single-row fetch would; the IN form is for the dashboard's batched
@@ -1087,14 +1128,14 @@ async def _summary_context(
     *,
     start_date: datetime | None,
     end_date: datetime | None,
-    user_id: str | None,
+    user_id: list[str] | None,
     status: str | None,
-    model: str | None,
+    model: list[str] | None,
     endpoint: str | None,
     provider: str | None = None,
     source: str | None = None,
     source_label: str | None = None,
-    api_key_id: str | None = None,
+    api_key_id: list[str] | None = None,
     priced: bool | None = None,
     tool: str | None = None,
     counts_toward_budget: bool | None = None,
@@ -1167,15 +1208,19 @@ async def usage_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
-    user_id: str | None = Query(default=None, description=_USER_DESC),
+    user_id: Annotated[
+        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
+    ] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
-    model: str | None = Query(default=None, description=_MODEL_DESC),
+    model: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
-    api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
+    api_key_id: Annotated[
+        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
+    ] = None,
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
@@ -1197,6 +1242,9 @@ async def usage_summary(
     totals or the series should narrow ``dimensions`` rather than pay for all eight
     (the dashboard's tiles, timeline context, and model typeahead all do). Omitting
     the parameter keeps the full set.
+
+    ``model``, ``user_id``, and ``api_key_id`` are repeatable: several values match
+    any of them, so one chart can compare a handful of models, users, or keys.
     """
     start, end, conditions, totals = await _summary_context(
         db,
@@ -1298,15 +1346,19 @@ async def usage_series(
     group_by: SeriesGroupBy = Query(description="Dimension to split the series by"),
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
-    user_id: str | None = Query(default=None, description=_USER_DESC),
+    user_id: Annotated[
+        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
+    ] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
-    model: str | None = Query(default=None, description=_MODEL_DESC),
+    model: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
-    api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
+    api_key_id: Annotated[
+        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
+    ] = None,
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
@@ -1429,15 +1481,19 @@ async def usage_summary_csv(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
-    user_id: str | None = Query(default=None, description=_USER_DESC),
+    user_id: Annotated[
+        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
+    ] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
-    model: str | None = Query(default=None, description=_MODEL_DESC),
+    model: Annotated[list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
     endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
     provider: str | None = Query(default=None, description=_PROVIDER_DESC),
     source: str | None = Query(default=None, description=_SOURCE_DESC),
     source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
-    api_key_id: str | None = Query(default=None, description=_API_KEY_DESC),
+    api_key_id: Annotated[
+        list[str] | None, Query(max_length=_MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
+    ] = None,
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),

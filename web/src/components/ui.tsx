@@ -542,3 +542,74 @@ export function FilterComboBox({
     </ComboBox.Root>
   );
 }
+
+// The same typeahead, accumulating several values instead of one: an analytics
+// filter is a comparison ("these three models"), not a single choice. Picking an
+// option adds it and clears the query, and the list stays open on the remaining
+// options so a run of selections takes one gesture; picked options drop out of it.
+// Removal lives with the page's filter chips (one per value) rather than a second
+// chip row here, so the applied set is visible whether or not the picker is open.
+// Dismiss the list (Escape, or a click outside) before reaching for the page
+// behind it: it is an overlay, so it holds focus while open.
+export function FilterMultiComboBox({
+  label,
+  values,
+  onChange,
+  options,
+  placeholder,
+  maxVisible = 50,
+}: {
+  label: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+  options: { value: string; label: string }[];
+  // Shown while nothing is picked (e.g. "All users"); once something is, the
+  // input reports the size of the selection instead.
+  placeholder?: string;
+  maxVisible?: number;
+}) {
+  const [text, setText] = useState("");
+
+  const query = text.trim().toLowerCase();
+  const visible = options
+    .filter((o) => !values.includes(o.value))
+    .filter((o) => !query || o.value.toLowerCase().includes(query) || o.label.toLowerCase().includes(query))
+    .slice(0, maxVisible);
+
+  return (
+    <ComboBox.Root
+      allowsEmptyCollection
+      menuTrigger="focus"
+      inputValue={text}
+      onInputChange={setText}
+      // Never a committed selection of its own: the picked values live in
+      // `values`, so the input stays a search box.
+      selectedKey={null}
+      onSelectionChange={(key) => {
+        if (key == null) return;
+        const next = String(key);
+        if (!values.includes(next)) onChange([...values, next]);
+        setText("");
+      }}
+      className="flex flex-col gap-1"
+    >
+      <Label className="text-xs font-medium text-[var(--otari-muted)]">{label}</Label>
+      <ComboBox.InputGroup>
+        <Input
+          placeholder={values.length === 0 ? placeholder : `${values.length} selected`}
+          autoComplete="off"
+        />
+        <ComboBox.Trigger />
+      </ComboBox.InputGroup>
+      <ComboBox.Popover>
+        <ListBox items={visible} className="max-h-72 overflow-auto">
+          {(option: { value: string; label: string }) => (
+            <ListBoxItem id={option.value} textValue={option.label}>
+              {option.label}
+            </ListBoxItem>
+          )}
+        </ListBox>
+      </ComboBox.Popover>
+    </ComboBox.Root>
+  );
+}

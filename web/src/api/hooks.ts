@@ -711,14 +711,22 @@ export function useDeleteUser() {
 // while the request goes out unfiltered and the table quietly shows everything.
 function usageParams(filters: UsageFilters): URLSearchParams {
   const params = new URLSearchParams();
+  // A multi-value filter goes on the wire as a repeated param (the analytics
+  // endpoints match any of them); an empty array is no filter at all, not a
+  // filter matching nothing.
+  const appendAll = (key: string, value: string | string[] | undefined) => {
+    for (const one of typeof value === "string" ? [value] : (value ?? [])) {
+      if (one) params.append(key, one);
+    }
+  };
   if (filters.start_date) params.set("start_date", filters.start_date);
   if (filters.end_date) params.set("end_date", filters.end_date);
   if (filters.status) params.set("status", filters.status);
-  if (filters.model) params.set("model", filters.model);
+  appendAll("model", filters.model);
   if (filters.endpoint) params.set("endpoint", filters.endpoint);
   if (filters.provider) params.set("provider", filters.provider);
-  if (filters.user_id) params.set("user_id", filters.user_id);
-  if (filters.api_key_id) params.set("api_key_id", filters.api_key_id);
+  appendAll("user_id", filters.user_id);
+  appendAll("api_key_id", filters.api_key_id);
   if (filters.source) params.set("source", filters.source);
   if (filters.source_label) params.set("source_label", filters.source_label);
   if (filters.tool) params.set("tool", filters.tool);

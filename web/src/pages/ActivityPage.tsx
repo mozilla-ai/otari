@@ -1138,13 +1138,17 @@ export function ActivityPage() {
   // counted client-side from the full filter set but re-derived server-side from
   // this body, so any filter left out widens the delete/reprice past the rows the
   // operator was shown (a session drill-down would wipe every other session).
+  //
+  // The three entity filters read from this page's own single-value URL state, not
+  // from `filters` (whose type allows the analytics page's multi-value form, which
+  // a bulk selection cannot express).
   const selectionBody = (): UsageMutationSelection =>
     selection.allMatching
       ? {
           by_filter: true,
-          model: filters.model,
-          user_id: filters.user_id,
-          api_key_id: filters.api_key_id,
+          model: modelFilter.trim() || undefined,
+          user_id: userFilter || undefined,
+          api_key_id: apiKeyFilter || undefined,
           status: filters.status,
           source: filters.source,
           source_label: filters.source_label,

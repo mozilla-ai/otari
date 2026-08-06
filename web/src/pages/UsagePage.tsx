@@ -20,7 +20,7 @@ import {
   DeltaHint,
   EmptyState,
   ErrorBanner,
-  FilterComboBox,
+  FilterMultiComboBox,
   FilterSelect,
   PageHeader,
   RefreshButton,
@@ -344,9 +344,12 @@ export function UsagePage() {
   const [customMode, setCustomMode] = useState(false);
   const [customStart, setCustomStart] = useState<string | undefined>();
   const [customEnd, setCustomEnd] = useState<string | undefined>();
-  const [modelFilter, setModelFilter] = useState("");
-  const [userFilter, setUserFilter] = useState("");
-  const [apiKeyFilter, setApiKeyFilter] = useState("");
+  // Entity filters are sets, not single choices: the question this page answers is
+  // usually a comparison ("these two models", "this team's three keys"). The
+  // endpoints take each one repeatably and match any of its values.
+  const [modelFilters, setModelFilters] = useState<string[]>([]);
+  const [userFilters, setUserFilters] = useState<string[]>([]);
+  const [apiKeyFilters, setApiKeyFilters] = useState<string[]>([]);
   const [metric, setMetric] = useState<ChartMetric>("cost");
   const [groupBy, setGroupBy] = useState<"" | UsageGroupBy>("");
 
@@ -364,11 +367,11 @@ export function UsagePage() {
     () => ({
       start_date: winStart,
       end_date: winEnd,
-      model: modelFilter.trim() || undefined,
-      user_id: userFilter || undefined,
-      api_key_id: apiKeyFilter || undefined,
+      model: modelFilters.length > 0 ? modelFilters : undefined,
+      user_id: userFilters.length > 0 ? userFilters : undefined,
+      api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
     }),
-    [winStart, winEnd, modelFilter, userFilter, apiKeyFilter],
+    [winStart, winEnd, modelFilters, userFilters, apiKeyFilters],
   );
 
   // The immediately-preceding window of equal length, for period-over-period
@@ -425,30 +428,50 @@ export function UsagePage() {
     label: k.key_name ?? `${k.id.slice(0, 8)}…`,
   }));
   const keyLabel = (id: string) => keyOptions.find((o) => o.value === id)?.label ?? id;
-  // Keep a selected-but-not-in-list model visible (e.g. seeded from elsewhere).
-  const modelOptionList = (
-    modelFilter && !modelOptions.includes(modelFilter) ? [modelFilter, ...modelOptions] : modelOptions
-  ).map((m) => ({ value: m, label: m }));
+  // Keep selected-but-not-in-list models visible (e.g. one whose traffic left the
+  // window after it was picked), so a selection never silently leaves the picker.
+  const modelOptionList = [...modelFilters, ...modelOptions.filter((m) => !modelFilters.includes(m))].map((m) => ({
+    value: m,
+    label: m,
+  }));
 
   // The default 30d window is the baseline (like the old "All" was), so it does
   // not count as a user-applied time filter: clearing returns to it, and an
   // empty gateway on the default view still reads as onboarding, not "no match".
   const timeFiltered = customMode || preset.key !== USAGE_DEFAULT_KEY;
-  const anyFilter = Boolean(modelFilter.trim() || userFilter || apiKeyFilter || timeFiltered);
+  const anyFilter =
+    modelFilters.length > 0 || userFilters.length > 0 || apiKeyFilters.length > 0 || timeFiltered;
 
-  // Active entity filters as removable chips (time is driven by the presets and
-  // the chart selection, so it is not a chip). Values show the human label.
+  // Active entity filters as removable chips, one per picked value (time is driven
+  // by the presets and the chart selection, so it is not a chip). The chip row is
+  // also where a value is removed: it stays visible when the pickers are collapsed.
   const labelFor = (options: { value: string; label: string }[], value: string) =>
     options.find((o) => o.value === value)?.label ?? value;
   const clearEntityFilters = () => {
-    setModelFilter("");
-    setUserFilter("");
-    setApiKeyFilter("");
+    setModelFilters([]);
+    setUserFilters([]);
+    setApiKeyFilters([]);
   };
+  const valueChips = (
+    dimension: string,
+    label: string,
+    values: string[],
+    display: (value: string) => string,
+    setValues: (next: string[]) => void,
+  ): FilterChip[] =>
+    values.map((value) => ({
+      key: `${dimension}:${value}`,
+      label,
+      value: display(value),
+      // The value is part of the control's name: several chips share a dimension,
+      // and "Remove User filter" three times over names none of them.
+      clearLabel: `Remove ${label} filter ${display(value)}`,
+      onClear: () => setValues(values.filter((v) => v !== value)),
+    }));
   const filterChips: FilterChip[] = [
-    ...(userFilter ? [{ key: "user", label: "User", value: labelFor(userOptions, userFilter), onClear: () => setUserFilter("") }] : []),
-    ...(modelFilter.trim() ? [{ key: "model", label: "Model", value: modelFilter.trim(), onClear: () => setModelFilter("") }] : []),
-    ...(apiKeyFilter ? [{ key: "key", label: "API key", value: labelFor(keyOptions, apiKeyFilter), onClear: () => setApiKeyFilter("") }] : []),
+    ...valueChips("user", "User", userFilters, (v) => labelFor(userOptions, v), setUserFilters),
+    ...valueChips("model", "Model", modelFilters, (v) => v, setModelFilters),
+    ...valueChips("key", "API key", apiKeyFilters, (v) => labelFor(keyOptions, v), setApiKeyFilters),
   ];
 
   // Distinguish "this gateway has never served a request" from "no rows match
@@ -505,6 +528,13 @@ export function UsagePage() {
     }
     navigate(`/activity?${search.toString()}`);
   };
+
+  // The Activity log filters one value per dimension (its bulk delete / set-price
+  // selection is expressed that way, so widening it there could let a bulk op reach
+  // past the rows on screen). A drill therefore carries an entity filter only while
+  // it holds a single value; a multi-value one is dropped rather than narrowed to an
+  // arbitrary member, and Activity's own chips show the scope it did apply.
+  const carried = (values: string[]) => (values.length === 1 ? values[0] : undefined);
 
   const errorRate = totals && totals.request_count > 0 ? totals.error_count / totals.request_count : 0;
 
@@ -656,14 +686,14 @@ export function UsagePage() {
       key: "model",
       label: "Model",
       rows: data?.by_model ?? [],
-      drill: (key) => drillTo({ model: key, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+      drill: (key) => drillTo({ model: key, user_id: carried(userFilters), api_key_id: carried(apiKeyFilters) }),
     },
     {
       key: "user",
       label: "User",
       rows: data?.by_user ?? [],
       drill: (key) =>
-        drillTo({ user_id: key, model: modelFilter.trim() || undefined, api_key_id: apiKeyFilter || undefined }),
+        drillTo({ user_id: key, model: carried(modelFilters), api_key_id: carried(apiKeyFilters) }),
     },
   ];
 
@@ -678,21 +708,21 @@ export function UsagePage() {
       rows: data?.by_source_label ?? [],
       unknownLabel: "(no session)",
       drill: (key) =>
-        drillTo({ source_label: key, model: modelFilter.trim() || undefined, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+        drillTo({ source_label: key, model: carried(modelFilters), user_id: carried(userFilters), api_key_id: carried(apiKeyFilters) }),
     },
     {
       key: "endpoint",
       label: "Endpoint",
       rows: data?.by_endpoint ?? [],
       drill: (key) =>
-        drillTo({ endpoint: key, model: modelFilter.trim() || undefined, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+        drillTo({ endpoint: key, model: carried(modelFilters), user_id: carried(userFilters), api_key_id: carried(apiKeyFilters) }),
     },
     {
       key: "provider",
       label: "Provider",
       rows: data?.by_provider ?? [],
       drill: (key) =>
-        drillTo({ provider: key, model: modelFilter.trim() || undefined, user_id: userFilter || undefined, api_key_id: apiKeyFilter || undefined }),
+        drillTo({ provider: key, model: carried(modelFilters), user_id: carried(userFilters), api_key_id: carried(apiKeyFilters) }),
     },
     {
       key: "source",
@@ -701,9 +731,9 @@ export function UsagePage() {
       drill: (key) =>
         drillTo({
           source: key,
-          model: modelFilter.trim() || undefined,
-          user_id: userFilter || undefined,
-          api_key_id: apiKeyFilter || undefined,
+          model: carried(modelFilters),
+          user_id: carried(userFilters),
+          api_key_id: carried(apiKeyFilters),
         }),
     },
   ];
@@ -751,9 +781,27 @@ export function UsagePage() {
           </>
         }
       >
-        <FilterComboBox label="User" value={userFilter} onChange={setUserFilter} options={userOptions} placeholder="All users" />
-        <FilterComboBox label="Model" value={modelFilter} onChange={setModelFilter} options={modelOptionList} placeholder="All models" />
-        <FilterComboBox label="API key" value={apiKeyFilter} onChange={setApiKeyFilter} options={keyOptions} placeholder="All keys" />
+        <FilterMultiComboBox
+          label="User"
+          values={userFilters}
+          onChange={setUserFilters}
+          options={userOptions}
+          placeholder="All users"
+        />
+        <FilterMultiComboBox
+          label="Model"
+          values={modelFilters}
+          onChange={setModelFilters}
+          options={modelOptionList}
+          placeholder="All models"
+        />
+        <FilterMultiComboBox
+          label="API key"
+          values={apiKeyFilters}
+          onChange={setApiKeyFilters}
+          options={keyOptions}
+          placeholder="All keys"
+        />
       </FilterChips>
 
       {isEmptyEver ? (

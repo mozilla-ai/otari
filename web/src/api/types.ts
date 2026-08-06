@@ -557,11 +557,15 @@ export interface UsageFilters {
   // analytics previous-period query so its window does not overlap the current one.
   end_date?: string;
   status?: string;
-  model?: string;
+  // The three entity filters accept several values: the analytics endpoints take
+  // them as repeated query params and match any of them, so one chart can compare
+  // a handful of models / users / keys. The request-log endpoints (/v1/usage,
+  // /v1/usage/count) stay single-value, so the Activity page sends a bare string.
+  model?: string | string[];
   endpoint?: string;
   provider?: string;
-  user_id?: string;
-  api_key_id?: string;
+  user_id?: string | string[];
+  api_key_id?: string | string[];
   source?: string;
   // Session/project attribution (a row's `source_label`), so the log can be
   // scoped to the one agent session a breakdown row points at.
