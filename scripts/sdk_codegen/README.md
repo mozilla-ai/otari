@@ -131,6 +131,13 @@ no token), so a spec change that breaks generation for any language is caught on
 the PR rather than failing the post-merge codegen workflow. Keep its toolchain
 and matrix in sync with `otari-sdk-codegen.yml`.
 
+After opening the PR the workflow queues **auto-merge** on it, so a green
+regeneration lands without waiting for someone to notice. This needs *Allow
+auto-merge* enabled in each SDK repo's settings; if it is off, the step logs a
+warning and the regeneration still succeeds. Where branch protection requires an
+approving review, the merge stays queued until someone approves rather than
+merging unattended.
+
 **Required secret:** `SDK_CODEGEN_TOKEN`, a fine-grained PAT or GitHub App token
 with `Contents:write` and `Pull-requests:write` on the four SDK repos. The default
 `GITHUB_TOKEN` cannot push to other repositories.
