@@ -1,4 +1,17 @@
-import { Button, Card, Chip, ComboBox, Description, Input, Label, ListBox, ListBoxItem, Spinner, TextField } from "@heroui/react";
+import {
+  Button,
+  Card,
+  Chip,
+  ComboBox,
+  Description,
+  Input,
+  Label,
+  ListBox,
+  ListBoxItem,
+  Spinner,
+  TextArea,
+  TextField,
+} from "@heroui/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -59,6 +72,56 @@ function SecretField({
         data-lpignore="true"
       />
       {description ? <Description className="text-xs text-[var(--otari-muted)]">{description}</Description> : null}
+    </TextField>
+  );
+}
+
+// client_args is whatever the provider's SDK client constructor takes (timeouts,
+// custom headers), so it has no fixed schema and the form edits it as JSON. Blank
+// means "none": the API reads an explicit null as "clear it".
+type ClientArgsParse =
+  | { ok: true; value: Record<string, unknown> | null }
+  | { ok: false; error: string };
+
+function parseClientArgs(text: string): ClientArgsParse {
+  const raw = text.trim();
+  if (raw === "") return { ok: true, value: null };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: "Not valid JSON." };
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: 'Must be a JSON object, like {"timeout": 1800}.' };
+  }
+  return { ok: true, value: parsed as Record<string, unknown> };
+}
+
+// Render stored client_args back into the textarea, leaving it blank when there
+// are none so an untouched form submits null rather than an empty object.
+function formatClientArgs(args: Record<string, unknown> | null | undefined): string {
+  return args && Object.keys(args).length > 0 ? JSON.stringify(args, null, 2) : "";
+}
+
+// The client_args editor. Options are passed straight to the provider client, so
+// a bad value is rejected here rather than sent (issue #517).
+function ClientArgsField({
+  value,
+  onChange,
+  error,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  error: string | null;
+}) {
+  return (
+    <TextField value={value} onChange={onChange} isInvalid={error !== null} className="flex max-w-md flex-col gap-1">
+      <Label className="text-sm font-medium text-[var(--otari-ink)]">Client options (JSON)</Label>
+      <TextArea rows={3} placeholder={'{"timeout": 1800}'} spellCheck={false} className="font-mono text-xs" />
+      <Description className={error ? "text-xs text-red-700" : "text-xs text-[var(--otari-muted)]"}>
+        {error ?? "Passed to the provider's client, e.g. a request timeout in seconds or custom headers."}
+      </Description>
     </TextField>
   );
 }
@@ -215,6 +278,8 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [apiBase, setApiBase] = useState("");
   const [name, setName] = useState("");
+  const [clientArgsText, setClientArgsText] = useState("");
+  const clientArgs = parseClientArgs(clientArgsText);
 
   // Autofill hints are fetched lazily for just the selected provider, so the
   // picker itself never imports every provider SDK (issue #365).
@@ -235,10 +300,14 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
   // Require the key when the chosen provider says it needs one; keyless local
   // backends (Ollama, llama.cpp) can submit without it.
   const canSubmit =
-    providerId !== "" && !nameHasDelimiter && (!needsKey || apiKey.trim() !== "") && !create.isPending;
+    providerId !== "" &&
+    !nameHasDelimiter &&
+    (!needsKey || apiKey.trim() !== "") &&
+    clientArgs.ok &&
+    !create.isPending;
 
   const submit = () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !clientArgs.ok) return;
     create.mutate(
       {
         instance: renamed ? name.trim() : providerId,
@@ -247,6 +316,7 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         provider_type: renamed ? providerId : null,
         api_base: apiBase.trim() || null,
         api_key: apiKey.trim() || null,
+        client_args: clientArgs.value,
       },
       { onSuccess: onClose },
     );
@@ -286,29 +356,36 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         className="self-start text-xs font-medium text-[var(--otari-brand-dark)]"
         onClick={() => setShowAdvanced((v) => !v)}
       >
-        {showAdvanced ? "Hide advanced" : "Advanced (API base, rename)"}
+        {showAdvanced ? "Hide advanced" : "Advanced (API base, rename, client options)"}
       </button>
       {showAdvanced ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="API base"
-            value={apiBase}
-            onChange={setApiBase}
-            placeholder={selected?.default_api_base ?? "https://…/v1"}
-            description="Only if you route through a proxy. Blank uses the built-in default."
-          />
-          <Field
-            label="Name"
-            value={name}
-            onChange={setName}
-            placeholder={providerId || "instance name"}
-            description={
-              nameHasDelimiter ? (
-                <span className="text-red-700">A name cannot contain “:” or “/”.</span>
-              ) : (
-                "Rename to run two instances of the same provider."
-              )
-            }
+        <div className="flex flex-col gap-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="API base"
+              value={apiBase}
+              onChange={setApiBase}
+              placeholder={selected?.default_api_base ?? "https://…/v1"}
+              description="Only if you route through a proxy. Blank uses the built-in default."
+            />
+            <Field
+              label="Name"
+              value={name}
+              onChange={setName}
+              placeholder={providerId || "instance name"}
+              description={
+                nameHasDelimiter ? (
+                  <span className="text-red-700">A name cannot contain “:” or “/”.</span>
+                ) : (
+                  "Rename to run two instances of the same provider."
+                )
+              }
+            />
+          </div>
+          <ClientArgsField
+            value={clientArgsText}
+            onChange={setClientArgsText}
+            error={clientArgs.ok ? null : clientArgs.error}
           />
         </div>
       ) : null}
@@ -321,13 +398,14 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         </Button>
         <ConnectionTest
           getPayload={() =>
-            providerId === ""
+            providerId === "" || !clientArgs.ok
               ? null
               : {
                   instance: renamed ? name.trim() : providerId,
                   provider_type: renamed ? providerId : null,
                   api_base: apiBase.trim() || null,
                   api_key: apiKey.trim() || null,
+                  client_args: clientArgs.value,
                 }
           }
         />
@@ -344,18 +422,22 @@ function CustomProviderForm({ onClose }: { onClose: () => void }) {
   const [providerType, setProviderType] = useState("openai-compatible");
   const [apiBase, setApiBase] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [clientArgsText, setClientArgsText] = useState("");
+  const clientArgs = parseClientArgs(clientArgsText);
 
   const nameHasDelimiter = /[:/]/.test(name);
-  const canSubmit = name.trim() !== "" && !nameHasDelimiter && apiBase.trim() !== "" && !create.isPending;
+  const canSubmit =
+    name.trim() !== "" && !nameHasDelimiter && apiBase.trim() !== "" && clientArgs.ok && !create.isPending;
 
   const submit = () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !clientArgs.ok) return;
     create.mutate(
       {
         instance: name.trim(),
         provider_type: providerType || "openai-compatible",
         api_base: apiBase.trim(),
         api_key: apiKey.trim() || null,
+        client_args: clientArgs.value,
       },
       { onSuccess: onClose },
     );
@@ -406,6 +488,11 @@ function CustomProviderForm({ onClose }: { onClose: () => void }) {
         label="API key (optional)"
         description="Many local backends need none. Stored encrypted."
       />
+      <ClientArgsField
+        value={clientArgsText}
+        onChange={setClientArgsText}
+        error={clientArgs.ok ? null : clientArgs.error}
+      />
       <div className="flex flex-wrap items-start gap-2">
         <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
           {create.isPending ? "Adding…" : "Add provider"}
@@ -415,13 +502,14 @@ function CustomProviderForm({ onClose }: { onClose: () => void }) {
         </Button>
         <ConnectionTest
           getPayload={() =>
-            name.trim() === "" || apiBase.trim() === ""
+            name.trim() === "" || apiBase.trim() === "" || !clientArgs.ok
               ? null
               : {
                   instance: name.trim(),
                   provider_type: providerType || "openai-compatible",
                   api_base: apiBase.trim(),
                   api_key: apiKey.trim() || null,
+                  client_args: clientArgs.value,
                 }
           }
         />
@@ -486,12 +574,16 @@ function EditProviderForm({
   const [apiBase, setApiBase] = useState(provider.api_base ?? "");
   const [replacingKey, setReplacingKey] = useState(false);
   const [apiKey, setApiKey] = useState("");
+  const [clientArgsText, setClientArgsText] = useState(() => formatClientArgs(provider.client_args));
+  const clientArgs = parseClientArgs(clientArgsText);
 
   const submit = () => {
-    if (update.isPending) return;
+    if (update.isPending || !clientArgs.ok) return;
     const body: UpdateStoredProviderRequest = {
       provider_type: providerType.trim() || null,
       api_base: apiBase.trim() || null,
+      // Sent on every save, so emptying the field clears the stored options.
+      client_args: clientArgs.value,
       // Guard against clobbering a concurrent edit; a 412 tells the operator to reload.
       expected_updated_at: provider.updated_at,
     };
@@ -551,8 +643,13 @@ function EditProviderForm({
             </div>
           )}
         </div>
+        <ClientArgsField
+          value={clientArgsText}
+          onChange={setClientArgsText}
+          error={clientArgs.ok ? null : clientArgs.error}
+        />
         <div className="flex gap-2">
-          <Button variant="primary" isDisabled={update.isPending} onPress={submit}>
+          <Button variant="primary" isDisabled={update.isPending || !clientArgs.ok} onPress={submit}>
             {update.isPending ? "Saving…" : "Save changes"}
           </Button>
           <Button variant="ghost" onPress={onClose}>
@@ -1043,6 +1140,10 @@ export function ProvidersPage() {
       {addOpen && secretKeyConfigured ? <AddProviderForm onClose={() => setAddOpen(false)} /> : null}
       {editingProvider ? (
         <EditProviderForm
+          // Remount when the operator switches rows: the fields are seeded from
+          // the provider once, so without this, editing a second provider would
+          // open with the first one's values (and save them onto it).
+          key={editingProvider.instance}
           provider={editingProvider}
           onClose={() => setEditing(null)}
           onSaved={clearTest}

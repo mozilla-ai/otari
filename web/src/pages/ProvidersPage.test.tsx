@@ -44,13 +44,18 @@ function providerInfo(instance: string, envKey: string | null = null): ProviderI
   };
 }
 
-function storedProvider(instance: string, last4: string | null, decryptable = true): StoredProvider {
+function storedProvider(
+  instance: string,
+  last4: string | null,
+  decryptable = true,
+  clientArgs: Record<string, unknown> = {},
+): StoredProvider {
   return {
     instance,
     provider_type: null,
     api_base: null,
     last4,
-    client_args: {},
+    client_args: clientArgs,
     created_at: null,
     updated_at: "2026-01-01T00:00:00+00:00",
     decryptable,
@@ -147,8 +152,19 @@ function mockApi(opts: MockOpts = {}) {
         return jsonResponse(testResult);
       }
       if (method === "POST") {
-        const body = JSON.parse(String(init?.body)) as { instance: string; api_key?: string | null };
-        const row = storedProvider(body.instance, body.api_key ? body.api_key.slice(-4) : null);
+        const body = JSON.parse(String(init?.body)) as {
+          instance: string;
+          api_key?: string | null;
+          client_args?: Record<string, unknown> | null;
+        };
+        // Mirror the backend, which normalises a null client_args to {} (the
+        // column is non-null).
+        const row = storedProvider(
+          body.instance,
+          body.api_key ? body.api_key.slice(-4) : null,
+          true,
+          body.client_args ?? {},
+        );
         storedList = [...storedList, row];
         return jsonResponse(row, 201);
       }
@@ -158,6 +174,7 @@ function mockApi(opts: MockOpts = {}) {
           provider_type?: string | null;
           api_base?: string | null;
           api_key?: string | null;
+          client_args?: Record<string, unknown> | null;
           expected_updated_at?: string | null;
         };
         const existing = storedList.find((p) => p.instance === instance);
@@ -175,6 +192,7 @@ function mockApi(opts: MockOpts = {}) {
           provider_type: "provider_type" in body ? (body.provider_type ?? null) : existing.provider_type,
           api_base: "api_base" in body ? (body.api_base ?? null) : existing.api_base,
           last4: "api_key" in body ? (body.api_key ? body.api_key.slice(-4) : null) : existing.last4,
+          client_args: "client_args" in body ? (body.client_args ?? {}) : existing.client_args,
           updated_at: "2026-01-02T00:00:00+00:00",
         };
         storedList = storedList.map((p) => (p.instance === instance ? row : p));
@@ -304,8 +322,9 @@ describe("ProvidersPage", () => {
 
     // Known provider is the default tab: a provider picker plus a collapsed Advanced section.
     expect(screen.getByPlaceholderText("Search providers…")).toBeInTheDocument();
-    expect(screen.getByText("Advanced (API base, rename)")).toBeInTheDocument();
+    expect(screen.getByText("Advanced (API base, rename, client options)")).toBeInTheDocument();
     expect(screen.queryByLabelText("API base")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Client options (JSON)")).not.toBeInTheDocument();
   });
 
   it("fetches provider autofill hints lazily, only after one is selected", async () => {
@@ -641,6 +660,102 @@ describe("ProvidersPage", () => {
     // The provider error stays on screen: a 404 is also what a wrong api_base
     // returns, so hiding it would mask a misconfiguration behind reassurance.
     expect(screen.getByText("Error code: 404")).toBeInTheDocument();
+  });
+
+  it("sends client options entered on the custom-endpoint form", async () => {
+    // otari#517: client_args is the only way to give the provider client a
+    // timeout, which a slow self-hosted backend needs; it was reachable only
+    // through config.yml or the raw API before.
+    const fetchMock = mockApi({ meta: [], stored: [] });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Add your first provider" }));
+    await user.click(screen.getByRole("button", { name: "Custom endpoint" }));
+    await user.type(screen.getByLabelText("Name"), "homelab");
+    await user.type(screen.getByLabelText("API base"), "https://my-box.example.net");
+    await user.type(screen.getByLabelText("Client options (JSON)"), '{{"timeout": 1800}');
+    await user.click(screen.getByRole("button", { name: "Add provider" }));
+
+    const post = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([u, init]) => String(u).endsWith("/v1/provider-credentials") && (init?.method ?? "") === "POST",
+      );
+      expect(call).toBeDefined();
+      return call!;
+    });
+    expect(JSON.parse(String(post[1]?.body))).toMatchObject({
+      instance: "homelab",
+      client_args: { timeout: 1800 },
+    });
+  });
+
+  it("rejects client options that are not a JSON object instead of sending them", async () => {
+    const fetchMock = mockApi({ meta: [], stored: [] });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await user.click(await screen.findByRole("button", { name: "Add your first provider" }));
+    await user.click(screen.getByRole("button", { name: "Custom endpoint" }));
+    await user.type(screen.getByLabelText("Name"), "homelab");
+    await user.type(screen.getByLabelText("API base"), "https://my-box.example.net");
+
+    const clientArgs = screen.getByLabelText("Client options (JSON)");
+    await user.type(clientArgs, "timeout: 1800");
+    expect(await screen.findByText("Not valid JSON.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeDisabled();
+    // A "Test connection" would hit the provider with the same bad options.
+    expect(screen.getByRole("button", { name: "Test connection" })).toBeDisabled();
+
+    // Valid JSON, but not an object: the API takes a mapping of client kwargs.
+    // "[[" is userEvent's escape for a literal "[".
+    await user.clear(clientArgs);
+    await user.type(clientArgs, "[[1800]");
+    expect(await screen.findByText('Must be a JSON object, like {"timeout": 1800}.')).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add provider" })).toBeDisabled();
+
+    expect(
+      fetchMock.mock.calls.some(
+        ([u, init]) => String(u).endsWith("/v1/provider-credentials") && (init?.method ?? "") === "POST",
+      ),
+    ).toBe(false);
+  });
+
+  it("prefills stored client options on edit and clears them when emptied", async () => {
+    const fetchMock = mockApi({ stored: [storedProvider("homelab", "1234", true, { timeout: 1800 })] });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1234");
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const clientArgs = screen.getByLabelText("Client options (JSON)");
+    expect(clientArgs).toHaveValue(JSON.stringify({ timeout: 1800 }, null, 2));
+
+    // Emptying the field clears the stored options: an explicit null, not an
+    // omission, which the API would read as "leave them alone".
+    await user.clear(clientArgs);
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    const patch = await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "PATCH");
+      expect(call).toBeDefined();
+      return call!;
+    });
+    expect(JSON.parse(String(patch[1]?.body)).client_args).toBeNull();
+  });
+
+  it("keeps a save from going out while the edited client options are invalid", async () => {
+    const fetchMock = mockApi({ stored: [storedProvider("homelab", "1234", true, { timeout: 1800 })] });
+    const user = userEvent.setup();
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("••••1234");
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.type(screen.getByLabelText("Client options (JSON)"), "oops");
+
+    expect(await screen.findByText("Not valid JSON.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([, init]) => (init?.method ?? "") === "PATCH")).toBe(false);
   });
 
   it("drops a connection-test verdict once the provider is edited", async () => {
