@@ -160,8 +160,10 @@ async def create_search(
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.
     - API key: usage and spend always bind to the key's own user. A ``user``
-      field naming a different user is rejected with 403 (or ignored, when
-      ``reject_user_mismatch`` is disabled); it is never billed to that user.
+      field naming a different user is rejected with 403 (or ignored, when the
+      key's own ``reject_user_mismatch`` is false, or the deployment-wide
+      setting is disabled and the key does not override it); it is never billed
+      to that user.
     """
     return await _dispatch_search(
         raw_request=raw_request,
@@ -195,8 +197,10 @@ async def create_search_for_tool(
     Authentication modes:
     - Master key: the ``user`` field is required and may name any existing user.
     - API key: usage and spend always bind to the key's own user. A ``user``
-      field naming a different user is rejected with 403 (or ignored, when
-      ``reject_user_mismatch`` is disabled); it is never billed to that user.
+      field naming a different user is rejected with 403 (or ignored, when the
+      key's own ``reject_user_mismatch`` is false, or the deployment-wide
+      setting is disabled and the key does not override it); it is never billed
+      to that user.
     """
     return await _dispatch_search(
         raw_request=raw_request,

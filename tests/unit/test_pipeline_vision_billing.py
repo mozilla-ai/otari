@@ -41,7 +41,7 @@ class _Recorder:
                 user_id="user-1",
                 allowed_models=None,
                 exclude_from_budget=False,
-                ignore_user_mismatch=False,
+                reject_user_mismatch=None,
             ), False
 
         async def fake_find_pricing(*args: Any, **kwargs: Any) -> None:

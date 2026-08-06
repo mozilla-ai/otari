@@ -51,12 +51,13 @@ def resolve_user_id(
         no_user_error: Raised when the API key has no associated user
         forbidden_user_error: Raised when a non-master key names a user other
             than its own (only when ``reject_mismatch`` is True)
-        reject_mismatch: When True (default), a non-master key naming a different
-            user is rejected. When False, the mismatch is ignored and spend is
-            still bound to the key's own user (the client ``user`` is treated as
-            a provider-side tag only). A key flagged ``ignore_user_mismatch`` is
-            lenient regardless of this argument. Spend is bound to the key's user
-            either way; leniency never lets a key charge another user.
+        reject_mismatch: The deployment-wide default. When True, a non-master key
+            naming a different user is rejected. When False, the mismatch is
+            ignored and spend is still bound to the key's own user (the client
+            ``user`` is treated as a provider-side tag only). A key whose own
+            ``reject_user_mismatch`` is not None overrides this in either
+            direction. Spend is bound to the key's user however this resolves;
+            leniency never lets a key charge another user.
 
     Returns:
         Resolved user_id string
@@ -76,10 +77,12 @@ def resolve_user_id(
     # A non-master key is bound to its own user. Allow the request to echo that
     # same id; a different id is rejected (strict) or ignored (lenient) — either
     # way spend binds to key_user_id, so a key can never charge another user.
-    # The per-key flag scopes leniency to the one key that needs it (e.g. a client
-    # whose ``user`` field is telemetry), leaving the gateway-wide default strict.
-    if api_key.ignore_user_mismatch:
-        reject_mismatch = False
+    # A key may override the deployment-wide default in either direction (NULL =
+    # inherit), so one client whose ``user`` field is telemetry can be let through
+    # without relaxing the check for every key, and a deployment that relaxed it
+    # globally can still pin an individual key strict.
+    if api_key.reject_user_mismatch is not None:
+        reject_mismatch = api_key.reject_user_mismatch
     if reject_mismatch and user_id_from_request and user_id_from_request != key_user_id:
         raise forbidden_user_error
 

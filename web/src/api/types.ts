@@ -412,10 +412,10 @@ export interface ApiKey {
   // When true, requests on this key are logged with cost but never counted toward
   // the user's budget or spend, and never gated by it.
   exclude_from_budget: boolean;
-  // When true, a request on this key naming a different `user` is accepted rather
-  // than rejected, even with the gateway-wide reject_user_mismatch on. Spend still
-  // binds to this key's own user.
-  ignore_user_mismatch: boolean;
+  // Per-key override of the deployment-wide reject_user_mismatch: null inherits
+  // it, true always rejects a request naming a different `user`, false always
+  // accepts one. Spend binds to this key's own user in every case.
+  reject_user_mismatch: boolean | null;
   metadata: Record<string, unknown>;
 }
 
@@ -425,7 +425,7 @@ export interface CreateKeyRequest {
   expires_at?: string | null;
   allowed_models?: string[] | null;
   exclude_from_budget?: boolean;
-  ignore_user_mismatch?: boolean;
+  reject_user_mismatch?: boolean | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -442,7 +442,7 @@ export interface CreateKeyResponse {
   is_active: boolean;
   allowed_models: string[] | null;
   exclude_from_budget: boolean;
-  ignore_user_mismatch: boolean;
+  reject_user_mismatch: boolean | null;
   metadata: Record<string, unknown>;
 }
 
@@ -454,7 +454,9 @@ export interface UpdateKeyRequest {
   expires_at?: string | null;
   allowed_models?: string[] | null;
   exclude_from_budget?: boolean | null;
-  ignore_user_mismatch?: boolean | null;
+  // Tri-state like `allowed_models`: omit = unchanged, null = clear to inheriting
+  // the deployment setting, true/false = pin this key strict/lenient.
+  reject_user_mismatch?: boolean | null;
   metadata?: Record<string, unknown> | null;
 }
 

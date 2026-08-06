@@ -32,20 +32,20 @@ API key's own user and, by default, rejects a request that names a different use
 (`403 permission_error`), so the key Claude Code uses needs that check relaxed.
 
 Do it on the key, not the deployment: create the key with
-`ignore_user_mismatch: true` (dashboard: Keys -> create a key, open **Advanced**,
-check **Ignore mismatched `user` field**; or `PATCH /v1/keys/{id}` on an existing
-one). Every other key keeps the strict check.
+`reject_user_mismatch: false` (dashboard: Keys, create a key, open **Advanced**,
+set **Mismatched `user` field** to *Always accept*; or `PATCH /v1/keys/{id}` on an
+existing one). Every other key keeps whatever the deployment setting says.
 
 ```bash
 curl -sS "$OTARI_URL/v1/keys" \
   -H "Otari-Key: Bearer $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"key_name":"claude-code","user_id":"alice","ignore_user_mismatch":true}'
+  -d '{"key_name":"claude-code","user_id":"alice","reject_user_mismatch":false}'
 ```
 
-Spend still binds to the key's own user either way; the client value is forwarded
-to the provider as an end-user tag only. The gateway-wide `reject_user_mismatch:
-false` setting has the same effect but applies to every non-master key on the
-deployment, so prefer the per-key flag.
+The key-level field is a three-way override of the deployment-wide setting of the
+same name: `null` (the default) inherits it, `false` always accepts a mismatched
+`user`, `true` always rejects one. Spend binds to the key's own user in every
+case; the client value is forwarded to the provider as an end-user tag only.
 
 Then run Claude Code against your local Otari:
 

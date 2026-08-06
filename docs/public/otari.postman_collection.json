@@ -972,7 +972,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"ignore_user_mismatch\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"user_id\": \"string\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\"\n}"
             },
             "description": "Create a new API key.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.",
             "header": [
@@ -1030,7 +1030,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"ignore_user_mismatch\": false,\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {}\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
             },
             "description": "Update an API key.\n\nRequires master key authentication.",
             "header": [
@@ -2095,7 +2095,7 @@
               },
               "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
             },
-            "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when\n  ``reject_user_mismatch`` is disabled); it is never billed to that user.",
+            "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
             "header": [
               {
                 "key": "Content-Type",
@@ -2127,7 +2127,7 @@
               },
               "raw": "{\n  \"max_results\": 5,\n  \"query\": \"otari llm gateway\"\n}"
             },
-            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when\n  ``reject_user_mismatch`` is disabled); it is never billed to that user.",
+            "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
             "header": [
               {
                 "key": "Content-Type",

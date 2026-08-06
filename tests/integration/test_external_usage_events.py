@@ -86,7 +86,7 @@ def _make_key(
     user_id: str,
     *,
     exclude_from_budget: bool = True,
-    ignore_user_mismatch: bool = False,
+    reject_user_mismatch: bool | None = None,
 ) -> dict[str, str]:
     """Create an API key bound to `user_id` and return its auth header.
 
@@ -98,7 +98,7 @@ def _make_key(
             "key_name": f"importer-{user_id}",
             "user_id": user_id,
             "exclude_from_budget": exclude_from_budget,
-            "ignore_user_mismatch": ignore_user_mismatch,
+            "reject_user_mismatch": reject_user_mismatch,
         },
         headers=master_key_header,
     )
@@ -168,12 +168,12 @@ def test_api_key_cannot_attribute_to_another_user(
 def test_lenient_key_binds_foreign_user_to_its_own(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
-    """A key flagged ignore_user_mismatch accepts a foreign user_id and still binds
-    the usage to its own user, matching the request path (issue #493)."""
+    """A key overriding reject_user_mismatch to false accepts a foreign user_id and
+    still binds the usage to its own user, matching the request path (issue #493)."""
     _seed_user(client, master_key_header, "dev-a")
     _seed_user(client, master_key_header, "dev-b")
     _seed_pricing(client, master_key_header)
-    headers = _make_key(client, master_key_header, "dev-a", ignore_user_mismatch=True)
+    headers = _make_key(client, master_key_header, "dev-a", reject_user_mismatch=False)
 
     resp = _post(client, headers, [_event("lenient")], user_id="dev-b")
     assert resp.status_code == 200, resp.text

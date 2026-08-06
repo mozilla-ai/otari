@@ -15,11 +15,11 @@ def _make_error(detail: str, status_code: int = 400) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail)
 
 
-def _make_key(user_id: str | None, *, ignore_user_mismatch: bool = False) -> MagicMock:
+def _make_key(user_id: str | None, *, reject_user_mismatch: bool | None = None) -> MagicMock:
     """A key stub with the attributes resolve_user_id reads, all set explicitly."""
     api_key = MagicMock()
     api_key.user_id = user_id
-    api_key.ignore_user_mismatch = ignore_user_mismatch
+    api_key.reject_user_mismatch = reject_user_mismatch
     return api_key
 
 
@@ -84,9 +84,9 @@ def test_resolve_user_id_lenient_mode_binds_mismatch_to_key_user() -> None:
     assert user_id == "key-user"
 
 
-def test_resolve_user_id_per_key_flag_binds_mismatch_to_key_user() -> None:
-    """A key flagged ignore_user_mismatch is lenient while the gateway stays strict."""
-    api_key = _make_key("key-user", ignore_user_mismatch=True)
+def test_resolve_user_id_per_key_override_binds_mismatch_to_key_user() -> None:
+    """A key overriding to lenient is lenient while the deployment stays strict."""
+    api_key = _make_key("key-user", reject_user_mismatch=False)
     user_id = resolve_user_id(
         user_id_from_request='{"device_id":"abc","session_id":"def"}',
         api_key=api_key,
@@ -97,8 +97,25 @@ def test_resolve_user_id_per_key_flag_binds_mismatch_to_key_user() -> None:
         forbidden_user_error=_make_error("forbidden user", 403),
         reject_mismatch=True,
     )
-    # Spend still binds to the key's own user, just as in gateway-wide lenient mode.
+    # Spend still binds to the key's own user, just as in deployment-wide lenient mode.
     assert user_id == "key-user"
+
+
+def test_resolve_user_id_per_key_override_can_re_tighten() -> None:
+    """A key overriding to strict is rejected even where the deployment is lenient."""
+    api_key = _make_key("key-user", reject_user_mismatch=True)
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_user_id(
+            user_id_from_request="someone-else",
+            api_key=api_key,
+            is_master_key=False,
+            master_key_error=_make_error("master key requires user"),
+            no_api_key_error=_make_error("no api key"),
+            no_user_error=_make_error("no user"),
+            forbidden_user_error=_make_error("forbidden user", 403),
+            reject_mismatch=False,
+        )
+    assert exc_info.value.status_code == 403
 
 
 def test_resolve_user_id_allows_matching_request_user() -> None:

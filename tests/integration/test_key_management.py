@@ -172,33 +172,43 @@ def test_update_api_key_metadata(
     assert data["metadata"] == new_metadata
 
 
-def test_ignore_user_mismatch_defaults_off_and_round_trips(
+def test_reject_user_mismatch_override_defaults_to_inherit_and_round_trips(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """The per-key user-mismatch opt-out defaults off and survives create/patch/read."""
-    created = client.post("/v1/keys", json={"key_name": "strict"}, headers=master_key_header)
+    """The per-key override defaults to inherit (null) and round-trips both ways."""
+    created = client.post("/v1/keys", json={"key_name": "inherits"}, headers=master_key_header)
     assert created.status_code == 200
-    assert created.json()["ignore_user_mismatch"] is False
+    assert created.json()["reject_user_mismatch"] is None
 
     lenient = client.post(
         "/v1/keys",
-        json={"key_name": "claude-code", "ignore_user_mismatch": True},
+        json={"key_name": "claude-code", "reject_user_mismatch": False},
         headers=master_key_header,
     )
     assert lenient.status_code == 200
-    assert lenient.json()["ignore_user_mismatch"] is True
+    assert lenient.json()["reject_user_mismatch"] is False
 
     key_id = created.json()["id"]
-    patched = client.patch(
+    pinned = client.patch(
         f"/v1/keys/{key_id}",
-        json={"ignore_user_mismatch": True},
+        json={"reject_user_mismatch": True},
         headers=master_key_header,
     )
-    assert patched.status_code == 200
-    assert patched.json()["ignore_user_mismatch"] is True
+    assert pinned.status_code == 200
+    assert pinned.json()["reject_user_mismatch"] is True
+
+    # An omitted field leaves the override alone; an explicit null clears it.
+    untouched = client.patch(f"/v1/keys/{key_id}", json={"key_name": "renamed"}, headers=master_key_header)
+    assert untouched.json()["reject_user_mismatch"] is True
+    cleared = client.patch(
+        f"/v1/keys/{key_id}",
+        json={"reject_user_mismatch": None},
+        headers=master_key_header,
+    )
+    assert cleared.json()["reject_user_mismatch"] is None
 
     fetched = client.get(f"/v1/keys/{key_id}", headers=master_key_header)
-    assert fetched.json()["ignore_user_mismatch"] is True
+    assert fetched.json()["reject_user_mismatch"] is None
 
 
 def test_delete_api_key(client: TestClient, master_key_header: dict[str, str]) -> None:
