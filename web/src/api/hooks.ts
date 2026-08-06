@@ -35,6 +35,7 @@ import type {
   TestProviderResult,
   TestServiceResponse,
   ToolSettingsResponse,
+  ToolsResponse,
   UpdateBudgetRequest,
   UpdateKeyRequest,
   UpdateSettingsRequest,
@@ -60,6 +61,7 @@ const MODELS = "models";
 const PRICING = "pricing";
 const SETTINGS = "settings";
 const TOOL_SETTINGS = "tool-settings";
+const TOOLS = "tools";
 const ALIASES = "aliases";
 const ROUTING_POLICIES = "routing-policies";
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
@@ -407,6 +409,16 @@ export function useToolSettings() {
   });
 }
 
+// The declaration forms this deployment honours. Depends on tool settings
+// (interception, the backend URLs), so a settings save invalidates it.
+export function useTools() {
+  return useQuery({
+    queryKey: [TOOLS],
+    queryFn: () => apiFetch<ToolsResponse>("/v1/tools"),
+    staleTime: 60_000,
+  });
+}
+
 export function useUpdateToolSettings() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -414,6 +426,9 @@ export function useUpdateToolSettings() {
       apiFetch<ToolSettingsResponse>("/v1/tool-settings", { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: (data) => {
       queryClient.setQueryData([TOOL_SETTINGS], data);
+      // Toggling interception or clearing a backend URL changes which
+      // declarations the gateway accepts, so the "how to call" card must refetch.
+      void queryClient.invalidateQueries({ queryKey: [TOOLS] });
     },
   });
 }

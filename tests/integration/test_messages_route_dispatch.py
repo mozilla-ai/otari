@@ -375,7 +375,9 @@ def test_mcp_servers_dispatches_through_anthropic_tool_loop(
     """
     seen: dict[str, Any] = {}
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> MessageResponse:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+    ) -> MessageResponse:
         seen["completion_kwargs"] = completion_kwargs
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -426,7 +428,9 @@ def test_code_execution_dispatches_through_sandbox_backend(
 
     pool_seen: list[Any] = []
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> MessageResponse:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+    ) -> MessageResponse:
         pool_seen.append(pool)
         return _text_response("via-sandbox-loop")
 
@@ -469,7 +473,9 @@ def test_web_search_dispatches_through_web_search_backend(
 
     pool_seen: list[Any] = []
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> MessageResponse:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+    ) -> MessageResponse:
         pool_seen.append(pool)
         return _text_response("via-web-search-loop")
 
@@ -673,7 +679,9 @@ def test_max_tool_iterations_exceeded_returns_422_anthropic_body(
 
     from gateway.services.mcp_loop_messages import MaxToolIterationsExceeded
 
-    async def fake_loop(*, completion_kwargs: Any, pool: Any, max_iterations: int) -> MessageResponse:
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+    ) -> MessageResponse:
         raise MaxToolIterationsExceeded(f"Exceeded max_tool_iterations={max_iterations}")
 
     fake_backend = AsyncMock()
@@ -974,7 +982,7 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     seen: dict[str, Any] = {}
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
     ) -> AsyncIterator[MessageStreamEvent]:
         seen["pool"] = pool
         seen["max_iterations"] = max_iterations
@@ -1027,7 +1035,7 @@ def test_stream_code_execution_dispatches_through_sandbox(
     pool_seen: list[Any] = []
 
     async def fake_loop_stream(
-        *, completion_kwargs: Any, pool: Any, max_iterations: int
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
     ) -> AsyncIterator[MessageStreamEvent]:
         pool_seen.append(pool)
         yield _stream_message_stop()
@@ -1091,3 +1099,246 @@ def test_stream_sandbox_unreachable_returns_502_anthropic_body(
 
     assert resp.status_code == 502
     _assert_anthropic_error(resp.json(), error_type="api_error", message_substr="sandbox unreachable")
+
+
+# ---------- web-search interception (opt-in) ----------
+
+
+@pytest.mark.parametrize(
+    "tool_entry",
+    [
+        {"type": "web_search"},
+        {"type": "web_search_20250305"},
+        # The exact shape Claude Code sends.
+        {"type": "web_search_20250305", "name": "web_search", "max_uses": 8},
+    ],
+)
+def test_intercept_routes_provider_keywords_to_the_gateway_backend(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tool_entry: dict[str, Any],
+) -> None:
+    """With interception on, a provider-named declaration reaches WebSearchBackend
+    instead of being forwarded, so a client that cannot say ``otari_web_search``
+    still gets the gateway's search."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
+
+    pool_seen: list[Any] = []
+
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+    ) -> MessageResponse:
+        pool_seen.append(pool)
+        return _text_response("via-web-search-loop")
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_builder_result = AsyncMock(
+        __aenter__=AsyncMock(return_value=fake_backend),
+        __aexit__=AsyncMock(return_value=None),
+    )
+
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
+        patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
+    ):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [tool_entry],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert pool_seen == [fake_backend], "declaration was forwarded instead of intercepted"
+
+
+def test_intercept_emits_native_blocks_only_for_a_native_declaration(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dated keyword opts into native server-tool blocks; the bare short form and
+    the canonical otari type do not."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
+
+    seen: list[bool] = []
+
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+    ) -> MessageResponse:
+        seen.append(emit_native_web_search)
+        return _text_response("ok")
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_builder_result = AsyncMock(
+        __aenter__=AsyncMock(return_value=fake_backend),
+        __aexit__=AsyncMock(return_value=None),
+    )
+
+    def post(tool_entry: dict[str, Any]) -> None:
+        with (
+            patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
+            patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
+        ):
+            resp = client.post(
+                "/v1/messages",
+                json={
+                    "model": "anthropic:claude-3-5-sonnet-20241022",
+                    "messages": [{"role": "user", "content": "search"}],
+                    "max_tokens": 100,
+                    "tools": [tool_entry],
+                },
+                headers=api_key_header,
+            )
+        assert resp.status_code == 200, resp.text
+
+    post({"type": "web_search_20250305"})
+    post({"type": "web_search"})
+    post({"type": "otari_web_search"})
+
+    assert seen == [True, False, False]
+
+
+def test_intercept_off_still_forwards_provider_keywords(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default: a configured backend alone does not change who runs the search."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response("ok")
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert [tool["type"] for tool in captured.get("tools") or []] == ["web_search_20250305"]
+
+
+def test_intercept_without_a_backend_forwards_rather_than_400s(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Interception with nothing to intercept *to* must not turn a request the
+    provider would have served into a 400."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_URL", raising=False)
+    monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response("ok")
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert [tool["type"] for tool in captured.get("tools") or []] == ["web_search_20250305"]
+
+
+def test_intercept_never_claims_a_caller_function_named_web_search(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The caller's own tool stays theirs to dispatch, so it must reach the provider."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response("ok")
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"name": "web_search", "input_schema": {"type": "object", "properties": {}}}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert [tool.get("name") for tool in captured.get("tools") or []] == ["web_search"]
+
+
+def test_intercept_retargets_a_forced_tool_choice(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool_choice forcing the caller's own name must be repointed at the
+    backend's tool, or the provider is asked to force a tool it never received."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_URL", "http://127.0.0.1:9999/search")
+    monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
+
+    seen: list[Any] = []
+
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+    ) -> MessageResponse:
+        seen.append(completion_kwargs.get("tool_choice"))
+        return _text_response("ok")
+
+    fake_backend = AsyncMock()
+    fake_backend.purpose_hints = lambda: []
+    fake_builder_result = AsyncMock(
+        __aenter__=AsyncMock(return_value=fake_backend),
+        __aexit__=AsyncMock(return_value=None),
+    )
+
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
+        patch("gateway.api.routes._pipeline._build_web_search_backend", return_value=fake_builder_result),
+    ):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": [{"role": "user", "content": "search"}],
+                "max_tokens": 100,
+                "tools": [{"type": "web_search_20250305", "name": "search_the_web"}],
+                "tool_choice": {"type": "tool", "name": "search_the_web"},
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert seen == [{"type": "tool", "name": "web_search"}]

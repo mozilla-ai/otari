@@ -12,6 +12,7 @@ For full request/response schemas, see the [OpenAPI spec](public/openapi.json) o
 | Chat completions (`/v1/chat/completions`) | Yes | Yes |
 | Messages (`/v1/messages`, `/v1/messages/count_tokens`) | Yes | Yes |
 | Responses (`/v1/responses`) | Yes | Yes |
+| Tool discovery (`/v1/tools`) | Yes | Yes |
 | Management (keys, users, budgets, aliases, routing policies, pricing, usage) | Yes | No |
 | OpenAI-compatible (embeddings, models, files, batches, images, audio, moderations, rerank) | Yes | No |
 
@@ -68,6 +69,14 @@ For a full client setup example, see [Use with Claude Code](use-with-claude-code
 | `POST` | `/v1/responses` | OpenAI Responses API-compatible endpoint. Supports streaming. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 
 Not every provider implements the Responses API; one that does not is rejected with `400 Provider '<name>' does not support the Responses API`. For a full client setup example, see [Use with Codex](use-with-codex.md).
+
+### Tools
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `GET` | `/v1/tools` | List the tools Otari runs itself, with the `tools[].type` values this deployment accepts, each tool's argument schema, and a runnable example. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+
+A tool with no backend configured is listed with `"available": false` rather than omitted, so a client can distinguish an unknown tool from an unconfigured one. `accepted_types` reflects the current configuration, so it grows when [web-search interception](tools.md#web-search-interception) is enabled. Connected deployments additionally enforce a per-workspace policy this endpoint cannot see, so an advertised tool may still be refused with a 403 at request time.
 
 ## Standalone-only endpoints
 

@@ -41,7 +41,7 @@ from gateway.api.routes._platform import (
     _resolve_platform_credentials,
 )
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
-from gateway.api.routes._tools import _strip_gateway_fields
+from gateway.api.routes._tools import _strip_gateway_fields, _web_search_intercept_enabled
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
@@ -115,6 +115,54 @@ class CountTokensResponse(BaseModel):
     """Anthropic ``/v1/messages/count_tokens`` response."""
 
     input_tokens: int
+
+
+# Content-block types the gateway mints itself to describe a search it ran
+# server-side. They are stripped back off inbound ``messages`` before the provider
+# sees them: continuing an Anthropic conversation means echoing the previous
+# assistant turn, and ``web_search_tool_result`` carries an ``encrypted_content``
+# blob the gateway cannot sign, so an echoed turn would ship an unsignable block to
+# a provider that never declared a web-search tool. Mirrors
+# ``responses._GATEWAY_MINTED_ITEM_TYPES``.
+_GATEWAY_MINTED_BLOCK_TYPES = frozenset({"server_tool_use", "web_search_tool_result"})
+
+
+def _strip_gateway_minted_blocks(messages: Any) -> Any:
+    """Drop gateway-minted server-tool blocks from inbound ``messages``.
+
+    Only applied when web-search interception is enabled, which is the only way a
+    transcript can contain a gateway-minted block. That keeps a deployment which
+    never opted in byte-identical: a genuine provider-run search's blocks (Anthropic
+    ran it, Anthropic signed it) still round-trip untouched.
+
+    A ``server_tool_use`` and its ``web_search_tool_result`` are always dropped as a
+    pair, since both types are listed. A message left with no content at all is
+    dropped too: an empty ``content`` array is rejected by the API, and a turn that
+    held nothing but the pair has nothing left to say.
+    """
+    if not isinstance(messages, list):
+        return messages
+    kept_messages: list[Any] = []
+    dropped = 0
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            kept_messages.append(message)
+            continue
+        kept_blocks = [
+            block
+            for block in content
+            if not (isinstance(block, dict) and block.get("type") in _GATEWAY_MINTED_BLOCK_TYPES)
+        ]
+        if len(kept_blocks) == len(content):
+            kept_messages.append(message)
+            continue
+        dropped += len(content) - len(kept_blocks)
+        if kept_blocks:
+            kept_messages.append({**message, "content": kept_blocks})
+    if dropped:
+        logger.debug("Stripped %d gateway-minted content block(s) from the inbound messages", dropped)
+    return kept_messages
 
 
 def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPException:
@@ -302,6 +350,8 @@ class _MessagesAdapter:
         pool: ToolBackend,
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
+        *,
+        emit_native_web_search: bool = False,
     ) -> MessageResponse:
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
@@ -312,6 +362,7 @@ class _MessagesAdapter:
             completion_kwargs=kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            emit_native_web_search=emit_native_web_search,
             **extra,
         )
 
@@ -320,11 +371,14 @@ class _MessagesAdapter:
         kwargs: dict[str, Any],
         pool: ToolBackend,
         max_iterations: int,
+        *,
+        emit_native_web_search: bool = False,
     ) -> AsyncIterator[MessageStreamEvent]:
         return anthropic_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            emit_native_web_search=emit_native_web_search,
         )
 
     def inject_hints(
@@ -443,9 +497,12 @@ async def create_message(
         request.model_dump(exclude_unset=True),
         tools_extracted=tool_ctx.tools_extracted,
         remaining_user_tools=tool_ctx.remaining_user_tools,
+        web_search_declared_name=tool_ctx.web_search_declared_name,
     )
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
+    if _web_search_intercept_enabled(config) and request_fields.get("messages"):
+        request_fields["messages"] = _strip_gateway_minted_blocks(request_fields["messages"])
 
     # ------------------------------------------------------------------
     # Streaming path

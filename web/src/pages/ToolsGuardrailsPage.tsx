@@ -1,8 +1,15 @@
 import { Button, Card } from "@heroui/react";
 import { useEffect, useRef, useState } from "react";
 
-import { usePricing, useSetPricing, useTestService, useToolSettings, useUpdateToolSettings } from "@/api/hooks";
-import type { ToolServiceName, ToolSettingField, UpdateToolSettingsRequest } from "@/api/types";
+import {
+  usePricing,
+  useSetPricing,
+  useTestService,
+  useToolSettings,
+  useTools,
+  useUpdateToolSettings,
+} from "@/api/hooks";
+import type { ManagedTool, ToolServiceName, ToolSettingField, UpdateToolSettingsRequest } from "@/api/types";
 import { ErrorBanner, FilterSelect, PageHeader, PageLoading, errorMessage } from "@/components/ui";
 
 // One settable field maps onto one key of the update request; cast at this one
@@ -22,17 +29,22 @@ const SERVICES: {
   // The pricing key for a tool Otari runs itself. Present only for the two
   // gateway-run tools: guardrails is a check, not billable work.
   pricingKey?: string;
+  // The /v1/tools id whose calling convention is shown under this service.
+  // Absent for guardrails, which is not declared in `tools[]` at all.
+  toolId?: string;
 }[] = [
   {
     key: "web_search",
     label: "Web search",
     blurb: "Backend for otari_web_search tools (a SearXNG instance or a search adapter).",
     pricingKey: "otari:web_search",
+    toolId: "otari_web_search",
     order: [
       "web_search_url",
       "web_search_engines",
       "web_search_max_results",
       "web_search_extract",
+      "web_search_intercept",
       "web_search_purpose_hint",
     ],
   },
@@ -41,6 +53,7 @@ const SERVICES: {
     label: "Code execution",
     blurb: "Backend for otari_code_execution tools (the sandbox that runs generated code).",
     pricingKey: "otari:code_execution",
+    toolId: "otari_code_execution",
     order: ["sandbox_url", "sandbox_purpose_hint"],
   },
   {
@@ -449,6 +462,48 @@ function BoolRow({
   );
 }
 
+// What a client has to send to make the gateway run a tool. This exists because
+// the contract is otherwise invisible: nothing on the page told an operator that
+// `otari_web_search` is the type to declare, or that turning interception on also
+// makes `web_search_20250305` work. Rendered from GET /v1/tools, so it reports
+// what this deployment currently honours rather than a static example.
+function HowToCallCard({ tool }: { tool: ManagedTool }) {
+  const request = {
+    model: "anthropic:claude-sonnet-4-6",
+    messages: [{ role: "user", content: "..." }],
+    tools: [tool.example],
+  };
+  return (
+    <div className="flex flex-col gap-3 py-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <code className="text-sm font-medium text-[var(--otari-ink)]">{tool.id}</code>
+        {tool.available ? null : (
+          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+            No backend configured
+          </span>
+        )}
+      </div>
+      <p className="text-sm text-[var(--otari-muted)]">{tool.description}</p>
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-[var(--otari-ink)]">Accepted tools[].type</span>
+        <div className="flex flex-wrap gap-1.5">
+          {tool.accepted_types.map((type) => (
+            <code
+              key={type}
+              className="rounded border border-[var(--otari-line)] bg-[var(--otari-surface)] px-1.5 py-0.5 text-xs"
+            >
+              {type}
+            </code>
+          ))}
+        </div>
+      </div>
+      <pre className="overflow-x-auto rounded-md border border-[var(--otari-line)] bg-[var(--otari-surface)] p-3 text-xs">
+        <code>{`POST /v1/chat/completions\n${JSON.stringify(request, null, 2)}`}</code>
+      </pre>
+    </div>
+  );
+}
+
 function ServiceRow({
   field,
   onSave,
@@ -474,6 +529,7 @@ function ServiceRow({
 
 export function ToolsGuardrailsPage() {
   const query = useToolSettings();
+  const tools = useTools();
   const pricing = usePricing();
   const setPricing = useSetPricing();
   const [pricedTool, setPricedTool] = useState<string | null>(null);
@@ -556,6 +612,11 @@ export function ToolsGuardrailsPage() {
         );
         const fields = [...ordered, ...extra];
         if (fields.length === 0) return null;
+        // Absent while /v1/tools is still loading, or if it failed: the card is
+        // reference material, so its absence must not hide the editable settings.
+        const managed = service.toolId
+          ? (tools.data?.data ?? []).find((tool) => tool.id === service.toolId)
+          : undefined;
         return (
           <section key={service.key} className="flex flex-col gap-2">
             <h2 className="text-sm font-semibold text-[var(--otari-ink)]">{service.label}</h2>
@@ -587,6 +648,7 @@ export function ToolsGuardrailsPage() {
                     disabled={disabled}
                   />
                 ))}
+                {managed ? <HowToCallCard tool={managed} /> : null}
               </Card.Content>
             </Card>
           </section>

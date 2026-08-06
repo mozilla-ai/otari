@@ -1072,3 +1072,297 @@ async def test_stream_mixed_batch_hides_and_still_runs_the_gateway_tool(
     starts = [getattr(e, "index") for e in events if e.type == "content_block_start"]
     assert starts == [0]
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+# ---------- native web-search blocks ----------
+#
+# A caller that declared web search in Anthropic's native vocabulary gets
+# ``server_tool_use`` / ``web_search_tool_result`` blocks describing the searches
+# the gateway ran, so a citations panel has something to render. Every other
+# caller keeps the historical behavior (the gateway's calls stay invisible).
+
+
+class _FakeSearchPool(_FakePool):
+    """A pool that owns ``web_search`` and exposes structured hits like the real backend."""
+
+    def __init__(
+        self,
+        *,
+        results: list[dict[str, Any]] | None = None,
+        fail: bool = False,
+    ) -> None:
+        super().__init__(tool_names=["web_search"], results={"web_search": "[1] Result\nhttps://a"})
+        self._structured = results if results is not None else [{"url": "https://a", "title": "A"}]
+        self._fail = fail
+        self._taken = False
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        if self._fail:
+            self.calls.append((name, arguments))
+            raise RuntimeError("backend down")
+        return await super().call_tool(name, arguments)
+
+    def take_last_results(self) -> list[dict[str, Any]]:
+        self._taken = True
+        return list(self._structured)
+
+
+def _search_use(block_id: str = "tu_1", query: str = "python release") -> ToolUseBlock:
+    return _tool_use(block_id, "web_search", {"query": query})
+
+
+def _two_round_responses(query: str = "python release") -> list[MessageResponse]:
+    return [
+        _message_response(stop_reason="tool_use", content=[_search_use(query=query)]),
+        _message_response(stop_reason="end_turn", content=[_text_block("Python 3.14.")]),
+    ]
+
+
+def _fake_amessages_for(responses: list[MessageResponse]) -> Any:
+    it = iter(responses)
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        return next(it)
+
+    return fake_amessages
+
+
+@pytest.mark.asyncio
+async def test_native_blocks_prepended_to_final_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for(_two_round_responses()))
+    pool = _FakeSearchPool(results=[{"url": "https://python.org", "title": "Python", "published_date": "2026-01-02"}])
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        emit_native_web_search=True,
+    )
+
+    # The pair comes before the model's answer, because the search happened first.
+    assert [b.type for b in result.content] == ["server_tool_use", "web_search_tool_result", "text"]
+    server_use, tool_result, _text = result.content
+    assert server_use.name == "web_search"
+    assert server_use.input == {"query": "python release"}
+    # The result block is paired to its server_tool_use by id, as a client expects.
+    assert tool_result.tool_use_id == server_use.id
+    assert server_use.id.startswith("srvtoolu_")
+    citation = tool_result.content[0]
+    assert citation.url == "https://python.org"
+    assert citation.title == "Python"
+    assert citation.page_age == "2026-01-02"
+    # Empty rather than forged: only Anthropic can sign this blob.
+    assert citation.encrypted_content == ""
+
+
+@pytest.mark.asyncio
+async def test_no_native_blocks_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The historical shape: the gateway's search is invisible in the response."""
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for(_two_round_responses()))
+    pool = _FakeSearchPool()
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, pool),
+        max_iterations=5,
+    )
+
+    assert [b.type for b in result.content] == ["text"]
+
+
+@pytest.mark.asyncio
+async def test_failed_search_contributes_no_native_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A search that never returned results has nothing to cite."""
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for(_two_round_responses()))
+    pool = _FakeSearchPool(fail=True)
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        emit_native_web_search=True,
+    )
+
+    assert [b.type for b in result.content] == ["text"]
+
+
+@pytest.mark.asyncio
+async def test_hits_without_a_url_are_dropped_from_citations(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for(_two_round_responses()))
+    pool = _FakeSearchPool(results=[{"title": "no url"}, {"url": "https://ok", "title": "ok"}])
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        emit_native_web_search=True,
+    )
+
+    citations = result.content[1].content
+    assert [c.url for c in citations] == ["https://ok"]
+
+
+@pytest.mark.asyncio
+async def test_non_web_search_tool_gets_no_native_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An MCP or sandbox call has no Anthropic block that would be honest to emit."""
+    responses = [
+        _message_response(stop_reason="tool_use", content=[_tool_use("tu_1", "fetch_url", {"u": "x"})]),
+        _message_response(stop_reason="end_turn", content=[_text_block("done")]),
+    ]
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for(responses))
+    pool = _FakePool(tool_names=["fetch_url"])
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, pool),
+        max_iterations=5,
+        emit_native_web_search=True,
+    )
+
+    assert [b.type for b in result.content] == ["text"]
+
+
+@pytest.mark.asyncio
+async def test_native_blocks_for_each_of_several_searches(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses = [
+        _message_response(stop_reason="tool_use", content=[_search_use("tu_1", "first")]),
+        _message_response(stop_reason="tool_use", content=[_search_use("tu_2", "second")]),
+        _message_response(stop_reason="end_turn", content=[_text_block("both")]),
+    ]
+    monkeypatch.setattr(messages_loop_module, "amessages", _fake_amessages_for(responses))
+
+    result = await anthropic_tool_loop(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+        pool=cast(Any, _FakeSearchPool()),
+        max_iterations=5,
+        emit_native_web_search=True,
+    )
+
+    assert [b.type for b in result.content] == [
+        "server_tool_use",
+        "web_search_tool_result",
+        "server_tool_use",
+        "web_search_tool_result",
+        "text",
+    ]
+    assert [b.input["query"] for b in result.content if b.type == "server_tool_use"] == ["first", "second"]
+    # Each pair is independently addressable.
+    ids = [b.id for b in result.content if b.type == "server_tool_use"]
+    assert len(set(ids)) == 2
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_native_blocks_with_gapless_indices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The synthetic blocks take the swallowed tool_use events' place on the wire.
+
+    Indices must continue the client-visible sequence: an SDK accumulator indexes
+    its snapshot array by the index it is handed.
+    """
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_1", "web_search"),
+                _input_json_delta(0, '{"query": "python"}'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "Python 3.14."),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = _FakeSearchPool(results=[{"url": "https://python.org", "title": "Python"}])
+
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+            pool=cast(Any, pool),
+            max_iterations=5,
+            emit_native_web_search=True,
+        )
+    ]
+
+    assert [e.type for e in events] == [
+        "message_start",
+        # The synthetic pair, in place of the tool_use events the loop swallowed.
+        "content_block_start",
+        "content_block_stop",
+        "content_block_start",
+        "content_block_stop",
+        # Then the second iteration's real text block.
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop",
+    ]
+    starts = [e for e in events if e.type == "content_block_start"]
+    assert [e.content_block.type for e in starts] == ["server_tool_use", "web_search_tool_result", "text"]
+    # Gapless and in order, so an accumulator can index straight into its array.
+    assert [e.index for e in events if e.type == "content_block_start"] == [0, 1, 2]
+    assert [e.index for e in events if e.type == "content_block_stop"] == [0, 1, 2]
+    # The query survives without any input_json_delta: the start event carries the
+    # complete block, and the SDK only overwrites ``input`` when a delta arrives.
+    assert starts[0].content_block.input == {"query": "python"}
+    # The gateway's own tool_use block still never reaches the client.
+    assert not any(getattr(getattr(e, "content_block", None), "type", None) == "tool_use" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_no_native_blocks_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_1", "web_search"),
+                _input_json_delta(0, '{"query": "python"}'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "Python 3.14."),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 100},
+            pool=cast(Any, _FakeSearchPool()),
+            max_iterations=5,
+        )
+    ]
+
+    assert [e.type for e in events] == [
+        "message_start",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop",
+    ]

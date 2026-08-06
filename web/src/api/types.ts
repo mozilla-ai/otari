@@ -884,6 +884,7 @@ export interface UpdateToolSettingsRequest {
   web_search_max_results?: number | null;
   web_search_extract?: boolean | null;
   web_search_purpose_hint?: string | null;
+  web_search_intercept?: boolean | null;
   sandbox_url?: string | null;
   sandbox_purpose_hint?: string | null;
   guardrails_url?: string | null;
@@ -892,4 +893,22 @@ export interface UpdateToolSettingsRequest {
 export interface TestServiceResponse {
   ok: boolean;
   reason: string;
+}
+
+// One tool Otari runs itself, as advertised by GET /v1/tools. `accepted_types`
+// is what this deployment currently routes to the tool, so it grows when
+// web-search interception is on.
+export interface ManagedTool {
+  id: string;
+  object: "tool";
+  description: string;
+  available: boolean;
+  accepted_types: string[];
+  input_schema: Record<string, unknown>;
+  example: Record<string, unknown>;
+}
+
+export interface ToolsResponse {
+  object: "list";
+  data: ManagedTool[];
 }

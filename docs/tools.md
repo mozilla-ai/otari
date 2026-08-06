@@ -11,9 +11,38 @@ Built-in tools work on `/v1/chat/completions`, `/v1/messages`, and `/v1/response
 
 **Current limitations:** `otari_code_execution` and `otari_web_search` cannot be used together in the same request, and neither can be combined with `mcp_servers` in the same request. These are planned to be lifted; for now, pick one per request.
 
+To see what a given deployment exposes, ask it:
+
+```bash
+curl http://localhost:8000/v1/tools -H "Otari-Key: Bearer $OTARI_KEY"
+```
+
+Each entry reports the `tools[].type` values that deployment accepts, the argument schema the model is given, and a ready-to-send example. A tool with no backend configured is listed with `"available": false` rather than omitted, so a client can tell "not a thing" from "not set up here".
+
 ## How the keyword decides who runs it
 
 An `otari_*` tool type is run by Otari in its own sandbox. Any other type, including provider-native keywords like `code_interpreter` or `web_search_<date>`, is forwarded to the provider's native sandbox untouched. Either way Otari handles routing and observability.
+
+### Web-search interception
+
+Some clients cannot be told to say `otari_web_search`. Claude Code, the Anthropic SDK, and Claude Desktop send Anthropic's own `{"type": "web_search_20250305", "name": "web_search"}`, so against a non-Anthropic model that declaration reaches a provider that cannot serve it. Setting `web_search_intercept` makes Otari claim the provider-named web-search keywords too, and run them against its own backend:
+
+| Declared | Default | With `web_search_intercept` |
+|---|---|---|
+| `otari_web_search` | Otari | Otari |
+| `web_search` | The provider | Otari |
+| `web_search_<date>`, `web_search_preview` | The provider | Otari |
+| A `function` named `web_search` | You dispatch it | You dispatch it |
+
+Set it on the **Tools & Guardrails** page, or with `OTARI_WEB_SEARCH_INTERCEPT=true`. It needs `web_search_url` set; with no backend to intercept *to*, the keyword passes through as usual rather than failing the request.
+
+It is off by default because turning it on takes a search away from a provider that would have run it: a deployment already relying on Anthropic's native web search would silently switch to Otari's backend on upgrade.
+
+A `function` tool named `web_search` is never claimed, even with interception on. That is your own tool, and running it server-side would mean your handler never fires and you never get back a `tool_call` you can dispatch.
+
+If the caller forces its declaration with `tool_choice` under a non-standard name, the choice is retargeted onto the backend's tool so the forced call still resolves.
+
+`max_uses` on an Anthropic-native declaration is accepted but not enforced; `max_tool_iterations` bounds the loop instead.
 
 Billing differs by who ran the tool:
 
@@ -68,7 +97,7 @@ a tool for you":
 | API | Non-streaming | Streaming |
 |---|---|---|
 | `/v1/responses` | A native `web_search_call` output item per search, before the message | The same item, as `response.output_item.added` / `.done`. It is not repeated in `response.completed`'s `output`, so a client reading only the final response sees the answer without the calls |
-| `/v1/messages` | Nothing. The final message only | Nothing. The gateway's own `tool_use` blocks are not forwarded |
+| `/v1/messages` | A native `server_tool_use` + `web_search_tool_result` pair per search, before the message, for a caller that declared `web_search_<date>`. Nothing otherwise | The same pair, as `content_block_start` / `content_block_stop` events |
 | `/v1/chat/completions` | Nothing. The final message only | Nothing. The gateway's own `tool_call` deltas are not forwarded |
 
 The gateway's own tool calls are deliberately withheld from streaming clients: a
@@ -83,13 +112,22 @@ Billing is standalone-only. In hybrid mode the platform resolves the model and
 receives the usage report, and that report carries no tool counts, so a
 gateway-run tool call there is recorded upstream as tokens only.
 
-Anthropic Messages does not get the native treatment even though it has a
-`server_tool_use` block, because the matching `web_search_tool_result` block
-requires `encrypted_content`, an Anthropic-signed blob only Anthropic can produce
-and which clients echo back upstream on the next turn. Minting one would either
-be forged or break the follow-up request. On Responses, a gateway-minted
-`web_search_call` is stripped back off an inbound `input`, so echoing a previous
-turn cannot ship it to a provider that never declared the tool.
+On Messages, the native blocks are emitted only for a caller that asked in
+Anthropic's own vocabulary (a `web_search_<date>` type). That is the declaration
+which makes a client expect them and render a citations panel; `otari_web_search`
+and the bare `web_search` short form do not, so those callers keep getting the
+plain-text result they always have.
+
+`web_search_tool_result` requires `encrypted_content`, an Anthropic-signed blob
+only Anthropic can produce. Otari sends it **empty** rather than forging one, so
+the block carries the URL, title, and page age a citations panel needs and nothing
+it cannot legitimately provide. Because clients echo the previous assistant turn
+back to continue a conversation, both minted block types are stripped off an
+inbound `messages` array (only when interception is on, which is the only way one
+can be present), so an echoed turn never ships an unsignable block upstream. A
+client that echoes the block straight to Anthropic instead of through Otari would
+be rejected there. Responses accepts the same trade-off for its minted
+`web_search_call` items, which are likewise stripped off an inbound `input`.
 
 ## Code execution
 
@@ -128,6 +166,8 @@ Use in a request:
   "tools": [{"type": "otari_web_search"}]
 }
 ```
+
+To let a client that only speaks a provider's vocabulary (Claude Code, the Anthropic SDK) reach this backend, turn on [web-search interception](#web-search-interception).
 
 The bundled SearXNG backend is suitable for trying things out but rate-limited for sustained use. For production, point `OTARI_WEB_SEARCH_URL` at a licensed backend. Ready-to-run Brave and Tavily adapters ship in `scripts/` and are available as separate Compose profiles (`web-search-brave`, `web-search-tavily`).
 

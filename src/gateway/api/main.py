@@ -25,6 +25,7 @@ from gateway.api.routes import (
     search,
     settings,
     tool_settings,
+    tools,
     usage,
     users,
 )
@@ -38,6 +39,8 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     # fallback + usage reporting), so they're registered in both modes.
     app.include_router(messages.router)
     app.include_router(responses.router)
+    # Tool discovery describes the gateway's own tools, which both modes run.
+    app.include_router(tools.router)
 
     if config.is_hybrid_mode:
         app.include_router(hybrid_mode.router)

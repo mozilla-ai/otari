@@ -275,6 +275,12 @@ For how users, keys, and budgets fit together and the management endpoints behin
   cost you money at a search provider or a sandbox, so they are billed onto the
   request that triggered them. An unpriced tool is refused with a 402 while
   `require_pricing` is on. See [Built-in tools](tools.md#pricing-a-gateway-run-tool).
+  Each gateway-run tool also shows **how to call it**: the `tools[].type` values
+  this deployment accepts and a request you can copy. Turning on
+  `web_search_intercept` adds the provider-named keywords (`web_search`,
+  `web_search_<date>`) to that list, which is what lets a client like Claude Code
+  reach your search backend without knowing Otari's own tool name. See
+  [Web-search interception](tools.md#web-search-interception).
 - **Settings**: search and toggle runtime settings, review and apply default
   pricing updates, and rotate the generated master key. Rotating the master key
   issues a fresh `otari-mk-…` value and keeps your current session signed in.

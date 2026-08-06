@@ -104,6 +104,7 @@ pricing:
 | `web_search_engines` | string | none | Comma-separated SearXNG engine list for the web-search backend. Also settable via `OTARI_WEB_SEARCH_ENGINES`. |
 | `web_search_max_results` | int | none | Default cap on web-search hits (a per-tool `max_results` still overrides it). Also settable via `OTARI_WEB_SEARCH_MAX_RESULTS`. |
 | `web_search_extract` | bool | none | Whether the web-search backend extracts page content in-process (`true`) or returns snippet-only results (`false`). When unset, extraction is on. Also settable via `OTARI_WEB_SEARCH_EXTRACT`. |
+| `web_search_intercept` | bool | none | Whether a provider-named web-search declaration (bare `web_search`, `web_search_<date>`) is run against the gateway's backend instead of forwarded to the provider. Off when unset; `otari_web_search` is always run by the gateway. Requires `web_search_url`. See [Built-in tools](tools.md#web-search-interception). Also settable via `OTARI_WEB_SEARCH_INTERCEPT`. |
 | `web_search_allow_private_hosts` | bool | `false` | SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. Also settable via `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS`. |
 | `mcp_allow_loopback` | bool | `true` | SSRF gate: allow MCP server URLs that resolve to loopback (same-host sidecars). Also settable via `OTARI_MCP_ALLOW_LOOPBACK`. |
 | `mcp_allow_private_hosts` | bool | `false` | SSRF gate: allow MCP server URLs that resolve to private/reserved hosts (and accept hostnames that fail to resolve at validation time). Also settable via `OTARI_MCP_ALLOW_PRIVATE_HOSTS`. |
@@ -177,6 +178,7 @@ These operator-facing settings configure the gateway-managed tools (`otari_code_
 | `OTARI_WEB_SEARCH_ENGINES` | backend default | Comma-separated SearXNG engine list (e.g. `google,bing`). |
 | `OTARI_WEB_SEARCH_MAX_RESULTS` | backend default | Default cap on returned hits (a per-tool `max_results` still overrides it). Must be `>= 1`. |
 | `OTARI_WEB_SEARCH_EXTRACT` | `true` | `0`/`false` disables in-process content extraction (snippet-only mode). |
+| `OTARI_WEB_SEARCH_INTERCEPT` | `false` | Run provider-named web-search declarations (`web_search`, `web_search_<date>`) against the gateway's backend instead of forwarding them. Requires `OTARI_WEB_SEARCH_URL`. |
 | `OTARI_WEB_SEARCH_ALLOW_PRIVATE_HOSTS` | `false` | SSRF gate: allow the web-search backend to fetch private/loopback/reserved hosts. |
 | `OTARI_MCP_ALLOW_LOOPBACK` | `true` | SSRF gate: allow MCP server URLs that resolve to loopback (same-host sidecars). |
 | `OTARI_MCP_ALLOW_PRIVATE_HOSTS` | `false` | SSRF gate: allow MCP server URLs that resolve to private/reserved hosts, and accept hostnames that fail to resolve at validation time. |

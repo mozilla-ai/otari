@@ -1,16 +1,31 @@
 """Unit tests for the tool-extraction helpers in `gateway.api.routes._tools`.
 
-Only the explicit gateway-managed types (`otari_code_execution` /
+By default only the explicit gateway-managed types (`otari_code_execution` /
 `otari_web_search`) are extracted and run by the gateway. Provider-named
 keywords (OpenAI `code_interpreter`, Anthropic versioned `code_execution_*` /
 `web_search_*`, and the bare `code_execution` / `web_search`) are *not*
 extracted — they stay in `tools[]` and pass through to the upstream provider,
 which executes them server-side.
+
+Web search has one opt-in exception: with `intercept=True` the provider-named
+web-search keywords are claimed too, so a client that can only speak a
+provider's vocabulary reaches a configured gateway backend. Code execution has
+no such mode, and an OpenAI `function` named `web_search` is never claimed.
 """
 
 from __future__ import annotations
 
-from gateway.api.routes._tools import _extract_code_execution_tool, _extract_web_search_tool
+from typing import Any
+
+from gateway.api.routes._tools import (
+    _extract_code_execution_tool,
+    _extract_web_search_tool,
+    _retargeted_tool_choice,
+    _strip_gateway_fields,
+    _web_search_intercept_enabled,
+    declares_native_web_search,
+)
+from gateway.core.config import GatewayConfig
 
 
 def test_extracts_otari_code_execution() -> None:
@@ -144,3 +159,190 @@ def test_web_search_carries_per_tool_config_through() -> None:
     assert entry is not None
     assert entry["max_results"] == 3
     assert entry["allowed_domains"] == ["docs.python.org"]
+
+
+# --- web_search interception (opt-in) ----------------------------------------
+
+
+def test_intercept_claims_bare_web_search() -> None:
+    entry, remaining = _extract_web_search_tool([{"type": "web_search"}], intercept=True)
+    assert entry == {"type": "web_search"}
+    assert remaining is None
+
+
+def test_intercept_claims_anthropic_versioned_type() -> None:
+    entry, remaining = _extract_web_search_tool([{"type": "web_search_20250305"}], intercept=True)
+    assert entry == {"type": "web_search_20250305"}
+    assert remaining is None
+
+
+def test_intercept_claims_future_anthropic_version() -> None:
+    entry, _ = _extract_web_search_tool([{"type": "web_search_20991231"}], intercept=True)
+    assert entry is not None
+
+
+def test_intercept_claims_openai_responses_preview_type() -> None:
+    entry, _ = _extract_web_search_tool([{"type": "web_search_preview"}], intercept=True)
+    assert entry is not None
+
+
+def test_intercept_claims_claude_code_shape_with_name_and_max_uses() -> None:
+    claude_code = {"type": "web_search_20250305", "name": "web_search", "max_uses": 8}
+    entry, remaining = _extract_web_search_tool([claude_code], intercept=True)
+    assert entry == claude_code
+    assert remaining is None
+
+
+def test_intercept_still_claims_the_canonical_otari_type() -> None:
+    entry, _ = _extract_web_search_tool([{"type": "otari_web_search"}], intercept=True)
+    assert entry == {"type": "otari_web_search"}
+
+
+def test_intercept_never_claims_a_function_named_web_search() -> None:
+    """A caller's own tool stays theirs to dispatch, even under interception.
+
+    Claiming it would mean their handler never fires and they never get back a
+    tool_call they can execute. LiteLLM excludes this case for the same reason.
+    """
+    own_tool = {"type": "function", "function": {"name": "web_search", "parameters": {}}}
+    entry, remaining = _extract_web_search_tool([own_tool], intercept=True)
+    assert entry is None
+    assert remaining == [own_tool]
+
+
+def test_intercept_does_not_claim_code_execution_or_unrelated_tools() -> None:
+    tools: list[dict[str, Any]] = [
+        {"type": "otari_code_execution"},
+        {"type": "web_fetch_20250910"},
+        {"type": "function", "function": {"name": "get_weather"}},
+    ]
+    entry, remaining = _extract_web_search_tool(tools, intercept=True)
+    assert entry is None
+    assert remaining == tools
+
+
+def test_intercept_off_is_the_default_and_passes_provider_keywords_through() -> None:
+    entry, remaining = _extract_web_search_tool([{"type": "web_search_20250305"}])
+    assert entry is None
+    assert remaining == [{"type": "web_search_20250305"}]
+
+
+# --- native-declaration discrimination ---------------------------------------
+
+
+def test_versioned_declaration_is_native() -> None:
+    assert declares_native_web_search({"type": "web_search_20250305"}) is True
+
+
+def test_bare_and_canonical_declarations_are_not_native() -> None:
+    """Neither shape implies the caller expects native server-tool blocks back."""
+    assert declares_native_web_search({"type": "web_search"}) is False
+    assert declares_native_web_search({"type": "otari_web_search"}) is False
+
+
+def test_missing_declaration_is_not_native() -> None:
+    assert declares_native_web_search(None) is False
+    assert declares_native_web_search({}) is False
+
+
+# --- intercept toggle resolution ---------------------------------------------
+
+
+def test_intercept_defaults_off(monkeypatch: Any) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    assert _web_search_intercept_enabled(GatewayConfig()) is False
+
+
+def test_intercept_reads_the_config_field(monkeypatch: Any) -> None:
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    assert _web_search_intercept_enabled(GatewayConfig(web_search_intercept=True)) is True
+
+
+def test_intercept_falls_back_to_env(monkeypatch: Any) -> None:
+    monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
+    assert _web_search_intercept_enabled(GatewayConfig()) is True
+
+
+def test_intercept_env_falsey_values_stay_off(monkeypatch: Any) -> None:
+    for raw in ("0", "false", "no", "off", ""):
+        monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", raw)
+        assert _web_search_intercept_enabled(GatewayConfig()) is False
+
+
+def test_config_false_wins_over_a_truthy_env(monkeypatch: Any) -> None:
+    """An explicit off (dashboard override / YAML) is not overridden by the env."""
+    monkeypatch.setenv("OTARI_WEB_SEARCH_INTERCEPT", "true")
+    assert _web_search_intercept_enabled(GatewayConfig(web_search_intercept=False)) is False
+
+
+# --- tool_choice retargeting -------------------------------------------------
+
+
+def test_retargets_anthropic_tool_choice_to_the_canonical_name() -> None:
+    assert _retargeted_tool_choice({"type": "tool", "name": "my_search"}, "my_search") == {
+        "type": "tool",
+        "name": "web_search",
+    }
+
+
+def test_retargets_chat_completions_tool_choice() -> None:
+    choice = {"type": "function", "function": {"name": "my_search"}}
+    assert _retargeted_tool_choice(choice, "my_search") == {
+        "type": "function",
+        "function": {"name": "web_search"},
+    }
+
+
+def test_retargets_responses_flat_function_tool_choice() -> None:
+    assert _retargeted_tool_choice({"type": "function", "name": "my_search"}, "my_search") == {
+        "type": "function",
+        "name": "web_search",
+    }
+
+
+def test_retarget_is_a_noop_when_the_declared_name_is_already_canonical() -> None:
+    choice = {"type": "tool", "name": "web_search"}
+    assert _retargeted_tool_choice(choice, "web_search") is choice
+
+
+def test_retarget_leaves_auto_and_any_untouched() -> None:
+    for choice in ({"type": "auto"}, {"type": "any"}, {"type": "none"}):
+        assert _retargeted_tool_choice(choice, "my_search") == choice
+
+
+def test_retarget_leaves_a_choice_naming_a_different_tool_untouched() -> None:
+    choice = {"type": "tool", "name": "get_weather"}
+    assert _retargeted_tool_choice(choice, "my_search") is choice
+
+
+def test_retarget_leaves_string_tool_choice_untouched() -> None:
+    assert _retargeted_tool_choice("required", "my_search") == "required"
+
+
+def test_retarget_does_not_mutate_the_callers_dict() -> None:
+    choice = {"type": "function", "function": {"name": "my_search"}}
+    _retargeted_tool_choice(choice, "my_search")
+    assert choice == {"type": "function", "function": {"name": "my_search"}}
+
+
+def test_strip_gateway_fields_retargets_tool_choice() -> None:
+    fields = _strip_gateway_fields(
+        {
+            "tools": [{"type": "web_search_20250305", "name": "my_search"}],
+            "tool_choice": {"type": "tool", "name": "my_search"},
+        },
+        tools_extracted=True,
+        remaining_user_tools=None,
+        web_search_declared_name="my_search",
+    )
+    assert fields["tool_choice"] == {"type": "tool", "name": "web_search"}
+    assert "tools" not in fields
+
+
+def test_strip_gateway_fields_leaves_tool_choice_alone_without_a_declared_name() -> None:
+    fields = _strip_gateway_fields(
+        {"tool_choice": {"type": "tool", "name": "my_search"}},
+        tools_extracted=True,
+        remaining_user_tools=None,
+    )
+    assert fields["tool_choice"] == {"type": "tool", "name": "my_search"}

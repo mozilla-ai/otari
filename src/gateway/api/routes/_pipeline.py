@@ -87,6 +87,8 @@ from gateway.api.routes._tools import (
     _extract_code_execution_tool,
     _extract_web_search_tool,
     _resolve_sandbox_purpose_hint,
+    _web_search_intercept_enabled,
+    declares_native_web_search,
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
@@ -458,6 +460,8 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         pool: ToolBackend,
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
+        *,
+        emit_native_web_search: bool = False,
     ) -> ResultT: ...
 
     def open_tool_loop_stream(
@@ -465,6 +469,8 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         kwargs: dict[str, Any],
         pool: ToolBackend,
         max_iterations: int,
+        *,
+        emit_native_web_search: bool = False,
     ) -> AsyncIterator[ChunkT]: ...
 
     def inject_hints(
@@ -1319,6 +1325,21 @@ class ToolContext:
         return self.sandbox_tool_entry is not None or self.web_search_tool_entry is not None
 
     @property
+    def web_search_declared_name(self) -> str | None:
+        """The ``name`` the caller gave its web-search declaration, if any.
+
+        Used to retarget a forced ``tool_choice`` onto the backend's canonical tool
+        name. ``None`` when no web-search entry was extracted or it carried no name.
+        """
+        name = (self.web_search_tool_entry or {}).get("name")
+        return name if isinstance(name, str) and name else None
+
+    @property
+    def emit_native_web_search(self) -> bool:
+        """Whether this request should get Anthropic-native server-tool blocks back."""
+        return self.use_web_search and declares_native_web_search(self.web_search_tool_entry)
+
+    @property
     def use_tool_loop(self) -> bool:
         return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search
 
@@ -1491,8 +1512,17 @@ async def prepare_gateway_tools(
             if isinstance(resolved_iters, int) and not isinstance(resolved_iters, bool) and resolved_iters > 0:
                 sandbox_max_iterations = resolved_iters
 
-        web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(tools_after_sandbox)
         web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
+        # Interception (claiming the provider-named web_search keywords) is opt-in and
+        # additionally requires a backend: without one there is nothing to intercept
+        # *to*, and claiming the keyword would turn a request the provider would have
+        # served into a 400. So with no backend configured, or the toggle off, a
+        # provider-named keyword passes through exactly as it always has.
+        intercept_web_search = _web_search_intercept_enabled(ctx.config) and web_search_url is not None
+        web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(
+            tools_after_sandbox,
+            intercept=intercept_web_search,
+        )
         # Forwarded to the search backend as `X-Gateway-Token`. Only set in
         # hybrid mode, where the backend may be the platform-hosted web-search
         # endpoint that authenticates the gateway. Standalone backends (SearXNG /
@@ -2093,7 +2123,13 @@ async def dispatch_non_stream(
         tally=tool_ctx.tally,
     ) as web_backend:
         kwargs = adapter.inject_hints(call_kwargs, web_backend.purpose_hints(), header=tool_ctx.tools_header)
-        return await adapter.run_tool_loop(kwargs, web_backend, tool_ctx.max_tool_iterations, on_first_response)
+        return await adapter.run_tool_loop(
+            kwargs,
+            web_backend,
+            tool_ctx.max_tool_iterations,
+            on_first_response,
+            emit_native_web_search=tool_ctx.emit_native_web_search,
+        )
 
 
 async def _lazy_mcp_stream(
@@ -2121,7 +2157,12 @@ async def _eager_backend_stream(
     # owns the matching ``__aexit__`` once the stream finishes or errors.
     try:
         hinted = adapter.inject_hints(kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
-        async for event in adapter.open_tool_loop_stream(hinted, backend, tool_ctx.max_tool_iterations):
+        async for event in adapter.open_tool_loop_stream(
+            hinted,
+            backend,
+            tool_ctx.max_tool_iterations,
+            emit_native_web_search=tool_ctx.emit_native_web_search,
+        ):
             yield event
     finally:
         await backend.__aexit__(None, None, None)
@@ -2760,7 +2801,12 @@ async def run_streaming_with_fallback(
             pool_for_loop.purpose_hints(),
             header=tool_ctx.tools_header,
         )
-        return adapter.open_tool_loop_stream(kwargs, pool_for_loop, tool_ctx.max_tool_iterations)
+        return adapter.open_tool_loop_stream(
+            kwargs,
+            pool_for_loop,
+            tool_ctx.max_tool_iterations,
+            emit_native_web_search=tool_ctx.emit_native_web_search,
+        )
 
     # See run_platform_non_stream: BackgroundTasks only run after a successful
     # response, so if every attempt fails before its first chunk the queued

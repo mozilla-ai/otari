@@ -61,6 +61,37 @@ _DEFAULT_PURPOSE_HINT = (
 )
 
 
+def code_execution_tool_definition() -> dict[str, Any]:
+    """The OpenAI-shaped function definition the model is given for code execution.
+
+    Module-level, and returning a fresh dict per call, so the ``/v1/tools``
+    discovery endpoint can advertise the same schema the tool loop injects without
+    constructing a backend. Mirrors
+    :func:`gateway.services.web_search_backend.web_search_tool_definition`.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": CODE_EXECUTION_TOOL_NAME,
+            "description": (
+                "Execute Python code in a sandboxed REPL. Returns stdout, "
+                "stderr, and any rich result blocks. State persists across "
+                "calls within the same request."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "The Python code to execute.",
+                    }
+                },
+                "required": ["code"],
+            },
+        },
+    }
+
+
 class SandboxNotReachableError(RuntimeError):
     """Raised when the sandbox container can't be reached or returns malformed data."""
 
@@ -133,29 +164,7 @@ class SandboxBackend:
 
     @property
     def openai_tools(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": CODE_EXECUTION_TOOL_NAME,
-                    "description": (
-                        "Execute Python code in a sandboxed REPL. Returns stdout, "
-                        "stderr, and any rich result blocks. State persists across "
-                        "calls within the same request."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "code": {
-                                "type": "string",
-                                "description": "The Python code to execute.",
-                            }
-                        },
-                        "required": ["code"],
-                    },
-                },
-            }
-        ]
+        return [code_execution_tool_definition()]
 
     def owns_tool(self, name: str) -> bool:
         return name == CODE_EXECUTION_TOOL_NAME

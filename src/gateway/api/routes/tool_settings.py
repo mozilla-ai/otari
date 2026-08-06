@@ -81,6 +81,7 @@ class UpdateToolSettingsRequest(BaseModel):
     web_search_max_results: int | None = Field(default=None, ge=1)
     web_search_extract: bool | None = None
     web_search_purpose_hint: str | None = None
+    web_search_intercept: bool | None = None
     sandbox_url: str | None = None
     sandbox_purpose_hint: str | None = None
     guardrails_url: str | None = None

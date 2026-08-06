@@ -2452,6 +2452,62 @@
         "title": "KnownProviderSummarySchema",
         "type": "object"
       },
+      "ManagedTool": {
+        "description": "One tool the gateway can run itself.",
+        "properties": {
+          "accepted_types": {
+            "description": "Every `tools[].type` this deployment currently routes to the tool. Always includes the canonical `otari_*` type; for web search it also includes the provider-named keywords when interception is enabled.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Accepted Types",
+            "type": "array"
+          },
+          "available": {
+            "description": "Whether this deployment has a backend configured for the tool. A request declaring an unavailable tool is rejected with 400.",
+            "title": "Available",
+            "type": "boolean"
+          },
+          "description": {
+            "description": "What the tool does, as the model is told.",
+            "title": "Description",
+            "type": "string"
+          },
+          "example": {
+            "additionalProperties": true,
+            "description": "A ready-to-use `tools[]` entry.",
+            "title": "Example",
+            "type": "object"
+          },
+          "id": {
+            "description": "The canonical tool type to put in `tools[]`.",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_schema": {
+            "additionalProperties": true,
+            "description": "JSON Schema for the arguments the model supplies, as the model sees it.",
+            "title": "Input Schema",
+            "type": "object"
+          },
+          "object": {
+            "const": "tool",
+            "default": "tool",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "available",
+          "accepted_types",
+          "input_schema",
+          "example"
+        ],
+        "title": "ManagedTool",
+        "type": "object"
+      },
       "McpServerConfig": {
         "description": "Inline MCP server configuration accepted on the chat completions request.\n\nStreamable HTTP transport. The `url` must be reachable from the gateway process.\n\nURL safety (SSRF guard against private/link-local/reserved IP ranges, plus\nrejecting plain ``http://`` when ``authorization_token`` is set) is\nenforced by :func:`gateway.services.url_safety.validate_mcp_url`, called\nfrom the async request pipeline (``prepare_gateway_tools``) rather than\nhere at parse time: the safety check does a DNS lookup, which must be\nawaited so it can't block the event loop, and Pydantic validators run\nsynchronously during request-body parsing.",
         "properties": {
@@ -4975,6 +5031,29 @@
         "title": "ToolSettingsResponse",
         "type": "object"
       },
+      "ToolsResponse": {
+        "description": "The gateway-run tools this deployment exposes.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ManagedTool"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "object": {
+            "const": "list",
+            "default": "list",
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ToolsResponse",
+        "type": "object"
+      },
       "UpdateBudgetRequest": {
         "description": "Request model for updating a budget.",
         "properties": {
@@ -5420,6 +5499,17 @@
               }
             ],
             "title": "Web Search Extract"
+          },
+          "web_search_intercept": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Web Search Intercept"
           },
           "web_search_max_results": {
             "anyOf": [
@@ -10740,6 +10830,36 @@
         "summary": "Test Service",
         "tags": [
           "tool-settings"
+        ]
+      }
+    },
+    "/v1/tools": {
+      "get": {
+        "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nEvery other `tools[]` entry, including provider-native keywords not listed\nhere, is forwarded to the upstream provider untouched.",
+        "operationId": "list_tools_v1_tools_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Tools",
+        "tags": [
+          "tools"
         ]
       }
     },
