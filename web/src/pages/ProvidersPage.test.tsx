@@ -435,6 +435,20 @@ describe("ProvidersPage", () => {
     expect(screen.getByPlaceholderText("Search providers…")).toBeInTheDocument();
   });
 
+  it("points the onboarding quickstart at the gateway-served tutorial in a new tab", async () => {
+    mockApi({ meta: [], stored: [] });
+    renderPage(<ProvidersPage />);
+
+    await screen.findByText("Welcome to Otari");
+    const quickstart = screen.getByRole("link", { name: "quickstart" });
+    // /welcome is a gateway-rendered page, not a HashRouter route: a router Link
+    // (href "#/welcome") would hit the catch-all and redirect to the overview.
+    expect(quickstart).toHaveAttribute("href", "/welcome");
+    // Following it leaves the SPA, so it must not replace the dashboard tab.
+    expect(quickstart).toHaveAttribute("target", "_blank");
+    expect(quickstart).toHaveAttribute("rel", "noreferrer");
+  });
+
   it("disables adding providers when OTARI_SECRET_KEY is not set", async () => {
     mockApi({
       stored: [storedProvider("openai", "1234")],

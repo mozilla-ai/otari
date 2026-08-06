@@ -37,8 +37,9 @@ value from the request body.
 
 - ✅ **Check**: a non-master API key resolves to its own user only. `resolve_user_id`
   (`api/routes/_helpers.py`) is the single chokepoint — a non-master key naming a
-  *different* `user` must be rejected (or bound to the key's own user under
-  `reject_user_mismatch=false`), **never** charged to the named user.
+  *different* `user` must be rejected (or bound to the key's own user when leniency
+  is in effect, either from the key's own `reject_user_mismatch` override or the
+  deployment-wide setting), **never** charged to the named user.
 - ✅ **Check**: only the **master key** may act on behalf of an arbitrary `user`.
 - ✅ **Check**: every billable route resolves identity through `resolve_user_id` — no route
   reads `request.user` (or `metadata.user_id`) directly to attribute spend.

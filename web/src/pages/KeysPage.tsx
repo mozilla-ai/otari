@@ -341,6 +341,35 @@ function BudgetExemptToggle({ checked, onChange }: { checked: boolean; onChange:
   );
 }
 
+// Access-control adjacent: a three-way override of the deployment-wide
+// reject_user_mismatch, so it is a picker rather than a checkbox. Same shape as
+// the budget picker on the Users page.
+function UserMismatchPicker({ value, onChange }: { value: boolean | null; onChange: (value: boolean | null) => void }) {
+  const selectId = "key-reject-user-mismatch";
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={selectId} className="text-sm font-medium text-[var(--otari-ink)]">
+        Mismatched <code>user</code> field
+      </label>
+      <select
+        id={selectId}
+        value={value === null ? "inherit" : value ? "reject" : "accept"}
+        onChange={(e) => onChange(e.target.value === "inherit" ? null : e.target.value === "reject")}
+        className="w-full rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)]"
+      >
+        <option value="inherit">Use the deployment setting (default)</option>
+        <option value="reject">Always reject (403)</option>
+        <option value="accept">Always accept</option>
+      </select>
+      <span className="text-xs text-[var(--otari-muted)]">
+        What happens when a request on this key names a different <code>user</code> than its owner. Accept it for
+        clients that send telemetry there rather than an identity, such as Claude Code. Spend binds to this
+        key&apos;s owner either way.
+      </span>
+    </div>
+  );
+}
+
 function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated: (result: CreateKeyResponse) => void }) {
   const create = useCreateKey();
   const users = useUsers();
@@ -350,6 +379,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [userId, setUserId] = useState("");
   const [allowedModels, setAllowedModels] = useState<string[] | null>(null);
   const [excludeFromBudget, setExcludeFromBudget] = useState(false);
+  const [rejectUserMismatch, setRejectUserMismatch] = useState<boolean | null>(null);
   const [scopeValid, setScopeValid] = useState(true);
 
   const expiresInPast = expiresAt !== "" && new Date(expiresAt).getTime() < Date.now();
@@ -366,6 +396,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels,
       exclude_from_budget: excludeFromBudget,
+      reject_user_mismatch: rejectUserMismatch,
     };
     create.mutate(body, {
       onSuccess: (result) => {
@@ -427,6 +458,7 @@ function CreateKeyForm({ onClose, onCreated }: { onClose: () => void; onCreated:
               }}
             />
             <BudgetExemptToggle checked={excludeFromBudget} onChange={setExcludeFromBudget} />
+            <UserMismatchPicker value={rejectUserMismatch} onChange={setRejectUserMismatch} />
           </div>
         ) : null}
         <div className="flex gap-2">
@@ -449,6 +481,7 @@ function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void 
   const [expiresAt, setExpiresAt] = useState(toDatetimeLocal(apiKey.expires_at));
   const [allowedModels, setAllowedModels] = useState<string[] | null>(apiKey.allowed_models);
   const [excludeFromBudget, setExcludeFromBudget] = useState(apiKey.exclude_from_budget);
+  const [rejectUserMismatch, setRejectUserMismatch] = useState<boolean | null>(apiKey.reject_user_mismatch);
   const [scopeValid, setScopeValid] = useState(true);
 
   const submit = () => {
@@ -461,6 +494,7 @@ function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void 
           expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
           allowed_models: allowedModels,
           exclude_from_budget: excludeFromBudget,
+          reject_user_mismatch: rejectUserMismatch,
         },
       },
       { onSuccess: onClose },
@@ -496,6 +530,7 @@ function EditKeyForm({ apiKey, onClose }: { apiKey: ApiKey; onClose: () => void 
           }}
         />
         <BudgetExemptToggle checked={excludeFromBudget} onChange={setExcludeFromBudget} />
+        <UserMismatchPicker value={rejectUserMismatch} onChange={setRejectUserMismatch} />
         <div className="flex gap-2">
           <Button variant="primary" isDisabled={update.isPending || !scopeValid} onPress={submit}>
             {update.isPending ? "Saving…" : "Save changes"}
@@ -628,6 +663,18 @@ export function KeysPage() {
                 Budget-exempt
               </span>
             ) : null}
+            {k.reject_user_mismatch === null ? null : (
+              <span
+                className="inline-flex items-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] px-2 py-0.5 text-xs font-medium text-[var(--otari-brand-dark)]"
+                title={
+                  k.reject_user_mismatch
+                    ? "This key always rejects a request naming a different user, whatever the deployment setting says"
+                    : "This key always accepts a request naming a different user; spend still binds to its owner"
+                }
+              >
+                {k.reject_user_mismatch ? "Strict user" : "Lenient user"}
+              </span>
+            )}
           </div>
         </div>
       ),

@@ -6,7 +6,7 @@ import logging
 
 import pytest
 import yaml
-from any_llm import LLMProvider
+from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 
 from gateway.api.routes.pricing import _candidate_model_keys
@@ -278,6 +278,14 @@ def test_resolve_alias_instance() -> None:
     assert resolved.dispatch_model == "openai:qwen3"
 
 
+def test_resolve_registry_only_provider_remains_unsupported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Otari provider resolution remains enum-backed despite any-llm's wider split type."""
+    monkeypatch.setattr(AnyLLM, "split_model_provider", lambda _selector: ("registry-only", "model"))
+
+    with pytest.raises(ValueError, match="registry-only"):
+        resolve_provider_selector(GatewayConfig(), "registry-only:model")
+
+
 def test_resolve_unknown_provider_raises() -> None:
     # An unconfigured prefix that is not a real provider surfaces any-llm's error
     # (caught as (ValueError, AnyLLMError) by the budget gate).
@@ -385,6 +393,12 @@ def test_normalize_pricing_key_provider_slash_to_colon() -> None:
     assert normalize_pricing_key(GatewayConfig(), "openai/gpt-4o") == "openai:gpt-4o"
 
 
+def test_normalize_pricing_key_accepts_string_provider_from_any_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(AnyLLM, "split_model_provider", lambda _selector: ("registry-only", "model"))
+
+    assert normalize_pricing_key(GatewayConfig(), "registry-only/model") == "registry-only:model"
+
+
 def test_normalize_pricing_key_unparseable_returned_unchanged() -> None:
     assert normalize_pricing_key(GatewayConfig(), "bare-model") == "bare-model"
 
@@ -444,3 +458,9 @@ def test_candidate_model_keys_normalizes_instance_slash_to_colon() -> None:
 
 def test_candidate_model_keys_real_provider_unchanged() -> None:
     assert _candidate_model_keys("openai:gpt-4o") == ["openai:gpt-4o", "openai/gpt-4o"]
+
+
+def test_candidate_model_keys_accepts_string_provider_from_any_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(AnyLLM, "split_model_provider", lambda _selector: ("registry-only", "model"))
+
+    assert _candidate_model_keys("registry-only:model") == ["registry-only:model", "registry-only/model"]

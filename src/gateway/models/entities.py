@@ -46,6 +46,15 @@ class APIKey(Base):
     # User.spend and never gates enforcement. Default false keeps every existing key
     # (and all keys minted before this column) on the normal enforced path.
     exclude_from_budget: Mapped[bool] = mapped_column(default=False)
+    # Per-key override of the deployment-wide ``reject_user_mismatch`` setting.
+    # NULL = inherit (the default, and where every key predating this column
+    # stays), True = always reject a request naming a different ``user``, False =
+    # always accept it. The override only decides the 403: spend binds to this
+    # key's own user either way, so the client value stays a provider-side tag.
+    # False is for clients whose ``user`` is telemetry rather than an identity
+    # (Claude Code sends a per-session JSON blob); True lets a deployment that
+    # relaxed the check globally keep an individual key strict.
+    reject_user_mismatch: Mapped[bool | None] = mapped_column(default=None)
     # Per-key model allow-list. NULL = unrestricted (default; every key predating
     # this column stays unrestricted), [] = deny all, a list = canonical
     # instance:model entries (with instance:* / instance:prefix* wildcards).
@@ -68,6 +77,7 @@ class APIKey(Base):
             "expires_at": self.expires_at.isoformat() if self.expires_at else None,
             "is_active": self.is_active,
             "exclude_from_budget": self.exclude_from_budget,
+            "reject_user_mismatch": self.reject_user_mismatch,
             "allowed_models": self.allowed_models,
             "metadata": self.metadata_,
         }

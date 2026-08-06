@@ -24,15 +24,28 @@ claude
 
 ### Standalone
 
-Claude Code attaches its own `metadata.user_id` to every request. In standalone
-mode Otari binds spend to the API key's own user and, by default, rejects a
-request that names a different user (`403 permission_error`). Set
-`reject_user_mismatch: false` in your config so Claude Code's `user_id` is
-ignored and spend is still bound to the key's user.
+Claude Code attaches its own `metadata.user_id` to every request. It is not an
+identity: it is a JSON blob of client telemetry (`device_id`, `account_uuid`, and
+a fresh `session_id` per session), so it never equals an Otari user id and no
+user you provision can make it match. In standalone mode Otari binds spend to the
+API key's own user and, by default, rejects a request that names a different user
+(`403 permission_error`), so the key Claude Code uses needs that check relaxed.
 
-```yaml
-reject_user_mismatch: false
+Do it on the key, not the deployment: create the key with
+`reject_user_mismatch: false` (dashboard: Keys, create a key, open **Advanced**,
+set **Mismatched `user` field** to *Always accept*; or `PATCH /v1/keys/{id}` on an
+existing one). Every other key keeps whatever the deployment setting says.
+
+```bash
+curl -sS "$OTARI_URL/v1/keys" \
+  -H "Otari-Key: Bearer $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"key_name":"claude-code","user_id":"alice","reject_user_mismatch":false}'
 ```
+
+The key-level field is a three-way override of the deployment-wide setting of the
+same name: `null` (the default) inherits it, `false` always accepts a mismatched
+`user`, `true` always rejects one. Spend binds to the key's own user in every
+case; the client value is forwarded to the provider as an end-user tag only.
 
 Then run Claude Code against your local Otari:
 

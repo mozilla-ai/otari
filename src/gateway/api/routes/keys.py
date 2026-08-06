@@ -41,6 +41,12 @@ class CreateKeyRequest(BaseModel):
         description="When true, requests on this key are logged with cost but never reserved, "
         "reconciled into the user's spend, or gated by budget.",
     )
+    reject_user_mismatch: bool | None = Field(
+        default=None,
+        description="Per-key override of the deployment-wide reject_user_mismatch setting: "
+        "null (default) inherits it, true always rejects a request naming a different 'user', "
+        "false always accepts it. Spend binds to this key's own user either way.",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
 
@@ -59,6 +65,7 @@ class CreateKeyResponse(BaseModel):
     is_active: bool
     allowed_models: list[str] | None
     exclude_from_budget: bool
+    reject_user_mismatch: bool | None
     metadata: dict[str, Any]
 
 
@@ -77,6 +84,7 @@ class KeyInfo(BaseModel):
     is_active: bool
     allowed_models: list[str] | None
     exclude_from_budget: bool
+    reject_user_mismatch: bool | None
     metadata: dict[str, Any]
 
     @classmethod
@@ -92,6 +100,7 @@ class KeyInfo(BaseModel):
             is_active=bool(key.is_active),
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
             exclude_from_budget=bool(key.exclude_from_budget),
+            reject_user_mismatch=None if key.reject_user_mismatch is None else bool(key.reject_user_mismatch),
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
 
@@ -103,6 +112,10 @@ class UpdateKeyRequest(BaseModel):
     is_active: bool | None = None
     expires_at: datetime | None = None
     exclude_from_budget: bool | None = None
+    # Tri-state via model_fields_set, like allowed_models below: absent =
+    # unchanged, null = clear to inheriting the deployment setting, true/false =
+    # pin this key strict/lenient.
+    reject_user_mismatch: bool | None = None
     # Tri-state via model_fields_set: absent = unchanged, null = clear to
     # unrestricted, [] = deny all, list = restrict. A plain default cannot tell
     # "absent" from "explicit null", so the handler checks model_fields_set.
@@ -170,6 +183,7 @@ async def create_key(
         expires_at=request.expires_at,
         allowed_models=allowed_models,
         exclude_from_budget=request.exclude_from_budget,
+        reject_user_mismatch=request.reject_user_mismatch,
         metadata_=request.metadata,
     )
 
@@ -256,6 +270,8 @@ async def update_key(
         key.expires_at = request.expires_at
     if request.exclude_from_budget is not None:
         key.exclude_from_budget = request.exclude_from_budget
+    if "reject_user_mismatch" in request.model_fields_set:
+        key.reject_user_mismatch = request.reject_user_mismatch
     # Tri-state: only touch the allow-list when the field was supplied. A supplied
     # null clears to unrestricted; [] denies all; a list restricts.
     if "allowed_models" in request.model_fields_set:

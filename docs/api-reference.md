@@ -54,8 +54,8 @@ For a full client setup example, see [Use with opencode](use-with-opencode.md).
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/messages` | Anthropic Messages API-compatible endpoint. Supports streaming, tool use, and extended thinking. Routes to any provider in the catalog (non-Anthropic models are translated to/from the Messages format automatically). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
-| `POST` | `/v1/messages/count_tokens` | Anthropic-compatible input-token count for a Messages request. Returns `{"input_tokens": N}`. Counts locally (no provider call, no budget debit); the count is an approximation. Used by clients such as Claude Code for context-window management. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+| `POST` | `/v1/messages` | Anthropic Messages API-compatible endpoint. Supports streaming, tool use, extended thinking, and Anthropic context management (`context_management` and `betas`, including compaction). Routes to any provider in the catalog (non-Anthropic models are translated to/from the Messages format automatically). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+| `POST` | `/v1/messages/count_tokens` | Anthropic-compatible input-token count for a Messages request. Returns `{"input_tokens": N}`. Counts locally (no provider call, no budget debit); the count is an approximation. `context_management` and `betas` are accepted for wire compatibility, but the local estimate does not apply provider-side context edits. Used by clients such as Claude Code for context-window management. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 
 > `/v1/messages` uses the Anthropic Messages request shape regardless of which upstream provider serves the model. For example, `max_tokens` is still required even when `model` is `openai:...`.
 
@@ -208,7 +208,7 @@ into something a text-only local model can read.
 | `POST` | `/v1/keys` | Create an API key. | Master key |
 | `GET` | `/v1/keys` | List all API keys. | Master key |
 | `GET` | `/v1/keys/{key_id}` | Get a specific key. | Master key |
-| `PATCH` | `/v1/keys/{key_id}` | Update a key (name, active status, expiration, allowed models, `exclude_from_budget`, metadata). | Master key |
+| `PATCH` | `/v1/keys/{key_id}` | Update a key (name, active status, expiration, allowed models, `exclude_from_budget`, `reject_user_mismatch`, metadata). | Master key |
 | `POST` | `/v1/keys/{key_id}/rotate` | Replace a key's secret in place (id, user, name, expiry, and metadata preserved); returns the new key once. The previous secret stops working immediately. | Master key |
 | `DELETE` | `/v1/keys/{key_id}` | Revoke a key. | Master key |
 

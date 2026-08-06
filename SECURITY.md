@@ -46,7 +46,8 @@ otari is a self-hosted LLM gateway; several controls are configuration-dependent
 - **The client `user` field is not trusted for non-master keys.** Spend is bound
   to the API key's own user; only the master key may bill on behalf of an
   arbitrary user. By default a non-master key naming a different user is rejected
-  (403); set `reject_user_mismatch=false` to instead bind to the key's own user
-  while still forwarding `user` to the provider as an end-user tag.
+  (403); set `reject_user_mismatch=false` on a single key, or deployment-wide, to
+  instead bind to the key's own user while still forwarding `user` to the provider
+  as an end-user tag.
 - **Audio and moderation endpoints** have no token-based pricing model and are
   exempt from `require_pricing` (treated as $0 when unpriced).

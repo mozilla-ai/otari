@@ -911,8 +911,22 @@
         "type": "object"
       },
       "CountTokensRequest": {
-        "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the input fields that affect the token\ncount, minus ``max_tokens`` and the streaming/sampling controls, since the\nendpoint only counts input tokens. Clients such as Claude Code call this on\nevery turn to keep their prompt within the model's context window.",
+        "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the input fields that affect the token\ncount, minus ``max_tokens`` and the streaming/sampling controls, since the\nendpoint only counts input tokens. ``context_management`` and ``betas`` are\naccepted for wire compatibility, but the local estimate does not apply\nprovider-side context edits. Clients such as Claude Code call this on every\nturn to keep their prompt within the model's context window.",
         "properties": {
+          "betas": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Betas"
+          },
           "cache_control": {
             "anyOf": [
               {
@@ -924,6 +938,18 @@
               }
             ],
             "title": "Cache Control"
+          },
+          "context_management": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Management"
           },
           "messages": {
             "items": {
@@ -1182,6 +1208,18 @@
             "title": "Metadata",
             "type": "object"
           },
+          "reject_user_mismatch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-key override of the deployment-wide reject_user_mismatch setting: null (default) inherits it, true always rejects a request naming a different 'user', false always accepts it. Spend binds to this key's own user either way.",
+            "title": "Reject User Mismatch"
+          },
           "user_id": {
             "anyOf": [
               {
@@ -1273,6 +1311,17 @@
             "title": "Metadata",
             "type": "object"
           },
+          "reject_user_mismatch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject User Mismatch"
+          },
           "user_id": {
             "anyOf": [
               {
@@ -1296,6 +1345,7 @@
           "is_active",
           "allowed_models",
           "exclude_from_budget",
+          "reject_user_mismatch",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -2284,6 +2334,17 @@
             "title": "Metadata",
             "type": "object"
           },
+          "reject_user_mismatch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject User Mismatch"
+          },
           "user_id": {
             "anyOf": [
               {
@@ -2307,6 +2368,7 @@
           "is_active",
           "allowed_models",
           "exclude_from_budget",
+          "reject_user_mismatch",
           "metadata"
         ],
         "title": "KeyInfo",
@@ -5028,6 +5090,17 @@
               }
             ],
             "title": "Metadata"
+          },
+          "reject_user_mismatch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject User Mismatch"
           }
         },
         "title": "UpdateKeyRequest",
@@ -10312,7 +10385,7 @@
     },
     "/v1/search": {
       "post": {
-        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when\n  ``reject_user_mismatch`` is disabled); it is never billed to that user.",
+        "description": "Run a search against a configured search tool.\n\nThe tool is taken from ``search_tool_name``, which may be omitted when\nexactly one tool is configured.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
         "operationId": "create_search_v1_search_post",
         "requestBody": {
           "content": {
@@ -10362,7 +10435,7 @@
     },
     "/v1/search/{search_tool_name}": {
       "post": {
-        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when\n  ``reject_user_mismatch`` is disabled); it is never billed to that user.",
+        "description": "Run a search against the search tool named in the path.\n\nIdentical to ``POST /v1/search`` except that the path names the tool, which\nis the form LiteLLM clients use. Any ``search_tool_name`` in the body is\nignored.\n\nAuthentication modes:\n- Master key: the ``user`` field is required and may name any existing user.\n- API key: usage and spend always bind to the key's own user. A ``user``\n  field naming a different user is rejected with 403 (or ignored, when the\n  key's own ``reject_user_mismatch`` is false, or the deployment-wide\n  setting is disabled and the key does not override it); it is never billed\n  to that user.",
         "operationId": "create_search_for_tool_v1_search__search_tool_name__post",
         "parameters": [
           {

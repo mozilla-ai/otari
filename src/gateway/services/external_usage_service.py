@@ -400,6 +400,12 @@ async def ingest_external_events(
             ),
         )
     result = ExternalIngestResult()
+    # A key's own ``reject_user_mismatch`` overrides the deployment-wide setting
+    # here too, so the per-key override means the same thing on the import path as
+    # on the request path (see resolve_user_id). Either way usage binds to the
+    # key's own user, never to the one the request named.
+    key_override = api_key.reject_user_mismatch if api_key is not None else None
+    reject_mismatch = reject_user_mismatch if key_override is None else key_override
     key_user = str(api_key.user_id) if api_key and api_key.user_id else None
     api_key_id = api_key.id if api_key else None
     seen_in_batch: set[str] = set()
@@ -428,7 +434,7 @@ async def ingest_external_events(
             request.user_id,
             key_user,
             is_master=is_master_key,
-            reject_mismatch=reject_user_mismatch,
+            reject_mismatch=reject_mismatch,
         )
         if bind_error is not None or target_user is None:
             _reject(result, index, event.source_event_id, bind_error or "Could not attribute usage to a user.")

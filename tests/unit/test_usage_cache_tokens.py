@@ -149,6 +149,51 @@ def test_messages_non_stream_captures_read_and_write() -> None:
     assert usage.cache_write_tokens == 15
 
 
+def test_messages_non_stream_bills_compaction_iterations() -> None:
+    from any_llm.types.messages import MessageResponse, MessageUsage
+
+    result = MessageResponse.model_construct(
+        usage=MessageUsage.model_validate(
+            {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 2,
+                "cache_creation_input_tokens": 3,
+                "iterations": [
+                    {
+                        "type": "compaction",
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                        "cache_read_input_tokens": 30,
+                        "cache_creation_input_tokens": 7,
+                        "cache_creation": {
+                            "ephemeral_5m_input_tokens": 3,
+                            "ephemeral_1h_input_tokens": 4,
+                        },
+                    },
+                    {
+                        "type": "message",
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "cache_read_input_tokens": 2,
+                        "cache_creation_input_tokens": 3,
+                    },
+                ],
+            }
+        )
+    )
+
+    usage = _MessagesAdapter().extract_usage(result)
+
+    assert isinstance(usage, GatewayUsage)
+    assert usage.prompt_tokens == 110
+    assert usage.completion_tokens == 25
+    assert usage.total_tokens == 135
+    assert usage.cache_read_tokens == 32
+    assert usage.cache_write_tokens == 10
+    assert cache_write_1h_tokens_of(usage) == 4
+
+
 def test_messages_non_stream_captures_1h_cache_write_breakdown() -> None:
     """Anthropic's optional TTL breakdown is retained for its distinct rate."""
     from anthropic.types.cache_creation import CacheCreation
@@ -187,6 +232,46 @@ def test_messages_stream_delta_captures_read_and_write() -> None:
     assert isinstance(usage, GatewayUsage)
     assert usage.cache_read_tokens == 5
     assert usage.cache_write_tokens == 2
+
+
+def test_messages_stream_delta_bills_compaction_iterations() -> None:
+    from any_llm.types.messages import MessageDeltaEvent, MessageDeltaUsage
+
+    event = MessageDeltaEvent.model_construct(
+        usage=MessageDeltaUsage.model_validate(
+            {
+                "input_tokens": None,
+                "output_tokens": 5,
+                "cache_read_input_tokens": None,
+                "cache_creation_input_tokens": None,
+                "iterations": [
+                    {
+                        "type": "compaction",
+                        "input_tokens": 100,
+                        "output_tokens": 20,
+                        "cache_read_input_tokens": 30,
+                        "cache_creation_input_tokens": 7,
+                    },
+                    {
+                        "type": "message",
+                        "input_tokens": 10,
+                        "output_tokens": 5,
+                        "cache_read_input_tokens": 2,
+                        "cache_creation_input_tokens": 3,
+                    },
+                ],
+            }
+        )
+    )
+
+    usage = _messages_stream_usage(event)
+
+    assert isinstance(usage, GatewayUsage)
+    assert usage.prompt_tokens == 110
+    assert usage.completion_tokens == 25
+    assert usage.total_tokens == 135
+    assert usage.cache_read_tokens == 32
+    assert usage.cache_write_tokens == 10
 
 
 def test_responses_captures_cached_tokens() -> None:
