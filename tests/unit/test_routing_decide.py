@@ -359,6 +359,35 @@ async def test_a_backend_that_raises_declines_rather_than_failing_the_request(
 
 
 @pytest.mark.asyncio
+async def test_a_backend_that_hangs_declines_at_the_deadline(
+    config: GatewayConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ranking that has not answered in time is not worth the caller's latency.
+
+    The work behind it is an outbound embedding call plus a read of the stored
+    examples, neither with a deadline of its own, so a hung embedding provider would
+    otherwise hold the request open for as long as its own client allows.
+    """
+    import asyncio
+
+    class _Hangs:
+        async def rank(self, ctx: RoutingContext) -> RoutingDecision:
+            await asyncio.sleep(60)
+            raise AssertionError("should have been cancelled")
+
+    monkeypatch.setattr("gateway.services.routing.decide.get_router_backend", lambda config, name: _Hangs())
+    monkeypatch.setattr("gateway.services.routing.decide.ROUTER_DEADLINE_SECONDS", 0.05)
+
+    ordering = await decide_ordering(
+        config, _spec(), policy_name="smart", user_id="u", allowlist=None, signal=_signal()
+    )
+
+    assert ordering is not None
+    assert ordering.selectors == []
+    assert "TimeoutError" in ordering.rationale
+
+
+@pytest.mark.asyncio
 async def test_the_request_headers_reach_the_backend(config: GatewayConfig, recorder: _Recorder) -> None:
     await decide_ordering(
         config,

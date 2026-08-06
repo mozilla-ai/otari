@@ -14,6 +14,7 @@ request could actually use.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from any_llm.exceptions import AnyLLMError
@@ -32,7 +33,14 @@ from gateway.services.routing.backends import (
 )
 from gateway.services.routing.compiler import RouterOrdering
 
-__all__ = ["RoutingSignal", "decide_ordering"]
+__all__ = ["ROUTER_DEADLINE_SECONDS", "RoutingSignal", "decide_ordering"]
+
+# A ranking that has not answered by now is not worth the caller's latency. The
+# work behind it is an outbound embedding call plus a read of the stored examples,
+# both on the request path and neither with a deadline of its own, so a hung
+# embedding provider would otherwise hold the request open for as long as its own
+# client allows. Expiring here costs the cheaper model, not the request.
+ROUTER_DEADLINE_SECONDS = 5.0
 
 
 @dataclass(frozen=True)
@@ -128,16 +136,18 @@ async def decide_ordering(
         trace_key=signal.conversation_id,
     )
     try:
-        decision = await backend.rank(context)
+        async with asyncio.timeout(ROUTER_DEADLINE_SECONDS):
+            decision = await backend.rank(context)
     except Exception as exc:
         # A router is an optimization, so it must never be the reason a request
-        # cannot be served. Backends already decline on the failures they can name
+        # cannot be served, or the reason it hangs. Backends already decline on the
+        # failures they can name
         # (cold pool, embedding error, missing pricing), but ranking also reads the
         # database, and a broad guard here is what makes the claim true for every
         # backend and every failure rather than for the ones each backend thought
         # of. Declining costs the caller the cheaper model, not the request.
         logger.warning(
-            "Router '%s' on policy '%s' failed (%s); serving '%s'",
+            "Router '%s' on policy '%s' failed or timed out (%s); serving '%s'",
             backend_name,
             policy_name,
             type(exc).__name__,
