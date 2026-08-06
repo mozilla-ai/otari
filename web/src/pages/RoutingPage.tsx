@@ -770,7 +770,7 @@ function PolicyForm({
             {candidates.length > 0 ? (
               <span className="text-xs text-[var(--otari-muted)]">
                 A new router serves the model above until it has scored examples. Recording them is an API
-                job for now (<code>POST /v1/routing/preferences/rank</code>); open <b>Router</b> on the row
+                job for now (<code>POST /v1/routing/preferences/rank</code>); open <b>Examples</b> on the row
                 afterwards to watch it warm up.
               </span>
             ) : null}
