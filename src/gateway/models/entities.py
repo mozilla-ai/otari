@@ -643,6 +643,9 @@ class RoutingMemory(Base):
     __table_args__ = (
         Index("ix_routing_memory_user_model", "user_id", "embedding_model"),
         Index("ix_routing_memory_user_created", "user_id", "created_at"),
+        # A task-scoped read filters on all three; without this it walks every
+        # record the user has for the embedding model before partitioning.
+        Index("ix_routing_memory_user_model_task", "user_id", "embedding_model", "task_id"),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))

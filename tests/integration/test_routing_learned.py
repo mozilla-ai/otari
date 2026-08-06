@@ -670,6 +670,71 @@ def test_rank_rejects_out_of_range_or_empty_scores(client: TestClient, scores: d
     assert _rank(client, "prompt", scores).status_code == 422
 
 
+def test_rank_trims_the_task_label_so_the_header_can_reach_the_pool(client: TestClient) -> None:
+    # The request side trims `Otari-Router-Task` and treats blank as absent, so a
+    # label stored verbatim as " math " created a partition no request could reach
+    # and `/status` listed it as real.
+    assert _rank(client, "what is 2 plus 2", {CHEAP: 1.0}, task_id="  math  ").status_code == 200
+    assert _rank(client, "add 3 and 4", {CHEAP: 1.0}, task_id="   ").status_code == 200
+
+    status = _status(client)
+    pools = {pool["task_id"]: pool["records"] for pool in status["tasks"]}
+    assert pools == {"math": 1}
+    # The blank label filed into the default pool rather than a phantom partition.
+    assert status["default_pool"]["records"] == 2
+
+
+@pytest.mark.parametrize("prompt", ["   ", "\n\t"])
+def test_rank_refuses_a_blank_prompt(client: TestClient, prompt: str) -> None:
+    # It used to write an audit row, no memory row, and a `recorded` count that
+    # disagreed with both.
+    assert _rank(client, prompt, {CHEAP: 1.0}).status_code == 422
+
+
+def test_eviction_keeps_the_store_bounded_without_a_giant_in_list(
+    learned_config: GatewayConfig, postgres_url: str
+) -> None:
+    """Eviction has to work at the *default* cap, not just at a tiny one.
+
+    It used to delete with `id NOT IN (<max_records ids>)`, which binds one host
+    parameter per kept row. SQLite caps those at 999 on builds before 3.32, so with
+    the default cap of 5000 the query that keeps the store bounded would fail. This
+    drives it through the real endpoint and asserts the store is actually trimmed.
+    """
+    learned_config.router_max_records_per_user = 3
+    _run_alembic_migrations(learned_config.database_url)
+    engine = create_engine(learned_config.database_url, pool_pre_ping=True)
+    app = create_app(learned_config)
+    override_get_db, dispose_override = build_async_session_override(learned_config.database_url)
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with patch("gateway.services.routing.knn.aembedding", new=_fake_aembedding), TestClient(app) as client:
+            _create_user(client)
+            resp = client.post(
+                "/v1/routing/preferences/rank",
+                json={
+                    "user_id": USER,
+                    "examples": [
+                        {"prompt": f"what is {n} plus {n}", "scores": {CHEAP: 1.0, STRONG: 1.0}}
+                        for n in range(6)
+                    ],
+                },
+                headers=HEADERS,
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["recorded"] == 6
+            # Six written, cap of three: the oldest are gone rather than the write
+            # failing or the store growing unbounded.
+            assert _status(client)["default_pool"]["records"] <= 3
+    finally:
+        dispose_override()
+        Base.metadata.drop_all(bind=engine)
+        with engine.connect() as conn:
+            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
+            conn.commit()
+        engine.dispose()
+
+
 def test_rank_rejects_an_empty_batch(client: TestClient) -> None:
     resp = client.post(
         "/v1/routing/preferences/rank", json={"user_id": USER, "examples": []}, headers=HEADERS

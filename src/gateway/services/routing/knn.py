@@ -55,6 +55,9 @@ if TYPE_CHECKING:
 __all__ = ["KnnRoutingMemory", "RouterPricingError", "unpriced_router_candidates"]
 
 _TRACE_CACHE_MAX = 10_000
+# Read bound when eviction is disabled (`router_max_records_per_user = 0`). Matches
+# the field's own default, so turning eviction off does not turn the read unbounded.
+_DEFAULT_READ_LIMIT = 5000
 
 
 class RouterPricingError(ValueError):
@@ -93,6 +96,10 @@ class KnnRoutingMemory:
         self.granularity = config.router_granularity.strip().lower()
         self.embedding_model = config.router_embedding_model
         self.max_records = max(0, int(config.router_max_records_per_user))
+        # What one decision may load. `max_records` is the operator's own answer to
+        # "how many records should this router use"; 0 means eviction is off, which
+        # is not a licence for an unbounded select, so fall back to the default.
+        self._read_limit = self.max_records or _DEFAULT_READ_LIMIT
         # trace_key -> chosen model, so the turns of one conversation reuse its
         # first decision. Bounded LRU, in-process only: a restart simply re-decides
         # at the next turn, which is safe because every candidate can serve.
@@ -302,6 +309,13 @@ class KnnRoutingMemory:
             )
             if task_id is not None:
                 stmt = stmt.where(RoutingMemory.task_id == task_id)
+            # Newest first, and bounded. Eviction is enforced lazily on write, and
+            # only for the user's whole set rather than per partition, so nothing
+            # else stops this select from growing without limit: a request would
+            # then load and cosine-score every row it finds. The cap is what the
+            # operator already configured as "how many records this router uses",
+            # and taking the newest is the same rule eviction applies.
+            stmt = stmt.order_by(RoutingMemory.created_at.desc()).limit(self._read_limit)
             return list((await db.execute(stmt)).scalars().all())
 
     def _neighbors(self, query: list[float], records: list[RoutingMemory]) -> list[tuple[float, RoutingMemory]]:
@@ -321,22 +335,28 @@ class KnnRoutingMemory:
             ).scalar_one()
             if count <= self.max_records:
                 return
-            keep_ids = (
-                (
-                    await db.execute(
-                        select(RoutingMemory.id)
-                        .where(RoutingMemory.user_id == user_id)
-                        .order_by(RoutingMemory.created_at.desc())
-                        .limit(self.max_records)
-                    )
+            # Delete by timestamp rather than by an id NOT IN list. The list would
+            # hold `max_records` ids (5000 by default), and SQLite caps host
+            # parameters per statement at 999 on builds before 3.32, so the eviction
+            # that keeps the store bounded would itself fail on the default config.
+            cutoff = (
+                await db.execute(
+                    select(RoutingMemory.created_at)
+                    .where(RoutingMemory.user_id == user_id)
+                    .order_by(RoutingMemory.created_at.desc())
+                    .offset(self.max_records - 1)
+                    .limit(1)
                 )
-                .scalars()
-                .all()
-            )
+            ).scalar_one_or_none()
+            if cutoff is None:
+                return
+            # Strictly older than the oldest row being kept. Rows sharing that exact
+            # timestamp are kept, so a batch written in one tick is never half
+            # evicted; the count can sit slightly above the cap until the next write.
             await db.execute(
                 delete(RoutingMemory).where(
                     RoutingMemory.user_id == user_id,
-                    RoutingMemory.id.notin_(keep_ids),
+                    RoutingMemory.created_at < cutoff,
                 )
             )
             try:

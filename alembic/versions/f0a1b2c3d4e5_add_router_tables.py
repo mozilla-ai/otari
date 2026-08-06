@@ -39,6 +39,12 @@ def upgrade() -> None:
     op.create_index("ix_routing_memory_created_at", "routing_memory", ["created_at"])
     op.create_index("ix_routing_memory_user_model", "routing_memory", ["user_id", "embedding_model"])
     op.create_index("ix_routing_memory_user_created", "routing_memory", ["user_id", "created_at"])
+    # A routed request with a task label filters on all three, and the seed gate
+    # counts the same partition, so both queries walk this index instead of every
+    # record the user has for the embedding model.
+    op.create_index(
+        "ix_routing_memory_user_model_task", "routing_memory", ["user_id", "embedding_model", "task_id"]
+    )
 
     op.create_table(
         "router_preferences",
@@ -65,6 +71,7 @@ def downgrade() -> None:
     op.drop_index("ix_router_preferences_user_id", table_name="router_preferences")
     op.drop_table("router_preferences")
 
+    op.drop_index("ix_routing_memory_user_model_task", table_name="routing_memory")
     op.drop_index("ix_routing_memory_user_created", table_name="routing_memory")
     op.drop_index("ix_routing_memory_user_model", table_name="routing_memory")
     op.drop_index("ix_routing_memory_created_at", table_name="routing_memory")

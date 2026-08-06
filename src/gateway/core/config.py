@@ -369,7 +369,9 @@ class GatewayConfig(BaseSettings):
         ge=0,
         description=(
             "Cap on stored routing-memory records per user; the oldest are evicted past it. The "
-            "store is scanned linearly, so this bounds per-request routing latency."
+            "store is scanned linearly, so this also bounds per-request routing latency. 0 disables "
+            "eviction rather than storing nothing, and the per-request read falls back to the default "
+            "bound, so the store grows without limit while each decision stays bounded."
         ),
     )
     pricing: dict[str, PricingConfig] = Field(

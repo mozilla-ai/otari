@@ -429,6 +429,23 @@ async def test_sticky_decision_is_dropped_when_it_leaves_the_pool() -> None:
     assert "trace-sticky" not in narrowed.rationale
 
 
+# -- store bounds -----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_record_read_is_bounded_and_takes_the_newest() -> None:
+    """One decision may not load an unbounded number of rows.
+
+    Eviction is enforced lazily on write and only over a user's whole set, so
+    nothing else stops a partition from growing past the cap; without a limit here
+    a single request would load and cosine-score every row it found.
+    """
+    backend = _backend(router_max_records_per_user=25)
+    assert backend._read_limit == 25
+    # Eviction off is not a licence for an unbounded read.
+    assert _backend(router_max_records_per_user=0)._read_limit == 5000
+
+
 # -- ordering ---------------------------------------------------------------
 
 
