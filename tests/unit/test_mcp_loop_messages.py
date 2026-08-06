@@ -11,6 +11,8 @@ from typing import Any, cast
 
 import pytest
 from any_llm.types.messages import (
+    CompactionBlock,
+    CompactionDelta,
     ContentBlockDeltaEvent,
     ContentBlockStartEvent,
     ContentBlockStopEvent,
@@ -595,6 +597,22 @@ def _text_delta(index: int, text: str) -> ContentBlockDeltaEvent:
     )
 
 
+def _compaction_block_start(index: int) -> ContentBlockStartEvent:
+    return ContentBlockStartEvent(
+        type="content_block_start",
+        index=index,
+        content_block=cast(Any, CompactionBlock(type="compaction", content=None)),
+    )
+
+
+def _compaction_delta(index: int, content: str) -> ContentBlockDeltaEvent:
+    return ContentBlockDeltaEvent(
+        type="content_block_delta",
+        index=index,
+        delta=cast(Any, CompactionDelta(type="compaction_delta", content=content)),
+    )
+
+
 def _content_block_stop(index: int) -> ContentBlockStopEvent:
     return ContentBlockStopEvent(type="content_block_stop", index=index)
 
@@ -710,6 +728,65 @@ async def test_stream_runs_owned_tool_and_continues(monkeypatch: pytest.MonkeyPa
     # sent the matching tool_result, because the loop consumed it.
     assert not any(getattr(getattr(e, "content_block", None), "type", None) == "tool_use" for e in events)
     assert pool.calls == [("fetch_url", {"u": "x"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_replays_compaction_content_when_tool_loop_continues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context_management = {
+        "edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]
+    }
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _compaction_block_start(0),
+                _compaction_delta(0, "Conversation "),
+                _compaction_delta(0, "summary"),
+                _content_block_stop(0),
+                _tool_use_block_start(1, "tu_1", "fetch_url"),
+                _input_json_delta(1, '{"u": "x"}'),
+                _content_block_stop(1),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "done"),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+    calls: list[dict[str, Any]] = []
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        calls.append(kwargs)
+        return next(iter_streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+
+    async for _event in anthropic_tool_loop_stream(
+        completion_kwargs={
+            "model": "fake",
+            "messages": [{"role": "user", "content": "go"}],
+            "max_tokens": 100,
+            "context_management": context_management,
+            "betas": ["compact-2026-01-12"],
+        },
+        pool=cast(Any, _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})),
+        max_iterations=5,
+    ):
+        pass
+
+    assistant_content = calls[1]["messages"][-2]["content"]
+    assert assistant_content[0] == {"type": "compaction", "content": "Conversation summary"}
+    assert assistant_content[1]["type"] == "tool_use"
+    assert calls[1]["context_management"] == context_management
+    assert calls[1]["betas"] == ["compact-2026-01-12"]
 
 
 @pytest.mark.asyncio

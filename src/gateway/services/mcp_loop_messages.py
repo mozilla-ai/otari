@@ -359,6 +359,10 @@ class _MessagesToolLoopStrategy:
                 state.tool_use_json_bufs[idx] += getattr(delta, "partial_json", "") or ""
             elif dtype == "text_delta":
                 block_dict["text"] = (block_dict.get("text") or "") + (getattr(delta, "text", "") or "")
+            elif dtype == "compaction_delta":
+                block_dict["content"] = (block_dict.get("content") or "") + (
+                    getattr(delta, "content", "") or ""
+                )
             elif dtype == "thinking_delta":
                 block_dict["thinking"] = (block_dict.get("thinking") or "") + (
                     getattr(delta, "thinking", "") or ""
