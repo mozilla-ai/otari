@@ -779,11 +779,15 @@ export function UsagePage() {
           </>
         }
       >
+        {/* allowsCustom because the options are the in-window top spenders (a
+            breakdown capped at 100): an entity below that rank, or with no traffic
+            in the window, is not offered, so Enter has to commit a pasted id. */}
         <FilterMultiComboBox
           label="User"
           values={userFilters}
           onChange={setUserFilters}
           options={userOptions}
+          allowsCustom
           placeholder="All users"
         />
         <FilterMultiComboBox
@@ -798,6 +802,7 @@ export function UsagePage() {
           values={apiKeyFilters}
           onChange={setApiKeyFilters}
           options={keyOptions}
+          allowsCustom
           placeholder="All keys"
         />
       </FilterChips>

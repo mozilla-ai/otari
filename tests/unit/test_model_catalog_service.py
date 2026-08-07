@@ -128,6 +128,32 @@ async def test_stale_read_without_a_cache_entry_still_fetches() -> None:
     assert result == {"openai": {}}
 
 
+@pytest.mark.asyncio
+async def test_stale_read_retries_a_failed_fetch_on_the_negative_ttl() -> None:
+    """A failed fetch must not be pinned for the refresher's whole interval.
+
+    The refresh cadence is the *success* cadence (``models_dev_cache_ttl_seconds``,
+    a day by default). Serving a failure at any age would leave the dashboard
+    without enrichment until the next tick, and ``/v1/models/metadata`` has no
+    ``refresh`` flag to escape it. The 60s negative TTL still governs a failure.
+    """
+    mcs.clear_catalog_cache()
+    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=86400)
+
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value=None)) as failing:
+        assert await mcs.load_models_dev_catalog(config, force=True) is None
+        assert failing.await_count == 1
+
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value={"openai": {}})) as recovered:
+        # Inside the negative TTL the failure is still served, as before.
+        assert await mcs.load_models_dev_catalog(config, serve_stale=True) is None
+        assert recovered.await_count == 0
+        # Past it, a read retries rather than waiting out the refresh interval.
+        mcs._cache.at = time.monotonic() - (mcs._NEGATIVE_TTL_SECONDS + 1)
+        assert await mcs.load_models_dev_catalog(config, serve_stale=True) == {"openai": {}}
+        assert recovered.await_count == 1
+
+
 def test_background_catalog_requires_caching_and_enrichment() -> None:
     """Both existing knobs still mean what they say; there is no third one."""
     assert mcs.background_catalog_enabled(GatewayConfig(models_dev_metadata=False)) is False

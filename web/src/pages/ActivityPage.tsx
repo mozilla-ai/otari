@@ -765,7 +765,6 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
 // ---------- page ----------
 
 export function ActivityPage() {
-
   // Filter + pagination state lives in the URL, so a filtered view is shareable
   // and survives the back button. `patch` batches related changes into one entry.
   const url = useUrlState(URL_DEFAULTS);
@@ -1394,10 +1393,16 @@ export function ActivityPage() {
               ))}
             </FilterSelect>
           ) : null}
+          {/* allowsCustom on all three: the options are the in-window top spenders
+              (a breakdown capped at 100), so an entity that exists but ranks below
+              that, or has no traffic in the window, is not offered. Enter commits a
+              pasted id anyway, the way the Model box already accepts a name the
+              suggestions do not cover. */}
           <FilterMultiComboBox
             label="API key"
             values={apiKeyFilters}
             onChange={(values) => url.patch({ api_key_id: values })}
+            allowsCustom
             placeholder="All keys"
             options={keyOptions}
           />
@@ -1405,6 +1410,7 @@ export function ActivityPage() {
             label="User"
             values={userFilters}
             onChange={(values) => url.patch({ user_id: values })}
+            allowsCustom
             placeholder="All users"
             options={userOptionsList}
           />

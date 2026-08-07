@@ -90,8 +90,13 @@ def clear_catalog_cache() -> None:
 def _read_cache(ttl: int, *, serve_stale: bool = False, force: bool = False) -> object:
     """Return the cached data if still fresh, else the ``_MISS`` sentinel.
 
-    ``serve_stale`` accepts a cached blob at any age, so a read never pays the
-    15s fetch timeout; the background refresher is what keeps it current.
+    ``serve_stale`` accepts a cached *successful* blob at any age, so a read
+    never pays the 15s fetch timeout; the background refresher is what keeps it
+    current. A failed fetch is deliberately excluded: it falls through to
+    ``_NEGATIVE_TTL_SECONDS`` below, because the refresh interval is the success
+    cadence (a day by default) and pinning a transient models.dev outage for that
+    long, with no read able to retry it and no ``refresh`` flag on
+    ``/v1/models/metadata``, would lose enrichment far longer than the failure.
     ``force`` is the refresher's own read: it treats every entry as expired so
     the fetch actually happens.
     """
@@ -99,7 +104,7 @@ def _read_cache(ttl: int, *, serve_stale: bool = False, force: bool = False) -> 
         return _MISS
     if force:
         return _MISS
-    if serve_stale:
+    if serve_stale and _cache.ok:
         return _cache.data
     # A successful fetch honors the configured TTL (0 disables caching, so it is
     # never fresh); a failed one is held only briefly before retrying.
@@ -195,10 +200,17 @@ async def run_catalog_refresher(config: GatewayConfig, interval: float | None = 
     Primes once immediately, then refetches on the interval. Errors are already
     swallowed inside ``_fetch`` (a failure degrades to "no enrichment"), so the
     guard here only covers an unexpected one taking the refresher down.
+
+    Re-checks ``background_catalog_enabled`` every tick rather than being started
+    only when it holds, for the same reason as the discovery refresher:
+    ``models_dev_metadata`` and ``models_dev_cache_ttl_seconds`` are both
+    runtime-settable, so the loop has to be able to start and stop refetching
+    without a restart.
     """
     while True:
         try:
-            await load_models_dev_catalog(config, force=True)
+            if background_catalog_enabled(config):
+                await load_models_dev_catalog(config, force=True)
         except asyncio.CancelledError:
             raise
         except Exception:

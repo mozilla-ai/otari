@@ -81,6 +81,31 @@ export async function deleteSession(): Promise<void> {
 // hung requests is enough to queue everything an operator clicks afterwards.
 // Callers pass their own `signal` to override.
 const REQUEST_TIMEOUT_MS = 30_000;
+const TIMEOUT_MESSAGE = `The gateway did not respond within ${REQUEST_TIMEOUT_MS / 1000}s.`;
+
+// For the handful of calls whose work scales with the data rather than with one
+// upstream hop: the bulk usage delete and reprice, and the pricing-snapshot
+// refresh. `DELETE /v1/usage` with `by_filter` issues one unbounded DELETE and
+// the reprice loops over every matched row, so on a large imported-usage table
+// either can outrun the 30s bound above. Aborting them is worse than waiting: the
+// server transaction commits regardless of whether the browser is still
+// listening, so the operator would be told the delete failed when it succeeded,
+// and the obvious next move is to run it again. Still bounded, because a socket
+// held forever is what the deadline exists to prevent.
+export const LONG_REQUEST_TIMEOUT_MS = 5 * 60_000;
+
+/** Signal for a request whose duration scales with the data, not with one hop. */
+export function longRequestSignal(): AbortSignal {
+  return AbortSignal.timeout(LONG_REQUEST_TIMEOUT_MS);
+}
+
+// A TimeoutError from AbortSignal.timeout means we gave up, not that the gateway
+// is unreachable; saying so points at the right thing to look at. It can surface
+// from either await: fetch() resolves once headers arrive, so a body that then
+// stalls trips the same deadline on the JSON read instead.
+function isTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
+}
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
@@ -89,15 +114,17 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     headers.set("Content-Type", "application/json");
   }
   const signal = init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  // Only name the deadline when it is ours; a caller-supplied signal has its own
+  // budget, and quoting 30s at an operator who waited five minutes is worse than
+  // saying nothing.
+  const timeoutMessage = init.signal ? "The gateway did not respond in time." : TIMEOUT_MESSAGE;
 
   let response: Response;
   try {
     response = await fetch(path, { ...init, headers, signal });
   } catch (error) {
-    // A TimeoutError from AbortSignal.timeout means we gave up, not that the
-    // gateway is unreachable; saying so points at the right thing to look at.
-    if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new ApiError(0, `The gateway did not respond within ${REQUEST_TIMEOUT_MS / 1000}s.`);
+    if (isTimeout(error)) {
+      throw new ApiError(0, timeoutMessage);
     }
     throw new ApiError(0, "Network error: could not reach the gateway.");
   }
@@ -117,5 +144,14 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     return undefined as T;
   }
 
-  return (await response.json()) as T;
+  try {
+    return (await response.json()) as T;
+  } catch (error) {
+    // Every caller expects an ApiError; a raw DOMException here would reach the
+    // UI as an unrecognized failure. A malformed body is still its own error.
+    if (isTimeout(error)) {
+      throw new ApiError(0, timeoutMessage);
+    }
+    throw error;
+  }
 }

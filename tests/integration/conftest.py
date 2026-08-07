@@ -34,28 +34,6 @@ from gateway.main import create_app
 MODEL_NAME = "gemini:gemini-2.5-flash"
 
 
-@pytest.fixture(autouse=True)
-def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Stop the app lifespan from dialing providers and models.dev for real.
-
-    Every ``TestClient(app)`` runs the lifespan, which starts the discovery and
-    catalog refreshers; their first act is to prime the cache from a live dial.
-    That is right in production and wrong in a test: it makes real outbound calls
-    from every fixture boot, and it races a test that patches the dial *after*
-    startup, so the read then serves whatever the unpatched prime cached.
-
-    Suppressing the refreshers leaves the cache empty, so a read takes the
-    cold-provider path and dials once, under whatever the test has patched.
-    A test that wants the warm-cache read path seeds the cache itself.
-    """
-
-    async def _noop(*_args: Any, **_kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr("gateway.main.run_discovery_refresher", _noop)
-    monkeypatch.setattr("gateway.main.run_catalog_refresher", _noop)
-
-
 def _run_alembic_migrations(database_url: str) -> None:
     """Run Alembic migrations for test database."""
     alembic_cfg = Config()

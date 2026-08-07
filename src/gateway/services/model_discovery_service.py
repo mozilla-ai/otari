@@ -15,6 +15,14 @@ of upstream calls:
   in-flight ``list_models`` call instead of each firing their own. This is what
   stops ``/v1/models`` and ``/v1/models/discoverable`` (both mounted on the
   dashboard's Models page) from doubling every fanout.
+- **Background refresh**: while ``model_cache_ttl_seconds`` is above 0 a
+  refresher task (``run_discovery_refresher``, wired in the lifespan) owns the
+  dialing, and reads answer from the cache at any age (``serve_stale``). So the
+  TTLs above describe when the *refresher* re-dials, not what a read waits for.
+  The exceptions are a provider that has never been dialed, which the arriving
+  read still dials so a cold worker does not claim the provider has no models,
+  and ``model_cache_ttl_seconds = 0``, which turns the refresher off and puts
+  every read back on the dialing path.
 """
 
 import asyncio
@@ -680,10 +688,17 @@ async def run_discovery_refresher(config: GatewayConfig, interval: float | None 
     Primes once immediately so the first read is served from cache, then re-dials
     on the interval. Every error is swallowed and retried on the next tick so one
     bad round cannot freeze the catalog. Cancelled at shutdown.
+
+    Re-checks ``background_discovery_enabled`` every tick rather than being
+    started only when it holds: ``model_cache_ttl_seconds`` is runtime-settable,
+    and while it is 0 the reads dial for themselves, so refreshing here would
+    only add a second dialer. Ticking without dialing keeps the loop ready to
+    resume the moment an operator turns caching back on.
     """
     while True:
         try:
-            await refresh_discovery_cache(config)
+            if background_discovery_enabled(config):
+                await refresh_discovery_cache(config)
         except asyncio.CancelledError:
             raise
         except Exception:

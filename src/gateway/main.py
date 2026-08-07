@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from typing import Any, Callable
 
 from fastapi import FastAPI, Request, Response
@@ -15,6 +15,7 @@ from gateway.api.main import register_routers
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.dashboard import get_dashboard_build_id, get_dashboard_dir
+from gateway.log_config import logger
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
@@ -24,12 +25,10 @@ from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
 from gateway.services.model_catalog_service import (
-    background_catalog_enabled,
     clear_catalog_cache,
     run_catalog_refresher,
 )
 from gateway.services.model_discovery_service import (
-    background_discovery_enabled,
     reset_discovery_cache,
     run_discovery_refresher,
 )
@@ -120,6 +119,42 @@ def _validate_platform_config(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+# How long shutdown waits for one refresher to acknowledge its cancellation.
+#
+# Cancelling a task is a request, not a guarantee. The CancelledError is
+# delivered at whatever the task is awaiting, and a nested cancel scope there can
+# absorb it: httpx and the provider SDKs implement their own timeouts as anyio
+# cancel scopes, which call ``Task.uncancel`` when they decide the cancellation
+# was theirs. The refresher loop then resumes, falls through to its ``sleep``,
+# and naps for a whole interval (a day, for the models.dev catalog). An
+# unbounded ``await task`` never returns, so the lifespan never finishes and
+# uvicorn's shutdown hangs behind a background refresh. Bounding the wait and
+# moving on is the right trade: the event loop is torn down immediately after,
+# and no refresher owns state that a late tick could corrupt.
+_REFRESHER_STOP_TIMEOUT_SECONDS = 5.0
+
+
+async def _stop_refresher(task: asyncio.Task[None], name: str) -> None:
+    """Cancel a lifespan refresher and wait for it, but never indefinitely.
+
+    ``asyncio.wait`` rather than ``await task``: it takes a timeout, and it
+    reports the outcome instead of re-raising it, so a refresher that died on an
+    unexpected error is logged here rather than aborting the rest of shutdown
+    (the log writer and the pooled search client still need closing).
+    """
+    task.cancel()
+    done, _pending = await asyncio.wait({task}, timeout=_REFRESHER_STOP_TIMEOUT_SECONDS)
+    if not done:
+        logger.warning(
+            "%s refresher did not stop within %.0fs; abandoning it so shutdown can finish",
+            name,
+            _REFRESHER_STOP_TIMEOUT_SECONDS,
+        )
+        return
+    if not task.cancelled() and (error := task.exception()) is not None:
+        logger.warning("%s refresher stopped with an unexpected error", name, exc_info=error)
+
+
 def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -187,11 +222,20 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # request's database session open for the whole dial. The refresher
             # owns the dialing now and reads answer from the cache. Not awaited:
             # priming runs on its first tick so a slow provider cannot delay boot.
-            if background_discovery_enabled(config):
-                discovery_refresher = asyncio.create_task(run_discovery_refresher(config))
+            #
+            # Started unconditionally, and each loop re-checks whether caching is
+            # on. Gating task creation on the setting here would strand the
+            # gateway in the one state that combination must never reach:
+            # model_cache_ttl_seconds and models_dev_cache_ttl_seconds are both
+            # runtime-settable from the dashboard's Settings page, and raising
+            # either from 0 flips every read onto the serve-from-cache path
+            # immediately. With no refresher running, that cache is then filled
+            # once per provider and never refreshed again for the life of the
+            # worker, which is the "cache nothing refreshes" mode these knobs
+            # deliberately do not offer.
+            discovery_refresher = asyncio.create_task(run_discovery_refresher(config))
             # Same shape for the models.dev catalog, whose fetch is bounded at 15s.
-            if background_catalog_enabled(config):
-                catalog_refresher = asyncio.create_task(run_catalog_refresher(config))
+            catalog_refresher = asyncio.create_task(run_catalog_refresher(config))
 
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
@@ -203,33 +247,21 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             yield
         finally:
             if alias_refresher is not None:
-                alias_refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await alias_refresher
+                await _stop_refresher(alias_refresher, "alias")
                 reset_alias_cache()
             if policy_refresher is not None:
-                policy_refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await policy_refresher
+                await _stop_refresher(policy_refresher, "policy")
                 reset_policy_cache()
             if provider_refresher is not None:
-                provider_refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await provider_refresher
+                await _stop_refresher(provider_refresher, "provider")
                 reset_provider_cache()
             if price_refresher is not None:
-                price_refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await price_refresher
+                await _stop_refresher(price_refresher, "price snapshot")
             if discovery_refresher is not None:
-                discovery_refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await discovery_refresher
+                await _stop_refresher(discovery_refresher, "model discovery")
                 reset_discovery_cache()
             if catalog_refresher is not None:
-                catalog_refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await catalog_refresher
+                await _stop_refresher(catalog_refresher, "models.dev catalog")
                 clear_catalog_cache()
             # Only stop a writer that actually started; if start() raised there is
             # nothing to stop, but the refreshers above still needed cancelling.

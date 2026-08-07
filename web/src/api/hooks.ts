@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { ApiError, apiFetch } from "@/api/client";
+import { ApiError, apiFetch, longRequestSignal } from "@/api/client";
 import { isoAgo } from "@/lib/timeRange";
 import type {
   AliasResponse,
@@ -515,9 +515,12 @@ export function useDeletePricing() {
   });
 }
 
+// Long deadline: this fetches the upstream snapshot and diffs it against every
+// priced model, so it scales with the pricing table rather than with one hop.
 export function usePreviewPricingRefresh() {
   return useMutation({
-    mutationFn: () => apiFetch<PricingRefreshPreview>("/v1/pricing/refresh", { method: "POST" }),
+    mutationFn: () =>
+      apiFetch<PricingRefreshPreview>("/v1/pricing/refresh", { method: "POST", signal: longRequestSignal() }),
   });
 }
 
@@ -863,23 +866,36 @@ export function useRequestGroups(groupIds: readonly string[]) {
 // Delete imported usage rows by selection (ids or by_filter). Only rows the
 // server treats as imported (counts_toward_budget = false) are removed; every
 // usage view is invalidated so the list, count, and analytics refresh.
+//
+// Given the long deadline, not apiFetch's default: a by_filter delete is one
+// unbounded DELETE server-side, so its duration tracks the number of matched
+// rows. Timing out here would report failure for a delete that committed anyway.
 export function useDeleteUsage() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: UsageMutationSelection) =>
-      apiFetch<UsageDeleteResult>("/v1/usage", { method: "DELETE", body: JSON.stringify(body) }),
+      apiFetch<UsageDeleteResult>("/v1/usage", {
+        method: "DELETE",
+        body: JSON.stringify(body),
+        signal: longRequestSignal(),
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [USAGE] });
     },
   });
 }
 
-// Set the cost of imported usage rows from manual per-1M rates.
+// Set the cost of imported usage rows from manual per-1M rates. Long deadline
+// for the same reason as the delete: the server reprices every matched row.
 export function useSetUsagePrice() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (body: UsageSetPriceRequest) =>
-      apiFetch<UsageSetPriceResult>("/v1/usage/set-price", { method: "POST", body: JSON.stringify(body) }),
+      apiFetch<UsageSetPriceResult>("/v1/usage/set-price", {
+        method: "POST",
+        body: JSON.stringify(body),
+        signal: longRequestSignal(),
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [USAGE] });
     },

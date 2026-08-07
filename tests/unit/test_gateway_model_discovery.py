@@ -1164,3 +1164,40 @@ class TestBackgroundDiscovery:
         """A tiny TTL must not become a re-dial storm against every provider."""
         assert _refresh_interval(self._config(ttl=1)) == _MIN_REFRESH_INTERVAL_SECONDS
         assert _refresh_interval(self._config(ttl=600)) == 600.0
+
+    @pytest.mark.asyncio
+    async def test_refresher_skips_dialing_while_caching_is_off_but_keeps_ticking(self) -> None:
+        """The setting is read per tick, not once at startup.
+
+        ``model_cache_ttl_seconds`` is runtime-settable from the Settings page, and
+        raising it from 0 flips every read onto the serve-from-cache path at once.
+        A refresher that had been skipped at startup would leave that cache filled
+        once and never refreshed for the life of the worker. So the loop always
+        runs and decides per tick: no dial while caching is off (the reads dial for
+        themselves then, and a second dialer would be pure duplication), and it
+        picks straight back up when the setting changes.
+        """
+        config = self._config(ttl=0)
+        rounds = 0
+        reached = asyncio.Event()
+
+        async def refresh(_cfg: GatewayConfig) -> None:
+            nonlocal rounds
+            rounds += 1
+            reached.set()
+
+        with patch("gateway.services.model_discovery_service.refresh_discovery_cache", side_effect=refresh):
+            task = asyncio.create_task(run_discovery_refresher(config, interval=0.001))
+            try:
+                # Several ticks' worth of time, with caching off the whole way.
+                await asyncio.sleep(0.05)
+                assert rounds == 0, "refresher dialed while model_cache_ttl_seconds was 0"
+
+                # An operator turns caching on; the running loop must notice.
+                config.model_cache_ttl_seconds = 300
+                await asyncio.wait_for(reached.wait(), timeout=5)
+                assert rounds >= 1
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
