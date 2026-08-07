@@ -4,11 +4,13 @@ import json
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from fastapi import HTTPException, Response, status
+from fastapi import HTTPException, Request, Response, status
 
+from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
 from gateway.core.env import otari_env
 from gateway.models.guardrails import GuardrailConfig
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
+from gateway.services.routing.decide import RoutingSignal
 from gateway.services.url_safety import UnsafeURLError
 
 if TYPE_CHECKING:
@@ -131,6 +133,125 @@ def latest_user_text(messages: Sequence[Any]) -> str:
     if messages and isinstance(messages[-1], dict):
         return text_from_content(messages[-1].get("content"))
     return ""
+
+
+_ROUTER_HEADER_OFF = frozenset({"off", "false", "0", "no", "none", "disabled"})
+_ROUTER_HEADER_ON = frozenset({"on", "true", "1", "yes", "auto", "default"})
+
+
+def routing_signal_from_messages(messages: Sequence[Any], raw_request: Request, *, has_tools: bool) -> RoutingSignal:
+    """Build the router's view of a chat-shaped request.
+
+    Flattens the prompt the same way guardrails do and reads the three routing
+    headers. Called on every request through the endpoint, whether or not the
+    model names a policy with a router, so it stays cheap: three header lookups
+    and one pass over the messages.
+    """
+    return RoutingSignal(
+        task_signal=latest_user_text(messages),
+        trace_signal=first_user_text(messages),
+        trace_anchor=conversation_opening_text(messages),
+        conversation_id=_header_value(raw_request, CONVERSATION_HEADER),
+        task_id=_header_value(raw_request, ROUTER_TASK_HEADER),
+        has_tools=has_tools,
+        # A conversation with an assistant turn is one whose routing decision has
+        # already been made, so trace-sticky reuse applies rather than a fresh
+        # decision.
+        is_continuation=any(isinstance(message, dict) and message.get("role") == "assistant" for message in messages),
+        opted_out=routing_opted_out(raw_request),
+    )
+
+
+def routing_signal_from_text(text: str, raw_request: Request, *, has_tools: bool) -> RoutingSignal:
+    """Build the router's view of a request with no message list (the responses API).
+
+    One text blob serves as all three signals: there is no turn structure to draw
+    a conversation opening from, so a routed responses request re-decides per call
+    unless the client sends a conversation id.
+    """
+    return RoutingSignal(
+        task_signal=text,
+        trace_signal=text,
+        trace_anchor=text,
+        conversation_id=_header_value(raw_request, CONVERSATION_HEADER),
+        task_id=_header_value(raw_request, ROUTER_TASK_HEADER),
+        has_tools=has_tools,
+        opted_out=routing_opted_out(raw_request),
+    )
+
+
+def _header_value(raw_request: Request, header: str) -> str | None:
+    """A trimmed header value, or ``None`` when absent or blank.
+
+    Blank is treated as absent so a client that always sends the header with an
+    empty value gets the default behavior rather than an empty-string identity.
+    """
+    raw = raw_request.headers.get(header)
+    if raw is None:
+        return None
+    return raw.strip() or None
+
+
+def routing_opted_out(raw_request: Request) -> bool:
+    """Whether the caller asked to skip routing for this request (``Otari-Router``).
+
+    Absent or an "on" value means "use the policy as written". An "off" value
+    serves the policy's default target without consulting its router, which is the
+    escape hatch for a request the caller knows is hard. Anything else is a 400:
+    silently ignoring an unrecognized value would leave a client believing it had
+    opted out.
+    """
+    raw = raw_request.headers.get(ROUTER_HEADER)
+    if raw is None:
+        return False
+    value = raw.strip().lower()
+    if value in _ROUTER_HEADER_OFF:
+        return True
+    if value in _ROUTER_HEADER_ON:
+        return False
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"Invalid {ROUTER_HEADER} header '{raw}': expected 'on' or 'off'.",
+    )
+
+
+def first_user_text(messages: Sequence[Any]) -> str:
+    """Return the text of the *first* ``role == "user"`` message.
+
+    The stable task signal for a conversation: it does not change as turns are
+    appended, so trace-sticky routing embeds the same thing on every turn and a
+    router that has forgotten its decision reproduces it rather than drifting.
+    Falls back to :func:`latest_user_text` when no user message is present.
+    """
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") == "user":
+            text = text_from_content(message.get("content"))
+            if text:
+                return text
+    return latest_user_text(messages)
+
+
+def conversation_opening_text(messages: Sequence[Any]) -> str:
+    """Every turn before the first assistant reply, flattened.
+
+    Used to identify a conversation when the client sends no
+    ``Otari-Conversation-Id``. Richer than the first user turn alone, so it
+    separates conversations that share an opening question but differ in their
+    system preamble. Two conversations whose entire opening is identical still
+    collapse to one identity; only a client-supplied id can tell those apart.
+    """
+    parts: list[str] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") == "assistant":
+            break
+        text = text_from_content(message.get("content"))
+        if text:
+            parts.append(text)
+    if parts:
+        return "\n".join(parts)
+    return first_user_text(messages)
 
 
 async def apply_input_guardrails(

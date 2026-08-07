@@ -36,6 +36,7 @@ from gateway.services.policy_store import (
     resolve_effective_policy,
 )
 from gateway.services.routing import BudgetState, NoEligibleCandidatesError, compile_policy
+from gateway.services.routing.knn import unpriced_router_candidates
 
 router = APIRouter(prefix="/v1/routing/policies", tags=["routing"])
 
@@ -138,6 +139,13 @@ class ExplainResponse(BaseModel):
     candidates: list[CandidateResponse]
     dropped: list[DroppedResponse]
     guardrails: list[dict[str, Any]]
+    # Set when the policy hands its ordering to a router. The plan above is then
+    # the decline path: ranking needs a live request (a prompt to embed, stored
+    # examples to compare it against), and explain deliberately dispatches
+    # nothing. Surfaced so the dashboard can say so rather than showing a
+    # one-candidate plan that looks like the router was ignored.
+    router_backend: str | None = None
+    router_candidates: list[str] = Field(default_factory=list)
 
 
 def _validated_spec(name: str, spec: dict[str, Any]) -> PolicySpec:
@@ -213,6 +221,31 @@ def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id:
             detail=(
                 f"'{spec.default_target}' is both the default target and an on_failure entry. Retrying the "
                 "candidate that just failed cannot help; remove it from on_failure."
+            ),
+        )
+
+
+async def _validate_router_pricing(config: GatewayConfig, db: AsyncSession, spec: PolicySpec) -> None:
+    """Refuse a learned policy whose candidates are not all priced.
+
+    A router scores by cost, so one unpriced candidate makes it decline every
+    request and the policy silently serves its default target forever. That is
+    indistinguishable from a broken router, and the fix (add pricing) is nothing
+    the operator would think to look for. Startup only *warns* about the same
+    problem in a config policy, because refusing there would take a running
+    gateway down over an optimization; refusing a write costs one corrected
+    request while the operator is looking at the policy.
+    """
+    if spec.router_backend is None:
+        return
+    missing = await unpriced_router_candidates(config, db, spec.router_candidates)
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Router candidate(s) {', '.join(missing)} have no pricing. A router scores candidates by "
+                "cost, so it would decline every request and this policy would always serve "
+                f"'{spec.default_target}'. Add pricing for those models (POST /v1/pricing) first."
             ),
         )
 
@@ -296,6 +329,7 @@ async def set_policy(
     spec = _validated_spec(request.name, request.spec)
     await refresh_policy_cache(db)
     _validate_write(config, request.name, spec, request.user_id)
+    await _validate_router_pricing(config, db, spec)
 
     # Scope is part of the identity: the upsert must not turn a global policy into
     # a user-scoped one (or vice versa) just because the names match.
@@ -327,11 +361,15 @@ async def set_policy(
     # An operator changing where traffic goes is worth a line in the log: this is the
     # object that decides which model spends money.
     logger.info(
-        "Routing policy written name=%s scope=%s candidates=%d dynamic=%s",
+        "Routing policy written name=%s scope=%s candidates=%d dynamic=%s router=%s",
         policy.name,
         policy.user_id or "global",
-        1 + len(spec.on_failure),
+        # A router entry contributes its whole pool, since the walker cascades
+        # through the ranking. Counting one head candidate here logged
+        # "candidates=1" for a policy that can dispatch three.
+        (len(spec.router_candidates) or 1) + len(spec.on_failure),
         spec.is_dynamic,
+        spec.router_backend or "none",
     )
     await _refresh_quietly(db, policy.name)
     return PolicyResponse.from_model(policy, is_dynamic=spec.is_dynamic)
@@ -432,6 +470,8 @@ async def explain_policy(
             name=name,
             selection_reason="none",
             is_dynamic=spec.is_dynamic,
+            router_backend=spec.router_backend,
+            router_candidates=spec.router_candidates,
             candidates=[],
             dropped=[
                 DroppedResponse(selector=item.selector, reason=item.reason, detail=item.detail)
@@ -444,6 +484,8 @@ async def explain_policy(
         name=name,
         selection_reason=plan.selection_reason,
         is_dynamic=spec.is_dynamic,
+        router_backend=spec.router_backend,
+        router_candidates=spec.router_candidates,
         candidates=[
             CandidateResponse(
                 position=attempt.position,

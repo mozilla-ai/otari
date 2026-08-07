@@ -4,6 +4,14 @@ All endpoints are under `http://localhost:8000` by default.
 
 For full request/response schemas, see the [OpenAPI spec](public/openapi.json) or the interactive docs at `/docs` when Otari is running.
 
+## Provider error details
+
+When an upstream provider fails, what the `detail` field contains depends on whose problem it is.
+
+If the provider returned 400, 422 or 404 because it rejected **your request**, Otari responds with 400 or 404 and a sanitized provider diagnostic that names the parameter, model or limit at fault. Credential-shaped tokens, URLs, account identifiers, and reflected request or response payloads are stripped, and the diagnostic is capped at 400 characters.
+
+If the failure is the **gateway's** (its provider credentials were rejected, the provider account is out of credit, the provider returned a 5xx, or the error could not be classified), the detail is a fixed string such as `The provider rejected the gateway's credentials`. There is no remedy you could apply, and the upstream text in those cases tends to name the operator's account rather than anything about your request. Operators should diagnose these with safe metadata (request ID, provider, model, and status) or a protected incident process, never by logging provider keys, internal URLs, prompts, responses, request bodies, or other user payloads.
+
 ## Endpoint availability
 
 | Endpoint group | Standalone | Connected to otari.ai |
@@ -269,6 +277,20 @@ See [Routing policies](routing.md).
 
 Master key on every verb, including `explain`: the response enumerates a policy's
 targets, which is what a policy exists to keep off the wire.
+
+### Learned routing
+
+Teaching the router a policy can name with `select: [{router: knn, candidates: [...]}]`.
+Routing memory is per user, so `user_id` names whose it is. There is deliberately no
+endpoint that fans a prompt out to the candidates for you: seeing what each answers is
+what `POST /v1/chat/completions` already does, and going through it means those calls
+are budget-checked and logged. See
+[learned routing](routing.md#let-a-router-choose-learned-routing).
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `POST` | `/v1/routing/preferences/rank` | Record a batch of scored `examples` under `user_id`: each has a `prompt`, `scores` (selector to quality in `[0, 1]`), an optional `task_id` partition, and an optional `label_source`. Writes the examples the router votes over and returns each touched pool's progress toward the seed count. Up to 100 per call. A score key that no learned policy could route to is refused, because such records are unmatchable and cannot be deleted. | Master key |
+| `GET` | `/v1/routing/status` | For `user_id`: records and warmth per pool (the default pool plus each task partition), the router's tuning, and which policies depend on it. | Master key |
 
 ### Pricing
 

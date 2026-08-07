@@ -15,7 +15,7 @@ from pydantic import ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
-from gateway.api.routes._helpers import latest_user_text, text_from_content
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_text, text_from_content
 from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
@@ -107,6 +107,24 @@ def _responses_input_text(value: Any) -> str:
     if isinstance(value, list):
         return latest_user_text(value)
     return text_from_content(value)
+
+
+def _routing_text(body: Any) -> str:
+    """The task signal a policy's router reads for a Responses request.
+
+    ``instructions`` is part of the task, not decoration: the same ``input`` under
+    "answer in one word" and "write a proof" are different jobs with different
+    quality bars. Embedding only ``input`` gave both the same routing decision and,
+    under trace-sticky granularity, the same conversation identity. Guardrails read
+    ``input`` alone because they screen what the user sent; routing has to read what
+    the model was actually asked to do.
+    """
+    instructions = getattr(body, "instructions", None)
+    parts = [
+        instructions if isinstance(instructions, str) else "",
+        _responses_input_text(body.input),
+    ]
+    return "\n".join(part for part in parts if part)
 
 
 def _split_codex_input_metadata(value: Any) -> tuple[Any, bool]:
@@ -432,6 +450,9 @@ async def create_response(
         estimate_max_output_tokens=max_output_tokens,
         master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
         user_forbidden_detail=_USER_FORBIDDEN,
+        routing_signal=lambda: routing_signal_from_text(
+            _routing_text(request_body), raw_request, has_tools=bool(request_body.tools)
+        ),
         normalize_messages=_normalize,
     )
 

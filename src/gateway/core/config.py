@@ -30,6 +30,20 @@ PROVIDER_TYPE_ALIASES = {
     "anthropic_compatible": "anthropic",
 }
 X_API_KEY_HEADER = "x-api-key"  # Anthropic-native clients send credentials here (no Bearer prefix).
+# Per-request opt-out for a policy's learned router: "off" serves the policy's
+# default target and skips the router entirely. There is no "force on": the
+# router is enabled by the policy, not by the caller.
+ROUTER_HEADER = "Otari-Router"
+# Stable per-conversation id for trace-sticky routing. When set, it is the trace
+# identity (namespaced per user); absent, the router falls back to hashing the
+# conversation's opening messages, which cannot tell apart two conversations that
+# open identically. See docs/routing-scaling.md.
+CONVERSATION_HEADER = "Otari-Conversation-Id"
+# Routing-memory partition (use case / category) for this request. When set, the
+# router votes only over records carrying the same task label and stays in
+# pass-through until that partition alone is warm; records from other tasks never
+# influence it. Submit the matching label via the /rank task_id.
+ROUTER_TASK_HEADER = "Otari-Router-Task"
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
 PLATFORM_TOKEN_ENV_VAR = "OTARI_AI_TOKEN"
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
@@ -69,6 +83,7 @@ ENV_BRIDGED_FIELDS = (
 # these) agree on the accepted set.
 STREAM_MISSING_USAGE_POLICIES = ("estimate", "fail", "allow_free")
 VISION_STRATEGIES = ("describe", "ocr", "off")
+ROUTER_GRANULARITIES = ("trace_sticky", "step")
 
 # Search providers the standalone POST /v1/search endpoint can dispatch to.
 # Declared here rather than in the adapter module so startup validation can
@@ -294,6 +309,69 @@ class GatewayConfig(BaseSettings):
             "failure ('on_failure'), and which guardrails always run. A one-target policy is an alias, "
             "so 'aliases:' remains its shorthand. Standalone-mode only: in hybrid mode the platform "
             "resolves the model, so a policy name would be sent upstream and rejected there."
+        ),
+    )
+    # Tuning for the learned (kNN) router a policy can name via `select: [{router: knn}]`.
+    # There is no on/off switch here on purpose: a policy naming the router is the
+    # switch, so the router cannot be enabled globally behind an operator's back,
+    # and two policies can never disagree about whether routing is on.
+    router_alpha: float = Field(
+        default=0.3,
+        ge=0.0,
+        description=(
+            "Learned router's cost-vs-quality dial: score(model) = predicted_quality - alpha * "
+            "normalized_cost. 0 ignores cost (always the best-predicted model); higher prefers "
+            "cheaper candidates more aggressively."
+        ),
+    )
+    router_k: int = Field(
+        default=5,
+        ge=1,
+        description=(
+            "Neighbor count for the learned router's vote. A request whose partition holds fewer "
+            "than k comparable examples stays on the policy's default target."
+        ),
+    )
+    router_embedding_model: str = Field(
+        default="openai:text-embedding-3-small",
+        description=(
+            "provider:model used to embed the task signal. Changing it invalidates existing "
+            "routing-memory records rather than mixing incomparable vector spaces, so the router "
+            "returns to pass-through until the new space is re-taught."
+        ),
+    )
+    router_confidence_floor: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum share of the k neighbors that must agree on the winning candidate. Below it, "
+            "the policy's default target leads and the router's order becomes the failover chain."
+        ),
+    )
+    router_seed_count: int = Field(
+        default=20,
+        ge=0,
+        description=(
+            "Routing-memory records a pool needs before the router routes at all. Under it, every "
+            "request through the policy serves the default target."
+        ),
+    )
+    router_granularity: str = Field(
+        default="trace_sticky",
+        description=(
+            "'trace_sticky' (default) decides once per conversation and reuses that decision on "
+            "later turns; 'step' re-decides on every call."
+        ),
+    )
+    router_max_records_per_user: int = Field(
+        default=5000,
+        ge=0,
+        description=(
+            "Cap on stored routing-memory records per user; the oldest are evicted past it. The "
+            "store is scanned linearly, so this also bounds per-request routing latency. 0 disables "
+            "eviction rather than storing nothing, and the per-request read falls back to the default "
+            "bound, so the store grows without limit while each decision stays bounded."
         ),
     )
     pricing: dict[str, PricingConfig] = Field(
@@ -1047,6 +1125,15 @@ class GatewayConfig(BaseSettings):
         normalized = value.strip().lower()
         if normalized not in VISION_STRATEGIES:
             msg = f"vision_strategy must be one of {sorted(VISION_STRATEGIES)}, got '{value}'"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("router_granularity")
+    @classmethod
+    def _validate_router_granularity(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in ROUTER_GRANULARITIES:
+            msg = f"router_granularity must be one of {sorted(ROUTER_GRANULARITIES)}, got '{value}'"
             raise ValueError(msg)
         return normalized
 

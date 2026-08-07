@@ -124,6 +124,8 @@ GET /v1/routing/policies                        # not yet wrapped
 POST /v1/routing/policies                       # not yet wrapped
 DELETE /v1/routing/policies/{name}              # not yet wrapped
 POST /v1/routing/policies/explain               # not yet wrapped
+POST /v1/routing/preferences/rank               # not yet wrapped
+GET /v1/routing/status                          # not yet wrapped
 # Pricing refresh workflow
 POST /v1/pricing/refresh                        # not yet wrapped
 POST /v1/pricing/refresh/confirm                # not yet wrapped

@@ -269,6 +269,23 @@ hand.
   that were *dropped* as well as the ones kept, which is how you catch a fallback
   chain that has quietly filtered down to a single attempt. A policy from
   `config.yml` is read-only here. See [Routing policies](routing.md).
+  A policy can also hand its choice to a **router** that sends easy prompts to a
+  cheaper model and keeps the strong one for the rest: open the policy form and use
+  **Let a router pick the cheapest good-enough model**, then name the models it may
+  choose between and mark the one that **serves when unsure**. That marked model is
+  the policy's target, so there is one list rather than a separate "Serves" field:
+  the fallback is always one of the models the router may pick. Those rows are tagged
+  `Learned`.
+- **Examples**, on a learned policy's row: opens inline under that row and answers the
+  question the table cannot. A router chooses nothing until it has scored examples, and
+  until then the policy serves its default target on every request, which looks exactly
+  like a broken router. This panel names the pool, says which model serves when the
+  router declines, and shows how many examples each pool has against how many it needs.
+  Pick whose memory first: the examples are one user's own prompts, so a policy every
+  caller shares warms once per caller. Recording examples is an API job in this release
+  (`POST /v1/routing/preferences/rank`); the panel links to the recipe. It is offered
+  for `config.yml` policies too, since reading readiness is safe for a policy this page
+  cannot change. See [learned routing](routing.md#let-a-router-choose-learned-routing).
 
 ### Access
 

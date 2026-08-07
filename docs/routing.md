@@ -81,7 +81,9 @@ routing:
 `select` entries are evaluated in order, and the first whose `when` matches wins.
 The `default` entry is the fallthrough and must come last: an entry after it could
 never be reached, so the gateway refuses to start rather than leave you with a
-silently dead rule.
+silently dead rule. A third kind of entry, `router`, hands the choice to a backend
+that ranks candidates per request; see [learned
+routing](#let-a-router-choose-learned-routing).
 
 ### `when` conditions
 
@@ -110,6 +112,203 @@ Two rules worth knowing, because both are silent-failure traps otherwise:
   rule could never fire. Tiering down keeps a caller *under* a cap; it is not a way
   to keep serving past one. `lt`/`lte` thresholds are not restricted: "still under
   the cap" is a reachable condition.
+
+## Let a router choose (learned routing)
+
+The third shape a `select` entry can take. Instead of naming the target yourself,
+hand the ordering to a **router**: it ranks a pool of candidates per request and
+the plan starts with its pick.
+
+```yaml
+routing:
+  policies:
+    smart:
+      select:
+        - router: knn
+          candidates: [openai:gpt-5-nano, openai:gpt-5]
+        - default: openai:gpt-5        # serves whenever the router declines
+      on_failure: [anthropic:claude-haiku-4-5]
+```
+
+Most requests do not need your most expensive model, and which ones do is a
+property of your traffic rather than of a benchmark. The `knn` router learns that
+from examples you score: you show it prompts, say how good each candidate's answer
+was, and it sends look-alike prompts to the cheapest candidate that was good
+enough. Until it has been taught, and whenever it is not confident, `default`
+serves, so a learned policy is never worse than the plain failover policy it was
+written from.
+
+The `default` target is part of the pool: the gateway appends it if `candidates`
+leaves it out, because what serves on a decline is always one of the models the router
+could have picked. The dashboard shows it that way too, as one list with the fallback
+marked.
+
+Standalone only, like every policy. The pool needs [pricing](configuration.md) for
+every candidate: the router weighs quality against cost, so an unpriced candidate
+has nothing to weigh (a stored policy with one is refused; a `config.yml` one warns
+at startup and never routes).
+
+### How it decides
+
+For each request the router embeds the prompt, finds the `k` nearest prompts it has
+been taught, and scores each candidate:
+
+```
+score(model) = mean_quality(model | neighbors) - alpha * normalized_cost(model)
+```
+
+`alpha` is the one dial: 0 ignores cost and always picks the best-predicted model;
+higher leans harder on the cheaper candidate. The whole ranking becomes the plan,
+so a routed request that fails over lands on the router's second choice before it
+reaches `on_failure`.
+
+It declines, and `default` serves, whenever it would be guessing:
+
+| It declines when | Because |
+| --- | --- |
+| The pool has fewer than `OTARI_ROUTER_SEED_COUNT` examples | Nothing to vote over |
+| Fewer than `OTARI_ROUTER_K` comparable examples exist | The neighborhood is too sparse to read |
+| Neighbor support is below `OTARI_ROUTER_CONFIDENCE_FLOOR` | The nearby prompts do not back the pick |
+| The request carries tools | Capability gating is minimal in v1, so tool calls stay on `default` |
+| A candidate has no pricing, or the embedding call fails | It cannot compare, and it must not fail the request |
+| The caller sent `Otari-Router: off` | The caller knows this one is hard |
+
+A decline is normal operation, not an error. The usage row's `selection_reason`
+says `default` when the router declined and `router:knn` when it chose, so "the
+router picked the strong model" and "the router did not run" stay distinguishable
+after the fact.
+
+### Teach it
+
+Teaching is an API job in this release: the dashboard shows a learned policy and how
+warm it is, but recording examples is `POST /v1/routing/preferences/rank`. Nothing is
+learned from live traffic yet either (that is a fast-follow on
+[#187](https://github.com/mozilla-ai/otari/issues/187)), so every example comes from
+you or from a judge you run.
+
+**Before the first example**, four things have to be true, and each one fails
+differently if it is not:
+
+| Requirement | If it is missing |
+| --- | --- |
+| The user exists (`POST /v1/users`) | `rank` returns 404 naming the user |
+| Every candidate has [pricing](configuration.md) | writing the policy returns 400; the router scores by cost |
+| A provider is configured for `OTARI_ROUTER_EMBEDDING_MODEL` (default `openai:text-embedding-3-small`) | `rank` returns 502 naming the model |
+| The score keys name the policy's candidates | `rank` returns 400 listing what it can accept |
+
+**How many examples.** A pool routes nothing until it holds `OTARI_ROUTER_SEED_COUNT`
+records (default 20) and each decision reads the `OTARI_ROUTER_K` nearest (default 5),
+so aim for at least `k` examples of *each kind of prompt* you care about, not 20 of
+one kind. Twenty all-ties examples warm the pool and then send everything to the cheap
+model. For a first trial, restart with `OTARI_ROUTER_SEED_COUNT=8` and teach four easy
+plus four hard; the seed count is read when the router is built, so it needs a restart.
+
+```bash
+# Score a batch, 0 (bad) to 1 (great) per candidate. One call, not one per example.
+curl -X POST http://localhost:8000/v1/routing/preferences/rank \
+  -H "Otari-Key: Bearer $MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{
+        "user_id": "alice",
+        "examples": [
+          {"prompt": "what is 18 + 24?",              "scores": {"openai:gpt-5-nano": 1.0, "openai:gpt-5": 1.0}},
+          {"prompt": "add 7 and 31",                  "scores": {"openai:gpt-5-nano": 1.0, "openai:gpt-5": 1.0}},
+          {"prompt": "prove the halting problem is undecidable",
+                                                      "scores": {"openai:gpt-5-nano": 0.0, "openai:gpt-5": 1.0}},
+          {"prompt": "derive Black-Scholes from first principles",
+                                                      "scores": {"openai:gpt-5-nano": 0.0, "openai:gpt-5": 1.0}}
+        ]
+      }'
+# -> {"recorded":4,"seed_count":8,"pools":[{"task_id":null,"records":4,"warm":false}]}
+
+# Watch each pool warm up.
+curl "http://localhost:8000/v1/routing/status?user_id=alice" -H "Otari-Key: Bearer $MASTER_KEY"
+
+# Then send a request through the policy and read what actually served: the response
+# `model` field says the policy name, so the usage row is where the answer is.
+curl "http://localhost:8000/v1/usage?user_id=alice&limit=1" -H "Otari-Key: Bearer $MASTER_KEY"
+# -> ... "model": "gpt-5-nano", "selection_reason": "router:knn"
+```
+
+`scripts/seed_routing_demo.py` does all of the above against a running gateway,
+including creating the policy and driving traffic through it, which is the quickest
+way to see a routed request:
+
+```bash
+python scripts/seed_routing_demo.py --key "$MASTER_KEY" \
+  --model openai:gpt-5 --cheap-model openai:gpt-5-nano
+```
+
+**A tie is the useful case:** two answers that are both fine is exactly when the
+cheaper model should win. Score the cheap candidate low only on the prompts where
+only the strong one is good enough. The scores do not have to come from a human
+reading answers, an LLM judge works too (`"label_source": "judge"`). To see what each
+candidate actually answers, send the prompt to each of them through
+`POST /v1/chat/completions`; those calls are budget-checked and land in the usage log
+like any other request.
+
+**Memory is per user, even for a global policy.** The examples are that user's own
+prompts, so sharing them across users would let one caller's traffic steer another's.
+A policy every caller resolves therefore warms once per caller, and `user_id` is
+required on both `rank` and `status` because there is no aggregate answer.
+
+**Teaching cannot be undone through the API yet.** There is no route that lists or
+deletes recorded examples, so `rank` refuses a score key that no learned policy could
+ask about rather than accepting records nothing can match. A `user_id` or `task_id`
+typo partitions hard, so it creates a second, invisible pool rather than an error.
+Both gaps are tracked on #187.
+
+**If a warm pool still serves the default**, the gateway says why, once per routed
+request, at INFO:
+
+```
+Router 'knn' on policy 'smart': sparse neighborhood: 3/5 comparable records
+  (confidence=0.00) -> policy default
+```
+
+That line carries the exact decline reason (cold pool, sparse neighborhood, confidence
+below the floor, tools present, an unpriced candidate). The usage row's
+`selection_reason` tells you *whether* the router chose (`router:knn`) or declined
+(`default`); the log line tells you why.
+
+### Per-request control
+
+| Header | Effect |
+| --- | --- |
+| `Otari-Router: off` | Serve `default` for this request without consulting the router. Any other unrecognized value is a 400, so a client cannot believe it opted out when it did not. |
+| `Otari-Conversation-Id: <id>` | The conversation's identity. With `trace_sticky` granularity (the default) the router decides once per conversation and reuses it, so an agent run does not flip models partway through and prompt caching is not thrown away. Without the header it hashes the conversation's opening turns, which cannot separate two conversations that open identically. |
+| `Otari-Router-Task: <name>` | Vote only over the examples filed under this task. A hard split: the partition warms on its own and records from other tasks never influence it. Match it with `task_id` on `rank`. Omit both and everything shares one pool. |
+
+### Tuning
+
+Set through the environment (see the [configuration
+reference](configuration.md)), not per policy, because these are properties of the
+gateway's routing rather than of one name:
+
+- `OTARI_ROUTER_ALPHA` (default `0.3`), the cost-vs-quality dial. Start low, raise
+  it as the routing earns trust.
+- `OTARI_ROUTER_SEED_COUNT` (default `20`), examples a pool needs before it routes.
+- `OTARI_ROUTER_CONFIDENCE_FLOOR` (default `0.0`), how much neighbor support a pick
+  needs.
+- `OTARI_ROUTER_K` (default `5`), neighbors per decision.
+- `OTARI_ROUTER_GRANULARITY` (`trace_sticky` or `step`).
+- `OTARI_ROUTER_EMBEDDING_MODEL`, `OTARI_ROUTER_MAX_RECORDS_PER_USER`.
+
+### Worth knowing before switching it on
+
+- **`explain` cannot rank.** Ranking needs a live request, and `explain`
+  dispatches nothing, so it shows the decline path plus the pool it would rank.
+- **One extra embedding call** per fresh request, plus a scan of that user's
+  examples. Continuations under `trace_sticky` reuse the opening decision and skip
+  both.
+- **Cost is list price.** Prompt-cache economics are not modeled yet, so a routed
+  agent trace can lose the cache the strong model had warm. `trace_sticky` limits
+  the damage; the cache-aware cost term is a fast-follow.
+- **Stickiness is per process.** The decision lives in the worker that made it, so
+  another replica or a restart re-decides. That is safe, just not sticky. See
+  [Routing at scale](routing-scaling.md).
+- **Changing `OTARI_ROUTER_EMBEDDING_MODEL` invalidates existing examples** rather
+  than mixing incomparable vector spaces, so the pool goes cold until it is
+  re-taught.
 
 ## Guardrails you cannot opt out of
 
@@ -225,8 +424,10 @@ wire. See the [API reference](api-reference.md#routing-policies).
 
 ## Rules and limits
 
-- **Candidate cap: 5** (the selected candidate plus `on_failure`). A policy over
-  the cap is refused rather than silently truncated.
+- **Candidate cap: 5** (the selected candidate plus `on_failure`; for a learned
+  policy, the whole routed pool plus `on_failure`, because the walker cascades
+  through the ranking). A policy over the cap is refused rather than silently
+  truncated.
 - **No chaining.** A target must name a real `instance:model` or
   `provider:model`, never another policy or alias.
 - **Names are checked at startup.** A policy name may not contain `:` or `/`, may

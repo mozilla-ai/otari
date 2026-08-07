@@ -36,6 +36,7 @@ _CONTEXT_MANAGEMENT = {
     "edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]
 }
 _BETAS = ["compact-2026-01-12"]
+_AUTOMATIC_CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}
 
 
 def _text_response(
@@ -146,7 +147,9 @@ def test_cache_control_and_non_stream_usage_round_trip(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """Cache markers reach Anthropic unchanged and cache usage reaches the client."""
+    """Block and automatic cache controls reach Anthropic unchanged, and cache
+    usage reaches the client.
+    """
     system_block = {
         "type": "text",
         "text": "Stable system instructions",
@@ -171,6 +174,7 @@ def test_cache_control_and_non_stream_usage_round_trip(
                 "system": [system_block],
                 "messages": [{"role": "user", "content": [message_block]}],
                 "max_tokens": 100,
+                "cache_control": _AUTOMATIC_CACHE_CONTROL,
             },
             headers=api_key_header,
         )
@@ -178,6 +182,7 @@ def test_cache_control_and_non_stream_usage_round_trip(
     assert resp.status_code == 200, resp.text
     assert captured["system"] == [system_block]
     assert captured["messages"] == [{"role": "user", "content": [message_block]}]
+    assert captured["cache_control"] == _AUTOMATIC_CACHE_CONTROL
     usage = resp.json()["usage"]
     assert usage["cache_creation_input_tokens"] == 13
     assert usage["cache_read_input_tokens"] == 8
@@ -837,13 +842,15 @@ def test_stream_no_tools_returns_sse_response(
     assert tool_loop_called is False
 
 
-def test_stream_cache_usage_reaches_client(
+def test_stream_cache_control_and_usage_round_trip(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """Cache usage from the provider remains present in the SSE message_start event."""
+    """Automatic cache control reaches Anthropic and usage remains in SSE."""
+    captured: dict[str, Any] = {}
 
-    async def fake_amessages(**_kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        captured.update(kwargs)
         return _stream_iter(
             _stream_message_start(cache_creation_input_tokens=13, cache_read_input_tokens=8),
             _stream_message_stop(),
@@ -857,11 +864,13 @@ def test_stream_cache_usage_reaches_client(
                 "messages": [{"role": "user", "content": "hi"}],
                 "max_tokens": 100,
                 "stream": True,
+                "cache_control": _AUTOMATIC_CACHE_CONTROL,
             },
             headers=api_key_header,
         )
 
     assert resp.status_code == 200, resp.text
+    assert captured["cache_control"] == _AUTOMATIC_CACHE_CONTROL
     payloads = [json.loads(line.removeprefix("data: ")) for line in resp.text.splitlines() if line.startswith("data: ")]
     message_start = next(payload for payload in payloads if payload["type"] == "message_start")
     usage = message_start["message"]["usage"]

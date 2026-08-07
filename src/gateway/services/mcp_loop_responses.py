@@ -214,6 +214,25 @@ def _web_search_items_for(owned: list[Any]) -> list[ResponseFunctionWebSearch]:
     return items
 
 
+def _compaction_items(output: list[Any]) -> list[Any]:
+    """Return provider compaction items in output order."""
+    return [item for item in output if getattr(item, "type", None) == "compaction"]
+
+
+def _replay_items(output: list[Any], owned: list[Any]) -> list[Any]:
+    """Keep compaction and owned function calls in provider output order."""
+    owned_call_ids = {getattr(item, "call_id", None) for item in owned}
+    return [
+        item
+        for item in output
+        if getattr(item, "type", None) == "compaction"
+        or (
+            getattr(item, "type", None) == "function_call"
+            and getattr(item, "call_id", None) in owned_call_ids
+        )
+    ]
+
+
 async def _execute_stream_owned(state: "_ResponsesStreamState", pool: ToolBackend) -> list[dict[str, Any]]:
     """Run the stream's gateway-owned function calls, returning their output items.
 
@@ -264,12 +283,28 @@ def _without_output_items(event: Any, call_ids: set[str]) -> Any:
         return event
 
 
+def _prepend_output_items(event: Any, items: list[Any]) -> Any:
+    """Prepend hidden-iteration output items to a terminal response."""
+    if not items:
+        return event
+    response_obj = getattr(event, "response", None)
+    if response_obj is None:
+        return event
+    try:
+        output = list(items) + list(getattr(response_obj, "output", None) or [])
+        return event.model_copy(update={"response": response_obj.model_copy(update={"output": output})})
+    except (AttributeError, TypeError):
+        logger.warning("Could not add hidden Responses output items to response.completed")
+        return event
+
+
 class _ResponsesStreamState:
     """Per-iteration bookkeeping for the Responses streaming loop."""
 
     def __init__(self) -> None:
         # output_index -> {"call_id", "name", "arguments"}
         self.function_calls: dict[int, dict[str, Any]] = {}
+        self.compaction_items: dict[int, Any] = {}
         self.deferred_completed: ResponseStreamEvent | None = None
         self.owned_specs: list[dict[str, Any]] = []
         # Output items the gateway runs itself. Their events are swallowed: the
@@ -305,8 +340,9 @@ class _ResponsesToolLoopStrategy:
 
     def new_usage_accumulator(self) -> dict[str, Any]:
         # ``searches`` collects the gateway-run searches so the final response can
-        # announce them natively; see ``fold_usage``.
-        return {"input": 0, "output": 0, "total": 0, "searches": []}
+        # announce them natively; ``compactions`` keeps replay state produced by
+        # hidden iterations available to the caller. See ``fold_usage``.
+        return {"input": 0, "output": 0, "total": 0, "searches": [], "compactions": []}
 
     def accumulate_usage(self, acc: dict[str, Any], result: Response) -> None:
         if result.usage:
@@ -319,11 +355,12 @@ class _ResponsesToolLoopStrategy:
         # Prepend a native ``web_search_call`` item per gateway-run search. The
         # loop consumed the raw ``function_call`` items, so without this the caller
         # has no way to know a search happened; they come first because they did.
-        if acc["searches"]:
+        hidden_output = list(acc["compactions"]) + list(acc["searches"])
+        if hidden_output:
             try:
-                result.output = list(acc["searches"]) + list(result.output or [])
+                result.output = hidden_output + list(result.output or [])
             except (AttributeError, TypeError):
-                logger.warning("Could not add web_search_call items to the response output")
+                logger.warning("Could not add hidden tool-loop items to the response output")
 
     def exit_before_split(self, result: Response) -> bool:
         return False
@@ -370,12 +407,15 @@ class _ResponsesToolLoopStrategy:
         pool: ToolBackend,
         acc: dict[str, Any] | None = None,
     ) -> None:
-        # All-owned: continue. Append the assistant's function_call items AND
-        # the matching function_call_output items so the next call's input has
-        # the full transcript.
-        transcript.extend(_items_to_dicts(owned))
+        # All-owned: continue. Replay compaction items and the assistant's
+        # function calls in their original output order, then append matching
+        # function_call_output items. Stateless compaction requires the opaque
+        # compaction item on every continuation.
+        output = list(result.output or [])
+        transcript.extend(_items_to_dicts(_replay_items(output, owned)))
         transcript.extend(await _execute_function_calls(pool, owned))
         if acc is not None:
+            acc["compactions"].extend(_compaction_items(output))
             acc["searches"].extend(_web_search_items_for(owned))
 
     # ---- streaming hooks ----
@@ -387,7 +427,7 @@ class _ResponsesToolLoopStrategy:
     def new_stream_state(self) -> _ResponsesStreamState:
         return _ResponsesStreamState()
 
-    def new_stream_accumulator(self) -> dict[str, int]:
+    def new_stream_accumulator(self) -> dict[str, Any]:
         # Each iteration's ``response.completed`` carries that iteration's
         # usage on ``event.response.usage``. When the loop continues, that
         # event is dropped and its usage would be lost from streaming token
@@ -401,14 +441,20 @@ class _ResponsesToolLoopStrategy:
         # ``sequence_number`` is renumbered continuously. Without this a tool-loop
         # stream repeats ``response.created`` and restarts sequence numbers, which
         # the SDK's stream helper treats as a protocol error.
-        return {"output_tokens": 0, "started": 0, "next_sequence": 0, "next_output_index": 0}
+        return {
+            "output_tokens": 0,
+            "started": 0,
+            "next_sequence": 0,
+            "next_output_index": 0,
+            "compactions": [],
+        }
 
     def observe(
         self,
         state: _ResponsesStreamState,
         event: ResponseStreamEvent,
         pool: ToolBackend,
-        acc: dict[str, int],
+        acc: dict[str, Any],
     ) -> tuple[StreamAction, ResponseStreamEvent]:
         etype = getattr(event, "type", None)
 
@@ -418,10 +464,19 @@ class _ResponsesToolLoopStrategy:
             acc["started"] = 1
             return StreamAction.FORWARD, self._resequenced(event, acc)
 
-        if etype == "response.output_item.added":
+        if etype in {"response.output_item.added", "response.output_item.done"}:
             item = getattr(event, "item", None)
             output_index = getattr(event, "output_index", None)
-            if item is not None and output_index is not None and getattr(item, "type", None) == "function_call":
+            if item is not None and isinstance(output_index, int) and getattr(item, "type", None) == "compaction":
+                # The done event replaces the added snapshot when both arrive,
+                # ensuring the replay uses the complete encrypted payload.
+                state.compaction_items[output_index] = item
+            if (
+                etype == "response.output_item.added"
+                and item is not None
+                and output_index is not None
+                and getattr(item, "type", None) == "function_call"
+            ):
                 name = getattr(item, "name", "")
                 state.function_calls[output_index] = {
                     "call_id": getattr(item, "call_id", ""),
@@ -512,7 +567,7 @@ class _ResponsesToolLoopStrategy:
         if state.owned_specs:
             await _execute_stream_owned(state, pool)
 
-    def terminal_events(self, state: _ResponsesStreamState, acc: dict[str, int]) -> list[ResponseStreamEvent]:
+    def terminal_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         if state.deferred_completed is None:
             return []
         # The terminal event carries the whole response, whose ``output`` still lists
@@ -521,12 +576,13 @@ class _ResponsesToolLoopStrategy:
         # client just accumulated, and hand it a call it cannot dispatch.
         hidden = _hidden_call_ids(state)
         folded = _without_output_items(state.deferred_completed, hidden) if hidden else state.deferred_completed
+        folded = _prepend_output_items(folded, acc["compactions"])
         folded = _maybe_fold_response_completed_usage(folded, acc["output_tokens"])
         # The terminal event is the last thing the client sees, so it continues the
         # same sequence as the events forwarded before it.
         return [self._resequenced(folded, acc)]
 
-    def accumulate_stream_usage(self, acc: dict[str, int], state: _ResponsesStreamState) -> None:
+    def accumulate_stream_usage(self, acc: dict[str, Any], state: _ResponsesStreamState) -> None:
         # All-owned continuation: fold this iteration's output_tokens from the
         # dropped ``response.completed`` event into the running total.
         if state.deferred_completed is not None:
@@ -534,9 +590,10 @@ class _ResponsesToolLoopStrategy:
             iter_usage = getattr(iter_response, "usage", None) if iter_response is not None else None
             if iter_usage is not None:
                 acc["output_tokens"] += getattr(iter_usage, "output_tokens", 0) or 0
+        acc["compactions"].extend(state.compaction_items[index] for index in sorted(state.compaction_items))
 
     def synthetic_events(
-        self, state: _ResponsesStreamState, acc: dict[str, int]
+        self, state: _ResponsesStreamState, acc: dict[str, Any]
     ) -> list[ResponseStreamEvent]:
         """Announce gateway-run searches in the Responses API's native vocabulary.
 
@@ -581,16 +638,21 @@ class _ResponsesToolLoopStrategy:
         state: _ResponsesStreamState,
         pool: ToolBackend,
     ) -> None:
-        transcript.extend(
-            {
-                "type": "function_call",
-                "call_id": spec["call_id"],
-                "name": spec["name"],
-                "arguments": spec["arguments"] or "{}",
-            }
-            for spec in state.owned_specs
-        )
-
+        replay_items: list[Any] = []
+        for output_index in sorted(set(state.compaction_items) | set(state.function_calls)):
+            if output_index in state.compaction_items:
+                replay_items.append(state.compaction_items[output_index])
+            if output_index in state.function_calls:
+                spec = state.function_calls[output_index]
+                replay_items.append(
+                    {
+                        "type": "function_call",
+                        "call_id": spec["call_id"],
+                        "name": spec["name"],
+                        "arguments": spec["arguments"] or "{}",
+                    }
+                )
+        transcript.extend(_items_to_dicts(replay_items))
         transcript.extend(await _execute_stream_owned(state, pool))
 
 

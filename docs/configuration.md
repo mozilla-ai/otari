@@ -66,6 +66,13 @@ pricing:
 | `cors_allow_origins` | list | `[]` | Allowed CORS origins (empty = disabled) |
 | `providers` | dict | `{}` | Provider credentials (see below) |
 | `routing` | dict | `{}` | Named routing policies: which real model serves a request, what is tried after a retryable failure, and which guardrails always run. An alias is the one-target case. See [Routing policies](routing.md). Standalone mode only. |
+| `router_alpha` | float | `0.3` | Learned router's cost-vs-quality dial: `score = predicted_quality - alpha * normalized_cost`. 0 ignores cost; higher prefers cheaper candidates. |
+| `router_k` | int | `5` | Neighbors per routing decision. A pool with fewer comparable examples serves the policy's default target. |
+| `router_seed_count` | int | `20` | Examples a pool needs before the router routes at all. |
+| `router_confidence_floor` | float | `0.0` | Share of the `k` neighbors that must agree on the winner. Below it, the default target leads and the ranking becomes the failover chain. |
+| `router_granularity` | string | `trace_sticky` | `trace_sticky` decides once per conversation and reuses it; `step` re-decides on every call. |
+| `router_embedding_model` | string | `openai:text-embedding-3-small` | Model used to embed the task signal. Changing it invalidates stored examples rather than mixing vector spaces. |
+| `router_max_records_per_user` | int | `5000` | Cap on stored routing-memory records per user; oldest are evicted past it, and it also bounds how many one decision loads. `0` disables eviction rather than storing nothing, so the store grows without limit while each decision stays bounded. |
 | `aliases` | dict | `{}` | Model name aliases (display name to target selector `instance:model` or `provider:model`). The alias is what users see in `GET /v1/models` and in response `model` fields; pricing, budgets, and usage key on the resolved target. See [Model aliases](models.md#model-aliases) and, for more than one target, [Routing policies](routing.md). Standalone mode only. |
 | `pricing` | dict | `{}` | Model pricing entries |
 | `search_tools` | dict | `{}` | Search tools served by `POST /v1/search` (see below). Standalone mode only. |

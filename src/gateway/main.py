@@ -41,6 +41,7 @@ from gateway.services.pricing_init_service import (
     initialize_pricing_from_config,
     warn_if_gateway_tools_lack_pricing,
     warn_if_require_pricing_without_pricing,
+    warn_if_router_candidates_lack_pricing,
     warn_if_search_tools_lack_flat_pricing,
 )
 from gateway.services.pricing_refresh_service import (
@@ -208,6 +209,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 await warn_if_require_pricing_without_pricing(config, session)
                 await warn_if_search_tools_lack_flat_pricing(config, session)
                 await warn_if_gateway_tools_lack_pricing(config, session)
+                await warn_if_router_candidates_lack_pricing(config, session)
                 await load_aliases_at_startup(session)
                 await load_policies_at_startup(session)
             log_writer = create_log_writer(config.log_writer_strategy)

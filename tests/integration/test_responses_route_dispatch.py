@@ -8,6 +8,7 @@ string — the Responses API doesn't use the Anthropic-style error envelope).
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any, cast
 from unittest.mock import AsyncMock, patch
@@ -15,7 +16,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from any_llm.types.responses import Response, ResponseStreamEvent
 from fastapi.testclient import TestClient
-from openai.types.responses import ResponseCompletedEvent, ResponseTextDeltaEvent, ResponseUsage
+from openai.types.responses import (
+    ResponseCompactionItem,
+    ResponseCompletedEvent,
+    ResponseOutputItemAddedEvent,
+    ResponseOutputItemDoneEvent,
+    ResponseTextDeltaEvent,
+    ResponseUsage,
+)
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
 _MODEL = "openai:gpt-4o-mini"
@@ -71,6 +79,45 @@ def test_no_tools_falls_through_to_plain_aresponses(
     assert resp.status_code == 200, resp.text
     # No tools in the upstream kwargs since none were requested.
     assert "tools" not in captured
+    assert "context_management" not in captured
+
+
+def test_context_management_and_compaction_output_pass_through(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    context_management = [{"type": "compaction", "compact_threshold": 200_000}]
+    compaction = ResponseCompactionItem(
+        id="cmp_direct",
+        type="compaction",
+        encrypted_content="opaque-direct",
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> Response:
+        captured.update(kwargs)
+        return _response(output=[compaction])
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        resp = client.post(
+            "/v1/responses",
+            json={
+                "model": _MODEL,
+                "input": "hi",
+                "context_management": context_management,
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["context_management"] == context_management
+    assert resp.json()["output"] == [
+        {
+            "id": "cmp_direct",
+            "encrypted_content": "opaque-direct",
+            "type": "compaction",
+        }
+    ]
 
 
 def test_bare_string_input_not_corrupted_by_normalization(
@@ -660,6 +707,73 @@ def test_stream_no_tools_returns_sse_response(
     assert resp.status_code == 200, resp.text
     assert resp.headers["content-type"].startswith("text/event-stream")
     assert tool_loop_called is False
+
+
+def test_stream_context_management_and_compaction_events_pass_through(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    context_management = [{"type": "compaction", "compact_threshold": 200_000}]
+    compaction = ResponseCompactionItem(
+        id="cmp_stream",
+        type="compaction",
+        encrypted_content="opaque-stream",
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_aresponses(**kwargs: Any) -> AsyncIterator[ResponseStreamEvent]:
+        captured.update(kwargs)
+        return _stream_iter(
+            ResponseOutputItemAddedEvent(
+                type="response.output_item.added",
+                item=compaction,
+                output_index=0,
+                sequence_number=0,
+            ),
+            ResponseOutputItemDoneEvent(
+                type="response.output_item.done",
+                item=compaction,
+                output_index=0,
+                sequence_number=1,
+            ),
+            ResponseCompletedEvent(
+                type="response.completed",
+                response=_response(output=[compaction]),
+                sequence_number=2,
+            ),
+        )
+
+    with patch("gateway.api.routes.responses.aresponses", new=fake_aresponses):
+        resp = client.post(
+            "/v1/responses",
+            json={
+                "model": _MODEL,
+                "input": "hi",
+                "stream": True,
+                "context_management": context_management,
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["context_management"] == context_management
+    payloads = [
+        json.loads(line.removeprefix("data: "))
+        for line in resp.iter_lines()
+        if line.startswith("data: {")
+    ]
+    compactions = [
+        payload
+        for payload in payloads
+        if payload.get("item", {}).get("type") == "compaction"
+    ]
+    assert [payload["type"] for payload in compactions] == [
+        "response.output_item.added",
+        "response.output_item.done",
+    ]
+    assert all(payload["item"]["encrypted_content"] == "opaque-stream" for payload in compactions)
+    completed = next(payload for payload in payloads if payload["type"] == "response.completed")
+    assert completed["response"]["output"][0]["type"] == "compaction"
 
 
 def test_stream_mcp_servers_dispatches_through_tool_loop_stream(

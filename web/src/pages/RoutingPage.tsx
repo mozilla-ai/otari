@@ -1,5 +1,5 @@
 import { Button, Card, Chip } from "@heroui/react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import type { AliasResponse, PolicyGuardrail, PolicySpec, RoutingPolicyResponse } from "@/api/types";
@@ -14,6 +14,7 @@ import {
   useUsers,
 } from "@/api/hooks";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
+import { RouterReadiness } from "@/components/RouterReadiness";
 import { Field } from "@/components/Field";
 import { ModelComboBox } from "@/components/ModelComboBox";
 import { UserComboBox } from "@/components/UserComboBox";
@@ -27,6 +28,13 @@ import { ConfirmButton, CopyableValue, EmptyState, ErrorBanner, PageHeader } fro
  *  write goes to; it is not cosmetic.
  */
 type RoutingRow = RoutingPolicyResponse & { kind: "policy" | "alias" };
+
+/** The one router backend the form can write. Others are shown read-only rather
+ *  than rewritten as this one on save. */
+const KNN_BACKEND = "knn";
+
+/** Server-side cap on a compiled plan (`MAX_CANDIDATES` in models/routing.py). */
+const MAX_CANDIDATES = 5;
 
 /** Present an alias as the one-target policy it is. */
 function aliasAsRow(alias: AliasResponse): RoutingRow {
@@ -76,9 +84,24 @@ function useGuardrailsConfigured(): { configured: boolean; isLoading: boolean } 
  *  edit is recoverable; a silent lossy save is not.
  */
 function isEditableInForm(spec: PolicySpec): boolean {
+  // The form re-emits `select` as conditions, then the router, then the default.
+  // Selection is order-sensitive server-side (the first matching entry wins), so a
+  // spec whose router sits *before* its conditions would come back with different
+  // behavior than it went in with. Refusing to edit is recoverable; a silent
+  // semantic change on Save is not.
+  const routerIndex = spec.select.findIndex((entry) => entry.router !== undefined);
+  const lastConditionIndex = spec.select.reduce(
+    (last, entry, index) => (entry.when !== undefined ? index : last),
+    -1,
+  );
+  if (routerIndex !== -1 && lastConditionIndex !== -1 && routerIndex < lastConditionIndex) return false;
   return spec.select.every((entry) => {
     if (entry.default !== undefined) return entry.when === undefined;
-    if (entry.router !== undefined) return false;
+    // A router entry is editable: the form models the backend and its pool, which
+    // is the whole entry. An unknown backend is still shown read-only, because
+    // saving it back through the "learned routing" control would silently rewrite
+    // it as kNN.
+    if (entry.router !== undefined) return entry.router === KNN_BACKEND && (entry.candidates?.length ?? 0) > 0;
     const when = entry.when;
     if (when === undefined || entry.target === undefined) return false;
     const keys = Object.keys(when);
@@ -91,6 +114,36 @@ function defaultTargetOf(spec: PolicySpec): string {
   return spec.select.find((entry) => entry.default !== undefined)?.default ?? "";
 }
 
+/** The router's candidate pool, or an empty list for a policy with no router. */
+function candidatesOf(spec: PolicySpec): string[] {
+  return spec.select.find((entry) => entry.router !== undefined)?.candidates ?? [];
+}
+
+/** The pool the form edits: the router's candidates, with the default target in it.
+ *
+ *  The gateway appends the default target to the pool when a policy omits it, so a
+ *  spec written through the API can list it or not. Normalizing here means the form
+ *  shows the models that will actually be dispatched, in the order they were
+ *  written, rather than a pool that is missing its own fallback.
+ */
+function initialPool(spec: PolicySpec): string[] {
+  const candidates = candidatesOf(spec);
+  if (candidates.length === 0) return [];
+  const fallthrough = defaultTargetOf(spec);
+  return candidates.includes(fallthrough) ? candidates : [...candidates, fallthrough];
+}
+
+/** Which entry of `initialPool` serves when the router declines. */
+function initialSafeIndex(spec: PolicySpec): number {
+  const index = initialPool(spec).indexOf(defaultTargetOf(spec));
+  return index === -1 ? 0 : index;
+}
+
+/** The router backend a policy names, or undefined for a policy with no router. */
+function routerBackendOf(spec: PolicySpec): string | undefined {
+  return spec.select.find((entry) => entry.router !== undefined)?.router;
+}
+
 /** The conditional entries, i.e. everything that is not the fallthrough. */
 function conditionsOf(spec: PolicySpec): { threshold: number; target: string }[] {
   return spec.select
@@ -101,6 +154,10 @@ function conditionsOf(spec: PolicySpec): { threshold: number; target: string }[]
 /** One line summarising what a policy serves, for the table. */
 function servesSummary(policy: RoutingPolicyResponse): string {
   const chain = policy.spec.on_failure ?? [];
+  const learned = candidatesOf(policy.spec);
+  if (learned.length > 0) {
+    return `Learned · ${learned.length} candidates, ${defaultTargetOf(policy.spec)} by default`;
+  }
   if (policy.is_dynamic) {
     const total = 1 + chain.length;
     return `Chosen per request · ${total} candidate${total === 1 ? "" : "s"}`;
@@ -235,18 +292,44 @@ function PolicyForm({
   const [chain, setChain] = useState<string[]>(existing?.spec.on_failure ?? []);
   const [conditions, setConditions] = useState(existing ? conditionsOf(existing.spec) : []);
   const [guardrails, setGuardrails] = useState<PolicyGuardrail[]>(existing?.spec.guardrails ?? []);
+  // The learned router's pool, and which of its models serves when the router
+  // declines. One list rather than a pool plus a separate "Serves" field: the
+  // fallback is always one of the models the router may choose, so asking for it
+  // twice made an operator name the strong model in two places and invited them to
+  // disagree with themselves. This mirrors what the gateway does with the spec,
+  // where the default target joins the pool if it was left out.
+  const [candidates, setCandidates] = useState<string[]>(existing ? initialPool(existing.spec) : []);
+  const [safeIndex, setSafeIndex] = useState<number>(existing ? initialSafeIndex(existing.spec) : 0);
+  const routed = candidates.length > 0;
+  // With a router, the fallthrough is the marked model; without one it is the single
+  // "Serves" field.
+  const effectiveTarget = routed ? (candidates[safeIndex] ?? "") : target;
 
   const nameHasDelimiter = /[:/]/.test(name);
   const scopeReady = userId === null || userId.trim() !== "";
   const conditionsReady = conditions.every((c) => c.target.trim() !== "" && c.threshold > 0 && c.threshold < 100);
   const guardrailsReady = guardrails.every((g) => g.profile.trim() !== "");
+  // Two, not one: ranking a single model is not a decision, and the API refuses it.
+  const candidatesReady =
+    !routed ||
+    (candidates.length >= 2 &&
+      candidates.every((entry) => entry.trim() !== "") &&
+      effectiveTarget.trim() !== "");
+  // The server caps the compiled plan at MAX_CANDIDATES, counting the routed pool
+  // plus the failure chain. Enforced here too so the form cannot author a policy it
+  // then fails to save: a rule the UI knows about should not arrive as a 400.
+  const plannedCandidates = (candidates.length || 1) + chain.length;
+  const atCandidateCap = plannedCandidates >= MAX_CANDIDATES;
+  const overCandidateCap = plannedCandidates > MAX_CANDIDATES;
   const canSubmit =
     name.trim() !== "" &&
-    target.trim() !== "" &&
+    effectiveTarget.trim() !== "" &&
     !nameHasDelimiter &&
     scopeReady &&
     conditionsReady &&
     guardrailsReady &&
+    candidatesReady &&
+    !overCandidateCap &&
     chain.every((entry) => entry.trim() !== "");
 
   // Built in plan order, with the fallthrough last, which is what the schema
@@ -258,26 +341,34 @@ function PolicyForm({
           when: { budget_used_pct: { gte: condition.threshold } },
           target: condition.target.trim(),
         })),
-        { default: target.trim() },
+        // After the conditions, before the fallthrough: an explicit tier-down is
+        // the operator overriding the router, and the router is what runs when no
+        // condition applies.
+        ...(routed ? [{ router: KNN_BACKEND, candidates: candidates.map((entry) => entry.trim()) }] : []),
+        { default: effectiveTarget.trim() },
       ],
       ...(chain.length > 0 ? { on_failure: chain.map((entry) => entry.trim()) } : {}),
       ...(guardrails.length > 0 ? { guardrails } : {}),
     }),
-    [conditions, target, chain, guardrails],
+    [conditions, candidates, routed, effectiveTarget, chain, guardrails],
   );
 
   // An alias has exactly one target, so growing one a chain, a condition, or a
   // guardrail makes it a policy. Saving it as a policy alone would leave the alias
   // row in place under the same name, and the API refuses that collision, so the
   // form keeps an alias an alias and points the operator at the way across.
-  const outgrewAlias = editingAlias && (chain.length > 0 || conditions.length > 0 || guardrails.length > 0);
+  const outgrewAlias =
+    editingAlias && (chain.length > 0 || conditions.length > 0 || guardrails.length > 0 || candidates.length > 0);
   const pending = save.isPending || saveAlias.isPending;
 
   const submit = () => {
     if (!canSubmit || outgrewAlias) return;
     const scope = userId === null ? null : userId.trim();
     if (editingAlias) {
-      saveAlias.mutate({ name: name.trim(), target: target.trim(), user_id: scope }, { onSuccess: onClose });
+      saveAlias.mutate(
+        { name: name.trim(), target: effectiveTarget.trim(), user_id: scope },
+        { onSuccess: onClose },
+      );
       return;
     }
     save.mutate({ name: name.trim(), spec, user_id: scope }, { onSuccess: onClose });
@@ -331,13 +422,30 @@ function PolicyForm({
                 }
               />
             )}
-            <ModelComboBox
-              label="Serves"
-              value={target}
-              onChange={setTarget}
-              isRequired
-              description="The model that serves a normal request. Callers never see it."
-            />
+            {routed ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-medium text-[var(--otari-ink)]">Serves</span>
+                <span className="text-sm text-[var(--otari-ink)]">
+                  {effectiveTarget.trim() === "" ? (
+                    <span className="text-[var(--otari-muted)]">whichever model you mark below</span>
+                  ) : (
+                    <code>{effectiveTarget}</code>
+                  )}
+                </span>
+                <span className="text-xs text-[var(--otari-muted)]">
+                  A router picks per request, so this policy has no single target. The model marked below is
+                  what serves when the router does not choose.
+                </span>
+              </div>
+            ) : (
+              <ModelComboBox
+                label="Serves"
+                value={target}
+                onChange={setTarget}
+                isRequired
+                description="The model that serves a normal request. Callers never see it."
+              />
+            )}
           </div>
 
           {editing ? null : <ScopePicker userId={userId} onChange={setUserId} />}
@@ -389,6 +497,83 @@ function PolicyForm({
             </div>
           ) : null}
 
+          {/* Learned routing */}
+          {candidates.length > 0 ? (
+            <div className="flex flex-col gap-3 rounded-lg border border-[var(--otari-line)] p-3">
+              <div>
+                <span className="text-sm font-medium text-[var(--otari-ink)]">The router chooses between</span>
+                <p className="text-xs text-[var(--otari-muted)]">
+                  For each request, the cheapest of these that past scoring says is good enough. Every model
+                  here needs pricing, because the router weighs quality against cost.
+                </p>
+              </div>
+              {candidates.map((entry, index) => (
+                <div key={index} className="flex flex-wrap items-end gap-3">
+                  <div className="min-w-56 flex-1">
+                    <ModelComboBox
+                      label={`Model ${index + 1}`}
+                      value={entry}
+                      onChange={(value) =>
+                        setCandidates((prev) => prev.map((c, i) => (i === index ? value : c)))
+                      }
+                      isRequired
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 pb-2 text-xs text-[var(--otari-ink)]">
+                    <input
+                      type="radio"
+                      name="router-safe-choice"
+                      checked={safeIndex === index}
+                      onChange={() => setSafeIndex(index)}
+                    />
+                    Serves when unsure
+                  </label>
+                  <Button
+                    variant="ghost"
+                    onPress={() => {
+                      setCandidates((prev) => prev.filter((_, i) => i !== index));
+                      // Keep the mark on the same model where possible; if the marked
+                      // one went, fall back to the first, never to nothing.
+                      setSafeIndex((prev) => (index < prev ? prev - 1 : index === prev ? 0 : prev));
+                    }}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+              <p className="text-xs text-[var(--otari-muted)]">
+                The marked model serves whenever the router does not choose: too few scored examples, a weakly
+                supported pick, a request carrying tools, or a caller sending <code>Otari-Router: off</code>.
+                Mark the one you would have picked without a router.
+              </p>
+              {candidates.length < 2 ? (
+                <p className="text-xs text-red-700">
+                  Name at least two models. Ranking one is not a routing decision.
+                </p>
+              ) : null}
+              <div className="flex flex-wrap items-baseline gap-2">
+                <button
+                  type="button"
+                  disabled={atCandidateCap}
+                  className={
+                    atCandidateCap
+                      ? "cursor-not-allowed text-sm text-[var(--otari-muted)] opacity-60"
+                      : "text-sm text-[var(--otari-brand)] hover:underline"
+                  }
+                  onClick={() => setCandidates((prev) => [...prev, ""])}
+                >
+                  + Another model
+                </button>
+                {atCandidateCap ? (
+                  <span className="text-xs text-[var(--otari-muted)]">
+                    A policy dispatches at most {MAX_CANDIDATES} models, counting the fallback chain.
+                    Remove a fallback to add another.
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           {/* Failure chain */}
           {chain.length > 0 ? (
             <div className="flex flex-col gap-3 rounded-lg border border-[var(--otari-line)] p-3">
@@ -414,14 +599,24 @@ function PolicyForm({
                   </Button>
                 </div>
               ))}
-              <div>
+              <div className="flex flex-wrap items-baseline gap-2">
                 <button
                   type="button"
-                  className="text-sm text-[var(--otari-brand)] hover:underline"
+                  disabled={atCandidateCap}
+                  className={
+                    atCandidateCap
+                      ? "cursor-not-allowed text-sm text-[var(--otari-muted)] opacity-60"
+                      : "text-sm text-[var(--otari-brand)] hover:underline"
+                  }
                   onClick={() => setChain((prev) => [...prev, ""])}
                 >
                   + Another fallback
                 </button>
+                {atCandidateCap ? (
+                  <span className="text-xs text-[var(--otari-muted)]">
+                    A policy dispatches at most {MAX_CANDIDATES} models in total.
+                  </span>
+                ) : null}
               </div>
             </div>
           ) : null}
@@ -516,6 +711,21 @@ function PolicyForm({
                 + Add a fallback chain
               </button>
             ) : null}
+            {candidates.length === 0 ? (
+              <button
+                type="button"
+                className="text-[var(--otari-brand)] hover:underline"
+                // Seeded with the policy's own target, marked as the safe choice, so
+                // the pool starts from the model this policy already serves and the
+                // operator adds the cheaper one rather than restating everything.
+                onClick={() => {
+                  setCandidates([target.trim() || "", ""]);
+                  setSafeIndex(0);
+                }}
+              >
+                + Let a router pick the cheapest good-enough model
+              </button>
+            ) : null}
             {guardrails.length === 0 ? (
               // Disabled rather than hidden, and never disabled silently: a hidden
               // control teaches nothing, and a greyed-out one with no explanation
@@ -557,6 +767,13 @@ function PolicyForm({
               Cancel
             </Button>
             <span className="text-xs text-[var(--otari-muted)]">In effect for new requests within 30s.</span>
+            {candidates.length > 0 ? (
+              <span className="text-xs text-[var(--otari-muted)]">
+                A new router serves the model above until it has scored examples. Recording them is an API
+                job for now (<code>POST /v1/routing/preferences/rank</code>); open <b>Examples</b> on the row
+                afterwards to watch it warm up.
+              </span>
+            ) : null}
             {outgrewAlias ? (
               <span className="text-xs text-amber-700">
                 An alias holds one target. To add a fallback, a condition, or a guardrail, delete this alias
@@ -584,6 +801,10 @@ export function RoutingPage() {
   const initialTarget = searchParams.get("target") ?? "";
   const [adding, setAdding] = useState(initialTarget !== "");
   const [editing, setEditing] = useState<RoutingRow | null>(null);
+  // Readiness opens inline under its own row (DataTable's accordion), because it
+  // describes one policy and the operator clicked that policy. A card above the
+  // table would put the panel nowhere near the control that opened it.
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   // Aliases and policies are listed together: an alias is the one-target case,
   // and this page is the only place either is managed.
@@ -591,6 +812,21 @@ export function RoutingPage() {
     ...(policies.data ?? []).map((policy) => ({ ...policy, kind: "policy" as const })),
     ...(aliases.data ?? []).map(aliasAsRow),
   ].sort((a, b) => a.name.localeCompare(b.name) || (a.user_id ?? "").localeCompare(b.user_id ?? ""));
+
+  // Stable so DataTable's row cache holds; see its docstring.
+  const renderDetail = useCallback(
+    (row: RoutingRow) => (
+      <RouterReadiness
+        policyName={row.name}
+        candidates={candidatesOf(row.spec)}
+        defaultTarget={defaultTargetOf(row.spec)}
+        backend={routerBackendOf(row.spec) ?? KNN_BACKEND}
+        scopedUserId={row.user_id}
+        onClose={() => setExpanded(null)}
+      />
+    ),
+    [],
+  );
 
   const columns = useMemo<DataTableColumn<RoutingRow>[]>(
     () => [
@@ -606,7 +842,13 @@ export function RoutingPage() {
         cell: (policy) => (
           <div className="flex items-center gap-2">
             <span className="text-sm text-[var(--otari-ink)]">{servesSummary(policy)}</span>
-            {policy.is_dynamic ? (
+            {/* "Learned" rather than "Dynamic" when a router decides: both are true,
+                but only one tells the reader what to do next (teach it). */}
+            {candidatesOf(policy.spec).length > 0 ? (
+              <Chip size="sm" color="accent">
+                Learned
+              </Chip>
+            ) : policy.is_dynamic ? (
               <Chip size="sm" color="accent">
                 Dynamic
               </Chip>
@@ -656,18 +898,39 @@ export function RoutingPage() {
       {
         id: "actions",
         header: "",
-        cell: (policy) =>
-          policy.source === "config" ? (
-            <span className="text-xs text-[var(--otari-muted)]">set in config.yml</span>
+        cell: (policy) => {
+          // Teaching is data, not configuration, so it is offered even for a policy
+          // defined in config.yml: an operator can score examples for a policy they
+          // cannot edit here, and without this that policy could never route.
+          // "Examples" rather than "Router": on a Routing page full of routing
+          // policies, "Router" names the thing rather than what opens, and the count
+          // of scored examples is the one number in there that changes. Outlined
+          // rather than ghost so it reads as the row's distinct affordance next to
+          // Edit and Delete.
+          const readiness = candidatesOf(policy.spec).length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onPress={() => setExpanded((current) => (current === rowKeyOf(policy) ? null : rowKeyOf(policy)))}
+            >
+              {expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
+            </Button>
+          );
+          return policy.source === "config" ? (
+            <div className="flex items-center justify-end gap-2">
+              {readiness}
+              <span className="text-xs text-[var(--otari-muted)]">set in config.yml</span>
+            </div>
           ) : (
             <div className="flex items-center justify-end gap-2">
+              {readiness}
               {isEditableInForm(policy.spec) ? (
                 <Button
                   size="sm"
                   variant="ghost"
                   onPress={() => {
                     // The table stays mounted while the create form is open, so
-                    // Edit is still reachable from it. Closing the other editor
+                    // Edit is still reachable from it. Closing the other panels
                     // keeps this to one form: two stacked forms do not recover on
                     // their own, since each only closes when cancelled.
                     setAdding(false);
@@ -693,17 +956,18 @@ export function RoutingPage() {
                 Delete
               </ConfirmButton>
             </div>
-          ),
+          );
+        },
       },
     ],
-    [deletePolicy, deleteAlias],
+    [deletePolicy, deleteAlias, expanded],
   );
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Routing"
-        description="Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run."
+        description="Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. It can also let a router learn which prompts a cheaper model handles just as well."
         action={
           adding || editing !== null ? undefined : (
             <Button
@@ -731,6 +995,10 @@ export function RoutingPage() {
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-[var(--otari-muted)]">
             <li>Create a policy and point it at the model that should normally serve.</li>
             <li>Add a fallback chain so a provider outage does not become a failed request.</li>
+            <li>
+              Or let a router choose per request between a cheap and a strong model, then teach it with a few
+              scored examples.
+            </li>
             <li>Have your callers send the policy name as their `model`.</li>
           </ol>
         </EmptyState>
@@ -740,6 +1008,8 @@ export function RoutingPage() {
           columns={columns}
           rows={rows}
           getRowKey={rowKeyOf}
+          detailKey={expanded}
+          renderDetail={renderDetail}
           isLoading={policies.isLoading || aliases.isLoading}
           emptyContent="No routing policies yet."
         />

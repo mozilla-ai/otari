@@ -15,7 +15,7 @@ from pydantic import Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
-from gateway.api.routes._helpers import latest_user_text
+from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
 from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
     NO_RESOLVABLE_PROVIDER_DETAIL,
@@ -300,6 +300,9 @@ async def chat_completions(
         ),
         master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
         user_forbidden_detail=_USER_FORBIDDEN,
+        routing_signal=lambda: routing_signal_from_messages(
+            request.messages, raw_request, has_tools=bool(request.tools)
+        ),
         normalize_messages=_normalize,
     )
 

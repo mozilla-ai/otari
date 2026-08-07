@@ -134,7 +134,8 @@ Client SDKs and the platform map gateway status codes to typed errors — keep t
 ### Sensitive data exposure — CWE-200 / CWE-532
 - ✅ **Check**: no provider keys, master key, or API keys in code, logs, or error messages — config via env (`.env` gitignored).
 - ✅ **Check**: **no prompt/response content or other user payloads in logs** — log opaque IDs (request id, user id), token counts, model/provider names, status. Never log `messages`, `input`, completion text, or full request bodies.
-- ✅ **Check**: upstream provider errors are not leaked verbatim — routes return a generic message (e.g. "The request could not be completed by the provider"); the raw upstream error/stack is logged server-side only. (Covered by `tests/integration/test_error_detail_leakage.py`.)
+- ✅ **Check**: upstream provider error text is returned on the statuses that are the **caller's** fault (400/422/404), redacted and length-capped by `redact_upstream_message`, and **only** there. A failure that is the gateway's own (rejected credentials, an exhausted provider account, any 5xx, an unclassifiable error) must keep a fixed detail: those are where the operator's keys and topology surface, and the caller has no remedy to apply. Adding a new status to the pass-through side is a security decision, not a UX one. (Covered by `tests/integration/test_error_detail_leakage.py` and `tests/unit/test_provider_error_classification.py`.)
+- ✅ **Check**: a new redaction shape is added to `_SECRET_SHAPES` when a provider starts emitting a credential format it does not already cover.
 - **Severity**: Critical
 
 ### SSRF & request forwarding — CWE-918

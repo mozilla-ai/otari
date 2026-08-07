@@ -22,7 +22,13 @@ import pytest
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger as gateway_logger
 from gateway.models.routing import PolicySpec
-from gateway.services.routing import NoEligibleCandidatesError, compile_policy
+from gateway.services.routing import (
+    BudgetState,
+    NoEligibleCandidatesError,
+    RouterOrdering,
+    compile_policy,
+    selection_consults_router,
+)
 
 
 @pytest.fixture
@@ -36,7 +42,7 @@ def router_warnings(
     it directly rather than to root; and the once-per-process warned set is reset
     so an earlier test cannot suppress this one's warning.
     """
-    monkeypatch.setattr("gateway.services.routing.compiler._warned_routers", set())
+    monkeypatch.setattr("gateway.services.routing.backends._warned_missing", set())
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.WARNING, logger="gateway")
     try:
@@ -103,40 +109,115 @@ def test_a_mixed_drop_reports_the_actionable_one(config: GatewayConfig) -> None:
     assert {item.reason for item in exc_info.value.dropped} == {"not_allowed", "unresolvable"}
 
 
-def _router_spec() -> PolicySpec:
+def _router_spec(*candidates: str) -> PolicySpec:
+    pool = list(candidates) or ["openai:gpt-5-nano", "openai:gpt-5-mini"]
     return PolicySpec.model_validate(
-        {"select": [{"router": "knn"}, {"default": "openai:gpt-5-mini"}], "on_failure": []}
+        {
+            "select": [{"router": "knn", "candidates": pool}, {"default": "openai:gpt-5-mini"}],
+            "on_failure": [],
+        }
     )
 
 
-def test_an_unavailable_router_warns_once_per_policy(
+def test_no_ordering_serves_the_default_and_says_nothing(
     config: GatewayConfig, router_warnings: Callable[[], list[str]]
 ) -> None:
-    """Router backends are not wired yet, and the policy compiles on every request
-    through it, so an unconditional warning is one log line per request forever.
-    The condition is static config: the first line says everything the thousandth
-    would, and the rest only bury real warnings.
-    """
-    spec = _router_spec()
-    for _ in range(3):
-        plan = compile_policy(config, "routed", spec)
+    """Compiling without an ordering is silent, whichever reason produced it.
 
-    # Falling through to the default is the safe reading: a router is an
-    # optimization and must never be why a request cannot be served.
+    A decline (cold pool, low confidence, caller opted out) is normal operation, and
+    ``explain`` and the CLI compile with no request at all by design. Only the
+    caller can tell those apart from a backend this build does not have, so the
+    warning lives there (see ``test_routing_decide``); warning here made ``explain``
+    report a misconfiguration that did not exist.
+    """
+    for ordering in (None, RouterOrdering([], rationale="cold pool")):
+        plan = compile_policy(config, "routed", _router_spec(), router_ordering=ordering)
+        assert [attempt.model for attempt in plan.attempts] == ["gpt-5-mini"]
+        assert plan.selection_reason == "default"
+        assert plan.router_ordering is None
+    assert router_warnings() == []
+
+
+def test_a_router_ranking_becomes_the_whole_plan(config: GatewayConfig) -> None:
+    """The ranking is the plan, not just its head.
+
+    The walker can try candidates in order, so keeping the rest means a routed
+    request that fails over lands on the router's second choice rather than
+    jumping to the operator's failure chain. Every attempt carries the router as
+    its selection reason, which is what the usage rows are attributed to.
+    """
+    spec = PolicySpec.model_validate(
+        {
+            "select": [
+                {"router": "knn", "candidates": ["openai:gpt-5-nano", "openai:gpt-5-mini"]},
+                {"default": "openai:gpt-5-mini"},
+            ],
+            "on_failure": ["openai:gpt-5"],
+        }
+    )
+    ordering = RouterOrdering(["openai:gpt-5-nano", "openai:gpt-5-mini"], confidence=0.8, rationale="knn")
+
+    plan = compile_policy(config, "routed", spec, router_ordering=ordering)
+
+    assert [attempt.model for attempt in plan.attempts] == ["gpt-5-nano", "gpt-5-mini", "gpt-5"]
+    assert plan.selection_reason == "router:knn"
+    assert [attempt.selection_reason for attempt in plan.attempts] == [
+        "router:knn",
+        "router:knn",
+        "on_failure",
+    ]
+    # Kept on the plan so the activity log can say why this model was chosen.
+    assert plan.router_ordering is not None
+    assert plan.router_ordering.confidence == 0.8
+
+
+def test_a_routed_candidate_the_caller_may_not_use_is_still_dropped(config: GatewayConfig) -> None:
+    """The allow-list outranks the router.
+
+    The pool is filtered before ranking (see ``services/routing/decide``), so this
+    is the belt-and-braces case: a stale ordering, or a backend that returned
+    something outside the pool, must not become an access-control bypass.
+    """
+    ordering = RouterOrdering(["openai:gpt-5-nano", "openai:gpt-5-mini"], rationale="knn")
+
+    plan = compile_policy(
+        config,
+        "routed",
+        _router_spec(),
+        allowlist=["openai:gpt-5-mini"],
+        router_ordering=ordering,
+    )
+
     assert [attempt.model for attempt in plan.attempts] == ["gpt-5-mini"]
-    warnings = router_warnings()
-    assert len(warnings) == 1
-    assert "routed" in warnings[0]
+    assert [dropped.reason for dropped in plan.dropped] == ["not_allowed"]
 
 
-def test_a_second_policy_naming_the_same_router_warns_on_its_own(
-    config: GatewayConfig, router_warnings: Callable[[], list[str]]
-) -> None:
-    """Keyed per (policy, router), so the suppression cannot hide a second
-    misconfigured policy behind the first.
+def test_a_condition_ahead_of_the_router_means_the_router_is_not_consulted() -> None:
+    """Order decides whether the router runs at all.
+
+    A ``when`` entry ahead of the router wins outright and the ranking is thrown
+    away, so asking a backend for one costs a paid embedding call plus a scan of the
+    caller's examples for nothing, and logs a decision the request did not use. The
+    pipeline gates on this before it ranks.
     """
-    spec = _router_spec()
-    compile_policy(config, "first", spec)
-    compile_policy(config, "second", spec)
+    spec = PolicySpec.model_validate(
+        {
+            "select": [
+                {"when": {"budget_used_pct": {"gte": 80}}, "target": "openai:gpt-5-nano"},
+                {"router": "knn", "candidates": ["openai:gpt-5-nano", "openai:gpt-5-mini"]},
+                {"default": "openai:gpt-5-mini"},
+            ]
+        }
+    )
 
-    assert len(router_warnings()) == 2
+    assert not selection_consults_router(spec, budget=BudgetState(used_pct=95.0))
+    # Under the threshold the condition does not match, so the router is next in line.
+    assert selection_consults_router(spec, budget=BudgetState(used_pct=10.0))
+
+
+def test_a_policy_with_no_router_never_consults_one() -> None:
+    assert not selection_consults_router(_spec("openai:gpt-5-mini"))
+
+
+def test_a_bare_router_policy_always_consults_it() -> None:
+    assert selection_consults_router(_router_spec())
