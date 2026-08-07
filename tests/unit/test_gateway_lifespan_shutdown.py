@@ -58,12 +58,12 @@ async def test_stop_refresher_returns_when_the_task_absorbs_its_cancellation() -
     await asyncio.sleep(0)  # let it reach its first await
 
     started = asyncio.get_running_loop().time()
-    await asyncio.wait_for(_stop_refresher(task, "test"), timeout=_REFRESHER_STOP_TIMEOUT_SECONDS + 10)
+    await asyncio.wait_for(_stop_refresher(task, "test"), timeout=_REFRESHER_STOP_TIMEOUT_SECONDS + 2)
     elapsed = asyncio.get_running_loop().time() - started
 
     # It waited out the grace period rather than returning instantly, and it
     # returned rather than blocking on a task that will never finish.
-    assert _REFRESHER_STOP_TIMEOUT_SECONDS <= elapsed < _REFRESHER_STOP_TIMEOUT_SECONDS + 10
+    assert _REFRESHER_STOP_TIMEOUT_SECONDS <= elapsed < _REFRESHER_STOP_TIMEOUT_SECONDS + 2
     assert not task.done()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -80,12 +80,18 @@ async def test_stop_refreshers_bounds_multiple_stuck_tasks_together() -> None:
     await _stop_refreshers([(task, f"test-{index}") for index, task in enumerate(tasks)])
     elapsed = asyncio.get_running_loop().time() - started
 
-    assert _REFRESHER_STOP_TIMEOUT_SECONDS <= elapsed < _REFRESHER_STOP_TIMEOUT_SECONDS + 10
+    assert _REFRESHER_STOP_TIMEOUT_SECONDS <= elapsed < _REFRESHER_STOP_TIMEOUT_SECONDS + 2
     assert all(not task.done() for task in tasks)
     for task in tasks:
         task.cancel()
     results = await asyncio.gather(*tasks, return_exceptions=True)
     assert all(isinstance(result, asyncio.CancelledError) for result in results)
+
+
+@pytest.mark.asyncio
+async def test_stop_refreshers_allows_no_tasks() -> None:
+    """Hybrid mode has no local refreshers to stop."""
+    await _stop_refreshers([])
 
 
 @pytest.mark.asyncio

@@ -120,7 +120,7 @@ def _validate_platform_config(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
-# How long shutdown waits for one refresher to acknowledge its cancellation.
+# How long shutdown waits for refreshers to acknowledge cancellation.
 #
 # Cancelling a task is a request, not a guarantee. The CancelledError is
 # delivered at whatever the task is awaiting, and a nested cancel scope there can
@@ -135,6 +135,19 @@ def _validate_platform_config(config: GatewayConfig) -> None:
 _REFRESHER_STOP_TIMEOUT_SECONDS = 5.0
 
 
+def _log_abandoned_refresher(name: str) -> None:
+    logger.warning(
+        "%s refresher did not stop within %.0fs; abandoning it so shutdown can finish",
+        name,
+        _REFRESHER_STOP_TIMEOUT_SECONDS,
+    )
+
+
+def _log_refresher_stop(task: asyncio.Task[None], name: str) -> None:
+    if not task.cancelled() and (error := task.exception()) is not None:
+        logger.warning("%s refresher stopped with an unexpected error", name, exc_info=error)
+
+
 async def _wait_for_refresher_stop(task: asyncio.Task[None], name: str) -> None:
     """Wait for a cancelled lifespan refresher, but never indefinitely.
 
@@ -145,14 +158,9 @@ async def _wait_for_refresher_stop(task: asyncio.Task[None], name: str) -> None:
     """
     done, _pending = await asyncio.wait({task}, timeout=_REFRESHER_STOP_TIMEOUT_SECONDS)
     if not done:
-        logger.warning(
-            "%s refresher did not stop within %.0fs; abandoning it so shutdown can finish",
-            name,
-            _REFRESHER_STOP_TIMEOUT_SECONDS,
-        )
+        _log_abandoned_refresher(name)
         return
-    if not task.cancelled() and (error := task.exception()) is not None:
-        logger.warning("%s refresher stopped with an unexpected error", name, exc_info=error)
+    _log_refresher_stop(task, name)
 
 
 async def _stop_refresher(task: asyncio.Task[None], name: str) -> None:
@@ -162,10 +170,20 @@ async def _stop_refresher(task: asyncio.Task[None], name: str) -> None:
 
 
 async def _stop_refreshers(refreshers: list[tuple[asyncio.Task[None], str]]) -> None:
-    """Cancel all refreshers before waiting so their shutdown bounds overlap."""
+    """Cancel all refreshers, then give the group one shared shutdown bound."""
+    if not refreshers:
+        return
     for task, _name in refreshers:
         task.cancel()
-    await asyncio.gather(*(_wait_for_refresher_stop(task, name) for task, name in refreshers))
+    done, pending = await asyncio.wait(
+        {task for task, _name in refreshers},
+        timeout=_REFRESHER_STOP_TIMEOUT_SECONDS,
+    )
+    for task, name in refreshers:
+        if task in pending:
+            _log_abandoned_refresher(name)
+        elif task in done:
+            _log_refresher_stop(task, name)
 
 
 def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
