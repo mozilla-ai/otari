@@ -1067,3 +1067,58 @@ def test_models_read_dials_when_caching_is_disabled(
     assert resp.status_code == 200
     assert "openai:fresh-model" in [model["id"] for model in resp.json()["data"]]
     assert mock_alist.await_count == 1
+
+
+def test_model_detail_agrees_with_the_listing_on_a_stale_entry(
+    cached_discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """GET /v1/models/{id} must not 404 a model GET /v1/models is listing.
+
+    Nothing on the request path renews ``cached_at`` any more, and the refresher
+    sleeps its interval *after* each round, so an entry is expired from the moment
+    the next round starts until its dials finish. A TTL-bounded peek in the detail
+    endpoint would disagree with the listing for that whole window, for any
+    provider model with no pricing row and no genai-prices fallback.
+    """
+    _warm_cache_with_expired_entry("gpt-4o")
+
+    with patch(
+        "gateway.services.model_discovery_service.alist_models",
+        new_callable=AsyncMock,
+    ) as mock_alist:
+        listed = cached_discovery_client.get("/v1/models", headers=discovery_master_header)
+        detail = cached_discovery_client.get("/v1/models/openai:gpt-4o", headers=discovery_master_header)
+
+    assert "openai:gpt-4o" in [model["id"] for model in listed.json()["data"]]
+    assert detail.status_code == 200
+    assert detail.json()["id"] == "openai:gpt-4o"
+    # Neither read dialed: the detail endpoint never dials at all, and the
+    # listing serves the cache.
+    mock_alist.assert_not_awaited()
+
+
+def test_model_detail_does_not_serve_a_cached_failure_as_a_model(
+    cached_discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """A negatively cached provider has no models to report, at any age."""
+    from datetime import UTC, datetime
+
+    from gateway.services.model_discovery_service import ProviderDiscovery, _CacheEntry
+
+    cache = get_model_cache()
+    cache.clear()
+    cache._store["openai"] = _CacheEntry(
+        result=ProviderDiscovery(provider="openai", models=[], error="bad key"),
+        cached_at=0.0,
+        checked_at=datetime.now(UTC),
+    )
+
+    resp = cached_discovery_client.get("/v1/models/openai:never-seen", headers=discovery_master_header)
+
+    # Falls through to the pricing/genai-prices answer rather than inventing a
+    # discovered model out of a failed dial.
+    assert resp.status_code in (200, 404)
+    if resp.status_code == 200:
+        assert resp.json().get("pricing_source") != "discovered"

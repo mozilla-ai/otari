@@ -659,16 +659,28 @@ async def get_model(
     )
     pricing = (await db.execute(stmt)).scalar_one_or_none()
 
-    # Check the discovery cache for this model (respecting TTL).
-    # Parse provider from model_id ("provider:model_name") for a targeted lookup
-    # instead of scanning all cached providers.
+    # Check the discovery cache for this model. Parse provider from model_id
+    # ("provider:model_name") for a targeted lookup instead of scanning all
+    # cached providers.
+    #
+    # Read stale-tolerantly, matching the listing above, because nothing on the
+    # request path renews ``cached_at`` any more: the refresher sleeps its
+    # interval *after* each round finishes, so an entry stored at T is already
+    # expired when the next round starts and stays expired until that round's
+    # dials complete. A TTL-bounded peek here would 404 a model that GET
+    # /v1/models is listing in the same instant, for any provider model with no
+    # pricing row and no genai-prices fallback. This endpoint never dials, so
+    # serving the last known answer is the only way to agree with the listing.
     discovered_model = None
     discovered_provider = None
     if config.model_discovery and ":" in model_id:
         provider_prefix, model_name = model_id.split(":", 1)
         cache = get_model_cache()
-        ttl = config.model_cache_ttl_seconds
-        cached_models = cache.get(provider_prefix, ttl)
+        if background_discovery_enabled(config):
+            stale = cache.stale(provider_prefix)
+            cached_models = stale.models if stale is not None and stale.error is None else None
+        else:
+            cached_models = cache.get(provider_prefix, config.model_cache_ttl_seconds)
         if cached_models is not None:
             for model in cached_models:
                 if model.id == model_name:

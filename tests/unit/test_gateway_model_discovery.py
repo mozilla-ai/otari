@@ -27,6 +27,7 @@ from gateway.services.model_discovery_service import (
     discover_all_models,
     discover_models_with_status,
     discover_provider_models,
+    refresh_discovery_cache,
     run_discovery_refresher,
 )
 from gateway.services.model_discovery_service import (
@@ -1201,3 +1202,73 @@ class TestBackgroundDiscovery:
                 task.cancel()
                 with pytest.raises(asyncio.CancelledError):
                     await task
+
+
+class TestRefresherCadence:
+    """A failed provider must not stay failed for a whole success interval.
+
+    Reads serve a cached failure at any age, so the refresh interval is what
+    decides how quickly a recovered provider reappears. Before the refresher
+    existed, ``model_discovery_negative_ttl_seconds`` bounded that at 30s via the
+    next read's re-dial; the refresher has to keep that promise.
+    """
+
+    @staticmethod
+    def _config(ttl: int = 300, negative_ttl: float = 30.0, discovery: bool = True) -> GatewayConfig:
+        return GatewayConfig(
+            providers={"openai": {"api_key": "sk-test"}},
+            model_cache_ttl_seconds=ttl,
+            model_discovery_negative_ttl_seconds=negative_ttl,
+            model_discovery=discovery,
+        )
+
+    def test_a_failed_round_comes_back_on_the_negative_ttl(self) -> None:
+        config = self._config(ttl=300, negative_ttl=30.0)
+        assert _refresh_interval(config, had_failure=False) == 300.0
+        assert _refresh_interval(config, had_failure=True) == 30.0
+
+    def test_the_floor_still_applies_to_a_failed_round(self) -> None:
+        """A tiny negative TTL must not become a re-dial storm."""
+        config = self._config(ttl=300, negative_ttl=1.0)
+        assert _refresh_interval(config, had_failure=True) == _MIN_REFRESH_INTERVAL_SECONDS
+
+    def test_a_failure_never_lengthens_the_interval(self) -> None:
+        """A negative TTL above the success TTL must not slow recovery down."""
+        config = self._config(ttl=600, negative_ttl=3600.0)
+        assert _refresh_interval(config, had_failure=True) == 600.0
+
+    @pytest.mark.asyncio
+    async def test_refresh_reports_whether_a_provider_failed(self) -> None:
+        config = self._config()
+        cache = ModelCache()
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                new=AsyncMock(side_effect=RuntimeError("provider down")),
+            ),
+        ):
+            assert await refresh_discovery_cache(config) is True
+
+        cache.clear()
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                new=AsyncMock(return_value=[_make_model("gpt-4o")]),
+            ),
+        ):
+            assert await refresh_discovery_cache(config) is False
+
+    def test_discovery_disabled_stops_the_background_dialing_too(self) -> None:
+        """`model_discovery: false` means "do not dial providers", unattended included.
+
+        A refresher fanning out every interval for the life of the process is new
+        unrequested traffic against a provider that may meter list_models, on a
+        deployment that explicitly opted out.
+        """
+        assert background_discovery_enabled(self._config(discovery=False)) is False
+        assert background_discovery_enabled(self._config(discovery=True)) is True

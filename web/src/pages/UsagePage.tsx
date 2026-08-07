@@ -309,12 +309,16 @@ const PAGE_BREAKDOWNS: SummaryDimension[] = [
   "tool",
 ];
 
-// Filter-option suggestions come from one summary that drops the three entity
-// filters, so each picker keeps offering every in-window value even while one is
-// selected. by_user and by_api_key carry the entity's display name (resolved
-// server-side in the same GROUP BY), which is what lets the pickers name their
-// options without the page loading the users and api_keys tables in full.
-const SUGGEST_BREAKDOWNS: SummaryDimension[] = ["model", "user", "api_key"];
+// The model typeahead drops only the model filter, so the other active filters
+// still narrow what it suggests. Dropping the entity filters here too would make
+// it offer models that, combined with the picked user, match nothing.
+const MODEL_BREAKDOWN: SummaryDimension[] = ["model"];
+
+// The user and key pickers drop both entity filters, so each keeps offering the
+// other values of its own dimension. by_user and by_api_key carry the entity's
+// display name (resolved server-side in the same GROUP BY), which is what lets
+// the pickers name their options without loading the users and api_keys tables.
+const ENTITY_BREAKDOWNS: SummaryDimension[] = ["user", "api_key"];
 
 // ---------- breakdown dimensions ----------
 
@@ -414,21 +418,23 @@ export function UsagePage() {
   // Model typeahead options: the in-window models. Sourced from a summary that
   // omits the model filter, so the list stays complete when a model is selected,
   // and derived directly from query data rather than mirrored into state.
-  const suggestFilters: UsageFilters = useMemo(
-    () => ({ ...filters, model: undefined, user_id: undefined, api_key_id: undefined }),
-    [filters],
-  );
-  const suggest = useUsageSummary(suggestFilters, bucket, SUGGEST_BREAKDOWNS);
+  const modelSuggestFilters: UsageFilters = useMemo(() => ({ ...filters, model: undefined }), [filters]);
+  const modelSuggest = useUsageSummary(modelSuggestFilters, bucket, MODEL_BREAKDOWN);
   const realGroups = (rows: UsageGroupRow[] | undefined) =>
     (rows ?? []).filter((r) => !r.is_other && r.key !== null);
-  const modelOptions = realGroups(suggest.data?.by_model).map((r) => r.key as string);
+  const modelOptions = realGroups(modelSuggest.data?.by_model).map((r) => r.key as string);
 
-  const userOptions = realGroups(suggest.data?.by_user).map((r) => ({
+  const entitySuggestFilters: UsageFilters = useMemo(
+    () => ({ ...filters, user_id: undefined, api_key_id: undefined }),
+    [filters],
+  );
+  const entitySuggest = useUsageSummary(entitySuggestFilters, bucket, ENTITY_BREAKDOWNS);
+  const userOptions = realGroups(entitySuggest.data?.by_user).map((r) => ({
     value: r.key as string,
     label: r.label ? `${r.label} (${r.key})` : (r.key as string),
   }));
   // API key options label by name (falling back to a short id), value is the id.
-  const keyOptions = realGroups(suggest.data?.by_api_key).map((r) => ({
+  const keyOptions = realGroups(entitySuggest.data?.by_api_key).map((r) => ({
     value: r.key as string,
     label: r.label ?? `${(r.key as string).slice(0, 8)}…`,
   }));
@@ -508,7 +514,8 @@ export function UsagePage() {
       setStartDate(isoAgo(preset.seconds ?? 0));
     }
     void summary.refetch();
-    void suggest.refetch();
+    void modelSuggest.refetch();
+    void entitySuggest.refetch();
     if (previousFilters !== null) {
       void previous.refetch();
     }

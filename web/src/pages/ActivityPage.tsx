@@ -168,12 +168,13 @@ const DEFAULT_PAGE_SIZE = 50;
 // The typeahead reads `by_model`; the source picker's option list piggybacks on
 // the same query's `by_source` while no source is picked (see the source
 // suggestion note below), so both breakdowns ride one request.
-// Every picker's options come from this one summary. by_user and by_api_key
-// carry each entity's display name, resolved server-side in the same GROUP BY,
-// so naming a filter option costs nothing beyond a breakdown the page already
-// requests. The alternative, and what this replaced, was paging the whole users
-// and api_keys tables on every visit.
-const SUGGEST_BREAKDOWNS: SummaryDimension[] = ["model", "source", "user", "api_key"];
+const MODEL_AND_SOURCE_BREAKDOWNS: SummaryDimension[] = ["model", "source"];
+
+// The user and key pickers read these two. by_user and by_api_key carry each
+// entity's display name, resolved server-side in the same GROUP BY, so naming an
+// option costs nothing beyond the breakdown itself. The alternative, and what
+// this replaced, was paging the whole users and api_keys tables on every visit.
+const ENTITY_BREAKDOWNS: SummaryDimension[] = ["user", "api_key"];
 const SOURCE_BREAKDOWN: SummaryDimension[] = ["source"];
 
 // All filter + pagination state, with defaults, kept in the URL.
@@ -885,6 +886,8 @@ export function ActivityPage() {
       start_date: win.start,
       end_date: win.end,
       status: statusFilter || undefined,
+      user_id: userFilters.length > 0 ? userFilters : undefined,
+      api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
       source: sourceFilter || undefined,
       source_label: sessionFilter || undefined,
       endpoint: endpointFilter || undefined,
@@ -903,13 +906,24 @@ export function ActivityPage() {
       toolFilter,
     ],
   );
-  // Four breakdowns are read (model typeahead, source picker, user and key
-  // pickers); the other three GROUP BYs are not requested.
-  const modelSummary = useUsageSummary(modelSuggestFilters, "day", SUGGEST_BREAKDOWNS);
+  // Two breakdowns are read here (model typeahead, source picker); the rest are
+  // not requested.
+  const modelSummary = useUsageSummary(modelSuggestFilters, "day", MODEL_AND_SOURCE_BREAKDOWNS);
   const realGroups = (rows: UsageGroupRow[] | undefined) =>
     (rows ?? []).filter((r) => !r.is_other && r.key !== null);
   const modelOptions = realGroups(modelSummary.data?.by_model).map((r) => r.key as string);
-  const keyOptions = realGroups(modelSummary.data?.by_api_key).map((r) => ({
+
+  // The user and key pickers need their own window: each must keep offering the
+  // *other* values of its own dimension, so both entity filters come off. That
+  // cannot share the model/source query above, which has to keep them applied,
+  // or filtering Activity to one user would make the typeahead suggest only the
+  // models other users called and picking one would return an empty table.
+  const entitySuggestFilters: UsageFilters = useMemo(
+    () => ({ ...modelSuggestFilters, user_id: undefined, api_key_id: undefined }),
+    [modelSuggestFilters],
+  );
+  const entitySummary = useUsageSummary(entitySuggestFilters, "day", ENTITY_BREAKDOWNS);
+  const keyOptions = realGroups(entitySummary.data?.by_api_key).map((r) => ({
     value: r.key as string,
     label: r.label ?? `${(r.key as string).slice(0, 8)}…`,
   }));
@@ -1061,7 +1075,7 @@ export function ActivityPage() {
   // it is not a chip). Values show the human label where one exists.
   const labelFrom = (options: { value: string; label: string }[], value: string) =>
     options.find((o) => o.value === value)?.label ?? value;
-  const userOptionsList = realGroups(modelSummary.data?.by_user).map((r) => ({
+  const userOptionsList = realGroups(entitySummary.data?.by_user).map((r) => ({
     value: r.key as string,
     label: r.label ? `${r.label} (${r.key})` : (r.key as string),
   }));

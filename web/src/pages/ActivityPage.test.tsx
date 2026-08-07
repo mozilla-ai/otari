@@ -1343,3 +1343,25 @@ describe("ActivityPage table-scan avoidance", () => {
     expect(await screen.findByText("abcdef12…")).toBeInTheDocument();
   });
 });
+
+describe("ActivityPage suggestion scoping", () => {
+  it("keeps the user filter on the model typeahead but not on the user picker", async () => {
+    // The two pickers want opposite windows. The model typeahead must stay
+    // narrowed by the active user, or it offers models that user never called
+    // and picking one returns an empty table. The user picker must drop it, or
+    // it can only ever offer the user already selected.
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?user_id=alice&range=24h");
+
+    await screen.findByText("gpt-4o");
+    const summaries = calls.map((c) => c.url).filter((url) => url.includes("/v1/usage/summary"));
+
+    const modelQuery = summaries.find((url) => url.includes("dimensions=model"));
+    expect(modelQuery, "model typeahead summary").toBeDefined();
+    expect(modelQuery).toContain("user_id=alice");
+
+    const entityQuery = summaries.find((url) => url.includes("dimensions=user"));
+    expect(entityQuery, "user/key picker summary").toBeDefined();
+    expect(entityQuery).not.toContain("user_id=alice");
+  });
+});

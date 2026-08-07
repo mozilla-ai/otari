@@ -218,7 +218,7 @@ async def test_polled_health_serves_the_cache_instead_of_dialing() -> None:
 
 @pytest.mark.asyncio
 async def test_explicit_recheck_still_dials() -> None:
-    """"Re-check now" is an operator asking for a fresh probe; honor it."""
+    """An explicit "re-check now" is an operator asking for a fresh probe; honor it."""
     get_model_cache().clear()
     config = _config({"openai": {"api_key": "x"}})
     seen: list[bool] = []

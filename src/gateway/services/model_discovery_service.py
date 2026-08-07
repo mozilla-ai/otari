@@ -658,22 +658,45 @@ def background_discovery_enabled(config: GatewayConfig) -> bool:
     a cache nothing refreshes". There is deliberately no second knob for "cache
     but do not refresh": that combination only produces a cache that goes stale
     forever, which is not a mode worth offering.
+
+    Also gated on ``model_discovery``. An operator who turned that off did so to
+    stop the gateway dialing providers, and a background refresher would fan out
+    across every configured provider every interval for the life of the process,
+    with nobody watching, which is new unrequested traffic against a provider
+    that may meter or rate-limit ``list_models``. With it off the two operator
+    endpoints keep dialing on read, exactly as they did before this refresher
+    existed.
     """
-    return config.model_cache_ttl_seconds > 0
+    return config.model_discovery and config.model_cache_ttl_seconds > 0
 
 
-def _refresh_interval(config: GatewayConfig) -> float:
-    return max(_MIN_REFRESH_INTERVAL_SECONDS, float(config.model_cache_ttl_seconds))
+def _refresh_interval(config: GatewayConfig, *, had_failure: bool = False) -> float:
+    """How long to wait before the next round of dials.
+
+    A round that reported at least one failure comes back sooner, bounded by
+    ``model_discovery_negative_ttl_seconds`` rather than the success cadence.
+    Reads serve a cached failure at any age, so the refresh interval is what now
+    decides how quickly a recovered provider reappears; leaving that at the
+    success TTL would keep a provider that came back 30s ago looking unreachable
+    for the rest of a 300s window. The floor still applies, so this cannot become
+    a retry storm.
+    """
+    interval = float(config.model_cache_ttl_seconds)
+    if had_failure:
+        interval = min(interval, float(config.model_discovery_negative_ttl_seconds))
+    return max(_MIN_REFRESH_INTERVAL_SECONDS, interval)
 
 
-async def refresh_discovery_cache(config: GatewayConfig) -> None:
+async def refresh_discovery_cache(config: GatewayConfig) -> bool:
     """Re-dial every configured provider and store the result.
 
-    Failures are already per-provider (``discover_models_with_status`` reports
-    them rather than raising), so this only guards against an unexpected error
-    taking the refresher down with it.
+    Returns whether any provider reported a failure, which sets the next tick's
+    delay. Failures are already per-provider (``discover_models_with_status``
+    reports them rather than raising), so this only guards against an unexpected
+    error taking the refresher down with it.
     """
-    await discover_models_with_status(config, force=True)
+    discoveries = await discover_models_with_status(config, force=True)
+    return any(discovery.error is not None for discovery in discoveries)
 
 
 async def run_discovery_refresher(config: GatewayConfig, interval: float | None = None) -> None:
@@ -696,14 +719,19 @@ async def run_discovery_refresher(config: GatewayConfig, interval: float | None 
     resume the moment an operator turns caching back on.
     """
     while True:
+        had_failure = False
         try:
             if background_discovery_enabled(config):
-                await refresh_discovery_cache(config)
+                had_failure = await refresh_discovery_cache(config)
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.warning("Model discovery refresh failed; retrying on the next tick", exc_info=True)
-        await asyncio.sleep(interval if interval is not None else _refresh_interval(config))
+            # An unexpected error is a failed round too: come back on the short
+            # cadence rather than sleeping out the full success interval.
+            had_failure = True
+        delay = interval if interval is not None else _refresh_interval(config, had_failure=had_failure)
+        await asyncio.sleep(delay)
 
 
 def reset_discovery_cache() -> None:
