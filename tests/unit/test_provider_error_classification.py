@@ -1,8 +1,14 @@
 """Unit tests for classify_provider_error.
 
-The classifier maps an upstream provider exception to a safe, client-facing
-(status, detail). It must never echo the raw provider message, and must return
-None for failures it cannot safely classify so callers keep the generic 502.
+The classifier maps an upstream provider exception to a client-facing
+(status, detail), and must return None for failures it cannot safely classify
+so callers keep the generic 502.
+
+Detail text splits on fault. A rejection of the caller's request (400/422/404)
+carries the provider's own message, redacted and length-capped, because only the
+provider knows what it objected to. A failure that is the gateway's own (rejected
+credentials, an exhausted account, a 5xx) keeps a fixed string and never echoes
+upstream text.
 """
 
 import asyncio
@@ -18,12 +24,15 @@ from gateway.api.routes._pipeline import (
     PROVIDER_CREDENTIALS_DETAIL,
     PROVIDER_MODEL_NOT_FOUND_DETAIL,
     PROVIDER_RATE_LIMITED_DETAIL,
-    PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL,
     PROVIDER_TIMEOUT_DETAIL,
     classify_provider_error,
     failure_status_code,
 )
-from gateway.api.routes._platform import _provider_failure_http_exc
+from gateway.api.routes._platform import (
+    MAX_EXPOSED_DETAIL_CHARS,
+    _provider_failure_http_exc,
+    redact_upstream_message,
+)
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 
 _RAW = "raw provider detail SECRET token=abc123"
@@ -108,22 +117,44 @@ def test_unified_any_llm_wrapped_timeout_maps_to_504() -> None:
 
 
 @pytest.mark.parametrize(
+    ("status_code", "expected_status"),
+    [(400, 400), (422, 400), (404, 404)],
+)
+def test_caller_fault_statuses_carry_the_upstream_message(status_code: int, expected_status: int) -> None:
+    """A provider rejecting the caller's request returns the provider's own
+    message. Only the provider knows what it objected to, and every fixed string
+    we could write in its place discards that."""
+    exc = _ParamError(status_code, None, "max_tokens must be less than or equal to 8192")
+    assert classify_provider_error(exc) == (expected_status, "max_tokens must be less than or equal to 8192")
+
+
+@pytest.mark.parametrize(
     ("status_code", "expected"),
     [
-        (400, (400, PROVIDER_BAD_REQUEST_DETAIL)),
-        (422, (400, PROVIDER_BAD_REQUEST_DETAIL)),
-        (404, (404, PROVIDER_MODEL_NOT_FOUND_DETAIL)),
         (401, (502, PROVIDER_CREDENTIALS_DETAIL)),
         (403, (502, PROVIDER_CREDENTIALS_DETAIL)),
         (429, (429, PROVIDER_RATE_LIMITED_DETAIL)),
     ],
 )
-def test_known_status_codes_map_to_safe_pairs(status_code: int, expected: tuple[int, str]) -> None:
+def test_gateway_fault_statuses_keep_a_fixed_detail(status_code: int, expected: tuple[int, str]) -> None:
+    """A rejected credential or a rate limit is not the caller's request to fix,
+    so the detail stays fixed and the upstream text is never echoed."""
     assert classify_provider_error(_StatusError(status_code)) == expected
 
 
+@pytest.mark.parametrize("status_code", [400, 404, 422])
+def test_caller_fault_falls_back_when_the_provider_said_nothing(status_code: int) -> None:
+    """An exception carrying no usable text still gets a usable detail rather
+    than an empty string."""
+    mapping = classify_provider_error(_ParamError(status_code, None, ""))
+    assert mapping is not None
+    assert mapping.detail in (PROVIDER_BAD_REQUEST_DETAIL, PROVIDER_MODEL_NOT_FOUND_DETAIL)
+
+
 def test_status_read_from_attached_response() -> None:
-    assert classify_provider_error(_ResponseStatusError(404)) == (404, PROVIDER_MODEL_NOT_FOUND_DETAIL)
+    mapping = classify_provider_error(_ResponseStatusError(404))
+    assert mapping is not None
+    assert mapping.status_code == 404
 
 
 @pytest.mark.parametrize("exc", [_StatusError(500), _StatusError(503), Exception(_RAW), ValueError(_RAW)])
@@ -131,8 +162,10 @@ def test_unclassifiable_returns_none(exc: BaseException) -> None:
     assert classify_provider_error(exc) is None
 
 
-def test_no_classified_detail_leaks_raw_message() -> None:
-    for status_code in (400, 401, 403, 404, 422, 429):
+def test_gateway_fault_details_never_echo_the_raw_message() -> None:
+    """The statuses where the gateway's own credentials and topology concentrate
+    keep a fixed detail, whatever the provider put in the body."""
+    for status_code in (401, 403, 429):
         mapping = classify_provider_error(_StatusError(status_code))
         assert mapping is not None
         assert "SECRET" not in mapping.detail
@@ -144,7 +177,6 @@ def test_platform_terminal_exc_uses_classified_status() -> None:
     standalone adapters, so the production path is not stuck on a generic 502."""
     exc = _provider_failure_http_exc(_StatusError(404), fallback_detail="LLM provider error")
     assert exc.status_code == 404
-    assert exc.detail == PROVIDER_MODEL_NOT_FOUND_DETAIL
 
 
 def test_platform_terminal_exc_falls_back_to_generic() -> None:
@@ -214,45 +246,91 @@ def test_failure_status_code_records_422_for_the_tool_loop_cap() -> None:
     assert failure_status_code(MaxToolIterationsExceeded("Exceeded max_tool_iterations=8")) == 422
 
 
-@pytest.mark.parametrize("status_code", [400, 422])
-def test_reasoning_effort_tools_conflict_maps_to_actionable_detail(status_code: int) -> None:
-    """A 400/422 flagged param=reasoning_effort whose message names function tools
-    gets the actionable remedy instead of the generic bad-request detail."""
-    exc = _ParamError(status_code, "reasoning_effort", _REASONING_TOOLS_MSG)
-    assert classify_provider_error(exc) == (400, PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL)
+def test_reasoning_effort_tools_conflict_reaches_the_caller_verbatim() -> None:
+    """#331's case, with no probe behind it. OpenAI's message already names the
+    remedy, so passing it through does the job the hand-written
+    PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL used to, for every rewording of
+    it we would otherwise have to chase."""
+    exc = _ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG)
+    assert classify_provider_error(exc) == (400, _REASONING_TOOLS_MSG)
 
 
-def test_reasoning_effort_tools_conflict_read_from_original_exception() -> None:
-    """The signal is picked up when it lives only on ``original_exception`` (the
+def test_upstream_message_read_from_original_exception() -> None:
+    """The message is found when it lives only on ``original_exception`` (the
     any-llm unified-exception shape)."""
-    original = _ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG)
-    exc = _WrappedError(400, original)
-    assert classify_provider_error(exc) == (400, PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL)
-
-
-def test_reasoning_effort_without_function_tools_stays_generic() -> None:
-    """A reasoning_effort rejection that is not the tools conflict (message does
-    not mention function tools) keeps the generic bad-request detail."""
-    exc = _ParamError(400, "reasoning_effort", "Unsupported value 'ultra' for reasoning_effort.")
-    assert classify_provider_error(exc) == (400, PROVIDER_BAD_REQUEST_DETAIL)
-
-
-def test_function_tools_message_on_other_param_stays_generic() -> None:
-    """A different offending param does not get the reasoning-effort remedy even
-    if the message happens to mention function tools."""
-    exc = _ParamError(400, "tools", "Function tools are malformed for this request.")
-    assert classify_provider_error(exc) == (400, PROVIDER_BAD_REQUEST_DETAIL)
-
-
-def test_reasoning_effort_tools_conflict_does_not_leak_raw_message() -> None:
-    """The actionable detail is a fixed string; the model name and endpoint from
-    the raw upstream message are never echoed to the caller."""
-    exc = _ParamError(400, "reasoning_effort", _REASONING_TOOLS_MSG + " SECRET token=abc123")
-    mapping = classify_provider_error(exc)
+    original = _ParamError(400, None, "temperature must be between 0 and 2")
+    mapping = classify_provider_error(_WrappedError(400, original))
     assert mapping is not None
-    assert mapping.detail == PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL
-    assert "gpt-5.6-sol" not in mapping.detail
-    assert "SECRET" not in mapping.detail
+    assert "temperature must be between 0 and 2" in mapping.detail
+
+
+@pytest.mark.parametrize(
+    ("raw", "leaked"),
+    [
+        ("Auth failed for Bearer sk-proj-AAAAAAAAAAAAAAAAAAAA", "sk-proj-AAAAAAAAAAAAAAAAAAAA"),
+        ("Invalid key sk-ant-api03-BBBBBBBBBBBBBBBB", "sk-ant-api03-BBBBBBBBBBBBBBBB"),
+        ("Rejected by AIzaSyCCCCCCCCCCCCCCCCCC", "AIzaSyCCCCCCCCCCCCCCCCCC"),
+        ("Cannot reach http://10.0.0.4:8000/v1/chat", "10.0.0.4"),
+        ("Bad request (api_key=hunter2hunter2)", "hunter2hunter2"),
+        ("Model unavailable for org-DDDDDDDDDD", "org-DDDDDDDDDD"),
+        ("Rejected: " + "E" * 48, "E" * 48),
+    ],
+)
+def test_redaction_strips_credential_shapes(raw: str, leaked: str) -> None:
+    """Passing the provider's message through does not mean passing its
+    credentials through. The gateway calls providers with the operator's key, so
+    a message naming that key, a self-hosted api_base, or the account serving a
+    managed model is not the caller's to read."""
+    assert leaked not in redact_upstream_message(raw)
+
+
+_CONTEXT_MANAGEMENT_MSG = "context_management and betas require a provider with a native Anthropic Messages API"
+
+
+def test_unsupported_feature_maps_to_400_with_the_reason() -> None:
+    """#530: any-llm rejects an unsupported request feature with a bare
+    NotImplementedError carrying no HTTP status, so it used to fall through to a
+    generic 500 telling the caller to retry something that can never succeed.
+    The exception type carries the whole signal, so this needs no probe into
+    any-llm's wording, and the message names the feature."""
+    mapping = classify_provider_error(NotImplementedError(_CONTEXT_MANAGEMENT_MSG))
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "context_management" in mapping.detail
+    assert "retry" not in mapping.detail.lower()
+
+
+def test_unsupported_feature_survives_the_unified_exception_wrapper() -> None:
+    """The type check still fires once ANY_LLM_UNIFIED_EXCEPTIONS=1 wraps the
+    raw error, because the wrapper keeps it on ``original_exception``."""
+    mapping = classify_provider_error(_WrappedError(500, NotImplementedError(_CONTEXT_MANAGEMENT_MSG)))
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "context_management" in mapping.detail
+
+
+def test_unsupported_feature_is_recorded_as_400_on_the_usage_log() -> None:
+    """The usage-log status follows the classification rather than the generic 502."""
+    assert failure_status_code(NotImplementedError(_CONTEXT_MANAGEMENT_MSG)) == 400
+
+
+def test_redaction_keeps_the_part_that_explains_the_rejection() -> None:
+    """Redaction targets secret shapes, not meaning: the text that tells the
+    caller what to change has to survive."""
+    redacted = redact_upstream_message("max_tokens: must be <= 8192 for claude-opus-5, got 200000")
+    assert "max_tokens" in redacted
+    assert "8192" in redacted
+    assert "claude-opus-5" in redacted
+
+
+def test_exposed_detail_is_length_capped() -> None:
+    """A provider that echoes the offending request back does not get to put all
+    of it in a response detail."""
+    mapping = classify_provider_error(_ParamError(400, None, "problem: " + "word " * 500))
+    assert mapping is not None
+    assert len(mapping.detail) <= MAX_EXPOSED_DETAIL_CHARS + 3
+
+
 
 
 # The exact upstream Anthropic message for an out-of-credit account. Anthropic
@@ -301,12 +379,12 @@ def test_billing_probe_is_gated_on_the_status_code() -> None:
     )
 
 
-def test_unrecognized_400_message_stays_generic_bad_request() -> None:
-    """A genuinely malformed request is not swept up by the billing probe: an
-    unrecognized phrasing degrades to the existing generic detail rather than
-    being misclassified into wasted failover attempts."""
+def test_unrecognized_400_message_stays_a_caller_fault_400() -> None:
+    """A genuinely malformed request is not swept up by the billing probe: it
+    stays a 400 and now says what was actually wrong, which is the case that
+    motivated passing the message through at all."""
     exc = _ParamError(400, None, "messages.3: tool_use ids were found without tool_result blocks")
-    assert classify_provider_error(exc) == (400, PROVIDER_BAD_REQUEST_DETAIL)
+    assert classify_provider_error(exc) == (400, "messages.3: tool_use ids were found without tool_result blocks")
 
 
 def test_billing_detail_does_not_leak_raw_message() -> None:

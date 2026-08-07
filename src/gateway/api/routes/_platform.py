@@ -12,6 +12,7 @@ lock-in semantics, and the terminal all-failed status mapping uniformly.
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, NamedTuple, TypeVar
@@ -711,18 +712,86 @@ def upstream_error_message(exc: BaseException) -> str:
     Concatenates the exception's ``message`` attribute and ``str()`` for both the
     exception and any ``original_exception``, so a substring probe still matches
     whether otari receives the raw SDK error today or the wrapped
-    ``AnyLLMError`` after any-llm flips to unified exceptions. Used only for
-    fixed-string classification, never echoed back to the caller.
+    ``AnyLLMError`` after any-llm flips to unified exceptions.
+
+    Used both for classification and, on a caller-fault rejection, as the text
+    the caller sees. Run it through :func:`redact_upstream_message` before it
+    reaches a response body.
     """
     parts: list[str] = []
+    seen: set[str] = set()
     for candidate in (exc, getattr(exc, "original_exception", None)):
         if candidate is None:
             continue
         message = getattr(candidate, "message", None)
-        if isinstance(message, str):
-            parts.append(message)
-        parts.append(str(candidate))
+        candidates = (message, str(candidate)) if isinstance(message, str) else (str(candidate),)
+        for part in candidates:
+            # ``message`` and ``str()`` are usually the same text on a raw SDK
+            # error, and a wrapper usually restringifies what it wraps. Keeping
+            # both would read as a stutter now that this text can reach the
+            # caller, so each distinct part is kept once, in order.
+            stripped = part.strip()
+            if stripped and stripped not in seen:
+                seen.add(stripped)
+                parts.append(stripped)
     return " ".join(parts)
+
+
+_REDACTION_PLACEHOLDER = "[redacted]"
+# Cap on an exposed upstream message. Providers occasionally echo the offending
+# request back in the error body, and a response detail is not the place for a
+# few hundred KB of it.
+MAX_EXPOSED_DETAIL_CHARS = 400
+# Applied in order, so a URL is masked before the trailing catch-all can pick
+# apart its path. Each targets a shape that carries secrets rather than meaning:
+# nothing here removes text a caller needs to understand what it got wrong.
+_SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
+    # Authorization-header credentials, whatever scheme.
+    re.compile(r"(?:Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
+    # Provider key formats: a known prefix plus the key body. Covers OpenAI
+    # (sk-, sk-proj-), Anthropic (sk-ant-), Groq (gsk_), xAI (xai-), and
+    # otari's own tk_ / gw_ tokens.
+    re.compile(r"\b(?:sk|pk|rk|gsk|xai|tk|gw|api|key)[-_][A-Za-z0-9._-]{8,}", re.IGNORECASE),
+    # Google API keys, which carry a fixed prefix and no separator.
+    re.compile(r"\bAIza[A-Za-z0-9._-]{10,}"),
+    # An explicitly named credential, as it appears in a query string or an
+    # echoed request body.
+    re.compile(r"\b(?:api[_-]?key|access[_-]?token|token|secret|password)\s*[=:]\s*\S+", re.IGNORECASE),
+    # Upstream account identifiers. A managed-model request runs on the
+    # platform's own provider account, so an error naming that account would
+    # tell a workspace user whose credentials served them.
+    re.compile(r"\b(?:org|proj|acct|account)[-_][A-Za-z0-9]{6,}", re.IGNORECASE),
+    # Any absolute URL. A self-hosted or proxied ``api_base`` is gateway
+    # topology the caller has no business learning, and a credential is
+    # sometimes embedded in one.
+    re.compile(r"\bhttps?://\S+", re.IGNORECASE),
+    # Catch-all for key material with no recognizable prefix. Long unbroken
+    # alphanumeric runs are tokens, not prose.
+    re.compile(r"[A-Za-z0-9_-]{40,}"),
+)
+
+
+def redact_upstream_message(message: str) -> str:
+    """Make an upstream provider message safe to return to the caller.
+
+    The gateway calls providers with the *operator's* credentials, so an
+    upstream message is not automatically the caller's to read: it can carry the
+    gateway's own key, a self-hosted ``api_base``, or other topology. This masks
+    those shapes and caps the length, leaving the part that says what was
+    actually wrong with the request.
+
+    Redaction is the second line rather than the only one. Statuses where
+    secrets concentrate (a rejected credential, a 5xx) never reach here at all,
+    because :func:`gateway.api.routes._pipeline.classify_provider_error` keeps a
+    fixed detail for them.
+    """
+    redacted = message.strip()
+    for pattern in _SECRET_SHAPES:
+        redacted = pattern.sub(_REDACTION_PLACEHOLDER, redacted)
+    redacted = " ".join(redacted.split())
+    if len(redacted) > MAX_EXPOSED_DETAIL_CHARS:
+        redacted = redacted[:MAX_EXPOSED_DETAIL_CHARS].rstrip() + "..."
+    return redacted
 
 
 def is_provider_billing_error(exc: BaseException) -> bool:

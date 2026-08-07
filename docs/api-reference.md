@@ -4,6 +4,14 @@ All endpoints are under `http://localhost:8000` by default.
 
 For full request/response schemas, see the [OpenAPI spec](public/openapi.json) or the interactive docs at `/docs` when Otari is running.
 
+## Provider error details
+
+When an upstream provider fails, what the `detail` field contains depends on whose problem it is.
+
+If the provider rejected **your request** (HTTP 400, 422 or 404), the detail is the provider's own message, so it names the parameter, model or limit at fault. Credential-shaped tokens, URLs and account identifiers are stripped from it, and it is capped at 400 characters.
+
+If the failure is the **gateway's** (its provider credentials were rejected, the provider account is out of credit, the provider returned a 5xx, or the error could not be classified), the detail is a fixed string such as `The provider rejected the gateway's credentials`. There is no remedy you could apply, and the upstream text in those cases tends to name the operator's account rather than anything about your request. Operators find the full error in the gateway logs.
+
 ## Endpoint availability
 
 | Endpoint group | Standalone | Connected to otari.ai |
