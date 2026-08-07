@@ -1,6 +1,6 @@
 import { Button, Card, ComboBox, Input, Label, ListBox, ListBoxItem, Spinner, Tooltip } from "@heroui/react";
 import { useEffect, useId, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
@@ -455,50 +455,69 @@ export function FilterSelect({
   return select;
 }
 
-// A type-to-filter combobox for page filter bars where the option list is large
-// (users, models): a native <select> with thousands of <option>s is unusable, so
-// this filters the list as you type and commits on selection. An empty input
-// means "no filter" (the caller's cleared value). Options-only by intent: you can
-// only filter to a value that exists, matching how the backend filters. If a
-// selected value is not in `options` (e.g. seeded from a URL), it still shows.
-export function FilterComboBox({
+// A type-to-filter combobox for page filter bars, accumulating a set of values.
+// The option list is large (users, models), so a native <select> with thousands of
+// <option>s is unusable and this narrows it as you type; and the question a usage
+// view answers is usually a comparison ("these three models"), not a single choice.
+// Picking an option adds it and clears the query, and the list stays open on the remaining
+// options so a run of selections takes one gesture; picked options drop out of it.
+// Removal lives with the page's filter chips (one per value) rather than a second
+// chip row here, so the applied set is visible whether or not the picker is open.
+// Dismiss the list (Escape, or a click outside) before reaching for the page
+// behind it: it is an overlay, so it holds focus while open.
+export function FilterMultiComboBox({
   label,
-  value,
+  values,
   onChange,
   options,
   placeholder,
   maxVisible = 50,
+  maxValues = 50,
   allowsCustom = false,
 }: {
   label: string;
-  value: string;
-  onChange: (value: string) => void;
+  values: string[];
+  onChange: (values: string[]) => void;
   options: { value: string; label: string }[];
+  // Shown while nothing is picked (e.g. "All users"); once something is, the
+  // input reports the size of the selection instead.
   placeholder?: string;
   maxVisible?: number;
-  // When true the typed text is itself a valid filter value (committed live, like
-  // a plain text box) and the options are suggestions. Use for a filter whose full
-  // value space is not enumerable (e.g. any model name the log might hold). When
-  // false the control is options-only: typing just narrows the suggestion list and
-  // a value is committed only by selecting one.
+  // Ceiling on the selection, matching what the analytics endpoints accept for
+  // one repeatable filter. Stopping here keeps a 51st pick from failing every
+  // query on the page with a 422 the operator cannot read.
+  maxValues?: number;
+  // When true, Enter adds whatever was typed, so a filter whose value space is not
+  // enumerable (any model name the log might hold, not just the ones a windowed
+  // suggestion list knows) can still be filtered on. The options stay suggestions.
   allowsCustom?: boolean;
 }) {
-  const labelFor = (v: string): string => options.find((o) => o.value === v)?.label ?? v;
-  const [text, setText] = useState(() => labelFor(value));
+  const [text, setText] = useState("");
 
-  // Re-sync the input when the committed value changes from outside (a "Clear
-  // filters" press, or a drill-down seeding the value). Typing does not change
-  // `value` until a selection commits, so this does not fight the user mid-type.
-  useEffect(() => {
-    setText(labelFor(value));
-    // labelFor closes over options; value is the external source of truth here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
+  const atLimit = values.length >= maxValues;
   const query = text.trim().toLowerCase();
   const visible = options
+    .filter((o) => !values.includes(o.value))
     .filter((o) => !query || o.value.toLowerCase().includes(query) || o.label.toLowerCase().includes(query))
     .slice(0, maxVisible);
+
+  const add = (value: string) => {
+    if (atLimit || values.includes(value)) return;
+    onChange([...values, value]);
+  };
+
+  // Free text commits on Enter: react-aria fires no selection for a value that is
+  // not in the list, so the key event is the only signal. Skipped while an option is
+  // highlighted (aria-activedescendant), because that Enter belongs to the option
+  // and committing the partial query beside it would add two values from one press.
+  const onInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (!allowsCustom || event.key !== "Enter") return;
+    if (event.currentTarget.getAttribute("aria-activedescendant")) return;
+    const typed = text.trim();
+    if (!typed) return;
+    add(typed);
+    setText("");
+  };
 
   return (
     <ComboBox.Root
@@ -506,28 +525,31 @@ export function FilterComboBox({
       allowsCustomValue={allowsCustom}
       menuTrigger="focus"
       inputValue={text}
-      onInputChange={(next) => {
-        setText(next);
-        if (allowsCustom) {
-          // Free-text mode: the input is the filter (committed live, like a plain
-          // text box), with the options offered as suggestions.
-          onChange(next.trim());
-        } else if (next.trim() === "") {
-          // Options-only: deleting the text clears the filter; partial text just
-          // narrows the dropdown (committing it would filter to a missing value).
-          onChange("");
-        }
-      }}
+      onInputChange={setText}
+      // Never a committed selection of its own: the picked values live in
+      // `values`, so the input stays a search box.
+      selectedKey={null}
+      // At the ceiling the remaining options are offered but inert, so the list
+      // reads as "full" rather than silently swallowing a click.
+      disabledKeys={atLimit ? visible.map((o) => o.value) : []}
       onSelectionChange={(key) => {
-        if (key != null) {
-          onChange(String(key));
-        }
+        if (key == null) return;
+        add(String(key));
+        setText("");
       }}
       className="flex flex-col gap-1"
     >
       <Label className="text-xs font-medium text-[var(--otari-muted)]">{label}</Label>
       <ComboBox.InputGroup>
-        <Input placeholder={placeholder} autoComplete="off" onFocus={(event) => event.currentTarget.select()} />
+        <Input
+          placeholder={
+            values.length === 0
+              ? placeholder
+              : `${values.length} selected${atLimit ? " (max)" : ""}`
+          }
+          autoComplete="off"
+          onKeyDown={onInputKeyDown}
+        />
         <ComboBox.Trigger />
       </ComboBox.InputGroup>
       <ComboBox.Popover>

@@ -3,7 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import suppress
+from contextlib import aclosing, suppress
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -51,6 +51,7 @@ class StreamFormat:
     done_marker: str
     error_payload: str
     yield_done_on_error: bool
+    keepalive: str
 
 
 _OPENAI_ERROR = json.dumps({"error": {"message": "An error occurred during streaming", "type": "server_error"}})
@@ -58,22 +59,31 @@ _ANTHROPIC_ERROR = json.dumps(
     {"type": "error", "error": {"type": "api_error", "message": "An error occurred during streaming"}}
 )
 
+# An SSE comment line: conformant parsers (including the OpenAI SDKs) drop it, so
+# it keeps the socket warm without ever surfacing as content.
+_SSE_COMMENT_KEEPALIVE = ": keepalive\n\n"
+
 OPENAI_STREAM_FORMAT = StreamFormat(
     done_marker="data: [DONE]\n\n",
     error_payload=f"data: {_OPENAI_ERROR}\n\n",
     yield_done_on_error=True,
+    keepalive=_SSE_COMMENT_KEEPALIVE,
 )
 
 RESPONSES_STREAM_FORMAT = StreamFormat(
     done_marker="data: [DONE]\n\n",
     error_payload=f"event: error\ndata: {_OPENAI_ERROR}\n\n",
     yield_done_on_error=False,
+    keepalive=_SSE_COMMENT_KEEPALIVE,
 )
 
 ANTHROPIC_STREAM_FORMAT = StreamFormat(
     done_marker="event: done\ndata: {}\n\n",
     error_payload=f"event: error\ndata: {_ANTHROPIC_ERROR}\n\n",
     yield_done_on_error=False,
+    # ``ping`` is part of the Messages stream vocabulary, so existing Anthropic
+    # clients already tolerate it; a bare SSE comment is not in that vocabulary.
+    keepalive=f"event: ping\ndata: {json.dumps({'type': 'ping'})}\n\n",
 )
 
 
@@ -93,6 +103,46 @@ def _merge_usage(current: CompletionUsage, update: CompletionUsage) -> Completio
     )
 
 
+_KEEPALIVE_DUE = object()
+"""Sentinel yielded by ``_chunks_or_keepalive`` when the upstream went idle."""
+
+
+async def _chunks_or_keepalive(stream: AsyncIterator[Any], interval_seconds: float) -> AsyncGenerator[Any, None]:
+    """Yield upstream chunks, emitting ``_KEEPALIVE_DUE`` once per idle interval.
+
+    The pending ``__anext__`` is held as a task across timeouts rather than being
+    awaited under ``wait_for``: cancelling that await would discard a chunk that
+    arrives moments after the interval elapses. A non-positive interval disables
+    the idle tracking and iterates the upstream directly.
+    """
+    if interval_seconds <= 0:
+        async for chunk in stream:
+            yield chunk
+        return
+
+    iterator = stream.__aiter__()
+    pending: asyncio.Task[Any] | None = None
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.ensure_future(iterator.__anext__())
+            done, _ = await asyncio.wait((pending,), timeout=interval_seconds)
+            if not done:
+                yield _KEEPALIVE_DUE
+                continue
+            finished, pending = pending, None
+            try:
+                chunk = finished.result()
+            except StopAsyncIteration:
+                return
+            yield chunk
+    finally:
+        if pending is not None:
+            pending.cancel()
+            with suppress(BaseException):
+                await pending
+
+
 async def streaming_generator(
     stream: AsyncIterator[Any],
     format_chunk: Callable[[Any], str],
@@ -104,6 +154,7 @@ async def streaming_generator(
     on_no_usage: Callable[[], Awaitable[None]] | None = None,
     on_incomplete: Callable[[], Awaitable[None]] | None = None,
     display_model: str | None = None,
+    keepalive_interval_seconds: float = 0.0,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -128,21 +179,34 @@ async def streaming_generator(
         on_incomplete: Called when the stream neither completes nor errors normally
             (e.g. client disconnect mid-stream). Used to release any budget
             reservation so it does not leak.
+        keepalive_interval_seconds: Emit ``fmt.keepalive`` whenever the upstream has
+            produced nothing for this long, so an intermediary with a read timeout
+            (Cloudflare's default Proxy Read Timeout is 125s) does not sever a
+            connection that is merely waiting on a slow time-to-first-token.
+            Transport-level only: keepalives never reach usage accounting, and they
+            do not extend any first-chunk or failover deadline, which stay in charge
+            of giving up on a hung upstream. 0 disables.
 
     """
     usage = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     has_usage = False
     settled = False
 
+    keepalive_interval = keepalive_interval_seconds if fmt.keepalive else 0.0
+
     try:
-        async for chunk in stream:
-            chunk_usage = extract_usage(chunk)
-            if chunk_usage:
-                usage = _merge_usage(usage, chunk_usage)
-                has_usage = True
-            if display_model is not None:
-                chunk = relabel_model(chunk, display_model)
-            yield format_chunk(chunk)
+        async with aclosing(_chunks_or_keepalive(stream, keepalive_interval)) as source:
+            async for chunk in source:
+                if chunk is _KEEPALIVE_DUE:
+                    yield fmt.keepalive
+                    continue
+                chunk_usage = extract_usage(chunk)
+                if chunk_usage:
+                    usage = _merge_usage(usage, chunk_usage)
+                    has_usage = True
+                if display_model is not None:
+                    chunk = relabel_model(chunk, display_model)
+                yield format_chunk(chunk)
         yield fmt.done_marker
 
         # Settle on normal completion. Guard the callbacks so a logging failure

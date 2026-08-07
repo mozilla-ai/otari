@@ -26,6 +26,7 @@ from gateway.api.routes import (
     search,
     settings,
     tool_settings,
+    tools,
     usage,
     users,
 )
@@ -66,3 +67,4 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(otlp.router)
     app.include_router(settings.router)
     app.include_router(tool_settings.router)
+    app.include_router(tools.router)

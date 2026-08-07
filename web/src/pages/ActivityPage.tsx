@@ -21,7 +21,14 @@ import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { FilterChips, type FilterChip } from "@/components/FilterChips";
 import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
 import { PAGE_SIZE_OPTIONS, TablePagination } from "@/components/TablePagination";
-import { CopyableValue, ErrorBanner, FilterComboBox, FilterSelect, PageHeader, RefreshButton } from "@/components/ui";
+import {
+  CopyableValue,
+  ErrorBanner,
+  FilterMultiComboBox,
+  FilterSelect,
+  PageHeader,
+  RefreshButton,
+} from "@/components/ui";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 import {
   ACTIVITY_DEFAULT_KEY,
@@ -764,9 +771,12 @@ export function ActivityPage() {
   const startParam = url.get("start_date");
   const endParam = url.get("end_date");
   const statusFilter = url.get("status");
-  const modelFilter = url.get("model");
-  const userFilter = url.get("user_id");
-  const apiKeyFilter = url.get("api_key_id");
+  // The three entity filters hold sets: each is repeatable in the URL and on the
+  // wire, so a comparison ("these two models") is one view rather than several, and
+  // a drill-down from the analytics page can carry its whole selection across.
+  const modelFilters = url.getAll("model");
+  const userFilters = url.getAll("user_id");
+  const apiKeyFilters = url.getAll("api_key_id");
   const pricedFilter = url.get("priced");
   // Provenance: gateway traffic vs an imported agent source. Set by its own select,
   // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
@@ -825,9 +835,9 @@ export function ActivityPage() {
       start_date: win.start,
       end_date: win.end,
       status: statusFilter || undefined,
-      model: modelFilter.trim() || undefined,
-      user_id: userFilter || undefined,
-      api_key_id: apiKeyFilter || undefined,
+      model: modelFilters.length > 0 ? modelFilters : undefined,
+      user_id: userFilters.length > 0 ? userFilters : undefined,
+      api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
       source: sourceFilter || undefined,
       source_label: sessionFilter || undefined,
       endpoint: endpointFilter || undefined,
@@ -839,9 +849,9 @@ export function ActivityPage() {
       win,
       toolFilter,
       statusFilter,
-      modelFilter,
-      userFilter,
-      apiKeyFilter,
+      modelFilters,
+      userFilters,
+      apiKeyFilters,
       sourceFilter,
       sessionFilter,
       endpointFilter,
@@ -874,8 +884,8 @@ export function ActivityPage() {
       start_date: win.start,
       end_date: win.end,
       status: statusFilter || undefined,
-      user_id: userFilter || undefined,
-      api_key_id: apiKeyFilter || undefined,
+      user_id: userFilters.length > 0 ? userFilters : undefined,
+      api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
       source: sourceFilter || undefined,
       source_label: sessionFilter || undefined,
       endpoint: endpointFilter || undefined,
@@ -885,8 +895,8 @@ export function ActivityPage() {
     [
       win,
       statusFilter,
-      userFilter,
-      apiKeyFilter,
+      userFilters,
+      apiKeyFilters,
       sourceFilter,
       sessionFilter,
       endpointFilter,
@@ -917,11 +927,11 @@ export function ActivityPage() {
       start_date: win.start,
       end_date: win.end,
       status: statusFilter || undefined,
-      model: modelFilter.trim() || undefined,
-      user_id: userFilter || undefined,
-      api_key_id: apiKeyFilter || undefined,
+      model: modelFilters.length > 0 ? modelFilters : undefined,
+      user_id: userFilters.length > 0 ? userFilters : undefined,
+      api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
     }),
-    [win, statusFilter, modelFilter, userFilter, apiKeyFilter],
+    [win, statusFilter, modelFilters, userFilters, apiKeyFilters],
   );
   const sourceSummary = useUsageSummary(sourceSuggestFilters, "day", SOURCE_BREAKDOWN, Boolean(sourceFilter));
   const sourceBreakdown = (sourceFilter ? sourceSummary.data : modelSummary.data)?.by_source;
@@ -957,9 +967,9 @@ export function ActivityPage() {
       start_date: winOutsideExtent ? win.start : extentWin.start,
       end_date: winOutsideExtent ? win.end : undefined,
       status: statusFilter || undefined,
-      model: modelFilter.trim() || undefined,
-      user_id: userFilter || undefined,
-      api_key_id: apiKeyFilter || undefined,
+      model: modelFilters.length > 0 ? modelFilters : undefined,
+      user_id: userFilters.length > 0 ? userFilters : undefined,
+      api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
       source: sourceFilter || undefined,
       source_label: sessionFilter || undefined,
       endpoint: endpointFilter || undefined,
@@ -973,9 +983,9 @@ export function ActivityPage() {
       win,
       extentWin,
       statusFilter,
-      modelFilter,
-      userFilter,
-      apiKeyFilter,
+      modelFilters,
+      userFilters,
+      apiKeyFilters,
       sourceFilter,
       sessionFilter,
       endpointFilter,
@@ -1032,9 +1042,9 @@ export function ActivityPage() {
     Boolean(startParam || endParam) || (range !== ACTIVITY_DEFAULT_KEY && rangePreset?.seconds != null);
   const anyFilter = Boolean(
     statusFilter ||
-      modelFilter.trim() ||
-      userFilter ||
-      apiKeyFilter ||
+      modelFilters.length ||
+      userFilters.length ||
+      apiKeyFilters.length ||
       pricedFilter ||
       sourceFilter ||
       sessionFilter ||
@@ -1056,21 +1066,37 @@ export function ActivityPage() {
     url.patch({
       status: "",
       priced: "",
-      model: "",
-      user_id: "",
-      api_key_id: "",
+      model: [],
+      user_id: [],
+      api_key_id: [],
       source: "",
       source_label: "",
       endpoint: "",
       provider: "",
       tool: "",
     });
+  // One chip per picked value of a repeatable filter, each clearing only itself.
+  const valueChips = (
+    dimension: string,
+    label: string,
+    param: "model" | "user_id" | "api_key_id",
+    values: string[],
+    display: (value: string) => string,
+  ): FilterChip[] =>
+    values.map((value) => ({
+      key: `${dimension}:${value}`,
+      label,
+      value: display(value),
+      // Several chips share a dimension, so the value has to be part of the name.
+      clearLabel: `Remove ${label} filter ${display(value)}`,
+      onClear: () => url.patch({ [param]: values.filter((v) => v !== value) }),
+    }));
   const filterChips: FilterChip[] = [
     ...(statusFilter ? [{ key: "status", label: "Status", value: labelFrom(STATUS_OPTIONS, statusFilter), onClear: () => url.patch({ status: "" }) }] : []),
     ...(pricedFilter ? [{ key: "priced", label: "Priced", value: labelFrom(PRICED_OPTIONS, pricedFilter), onClear: () => url.patch({ priced: "" }) }] : []),
-    ...(userFilter ? [{ key: "user", label: "User", value: labelFrom(userOptionsList, userFilter), onClear: () => url.patch({ user_id: "" }) }] : []),
-    ...(modelFilter.trim() ? [{ key: "model", label: "Model", value: modelFilter.trim(), onClear: () => url.patch({ model: "" }) }] : []),
-    ...(apiKeyFilter ? [{ key: "key", label: "API key", value: labelFrom(keyOptions, apiKeyFilter), onClear: () => url.patch({ api_key_id: "" }) }] : []),
+    ...valueChips("user", "User", "user_id", userFilters, (v) => labelFrom(userOptionsList, v)),
+    ...valueChips("model", "Model", "model", modelFilters, (v) => v),
+    ...valueChips("key", "API key", "api_key_id", apiKeyFilters, (v) => labelFrom(keyOptions, v)),
     ...(sourceFilter ? [{ key: "source", label: "Source", value: sourceLabel(sourceFilter), onClear: () => url.patch({ source: "" }) }] : []),
     ...(sessionFilter ? [{ key: "session", label: "Session", value: sessionFilter, onClear: () => url.patch({ source_label: "" }) }] : []),
     ...(endpointFilter ? [{ key: "endpoint", label: "Endpoint", value: endpointFilter, onClear: () => url.patch({ endpoint: "" }) }] : []),
@@ -1138,6 +1164,10 @@ export function ActivityPage() {
   // counted client-side from the full filter set but re-derived server-side from
   // this body, so any filter left out widens the delete/reprice past the rows the
   // operator was shown (a session drill-down would wipe every other session).
+  //
+  // The entity filters travel as the sets they are: the selection body takes the same
+  // repeatable form as the read filters, so "all N matching" targets exactly the rows
+  // the count was taken over (see UsageSelection).
   const selectionBody = (): UsageMutationSelection =>
     selection.allMatching
       ? {
@@ -1360,30 +1390,27 @@ export function ActivityPage() {
               ))}
             </FilterSelect>
           ) : null}
-          <FilterComboBox
+          <FilterMultiComboBox
             label="API key"
-            value={apiKeyFilter}
-            onChange={(value) => url.patch({ api_key_id: value })}
+            values={apiKeyFilters}
+            onChange={(values) => url.patch({ api_key_id: values })}
             placeholder="All keys"
             options={keyOptions}
           />
-          <FilterComboBox
+          <FilterMultiComboBox
             label="User"
-            value={userFilter}
-            onChange={(value) => url.patch({ user_id: value })}
+            values={userFilters}
+            onChange={(values) => url.patch({ user_id: values })}
             placeholder="All users"
             options={userOptionsList}
           />
-          <FilterComboBox
+          <FilterMultiComboBox
             label="Model"
-            value={modelFilter}
-            onChange={(value) => url.patch({ model: value })}
+            values={modelFilters}
+            onChange={(values) => url.patch({ model: values })}
             allowsCustom
             placeholder="Any model"
-            options={(modelFilter && !modelOptions.includes(modelFilter)
-              ? [modelFilter, ...modelOptions]
-              : modelOptions
-            ).map((m) => ({ value: m, label: m }))}
+            options={modelOptions.map((m) => ({ value: m, label: m }))}
           />
         </FilterChips>
       </div>

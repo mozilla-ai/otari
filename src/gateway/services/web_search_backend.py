@@ -92,6 +92,35 @@ _DEFAULT_PURPOSE_HINT = (
 )
 
 
+def web_search_tool_definition() -> dict[str, Any]:
+    """The OpenAI-shaped function definition the model is given for web search.
+
+    Module-level, and returning a fresh dict per call, so the ``/v1/tools``
+    discovery endpoint can advertise the same schema the tool loop injects without
+    constructing a backend (or risking a shared mutable constant).
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": WEB_SEARCH_TOOL_NAME,
+            "description": (
+                "Search the web for current information. Returns a ranked list "
+                "of results with URLs, titles, and extracted page content."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query. Use natural language.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    }
+
+
 class WebSearchNotReachableError(RuntimeError):
     """Raised when the search backend can't be reached or returns malformed data."""
 
@@ -155,6 +184,12 @@ class WebSearchBackend:
         self._auth_token = auth_token
         self._client: httpx.AsyncClient | None = None
         self._stack: AsyncExitStack = AsyncExitStack()
+        # Structured hits from the most recent ``call_tool``, kept so a caller that
+        # speaks a native server-tool vocabulary can turn them into citation blocks
+        # (``take_last_results``). The formatted string the model consumes has
+        # already flattened them. Safe as single-slot state because every tool loop
+        # awaits its calls one at a time.
+        self._last_results: list[dict[str, Any]] = []
 
     async def __aenter__(self) -> WebSearchBackend:
         # The search call has its own short timeout; per-page fetches use a
@@ -176,34 +211,24 @@ class WebSearchBackend:
 
     @property
     def openai_tools(self) -> list[dict[str, Any]]:
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": WEB_SEARCH_TOOL_NAME,
-                    "description": (
-                        "Search the web for current information. Returns a ranked list "
-                        "of results with URLs, titles, and extracted page content."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The search query. Use natural language.",
-                            },
-                        },
-                        "required": ["query"],
-                    },
-                },
-            }
-        ]
+        return [web_search_tool_definition()]
 
     def owns_tool(self, name: str) -> bool:
         return name == WEB_SEARCH_TOOL_NAME
 
     def purpose_hints(self) -> list[tuple[str, str]]:
         return [(WEB_SEARCH_TOOL_NAME, self._purpose_hint)]
+
+    def take_last_results(self) -> list[dict[str, Any]]:
+        """Structured hits from the last ``call_tool``, clearing them.
+
+        Consumed right after each awaited call by a loop building native
+        server-tool result blocks. Clearing means a later call that fails, or one
+        whose loop doesn't ask, cannot attribute the previous call's hits to itself.
+        """
+        results = self._last_results
+        self._last_results = []
+        return results
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         """Run a search and record it on the request's tally.
@@ -228,6 +253,10 @@ class WebSearchBackend:
     async def _search_tool(self, arguments: dict[str, Any]) -> str:
         if self._client is None:
             raise RuntimeError("WebSearchBackend not entered as an async context manager")
+
+        # Cleared up front so an early return or a raise below cannot leave the
+        # previous call's hits behind for this one to claim.
+        self._last_results = []
 
         with tracer.start_as_current_span(
             WEB_SEARCH_TOOL_NAME,
@@ -255,6 +284,7 @@ class WebSearchBackend:
                 await self._enrich_with_extracted_content(filtered)
 
             span.set_attribute("web_search.result_count", len(filtered))
+            self._last_results = filtered
             return _format_results_for_model(query, filtered)
 
     # ----- internals -----

@@ -1,8 +1,9 @@
 """Integration tests for the aggregated usage summary + CSV export endpoints.
 
-Runs against whatever backend the suite is configured for (SQLite by default,
-PostgreSQL when TEST_DATABASE_URL / testcontainers provides one), so the same
-assertions pin the cross-dialect bucketing and reconciliation contract.
+Runs against the PostgreSQL the suite is configured for (``TEST_DATABASE_URL``, or
+a testcontainer). The bucketing expressions are dialect-aware (see
+``_bucket_expr``), and these assertions pin the bucketing and reconciliation
+contract they produce.
 """
 
 from __future__ import annotations
@@ -17,7 +18,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.models.entities import UsageLog, User
+from gateway.core.sql import MAX_FILTER_VALUES
+from gateway.models.entities import APIKey, UsageLog, User
 
 SUMMARY_PATH = "/v1/usage/summary"
 CSV_PATH = "/v1/usage/summary.csv"
@@ -26,6 +28,13 @@ CSV_PATH = "/v1/usage/summary.csv"
 def _ensure_user(db: Session, user_id: str) -> None:
     if db.query(User).filter(User.user_id == user_id).first() is None:
         db.add(User(user_id=user_id, alias=user_id, spend=0.0, blocked=False))
+        db.flush()
+
+
+def _ensure_api_key(db: Session, key_id: str, user_id: str | None) -> None:
+    # usage_logs.api_key_id is a real FK, so a row attributed to a key needs one.
+    if db.query(APIKey).filter(APIKey.id == key_id).first() is None:
+        db.add(APIKey(id=key_id, key_hash=f"hash-{key_id}", key_name=key_id, user_id=user_id))
         db.flush()
 
 
@@ -54,6 +63,8 @@ def _make_log(
 ) -> None:
     if user_id is not None:
         _ensure_user(db, user_id)
+    if api_key_id is not None:
+        _ensure_api_key(db, api_key_id, user_id)
     db.add(
         UsageLog(
             id=str(uuid.uuid4()),
@@ -415,6 +426,121 @@ def test_summary_filters_by_session_endpoint_and_provider(
     assert by_provider["totals"]["request_count"] == 1
 
 
+def test_summary_filters_by_several_models_users_and_keys(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The three entity filters are repeatable: several values match any of them.
+
+    The analytics page compares a handful of models / users / keys in one chart, so
+    a single-value filter would force one request per value and make the tiles
+    disagree with the comparison the operator asked for.
+    """
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(db_session, user_id="multi-a", timestamp=now, model="gpt-4", api_key_id="key-a", cost=0.10)
+    _make_log(db_session, user_id="multi-b", timestamp=now, model="claude", api_key_id="key-b", cost=0.20)
+    _make_log(db_session, user_id="multi-c", timestamp=now, model="gemini", api_key_id="key-c", cost=0.40)
+    db_session.commit()
+
+    everyone = ["multi-a", "multi-b", "multi-c"]
+
+    two_users = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": everyone[:2]}).json()
+    assert two_users["totals"]["request_count"] == 2
+    assert two_users["totals"]["cost"] == pytest.approx(0.30)
+    assert {row["key"] for row in two_users["by_user"]} == {"multi-a", "multi-b"}
+
+    two_models = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": everyone, "model": ["gpt-4", "gemini"]}
+    ).json()
+    assert two_models["totals"]["request_count"] == 2
+    assert two_models["totals"]["cost"] == pytest.approx(0.50)
+
+    two_keys = client.get(
+        SUMMARY_PATH, headers=master_key_header, params={"user_id": everyone, "api_key_id": ["key-a", "key-b"]}
+    ).json()
+    assert two_keys["totals"]["request_count"] == 2
+    assert two_keys["totals"]["cost"] == pytest.approx(0.30)
+
+    # A single value keeps working unchanged (the wire form every existing caller sends).
+    one_user = client.get(SUMMARY_PATH, headers=master_key_header, params={"user_id": "multi-c"}).json()
+    assert one_user["totals"]["request_count"] == 1
+    assert one_user["totals"]["cost"] == pytest.approx(0.40)
+
+
+def test_every_read_endpoint_caps_the_number_of_filter_values(
+    client: TestClient, master_key_header: dict[str, str]
+) -> None:
+    """Every endpoint taking a repeatable filter bounds it, at the same value.
+
+    The cap keeps a caller from posting an unbounded IN list, and it has to hold
+    across the whole read surface: the bulk-mutation body carries the same ceiling,
+    and that only means anything if the count an operator confirms is subject to it
+    too. Sits far above any comparison a chart can render.
+    """
+    too_many = [f"m{index}" for index in range(MAX_FILTER_VALUES + 1)]
+    at_cap = too_many[:MAX_FILTER_VALUES]
+    for path, extra in (
+        (SUMMARY_PATH, {}),
+        (SERIES_PATH, {"group_by": "model"}),
+        (CSV_PATH, {}),
+        ("/v1/usage", {}),
+        ("/v1/usage/count", {}),
+    ):
+        over = client.get(path, headers=master_key_header, params={**extra, "model": too_many})
+        assert over.status_code == 422, path
+        ok = client.get(path, headers=master_key_header, params={**extra, "model": at_cap})
+        assert ok.status_code == 200, path
+
+    # The bound counts values, not characters: a long provider-qualified model name
+    # is a single value and must still filter.
+    long_name = "openai:" + "a" * 80
+    assert client.get(SUMMARY_PATH, headers=master_key_header, params={"model": long_name}).status_code == 200
+
+
+def test_grouped_series_filters_by_several_models(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # /series claims filter parity with /summary, so the stacked chart must scope to
+    # the same value set the tiles beside it were computed over.
+    ts = datetime(2025, 9, 1, 12, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="multiser", timestamp=ts, model="gpt-4", cost=0.10, total_tokens=15)
+    _make_log(db_session, user_id="multiser", timestamp=ts, model="claude", cost=0.20, total_tokens=15)
+    _make_log(db_session, user_id="multiser", timestamp=ts, model="gemini", cost=0.40, total_tokens=15)
+    db_session.commit()
+
+    body = client.get(
+        SERIES_PATH,
+        headers=master_key_header,
+        params={
+            "group_by": "model",
+            "user_id": "multiser",
+            "model": ["gpt-4", "claude"],
+            "start_date": "2025-09-01T00:00:00Z",
+            "end_date": "2025-09-02T00:00:00Z",
+        },
+    ).json()
+
+    assert {g["key"] for g in body["groups"]} == {"gpt-4", "claude"}
+    assert sum(p["cost"] for p in body["points"]) == pytest.approx(0.30)
+
+
+def test_csv_export_filters_by_several_users(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # The export takes the same window and filters as /summary, so a multi-value
+    # comparison can be downloaded rather than re-filtered by hand.
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(db_session, user_id="csv-a", timestamp=now, model="gpt-4", cost=0.10)
+    _make_log(db_session, user_id="csv-b", timestamp=now, model="claude", cost=0.20)
+    _make_log(db_session, user_id="csv-c", timestamp=now, model="gemini", cost=0.40)
+    db_session.commit()
+
+    resp = client.get(CSV_PATH, headers=master_key_header, params={"user_id": ["csv-a", "csv-b"]})
+    assert resp.status_code == 200
+    rows = list(csv.DictReader(io.StringIO(resp.text)))
+    users = {row["key"] for row in rows if row["dimension"] == "user"}
+    assert users == {"csv-a", "csv-b"}
+
+
 def test_usage_list_and_count_filter_by_session_and_provider(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
@@ -454,6 +580,36 @@ def test_usage_list_and_count_filter_by_session_and_provider(
     ).json()
     assert len(openai_rows) == 1
     assert openai_rows[0]["provider"] == "openai"
+
+
+def test_usage_list_and_count_filter_by_several_values(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    # The request log takes the same repeatable filters as the analytics endpoints, so
+    # a drill-down carrying a multi-value comparison lands on exactly those rows, and
+    # /count agrees with the list so the paginator total matches what is shown.
+    now = datetime.now(UTC) - timedelta(hours=1)
+    _make_log(db_session, user_id="listmulti", timestamp=now, model="gpt-4")
+    _make_log(db_session, user_id="listmulti", timestamp=now, model="claude")
+    _make_log(db_session, user_id="listmulti", timestamp=now, model="gemini")
+    db_session.commit()
+
+    params = {"user_id": "listmulti", "model": ["gpt-4", "claude"]}
+    rows = client.get("/v1/usage", headers=master_key_header, params=params).json()
+    assert sorted(row["model"] for row in rows) == ["claude", "gpt-4"]
+
+    count = client.get("/v1/usage/count", headers=master_key_header, params=params).json()
+    assert count["total"] == len(rows) == 2
+
+    # Two users, one model: the other dimension still narrows as usual.
+    _make_log(db_session, user_id="listmulti2", timestamp=now, model="gpt-4")
+    db_session.commit()
+    both = client.get(
+        "/v1/usage/count",
+        headers=master_key_header,
+        params={"user_id": ["listmulti", "listmulti2"], "model": "gpt-4"},
+    ).json()
+    assert both["total"] == 2
 
 
 def test_summary_series_day_buckets_are_canonical_utc(

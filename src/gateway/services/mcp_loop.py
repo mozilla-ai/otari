@@ -287,7 +287,11 @@ class _ChatToolLoopStrategy:
     def exit_after_split(self, result: ChatCompletion) -> bool:
         return False
 
-    async def execute_owned(self, pool: ToolBackend, owned: list[Any]) -> list[dict[str, Any]]:
+    async def execute_owned(
+        self, pool: ToolBackend, owned: list[Any], acc: Any = None
+    ) -> list[dict[str, Any]]:
+        # ``acc`` is accepted for interface parity and unused: this format has no
+        # native vocabulary for a server-side tool call to report on a mixed batch.
         return await _execute_mcp_calls(pool, owned)
 
     def filter_owned(self, result: ChatCompletion, owned: list[Any], pool: ToolBackend) -> None:

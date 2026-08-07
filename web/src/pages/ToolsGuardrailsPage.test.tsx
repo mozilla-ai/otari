@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ToolSettingField, ToolSettingsResponse } from "@/api/types";
+import type { ToolSettingField, ToolSettingsResponse, ToolsResponse } from "@/api/types";
 import { ToolsGuardrailsPage } from "@/pages/ToolsGuardrailsPage";
 
 const FIELDS: ToolSettingField[] = [
@@ -12,6 +12,7 @@ const FIELDS: ToolSettingField[] = [
   { key: "web_search_engines", service: "web_search", type: "str", value: null, description: "Engine list." },
   { key: "web_search_max_results", service: "web_search", type: "int", value: 5, description: "Result cap." },
   { key: "web_search_extract", service: "web_search", type: "bool", value: null, description: "Extract page content." },
+  { key: "web_search_intercept", service: "web_search", type: "bool", value: null, description: "Claim provider-named web_search keywords." },
   { key: "web_search_purpose_hint", service: "web_search", type: "str", value: null, description: "Purpose hint." },
   { key: "sandbox_url", service: "sandbox", type: "url", value: null, description: "Sandbox backend URL." },
   { key: "sandbox_purpose_hint", service: "sandbox", type: "str", value: null, description: "Purpose hint." },
@@ -19,6 +20,32 @@ const FIELDS: ToolSettingField[] = [
 ];
 
 const RESPONSE: ToolSettingsResponse = { fields: FIELDS };
+
+// GET /v1/tools drives the "how to call this" card. `accepted_types` is what the
+// deployment currently honours, so it is the interesting axis here.
+const TOOLS: ToolsResponse = {
+  object: "list",
+  data: [
+    {
+      id: "otari_web_search",
+      object: "tool",
+      description: "Search the web for current information.",
+      available: true,
+      accepted_types: ["otari_web_search"],
+      input_schema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      example: { type: "otari_web_search" },
+    },
+    {
+      id: "otari_code_execution",
+      object: "tool",
+      description: "Execute Python code in a sandboxed REPL.",
+      available: false,
+      accepted_types: ["otari_code_execution"],
+      input_schema: { type: "object", properties: { code: { type: "string" } }, required: ["code"] },
+      example: { type: "otari_code_execution" },
+    },
+  ],
+};
 
 function renderWithClient(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -33,6 +60,8 @@ interface MockOpts {
   patchStatus?: number;
   patchDetail?: string;
   testBody?: { ok: boolean; reason: string };
+  tools?: ToolsResponse;
+  toolsStatus?: number;
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -40,6 +69,12 @@ function mockApi(opts: MockOpts = {}) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
     const method = (init?.method ?? "GET").toUpperCase();
+    if (url.includes("/v1/tools")) {
+      if (opts.toolsStatus && opts.toolsStatus >= 400) {
+        return jsonResponse({ detail: "nope" }, opts.toolsStatus);
+      }
+      return jsonResponse(opts.tools ?? TOOLS);
+    }
     if (url.includes("/tool-settings/") && url.endsWith("/test")) {
       return jsonResponse(opts.testBody ?? { ok: true, reason: "reachable (HTTP 200)" });
     }
@@ -247,5 +282,72 @@ describe("ToolsGuardrailsPage", () => {
 
     const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "PATCH");
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ web_search_engines: "google,bing" });
+  });
+});
+
+describe("ToolsGuardrailsPage how-to-call card", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows the accepted declaration types and a runnable example per tool", async () => {
+    mockApi();
+    renderWithClient(<ToolsGuardrailsPage />);
+
+    // One card per gateway-run tool; guardrails has none (it is not declared in
+    // `tools[]` at all).
+    await screen.findByText("Web search");
+    await waitFor(() => expect(screen.getAllByText("Accepted tools[].type")).toHaveLength(2));
+    // The type to declare is the thing an operator cannot guess from the settings.
+    expect(screen.getAllByText("otari_web_search").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/POST \/v1\/chat\/completions/)).toHaveLength(2);
+  });
+
+  it("advertises the provider-named keywords when interception is on", async () => {
+    mockApi({
+      tools: {
+        object: "list",
+        data: [
+          {
+            ...TOOLS.data[0],
+            accepted_types: ["otari_web_search", "web_search", "web_search_<date>"],
+          },
+        ],
+      },
+    });
+    renderWithClient(<ToolsGuardrailsPage />);
+
+    expect(await screen.findByText("web_search_<date>")).toBeInTheDocument();
+    expect(screen.getByText("web_search")).toBeInTheDocument();
+  });
+
+  it("flags a tool whose backend is not configured", async () => {
+    mockApi();
+    renderWithClient(<ToolsGuardrailsPage />);
+
+    // The code-execution fixture has available: false.
+    expect(await screen.findByText("No backend configured")).toBeInTheDocument();
+  });
+
+  it("keeps the editable settings usable when /v1/tools fails", async () => {
+    // The card is reference material; a failed discovery fetch must not take the
+    // settings form down with it.
+    mockApi({ toolsStatus: 500 });
+    renderWithClient(<ToolsGuardrailsPage />);
+
+    expect(await screen.findByLabelText("web_search_url")).toHaveValue("http://searxng:8080");
+    await waitFor(() => expect(screen.queryByText("Accepted tools[].type", { exact: false })).not.toBeInTheDocument());
+  });
+
+  it("saves web_search_intercept from the tri-state select", async () => {
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+    renderWithClient(<ToolsGuardrailsPage />);
+    await screen.findByText("Web search");
+
+    await user.selectOptions(screen.getByLabelText("web_search_intercept"), "on");
+
+    const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "PATCH");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ web_search_intercept: true });
   });
 });

@@ -38,6 +38,7 @@ import type {
   TestProviderResult,
   TestServiceResponse,
   ToolSettingsResponse,
+  ToolsResponse,
   UpdateBudgetRequest,
   UpdateKeyRequest,
   UpdateSettingsRequest,
@@ -63,6 +64,7 @@ const MODELS = "models";
 const PRICING = "pricing";
 const SETTINGS = "settings";
 const TOOL_SETTINGS = "tool-settings";
+const TOOLS = "tools";
 const ALIASES = "aliases";
 const ROUTING_POLICIES = "routing-policies";
 const ROUTER_STATUS = "router-status";
@@ -447,6 +449,16 @@ export function useToolSettings() {
   });
 }
 
+// The declaration forms this deployment honours. Depends on tool settings
+// (interception, the backend URLs), so a settings save invalidates it.
+export function useTools() {
+  return useQuery({
+    queryKey: [TOOLS],
+    queryFn: () => apiFetch<ToolsResponse>("/v1/tools"),
+    staleTime: 60_000,
+  });
+}
+
 export function useUpdateToolSettings() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -454,6 +466,9 @@ export function useUpdateToolSettings() {
       apiFetch<ToolSettingsResponse>("/v1/tool-settings", { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: (data) => {
       queryClient.setQueryData([TOOL_SETTINGS], data);
+      // Toggling interception or clearing a backend URL changes which
+      // declarations the gateway accepts, so the "how to call" card must refetch.
+      void queryClient.invalidateQueries({ queryKey: [TOOLS] });
     },
   });
 }
@@ -751,14 +766,22 @@ export function useDeleteUser() {
 // while the request goes out unfiltered and the table quietly shows everything.
 function usageParams(filters: UsageFilters): URLSearchParams {
   const params = new URLSearchParams();
+  // A multi-value filter goes on the wire as a repeated param (the analytics
+  // endpoints match any of them); an empty array is no filter at all, not a
+  // filter matching nothing.
+  const appendAll = (key: string, value: string | string[] | undefined) => {
+    for (const one of typeof value === "string" ? [value] : (value ?? [])) {
+      if (one) params.append(key, one);
+    }
+  };
   if (filters.start_date) params.set("start_date", filters.start_date);
   if (filters.end_date) params.set("end_date", filters.end_date);
   if (filters.status) params.set("status", filters.status);
-  if (filters.model) params.set("model", filters.model);
+  appendAll("model", filters.model);
   if (filters.endpoint) params.set("endpoint", filters.endpoint);
   if (filters.provider) params.set("provider", filters.provider);
-  if (filters.user_id) params.set("user_id", filters.user_id);
-  if (filters.api_key_id) params.set("api_key_id", filters.api_key_id);
+  appendAll("user_id", filters.user_id);
+  appendAll("api_key_id", filters.api_key_id);
   if (filters.source) params.set("source", filters.source);
   if (filters.source_label) params.set("source_label", filters.source_label);
   if (filters.tool) params.set("tool", filters.tool);

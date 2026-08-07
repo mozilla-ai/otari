@@ -628,11 +628,15 @@ export interface UsageFilters {
   // analytics previous-period query so its window does not overlap the current one.
   end_date?: string;
   status?: string;
-  model?: string;
+  // The three entity filters accept several values on every usage endpoint: they go
+  // on the wire as repeated query params and match any of them, so one chart can
+  // compare a handful of models / users / keys and the request log can be scoped to
+  // the same set a drill-down arrived with.
+  model?: string | string[];
   endpoint?: string;
   provider?: string;
-  user_id?: string;
-  api_key_id?: string;
+  user_id?: string | string[];
+  api_key_id?: string | string[];
   source?: string;
   // Session/project attribution (a row's `source_label`), so the log can be
   // scoped to the one agent session a breakdown row points at.
@@ -661,9 +665,11 @@ export interface UsageMutationSelection {
   ids?: string[];
   by_filter?: boolean;
   source?: string;
-  model?: string;
-  user_id?: string;
-  api_key_id?: string;
+  // Multi-value like the read filters, so a set the operator filtered on scopes the
+  // mutation to exactly those rows rather than every value of the dimension.
+  model?: string | string[];
+  user_id?: string | string[];
+  api_key_id?: string | string[];
   status?: string;
   // Every scoping filter the Activity log honors must be repeatable here: the
   // "all matching" path re-derives the target set server-side, so a filter the
@@ -955,6 +961,7 @@ export interface UpdateToolSettingsRequest {
   web_search_max_results?: number | null;
   web_search_extract?: boolean | null;
   web_search_purpose_hint?: string | null;
+  web_search_intercept?: boolean | null;
   sandbox_url?: string | null;
   sandbox_purpose_hint?: string | null;
   guardrails_url?: string | null;
@@ -963,4 +970,22 @@ export interface UpdateToolSettingsRequest {
 export interface TestServiceResponse {
   ok: boolean;
   reason: string;
+}
+
+// One tool Otari runs itself, as advertised by GET /v1/tools. `accepted_types`
+// is what this deployment currently routes to the tool, so it grows when
+// web-search interception is on.
+export interface ManagedTool {
+  id: string;
+  object: "tool";
+  description: string;
+  available: boolean;
+  accepted_types: string[];
+  input_schema: Record<string, unknown>;
+  example: Record<string, unknown>;
+}
+
+export interface ToolsResponse {
+  object: "list";
+  data: ManagedTool[];
 }

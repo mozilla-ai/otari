@@ -1,9 +1,10 @@
 name: SDK Regen PR Staleness
 
 # Alerts when an SDK regeneration PR (opened by otari-sdk-codegen.yml on the
-# sdk-codegen/client-core branch) sits unmerged beyond the freshness window,
-# which signals an SDK lagging the Otari spec. Keeps a single tracking issue on
-# this repo in sync: opened/updated while any PR is stale, closed once none are.
+# sdk-codegen/client-core branch) needs attention, which signals an SDK lagging
+# the Otari spec. A PR is flagged when its checks are failing (at any age) or it
+# has been open past the freshness window. Keeps a single tracking issue on this
+# repo in sync: opened/updated while any PR is flagged, closed once none are.
 #
 # Reading PRs on the SDK repos needs a token with pull-requests:read on
 # mozilla-ai/otari-sdk-{python,ts,go,rust}; the SDK_CODEGEN_TOKEN used by the
@@ -12,7 +13,13 @@ name: SDK Regen PR Staleness
 
 on:
   schedule:
-    # Mondays at 13:00 UTC.
+    # Mondays at 13:00 UTC. Deliberately weekly, not daily, even though the
+    # failing-checks trigger below would detect a break sooner if polled more
+    # often. The script reuses only a currently-open tracking issue, so a
+    # condition that flaps red/green opens a fresh issue each cycle, and CI is
+    # flaky enough (a GitHub Actions outage alone can redden every job) that
+    # daily polling would turn transient failures into recurring alerts. Weekly
+    # trades detection latency for an alert that stays worth reading.
     - cron: '0 13 * * 1'
   workflow_dispatch:
     inputs:

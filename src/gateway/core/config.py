@@ -457,6 +457,18 @@ class GatewayConfig(BaseSettings):
             "the request errored), or 'allow_free' (release the reservation, legacy behavior)."
         ),
     )
+    streaming_keepalive_interval_ms: int = Field(
+        default=15000,
+        ge=0,
+        description=(
+            "Idle interval in milliseconds after which a streaming response emits a transport "
+            "keepalive while it waits on the provider: a 'ping' event on /v1/messages, an SSE "
+            "comment line on /v1/chat/completions and /v1/responses. Keeps an intermediary with a "
+            "read timeout (Cloudflare's default Proxy Read Timeout is 125s) from severing a connection "
+            "during a long time-to-first-token. Does not extend any first-chunk or failover deadline. "
+            "0 disables."
+        ),
+    )
     model_discovery: bool = Field(
         default=True,
         description="Enable auto-discovery of models from configured providers via GET /v1/models",
@@ -647,6 +659,15 @@ class GatewayConfig(BaseSettings):
         description=(
             "Whether the web-search backend extracts page content in-process (True) or returns "
             "snippet-only results (False). When unset, the backend default (extraction on) applies."
+        ),
+    )
+    web_search_intercept: bool | None = Field(
+        default=None,
+        description=(
+            "Whether a provider-named web-search declaration (bare 'web_search', Anthropic-native "
+            "'web_search_<date>') is run against the gateway's own backend instead of being forwarded "
+            "to the provider. Off when unset: the explicit otari_web_search type is always run by the "
+            "gateway, and every other keyword reaches the provider untouched. Requires web_search_url."
         ),
     )
     web_search_allow_private_hosts: bool = Field(

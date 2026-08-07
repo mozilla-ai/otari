@@ -12,7 +12,7 @@ For full request/response schemas, see the [OpenAPI spec](public/openapi.json) o
 | Chat completions (`/v1/chat/completions`) | Yes | Yes |
 | Messages (`/v1/messages`, `/v1/messages/count_tokens`) | Yes | Yes |
 | Responses (`/v1/responses`) | Yes | Yes |
-| Management (keys, users, budgets, aliases, routing policies, pricing, usage) | Yes | No |
+| Management (keys, users, budgets, aliases, routing policies, pricing, usage, tool discovery) | Yes | No |
 | OpenAI-compatible (embeddings, models, files, batches, images, audio, moderations, rerank) | Yes | No |
 
 ## Authentication
@@ -83,6 +83,16 @@ Not every provider implements the Responses API; one that does not is rejected w
 |--------|------|-------------|------|
 | `GET` | `/v1/models` | List available models: auto-discovered from configured providers (when `model_discovery` is on, the default), plus configured pricing entries and aliases. | API key or master key |
 | `GET` | `/v1/models/{model_id}` | Get a specific model. | API key or master key |
+
+### Tools
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `GET` | `/v1/tools` | List the tools Otari runs itself, with the `tools[].type` values this deployment accepts, each tool's argument schema, and a runnable example. | API key or master key |
+
+A tool with no backend configured is listed with `"available": false` rather than omitted, so a client can distinguish an unknown tool from an unconfigured one. `accepted_types` reflects the current configuration, so it grows when [web-search interception](tools.md#web-search-interception) is enabled.
+
+Standalone-only. Connected to otari.ai the platform owns the per-workspace tool policy, so this gateway's own configuration is not the answer to "what can I call".
 
 ### Moderations
 
@@ -288,10 +298,11 @@ are budget-checked and logged. See
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `status_code`, `model`, `endpoint`, `provider`, `source`, `source_label`, `api_key_id`, `request_group_id`. `status_code` is the HTTP status classifying a failure (e.g. 429 provider rate limit, 402 missing pricing); only error rows carry one, so filtering by it also restricts to `status=error` unless `status` is passed explicitly. `request_group_id` is repeatable and returns a routed request's whole attempt plan (see [Routing](routing.md)). | Master key |
-| `GET` | `/v1/usage/count` | Total rows matching the filters (paginator total). | Master key |
-| `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source/session/endpoint/provider, the failure taxonomy in `errors_by_status_code` (failures grouped by `status_code` with a coarse `error_class`), and a time series. `dimensions` narrows which breakdowns are computed (each one is a separate `GROUP BY`, including `status_code` for the taxonomy); `dimensions=none` returns totals and series only. | Master key |
-| `GET` | `/v1/usage/summary.csv` | Every breakdown as a CSV download. | Master key |
+| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `status_code`, `model`, `endpoint`, `provider`, `source`, `source_label`, `api_key_id`, `request_group_id`. `user_id`, `model`, and `api_key_id` are repeatable (up to 50 values each) and match any of the values given. `status_code` is the HTTP status classifying a failure (e.g. 429 provider rate limit, 402 missing pricing); only error rows carry one, so filtering by it also restricts to `status=error` unless `status` is passed explicitly. `request_group_id` is repeatable and returns a routed request's whole attempt plan (see [Routing](routing.md)). | Master key |
+| `GET` | `/v1/usage/count` | Total rows matching the filters (paginator total). Same filters as `GET /v1/usage`, so a multi-value filter counts the same rows the list returns. | Master key |
+| `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source/session/endpoint/provider, the failure taxonomy in `errors_by_status_code` (failures grouped by `status_code` with a coarse `error_class`), and a time series. `dimensions` narrows which breakdowns are computed (each one is a separate `GROUP BY`, including `status_code` for the taxonomy); `dimensions=none` returns totals and series only. `model`, `user_id`, and `api_key_id` are repeatable (up to 50 values each) and match any of the values given, so one call can compare a set of models, users, or keys. | Master key |
+| `GET` | `/v1/usage/summary.csv` | Every breakdown as a CSV download. Same filters as `/v1/usage/summary`, including the repeatable `model` / `user_id` / `api_key_id`. | Master key |
+| `GET` | `/v1/usage/series` | One time series per group, for stacked charts. `group_by` is required (`model`, `user_id`, `api_key_id`, or `source`). Same filters and window bounds as `/v1/usage/summary`, including the repeatable `model` / `user_id` / `api_key_id` (up to 50 values each, matching any of them). Returns the window's top eight groups by spend, with everything past them folded into one `other` series per bucket, so the stack reconciles with the summary totals. Points are sparse (populated cells only), and an `hour` bucket over a window of more than 1000 buckets is rejected with a 422 rather than returning an oversized payload. | Master key |
 | `POST` | `/v1/usage/external-events` | Import externally-observed usage (e.g. Claude Code) as source-tagged rows, priced at API rates, never counted toward budget. An API key (must be budget-exempt) attributes to its own user; the master key may name any user. Idempotent by `(source, source_event_id)`. See [Importing external usage](external-usage.md). | API key (budget-exempt) or master key |
 | `POST` | `/v1/traces` | OTLP receiver for GenAI usage **spans** (protobuf or JSON). Maps the OpenTelemetry GenAI conventions (`gen_ai.*`, `otari.*`) onto external usage ingestion. Any instrumented app can ship here. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |
 | `POST` | `/v1/logs` | OTLP receiver for GenAI usage **log events** (protobuf or JSON), including Claude Code's `api_request` and Codex's `codex.sse_event` / `codex.api_request`. Same mapping as `/v1/traces`. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |

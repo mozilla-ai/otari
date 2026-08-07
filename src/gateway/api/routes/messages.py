@@ -117,6 +117,84 @@ class CountTokensResponse(BaseModel):
     input_tokens: int
 
 
+def _is_gateway_minted_result(block: Any) -> bool:
+    """Whether a ``web_search_tool_result`` block was minted by this gateway.
+
+    Provenance is the empty ``encrypted_content``: Anthropic always populates that
+    field with a signed blob, and the gateway cannot, so it sends the field empty
+    (see ``mcp_loop_messages._native_web_search_blocks``). A result block whose hits
+    all carry an empty value is therefore ours; one carrying real signed content came
+    from a provider that ran the search itself and must survive untouched.
+
+    An empty ``content`` list counts as ours: that is what a gateway search with no
+    usable hits produces, and a provider reporting no results uses the error shape
+    instead.
+    """
+    if not isinstance(block, dict) or block.get("type") != "web_search_tool_result":
+        return False
+    hits = block.get("content")
+    if not isinstance(hits, list):
+        # The error shape (``web_search_tool_result_error``) is a dict, and only a
+        # provider produces it. Never ours.
+        return False
+    return all(isinstance(hit, dict) and not hit.get("encrypted_content") for hit in hits)
+
+
+def _strip_gateway_minted_blocks(messages: Any) -> Any:
+    """Drop this gateway's own server-tool blocks from inbound ``messages``.
+
+    Continuing an Anthropic conversation means echoing the previous assistant turn,
+    and a gateway-minted ``web_search_tool_result`` carries an ``encrypted_content``
+    the gateway cannot sign, so an echoed turn would ship an unsignable block to a
+    provider. Mirrors ``responses._strip_gateway_minted_items``, but where Responses
+    has no way to tell its own minted items from a provider's, here it can: only
+    blocks with gateway provenance are removed (see
+    :func:`_is_gateway_minted_result`), so a genuine provider-run search's signed
+    blocks round-trip untouched even with interception on. A `server_tool_use` is
+    removed only alongside the gateway-minted result that answers it, matched by
+    ``tool_use_id``, so a provider's pair is never split.
+
+    Only called when interception is active (opted in, with a backend configured),
+    which is the only way one of our blocks can be in a transcript at all.
+
+    A message left with no content is dropped: an empty ``content`` array is rejected
+    by the API, and a turn that held nothing but our pair has nothing left to say.
+    """
+    if not isinstance(messages, list):
+        return messages
+    kept_messages: list[Any] = []
+    dropped = 0
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            kept_messages.append(message)
+            continue
+        # Two passes: identify our result blocks, then drop them along with the
+        # server_tool_use each one answers. A provider's pair matches neither.
+        minted_ids = {
+            block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)
+        }
+        kept_blocks = [block for block in content if not _is_minted_pair_member(block, minted_ids)]
+        if len(kept_blocks) == len(content):
+            kept_messages.append(message)
+            continue
+        dropped += len(content) - len(kept_blocks)
+        if kept_blocks:
+            kept_messages.append({**message, "content": kept_blocks})
+    if dropped:
+        logger.debug("Stripped %d gateway-minted content block(s) from the inbound messages", dropped)
+    return kept_messages
+
+
+def _is_minted_pair_member(block: Any, minted_ids: set[Any]) -> bool:
+    """Whether ``block`` is one half of a gateway-minted server-tool pair."""
+    if not isinstance(block, dict):
+        return False
+    if _is_gateway_minted_result(block):
+        return True
+    return block.get("type") == "server_tool_use" and block.get("id") in minted_ids
+
+
 def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPException:
     """Create an HTTPException with Anthropic-style error body."""
     return HTTPException(
@@ -302,6 +380,8 @@ class _MessagesAdapter:
         pool: ToolBackend,
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
+        *,
+        emit_native_web_search: bool = False,
     ) -> MessageResponse:
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
@@ -312,6 +392,7 @@ class _MessagesAdapter:
             completion_kwargs=kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            emit_native_web_search=emit_native_web_search,
             **extra,
         )
 
@@ -320,11 +401,14 @@ class _MessagesAdapter:
         kwargs: dict[str, Any],
         pool: ToolBackend,
         max_iterations: int,
+        *,
+        emit_native_web_search: bool = False,
     ) -> AsyncIterator[MessageStreamEvent]:
         return anthropic_tool_loop_stream(
             completion_kwargs=kwargs,
             pool=pool,
             max_iterations=max_iterations,
+            emit_native_web_search=emit_native_web_search,
         )
 
     def inject_hints(
@@ -446,9 +530,12 @@ async def create_message(
         request.model_dump(exclude_unset=True),
         tools_extracted=tool_ctx.tools_extracted,
         remaining_user_tools=tool_ctx.remaining_user_tools,
+        web_search_declared_name=tool_ctx.web_search_declared_name,
     )
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
+    if tool_ctx.intercepts_web_search and request_fields.get("messages"):
+        request_fields["messages"] = _strip_gateway_minted_blocks(request_fields["messages"])
 
     # ------------------------------------------------------------------
     # Streaming path

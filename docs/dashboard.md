@@ -195,10 +195,20 @@ gateway.
   number of calls, and the **Tool** filter narrows the log to one of them. The
   request detail lists the calls, how many failed, and what they cost. Query text
   is never stored: the log records counts and names only.
+  The **User**, **Model**, and **API key** filters here take several values too, so
+  a drill-down from Usage arrives intact and a comparison can be read as one list.
+  The Model box also accepts a name that is not in its suggestions: press Enter to
+  add it, since the suggestions only cover models with traffic in the window. When
+  "select all N matching" is used for a bulk delete or reprice, the selection is
+  scoped to exactly the values shown in the chips.
 - **Usage**: aggregate usage and analytics, showing spend and volume over time,
   broken down by model and by user, plus a switchable breakdown by session,
-  endpoint, provider, or source. Clicking any row opens the Activity log scoped
-  to that group, so "spend went up" leads straight to the requests behind it.
+  endpoint, provider, or source. The **User**, **Model**, and **API key** pickers
+  each take several values, so a chart can compare a set ("these two models across
+  this team's keys") rather than one entity at a time; every pick becomes its own
+  chip, and the chip's ✕ removes just that value. Clicking any row opens the
+  Activity log scoped to that group, carrying the whole selection with it, so
+  "spend went up" leads straight to the requests behind it.
   When the window contains gateway-run tool calls, a **Gateway-run tools** table
   shows calls, failures, and spend per tool, so "what did search cost me last
   week" has an answer that is not one request at a time. MCP tools are excluded
@@ -224,7 +234,11 @@ hand.
 
 - **Providers**: add, edit, test, and delete provider credentials at runtime
   (standalone only). Stored keys are encrypted with `OTARI_SECRET_KEY`; config
-  providers appear read-only. See the first-run walkthrough above.
+  providers appear read-only. See the first-run walkthrough above. The add and
+  edit forms also take **Client options (JSON)**, the `client_args` passed to the
+  provider's client (a request timeout, custom headers); on the known-provider
+  form they sit under Advanced. A backend that can take longer than 10 minutes to
+  answer a non-streaming request needs an explicit `{"timeout": 1800}` here.
 - **Models**: browse the model catalogue and set per-model pricing, with specs
   and modality metadata where available (from models.dev). The copy control next
   to a model puts its full `provider:model` id on your clipboard, which is what
@@ -292,6 +306,12 @@ For how users, keys, and budgets fit together and the management endpoints behin
   cost you money at a search provider or a sandbox, so they are billed onto the
   request that triggered them. An unpriced tool is refused with a 402 while
   `require_pricing` is on. See [Built-in tools](tools.md#pricing-a-gateway-run-tool).
+  Each gateway-run tool also shows **how to call it**: the `tools[].type` values
+  this deployment accepts and a request you can copy. Turning on
+  `web_search_intercept` adds the provider-named keywords (`web_search`,
+  `web_search_<date>`) to that list, which is what lets a client like Claude Code
+  reach your search backend without knowing Otari's own tool name. See
+  [Web-search interception](tools.md#web-search-interception).
 - **Settings**: search and toggle runtime settings, review and apply default
   pricing updates, and rotate the generated master key. Rotating the master key
   issues a fresh `otari-mk-…` value and keeps your current session signed in.

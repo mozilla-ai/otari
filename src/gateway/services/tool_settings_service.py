@@ -41,6 +41,7 @@ WEB_SEARCH_ENGINES = "web_search_engines"
 WEB_SEARCH_MAX_RESULTS = "web_search_max_results"
 WEB_SEARCH_EXTRACT = "web_search_extract"
 WEB_SEARCH_PURPOSE_HINT = "web_search_purpose_hint"
+WEB_SEARCH_INTERCEPT = "web_search_intercept"
 SANDBOX_URL = "sandbox_url"
 SANDBOX_PURPOSE_HINT = "sandbox_purpose_hint"
 GUARDRAILS_URL = "guardrails_url"
@@ -72,6 +73,7 @@ _TOOL_SPECS: dict[str, _ToolSpec] = {
     SANDBOX_PURPOSE_HINT: _ToolSpec("str"),
     WEB_SEARCH_MAX_RESULTS: _ToolSpec("int", ge=1),
     WEB_SEARCH_EXTRACT: _ToolSpec("bool"),
+    WEB_SEARCH_INTERCEPT: _ToolSpec("bool"),
 }
 
 TOOL_SETTABLE_KEYS = tuple(_TOOL_SPECS)
@@ -83,6 +85,7 @@ _FIELD_SERVICE: dict[str, str] = {
     WEB_SEARCH_MAX_RESULTS: "web_search",
     WEB_SEARCH_EXTRACT: "web_search",
     WEB_SEARCH_PURPOSE_HINT: "web_search",
+    WEB_SEARCH_INTERCEPT: "web_search",
     SANDBOX_URL: "sandbox",
     SANDBOX_PURPOSE_HINT: "sandbox",
     GUARDRAILS_URL: "guardrails",

@@ -294,7 +294,12 @@ class _ResponsesAdapter:
         pool: ToolBackend,
         max_iterations: int,
         on_first_response: Callable[[], None] | None = None,
+        *,
+        emit_native_web_search: bool = False,
     ) -> ResponsesResponse:
+        # ``emit_native_web_search`` is accepted for interface parity and ignored:
+        # this format has no native vocabulary for a server-side tool call, so a
+        # gateway-run search stays invisible on the wire (see docs/tools.md).
         # Standalone dispatch has no lock-in callback; only pass the kwarg on
         # the platform-attempt path so test fakes can mirror each call shape.
         extra: dict[str, Any] = {}
@@ -312,6 +317,8 @@ class _ResponsesAdapter:
         kwargs: dict[str, Any],
         pool: ToolBackend,
         max_iterations: int,
+        *,
+        emit_native_web_search: bool = False,
     ) -> AsyncIterator[ResponseStreamEvent]:
         return responses_tool_loop_stream(
             completion_kwargs=kwargs,
@@ -515,6 +522,7 @@ async def create_response(
         request_body.model_dump(exclude_none=True),
         tools_extracted=tool_ctx.tools_extracted,
         remaining_user_tools=tool_ctx.remaining_user_tools,
+        web_search_declared_name=tool_ctx.web_search_declared_name,
     )
     # This is an internal handoff populated below, never a client request field.
     # ``ResponsesRequest`` permits extra fields for OpenAI compatibility, so

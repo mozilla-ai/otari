@@ -89,7 +89,10 @@ function mockApi(body: UsageSummary | null) {
       });
     }
     if (url.includes("/v1/users")) {
-      return jsonResponse([{ user_id: "alice", alias: "Alice" }]);
+      return jsonResponse([
+        { user_id: "alice", alias: "Alice" },
+        { user_id: "bob", alias: "Bob" },
+      ]);
     }
     if (url.includes("/v1/keys")) {
       return jsonResponse([{ id: "key-1", key_name: "ci-bot", user_id: "alice", allowed_models: null }]);
@@ -362,6 +365,9 @@ describe("UsagePage", () => {
     await user.click(modelInput);
     await user.type(modelInput, "gpt");
     await user.click(await screen.findByRole("option", { name: /gpt-5.6/ }));
+    // The picker stays open on the remaining models (it takes several), so dismiss
+    // it before reaching the page behind the overlay.
+    await user.keyboard("{Escape}");
 
     await user.click(screen.getByRole("button", { name: "User" }));
     const row = (await screen.findByText("alice")).closest("tr")!;
@@ -651,9 +657,66 @@ describe("UsagePage", () => {
     await user.click(screen.getByRole("button", { name: "Add filter" }));
     await user.click(screen.getByPlaceholderText("All keys"));
     await user.click(await screen.findByRole("option", { name: "ci-bot" }));
+    // The picker stays open on the remaining keys; dismiss it to reach the chips.
+    await user.keyboard("{Escape}");
 
-    // The picked key shows as a chip with a remove control.
-    expect(await screen.findByRole("button", { name: "Remove API key filter" })).toBeInTheDocument();
+    // The picked key shows as a chip whose remove control names the value: a
+    // dimension can hold several, so the label has to distinguish them.
+    expect(await screen.findByRole("button", { name: "Remove API key filter ci-bot" })).toBeInTheDocument();
+  });
+
+  it("filters the chart on several models at once", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("gpt-5.6");
+
+    // A spend question is usually a comparison, so the picker accumulates values
+    // and sends them as repeated params (the endpoints match any of them).
+    const modelInput = screen.getByRole("combobox", { name: "Model" });
+    await user.click(modelInput);
+    await user.click(await screen.findByRole("option", { name: "gpt-5.6" }));
+    await user.click(await screen.findByRole("option", { name: "claude-sonnet-5" }));
+
+    await vi.waitFor(() => {
+      const last = fetchMock.mock.calls
+        .map(([u]) => String(u))
+        .filter((u) => u.includes("/v1/usage/summary"))
+        .at(-1);
+      expect(last).toContain("model=gpt-5.6");
+      expect(last).toContain("model=claude-sonnet-5");
+    });
+
+    // Both picks carry their own chip, and removing one leaves the other applied.
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "Remove Model filter gpt-5.6" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove Model filter claude-sonnet-5" }));
+
+    expect(screen.queryByRole("button", { name: "Remove Model filter claude-sonnet-5" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove Model filter gpt-5.6" })).toBeInTheDocument();
+  });
+
+  it("carries a whole multi-value filter into the request log", async () => {
+    const user = userEvent.setup();
+    mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("gpt-5.6");
+
+    // A two-user comparison travels as repeated params, so the log opens on exactly
+    // the traffic the chart was showing rather than on a wider or arbitrary slice.
+    const userInput = screen.getByRole("combobox", { name: "User" });
+    await user.click(userInput);
+    await user.click(await screen.findByRole("option", { name: /alice/ }));
+    await user.click(await screen.findByRole("option", { name: /bob/ }));
+    await user.keyboard("{Escape}");
+
+    const row = (await screen.findByText("gpt-5.6")).closest("tr")!;
+    await user.click(row);
+
+    const loc = screen.getByRole("status", { name: "Current location" }).textContent ?? "";
+    expect(loc).toContain("model=gpt-5.6");
+    expect(loc).toContain("user_id=alice");
+    expect(loc).toContain("user_id=bob");
   });
 });
 

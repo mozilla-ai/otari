@@ -19,7 +19,7 @@ neither operation can desync a budget, matching the boundary the ingest path est
 """
 
 from datetime import datetime
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import ColumnElement, delete, func, select
@@ -27,6 +27,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.sql import MAX_FILTER_VALUES, match_any
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing, UsageLog
@@ -41,6 +42,12 @@ _MAX_IDS = 1000
 # variables in one IN() (999), mirroring the ingest path.
 _REPRICE_CHUNK = 500
 
+# A repeatable entity filter's values, bounded the way the read endpoints bound
+# theirs (see MAX_FILTER_VALUES). The bound is annotated on the list itself rather
+# than on the ``str | list[str]`` field: on the union it would also cap a single
+# value's character length, rejecting a long provider-qualified model name.
+_CappedValues = Annotated[list[str], Field(max_length=MAX_FILTER_VALUES)]
+
 
 class UsageSelection(BaseModel):
     """Which imported usage rows an operation targets.
@@ -54,9 +61,16 @@ class UsageSelection(BaseModel):
     ids: list[str] | None = Field(default=None, max_length=_MAX_IDS)
     by_filter: bool = False
     source: str | None = None
-    model: str | None = None
-    user_id: str | None = None
-    api_key_id: str | None = None
+    # The three entity filters accept several values, matching the repeatable form
+    # the read endpoints take. They have to: "all N matching" is counted from the
+    # filters the operator was shown and re-derived here, so a filter this body
+    # could not express would target more rows than the table displayed. They carry
+    # the read endpoints' ceiling for the mirror of that reason: a value set /count
+    # rejects (422) but a delete accepted would run destructively over rows no count
+    # could have been shown for.
+    model: str | _CappedValues | None = None
+    user_id: str | _CappedValues | None = None
+    api_key_id: str | _CappedValues | None = None
     status: str | None = None
     endpoint: str | None = None
     provider: str | None = None
@@ -145,12 +159,17 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
         return conditions
     if selection.source is not None:
         conditions.append(UsageLog.source == selection.source)
-    if selection.model is not None:
-        conditions.append(UsageLog.model == selection.model)
-    if selection.user_id is not None:
-        conditions.append(UsageLog.user_id == selection.user_id)
-    if selection.api_key_id is not None:
-        conditions.append(UsageLog.api_key_id == selection.api_key_id)
+    # An empty list is no filter at all, the same reading the count endpoint applies.
+    # That agreement is the point: the "N matching" an operator confirms comes from
+    # /v1/usage/count over this same filter set, so a dimension the two endpoints
+    # scoped differently would delete a different number of rows than the dialog
+    # promised. (The dashboard sends the field absent, never empty.)
+    if selection.model is not None and selection.model != []:
+        conditions.append(match_any(UsageLog.model, selection.model))
+    if selection.user_id is not None and selection.user_id != []:
+        conditions.append(match_any(UsageLog.user_id, selection.user_id))
+    if selection.api_key_id is not None and selection.api_key_id != []:
+        conditions.append(match_any(UsageLog.api_key_id, selection.api_key_id))
     if selection.status is not None:
         conditions.append(UsageLog.status == selection.status)
     if selection.endpoint is not None:

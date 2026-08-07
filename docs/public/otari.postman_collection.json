@@ -2393,6 +2393,29 @@
     {
       "item": [
         {
+          "name": "List Tools",
+          "request": {
+            "description": "List the tools Otari runs itself, with the declaration forms it accepts.\n\nEvery other `tools[]` entry, including provider-native keywords not listed\nhere, is forwarded to the upstream provider untouched.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "tools"
+              ],
+              "raw": "{{baseUrl}}/v1/tools"
+            }
+          }
+        }
+      ],
+      "name": "tools"
+    },
+    {
+      "item": [
+        {
           "name": "List Usage",
           "request": {
             "description": "List usage logs ordered by timestamp (most recent first).\n\nSupports optional filters for time range, user, status, failure status code,\nmodel, endpoint, provider, source, session (``source_label``), and request\ngroup (``request_group_id``, repeatable, which returns a routed request's\nwhole attempt plan). Paginated via skip/limit. The return shape is a bare JSON array; external\nbilling/analytics consumers depend on this, so the total row count for a\npaginated UI is served separately by ``GET /v1/usage/count`` rather than\nwrapped in an envelope here. Timestamps accept either ISO 8601 strings or\nUnix epoch seconds (numeric).",
@@ -2420,7 +2443,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single user",
+                  "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "user_id",
                   "value": ""
@@ -2438,7 +2461,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single model",
+                  "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "model",
                   "value": ""
@@ -2468,7 +2491,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single API key id",
+                  "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
                   "value": ""
@@ -2561,7 +2584,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single user",
+                  "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "user_id",
                   "value": ""
@@ -2579,7 +2602,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single model",
+                  "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "model",
                   "value": ""
@@ -2609,7 +2632,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single API key id",
+                  "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
                   "value": ""
@@ -2711,7 +2734,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single user",
+                  "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "user_id",
                   "value": ""
@@ -2729,7 +2752,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single model",
+                  "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "model",
                   "value": ""
@@ -2759,7 +2782,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single API key id",
+                  "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
                   "value": ""
@@ -2829,7 +2852,7 @@
         {
           "name": "Usage Summary",
           "request": {
-            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold, billed token counts), the error taxonomy grouped\nby failure status code, and a UTC-bucketed time series carrying each bucket's\nerror count and billed token composition (input incl. cache, cache read/write,\noutput).\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.",
+            "description": "Aggregate spend, tokens, and request volume for the dashboard Usage page.\n\nRange-bounded (default last 30 days, hard-capped): unlike the raw ``/v1/usage``\nlist, every aggregate is scoped to a bounded window so it stays served by the\ntimestamp index. Returns grand totals, breakdowns by model / user / API key /\nsource / session (``source_label``) / endpoint / provider (top rows plus a\nreconciling ``other`` fold, billed token counts), the error taxonomy grouped\nby failure status code, and a UTC-bucketed time series carrying each bucket's\nerror count and billed token composition (input incl. cache, cache read/write,\noutput).\n\nEach breakdown is its own ``GROUP BY`` pass, so a caller that reads only the\ntotals or the series should narrow ``dimensions`` rather than pay for all eight\n(the dashboard's tiles, timeline context, and model typeahead all do). Omitting\nthe parameter keeps the full set.\n\n``model``, ``user_id``, and ``api_key_id`` are repeatable: several values match\nany of them, so one chart can compare a handful of models, users, or keys.",
             "header": [],
             "method": "GET",
             "url": {
@@ -2855,7 +2878,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single user",
+                  "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "user_id",
                   "value": ""
@@ -2873,7 +2896,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single model",
+                  "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "model",
                   "value": ""
@@ -2903,7 +2926,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single API key id",
+                  "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
                   "value": ""
@@ -2972,7 +2995,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single user",
+                  "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "user_id",
                   "value": ""
@@ -2990,7 +3013,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single model",
+                  "description": "Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "model",
                   "value": ""
@@ -3020,7 +3043,7 @@
                   "value": ""
                 },
                 {
-                  "description": "Filter to a single API key id",
+                  "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
                   "disabled": true,
                   "key": "api_key_id",
                   "value": ""

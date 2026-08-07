@@ -799,3 +799,64 @@ async def test_call_tool_span_records_error_when_backend_unreachable(monkeypatch
     assert attrs is not None
     assert attrs["exception.type"] == "httpx.ConnectError"
 
+
+
+# --- structured results for native citation blocks ---------------------------
+
+
+@pytest.mark.asyncio
+async def test_take_last_results_returns_structured_hits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The formatted string the model reads has flattened the hits; a caller building
+    native citation blocks needs them structured."""
+    _patched_async_client(
+        {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
+        monkeypatch,
+    )
+
+    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=False) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
+        results = backend.take_last_results()
+
+    assert [r["url"] for r in results] == ["https://example.com/post-a", "https://example.org/post-b"]
+    assert results[0]["title"] == "Post A"
+
+
+@pytest.mark.asyncio
+async def test_take_last_results_clears_the_buffer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second take cannot re-attribute the first call's hits."""
+    _patched_async_client(
+        {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
+        monkeypatch,
+    )
+
+    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=False) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
+        assert backend.take_last_results()
+        assert backend.take_last_results() == []
+
+
+@pytest.mark.asyncio
+async def test_take_last_results_empty_after_a_failed_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A raise must not leave the previous call's hits for this one to claim."""
+    handlers: dict[tuple[str, str], Any] = {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)}
+    _patched_async_client(handlers, monkeypatch)
+
+    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=False) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "first"})
+        # The transport reads this dict per request, so the next call fails.
+        handlers[("searxng", "/search")] = httpx.ConnectError("connection refused")
+        with pytest.raises(WebSearchNotReachableError):
+            await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "second"})
+        assert backend.take_last_results() == []
+
+
+@pytest.mark.asyncio
+async def test_take_last_results_empty_for_an_empty_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched_async_client(
+        {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
+        monkeypatch,
+    )
+
+    async with WebSearchBackend(base_url="http://searxng:8080", extract_content=False) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "   "})
+        assert backend.take_last_results() == []

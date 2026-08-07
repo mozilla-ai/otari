@@ -154,6 +154,56 @@ def test_all_settlement_callbacks_wired_for_every_format_and_path(
         assert "X-Correlation-ID" not in response.headers
 
 
+@pytest.mark.parametrize("adapter", ADAPTERS)
+@pytest.mark.parametrize(
+    ("interval_ms", "expected_seconds"),
+    [(15000, 15.0), (2500, 2.5), (0, 0.0)],
+    ids=["default", "custom", "disabled"],
+)
+def test_keepalive_interval_wired_from_config_for_every_format(
+    monkeypatch: pytest.MonkeyPatch,
+    adapter: Any,
+    interval_ms: int,
+    expected_seconds: float,
+) -> None:
+    """The transport keepalive interval reaches the generator for every format.
+
+    Without this the config field is inert and a slow time-to-first-token still
+    writes nothing downstream until an intermediary severs the connection.
+    """
+    captured: dict[str, Any] = {}
+
+    def fake_streaming_generator(**kwargs: Any) -> AsyncIterator[str]:
+        captured.update(kwargs)
+
+        async def _gen() -> AsyncIterator[str]:
+            yield "data: {}\n\n"
+
+        return _gen()
+
+    monkeypatch.setattr(pipeline, "streaming_generator", fake_streaming_generator)
+
+    async def _empty() -> AsyncIterator[Any]:
+        return
+        yield  # unreachable; makes this a generator
+
+    build_streaming_response(
+        adapter=adapter,
+        stream=_empty(),
+        provider=LLMProvider.OPENAI,
+        model="m",
+        config=GatewayConfig(streaming_keepalive_interval_ms=interval_ms),
+        db=None,
+        log_writer=None,
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+    )
+
+    assert captured["keepalive_interval_seconds"] == expected_seconds
+
+
 # ---------------------------------------------------------------------------
 # First-chunk timeout parity
 # ---------------------------------------------------------------------------

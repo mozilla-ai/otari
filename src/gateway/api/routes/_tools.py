@@ -6,12 +6,23 @@ Chat-Completions, Anthropic Messages, and OpenAI Responses endpoints so
 ``otari_code_execution`` / ``otari_web_search`` requests get identical
 handling regardless of wire shape.
 
-Only the explicit ``otari_*`` tool types trigger gateway-side execution.
-Every other tool type — the legacy gateway short forms (``code_execution`` /
-``web_search``) and the provider-native keywords (``code_interpreter`` /
+The explicit ``otari_*`` tool types always trigger gateway-side execution.
+Every other tool type — the short forms (``code_execution`` / ``web_search``)
+and the provider-native keywords (``code_interpreter`` /
 ``code_execution_<date>`` / ``web_search_<date>``) — is left untouched in
 ``tools[]`` and forwarded to the upstream provider, which runs it server-side.
-The keyword alone says who runs the code — no flag, no env toggle.
+For code execution the keyword alone says who runs it: no flag, no env toggle.
+
+Web search has one opt-in exception. A client that cannot be told to say
+``otari_web_search`` (Claude Code, the Anthropic SDK, anything speaking a
+provider's native vocabulary) would otherwise never reach a configured gateway
+backend. Setting ``web_search_intercept`` makes the gateway also claim the
+provider-named web-search keywords, so those clients work unchanged. It is off
+by default because turning it on silently takes a search away from a provider
+that would have run it (see ``docs/tools.md``). An OpenAI ``function`` named
+``web_search`` is deliberately *not* claimed even then: that is a caller's own
+tool, and hijacking it means the caller's handler never fires and it never gets
+back a ``tool_call`` it can dispatch.
 """
 
 from __future__ import annotations
@@ -24,7 +35,7 @@ from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.services.tool_usage import ToolUsageTally
-from gateway.services.web_search_backend import WebSearchBackend
+from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME, WebSearchBackend
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -47,6 +58,14 @@ class Tool(StrEnum):
     WEB_SEARCH = auto()  # -> "otari_web_search"
 
 
+# The provider-named web-search keywords the gateway claims when interception is
+# on: the bare short form, and any dated/preview variant. The prefix match keeps
+# future Anthropic versions (``web_search_20991231``) and OpenAI's Responses
+# spellings (``web_search_preview``) working without a release here.
+_BARE_WEB_SEARCH_TYPE = "web_search"
+_VERSIONED_WEB_SEARCH_PREFIX = "web_search_"
+
+
 def _is_web_search_tool_type(type_value: Any) -> bool:
     """Recognise the explicit gateway-managed web_search tool type.
 
@@ -57,6 +76,39 @@ def _is_web_search_tool_type(type_value: Any) -> bool:
     if not isinstance(type_value, str):
         return False
     return type_value == Tool.WEB_SEARCH
+
+
+def _is_provider_web_search_tool_type(type_value: Any) -> bool:
+    """Recognise a provider-named web-search keyword (interception only).
+
+    ``"web_search"`` (Claude Code's short form, OpenAI Responses' native type)
+    or any ``"web_search_<suffix>"`` variant. Does not match
+    ``"otari_web_search"``, which :func:`_is_web_search_tool_type` owns.
+    """
+    if not isinstance(type_value, str):
+        return False
+    return type_value == _BARE_WEB_SEARCH_TYPE or type_value.startswith(_VERSIONED_WEB_SEARCH_PREFIX)
+
+
+def _is_any_web_search_tool_type(type_value: Any) -> bool:
+    """The gateway-managed type or a provider-named keyword."""
+    return _is_web_search_tool_type(type_value) or _is_provider_web_search_tool_type(type_value)
+
+
+def declares_native_web_search(tool_entry: dict[str, Any] | None) -> bool:
+    """Whether the caller declared web search in a provider's *native* vocabulary.
+
+    True for a dated/preview keyword (``web_search_20250305``), which is what the
+    Anthropic SDK, Claude Code, and Claude Desktop send and what makes them expect
+    ``server_tool_use`` / ``web_search_tool_result`` blocks back so a citations
+    panel has something to render. False for ``otari_web_search`` and for the bare
+    ``web_search`` short form: neither implies the native response shape, so those
+    callers keep receiving the plain-text result they always have.
+    """
+    if not tool_entry:
+        return False
+    type_value = tool_entry.get("type")
+    return isinstance(type_value, str) and type_value.startswith(_VERSIONED_WEB_SEARCH_PREFIX)
 
 
 def _is_code_execution_tool_type(type_value: Any) -> bool:
@@ -92,6 +144,7 @@ def _strip_gateway_fields(
     *,
     tools_extracted: bool = False,
     remaining_user_tools: list[dict[str, Any]] | None = None,
+    web_search_declared_name: str | None = None,
 ) -> dict[str, Any]:
     """Strip gateway-internal fields from a ``request.model_dump(...)`` payload.
 
@@ -100,6 +153,10 @@ def _strip_gateway_fields(
     web_search / future), pass ``tools_extracted=True`` and the remaining
     user-supplied tools; the original ``tools`` list is replaced (or popped
     entirely if none remain).
+
+    ``web_search_declared_name`` is the ``name`` on an extracted web-search entry.
+    When the caller forced that name with ``tool_choice``, the choice is retargeted
+    to the backend's canonical tool name (see :func:`_retargeted_tool_choice`).
 
     Sensitive provider-call fields (credentials, ``provider`` selection, ...) are
     also stripped: the request schemas never derive them (see
@@ -117,6 +174,8 @@ def _strip_gateway_fields(
             fields["tools"] = remaining_user_tools
         else:
             fields.pop("tools", None)
+    if web_search_declared_name and "tool_choice" in fields:
+        fields["tool_choice"] = _retargeted_tool_choice(fields["tool_choice"], web_search_declared_name)
     return fields
 
 
@@ -175,14 +234,76 @@ def _extract_code_execution_tool(
 
 def _extract_web_search_tool(
     tools: list[dict[str, Any]] | None,
+    *,
+    intercept: bool = False,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]] | None]:
-    """Pull the first ``{"type": "otari_web_search"}`` entry out of ``tools``.
+    """Pull the first gateway-run web-search entry out of ``tools``.
 
-    Only the explicit gateway-managed type is extracted (and run against the
-    gateway's web_search backend). Provider-named web_search keywords stay in
-    ``tools[]`` and reach the upstream provider unchanged.
+    With ``intercept`` off (the default) only the explicit
+    ``{"type": "otari_web_search"}`` is extracted; provider-named web_search
+    keywords stay in ``tools[]`` and reach the upstream provider unchanged.
+
+    With ``intercept`` on, the provider-named keywords (``web_search``,
+    ``web_search_<date>``) are claimed too, so a client that only speaks a
+    provider's vocabulary reaches the gateway's backend. An OpenAI ``function``
+    named ``web_search`` is still never claimed; see the module docstring.
     """
-    return _extract_first_matching_tool(tools, _is_web_search_tool_type)
+    predicate = _is_any_web_search_tool_type if intercept else _is_web_search_tool_type
+    return _extract_first_matching_tool(tools, predicate)
+
+
+def _retargeted_tool_choice(tool_choice: Any, declared_name: str) -> Any:
+    """Point a forced ``tool_choice`` at the gateway's canonical web-search tool.
+
+    A caller may declare web search under its own name
+    (``{"type": "web_search_20250305", "name": "search_the_web"}``) and force it
+    with a matching ``tool_choice``. The declaration is replaced by the backend's
+    own tool, which is named :data:`WEB_SEARCH_TOOL_NAME`, so an unrewritten
+    ``tool_choice`` would name a tool the provider never received and be rejected.
+
+    Only a choice naming ``declared_name`` is rewritten; ``auto`` / ``any`` /
+    ``none`` and choices naming a different tool pass through untouched. Returns a
+    new object rather than mutating the caller's.
+    """
+    if not isinstance(tool_choice, dict) or declared_name == WEB_SEARCH_TOOL_NAME:
+        return tool_choice
+    # Anthropic: {"type": "tool", "name": ...}. Responses: {"type": "function", "name": ...}.
+    if tool_choice.get("name") == declared_name:
+        return {**tool_choice, "name": WEB_SEARCH_TOOL_NAME}
+    # Chat Completions: {"type": "function", "function": {"name": ...}}.
+    function = tool_choice.get("function")
+    if isinstance(function, dict) and function.get("name") == declared_name:
+        return {**tool_choice, "function": {**function, "name": WEB_SEARCH_TOOL_NAME}}
+    return tool_choice
+
+
+def _web_search_intercept_enabled(config: GatewayConfig | None = None) -> bool:
+    """Whether provider-named web-search keywords are claimed by the gateway.
+
+    Effective config value (dashboard override / ``OTARI_WEB_SEARCH_INTERCEPT`` env /
+    YAML) first, falling back to the env var so pure-env deployments work without a
+    config file. Off when unset, so an upgrade never changes who runs a search.
+    """
+    configured = config.web_search_intercept if config is not None else None
+    if configured is not None:
+        return configured
+    raw = otari_env("WEB_SEARCH_INTERCEPT")
+    if raw is None:
+        return False
+    return raw.strip().lower() not in {"", "0", "false", "no", "off"}
+
+
+def web_search_declaration_forms(config: GatewayConfig | None = None) -> list[str]:
+    """Every ``tools[].type`` this deployment routes to the web-search backend.
+
+    Advertised by ``GET /v1/tools``. The dated form is spelled with a placeholder
+    (``web_search_<date>``) because the match is a prefix, not a fixed list: any
+    suffix works, including future Anthropic versions.
+    """
+    forms = [str(Tool.WEB_SEARCH)]
+    if _web_search_intercept_enabled(config):
+        forms += [_BARE_WEB_SEARCH_TYPE, f"{_VERSIONED_WEB_SEARCH_PREFIX}<date>"]
+    return forms
 
 
 def _resolve_web_search_purpose_hint(

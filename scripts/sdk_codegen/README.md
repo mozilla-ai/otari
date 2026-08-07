@@ -57,11 +57,29 @@ policy and the spec-version to minimum-SDK-version matrix.
 ## Endpoint-coverage drift gate
 
 Because the core is generated but the shell is hand-written, a new gateway
-endpoint can land in the spec without a corresponding shell method. Each SDK
-repo runs an endpoint-coverage drift gate against the gateway's published spec
-to catch this: if the generated core gains endpoints the SDK does not yet
-surface, the gate fails, signalling that the SDK needs a regeneration plus shell
-wiring for the new surface.
+endpoint can land in the spec without a corresponding shell method. The drift
+gate catches that.
+
+`sdk-endpoints.txt` in this directory is the **canonical** manifest: every
+endpoint in `docs/public/openapi.json` must be listed under `[covered]` (a
+public SDK wrapper surfaces it) or `[excluded]` (deliberately not surfaced,
+with a reason). `tests/unit/test_sdk_endpoint_coverage.py` enforces both
+directions against the spec **from the same commit**, so a gateway PR that adds
+an endpoint fails the gateway's own build until the endpoint is classified.
+`endpoint_manifest.py` holds the parsing and comparison logic.
+
+The codegen workflow copies the manifest into each SDK repo alongside the
+generated core, so the four copies are generated artifacts. Edit the copy here;
+edits in an SDK repo are overwritten on the next regeneration.
+
+This arrangement is deliberate. The gate used to live only in the SDK repos,
+where each copy fetched the gateway's spec from `main` over the network at test
+time. That made the check a moving target: an unchanged SDK commit passed one
+day and failed the next, and because SDK CI only runs on push or PR, all four
+`main` branches sat red and unnoticed for over two weeks
+([#438](https://github.com/mozilla-ai/otari/issues/438)). Validating here
+instead means drift fails in the repo that causes it, at the moment it is
+caused, against a spec that cannot change underneath the assertion.
 
 ## Local usage
 
@@ -112,6 +130,13 @@ pull requests that touch the spec or codegen tooling (but opens no PRs and needs
 no token), so a spec change that breaks generation for any language is caught on
 the PR rather than failing the post-merge codegen workflow. Keep its toolchain
 and matrix in sync with `otari-sdk-codegen.yml`.
+
+After opening the PR the workflow queues **auto-merge** on it, so a green
+regeneration lands without waiting for someone to notice. This needs *Allow
+auto-merge* enabled in each SDK repo's settings; if it is off, the step logs a
+warning and the regeneration still succeeds. Where branch protection requires an
+approving review, the merge stays queued until someone approves rather than
+merging unattended.
 
 **Required secret:** `SDK_CODEGEN_TOKEN`, a fine-grained PAT or GitHub App token
 with `Contents:write` and `Pull-requests:write` on the four SDK repos. The default
