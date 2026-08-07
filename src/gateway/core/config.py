@@ -385,9 +385,10 @@ class GatewayConfig(BaseSettings):
         description=(
             "Idle interval in milliseconds after which a streaming response emits a transport "
             "keepalive while it waits on the provider: a 'ping' event on /v1/messages, an SSE "
-            "comment line on /v1/chat/completions and /v1/responses. Keeps an intermediary with "
-            "an idle timeout (Cloudflare's is 100s) from severing a connection during a long "
-            "time-to-first-token. Does not extend any first-chunk or failover deadline. 0 disables."
+            "comment line on /v1/chat/completions and /v1/responses. Keeps an intermediary with a "
+            "read timeout (Cloudflare's default Proxy Read Timeout is 125s) from severing a connection "
+            "during a long time-to-first-token. Does not extend any first-chunk or failover deadline. "
+            "0 disables."
         ),
     )
     model_discovery: bool = Field(

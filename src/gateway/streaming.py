@@ -180,12 +180,12 @@ async def streaming_generator(
             (e.g. client disconnect mid-stream). Used to release any budget
             reservation so it does not leak.
         keepalive_interval_seconds: Emit ``fmt.keepalive`` whenever the upstream has
-            produced nothing for this long, so an intermediary with an idle timeout
-            (Cloudflare's is 100s) does not sever a connection that is merely
-            waiting on a slow time-to-first-token. Transport-level only: keepalives
-            never reach usage accounting, and they do not extend any first-chunk or
-            failover deadline, which stay in charge of giving up on a hung upstream.
-            0 disables.
+            produced nothing for this long, so an intermediary with a read timeout
+            (Cloudflare's default Proxy Read Timeout is 125s) does not sever a
+            connection that is merely waiting on a slow time-to-first-token.
+            Transport-level only: keepalives never reach usage accounting, and they
+            do not extend any first-chunk or failover deadline, which stay in charge
+            of giving up on a hung upstream. 0 disables.
 
     """
     usage = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
