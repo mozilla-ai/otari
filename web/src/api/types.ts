@@ -497,7 +497,12 @@ export interface UpdateBudgetRequest {
 export interface UsageEntry {
   id: string;
   user_id: string | null;
+  // Row labels resolved server-side, so rendering a page never depends on
+  // holding the users/api_keys tables client-side. Null when there is no owner,
+  // the entity was deleted, or it simply has no label; fall back to the id.
+  user_alias?: string | null;
   api_key_id: string | null;
+  api_key_name?: string | null;
   timestamp: string;
   model: string;
   provider: string | null;
@@ -663,6 +668,12 @@ export interface UsageTotals {
 // (`is_other: false`); `is_other` tells them apart.
 export interface UsageGroupRow {
   key: string | null;
+  // Display name for an opaque key, resolved server-side in the same GROUP BY:
+  // set only on `by_user` and `by_api_key`, and null there when the entity has
+  // no label or is gone. Falling back to `key` is what makes this safe to read
+  // unconditionally. It is why the user and key pickers no longer need every
+  // user and every key loaded to name a filter option.
+  label?: string | null;
   cost: number;
   tokens: number;
   requests: number;

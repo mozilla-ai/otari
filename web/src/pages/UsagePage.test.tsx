@@ -30,10 +30,12 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
       { key: null, cost: 110.5, tokens: 1_400_000, requests: 14_000, is_other: true },
     ],
     by_user: [
-      { key: "alice", cost: 900.5, tokens: 8_000_000, requests: 50_000, is_other: false },
-      { key: "bob", cost: 340, tokens: 4_400_000, requests: 34_000, is_other: false },
+      { key: "alice", label: "Alice", cost: 900.5, tokens: 8_000_000, requests: 50_000, is_other: false },
+      { key: "bob", label: "Bob", cost: 340, tokens: 4_400_000, requests: 34_000, is_other: false },
     ],
-    by_api_key: [],
+    // `label` is the server-resolved key name; the picker reads it from here
+    // rather than from a full /v1/keys listing.
+    by_api_key: [{ key: "key-1", label: "ci-bot", cost: 500, tokens: 5_000_000, requests: 30_000, is_other: false }],
     by_source: [
       { key: "gateway", cost: 1_000, tokens: 9_000_000, requests: 60_100, is_other: false },
       { key: "claude_code", cost: 240.5, tokens: 3_400_000, requests: 23_900, is_other: false },

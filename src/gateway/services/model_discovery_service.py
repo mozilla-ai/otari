@@ -152,6 +152,18 @@ class ModelCache:
             return None
         return entry.result
 
+    def stale(self, provider: str) -> ProviderDiscovery | None:
+        """The last known result for ``provider`` at any age, or ``None``.
+
+        Read-only and never dials, unlike :meth:`get`, which is bounded by a TTL
+        and hides failures. This is what lets a read endpoint answer from the
+        cache while the background refresher owns the dialing: freshness is then
+        bounded by the refresh interval rather than paid for by whoever happens
+        to arrive after the TTL lapsed.
+        """
+        entry = self._store.get(provider)
+        return _copy_discovery(entry.result) if entry is not None else None
+
     async def get_or_discover(
         self,
         provider: str,
@@ -159,6 +171,7 @@ class ModelCache:
         positive_ttl: float,
         negative_ttl: float,
         discover: Callable[[], Awaitable[ProviderDiscovery]],
+        serve_stale: bool = False,
     ) -> ProviderDiscovery:
         """Return a cached result, or run ``discover`` once (single-flight).
 
@@ -167,7 +180,17 @@ class ModelCache:
         provider awaits that one task, so a slow provider is dialed once, not
         once per request. ``discover`` is expected to report failure by
         returning a ``ProviderDiscovery`` with ``error`` set rather than raising.
+
+        ``serve_stale`` accepts a cached result of any age, so a read never waits
+        on a provider that has been dialed at least once. A provider with no
+        entry at all still dials (single-flighted), which keeps a cold worker
+        correct rather than briefly claiming the provider has no models.
         """
+        if serve_stale:
+            stale = self.stale(provider)
+            if stale is not None:
+                return stale
+
         cached = self._fresh(provider, positive_ttl, negative_ttl)
         if cached is not None:
             return _copy_discovery(cached)
@@ -422,20 +445,33 @@ async def _discover_uncached(config: GatewayConfig, instance: str) -> ProviderDi
     return ProviderDiscovery(provider=instance, models=models)
 
 
-async def discover_provider_models(config: GatewayConfig, instance: str) -> ProviderDiscovery:
+async def discover_provider_models(
+    config: GatewayConfig,
+    instance: str,
+    *,
+    serve_stale: bool = False,
+    force: bool = False,
+) -> ProviderDiscovery:
     """Discover one instance's models, cached (positive + negative) and single-flighted.
 
     ``discover_all_models`` drops a failing provider and logs it, which is right
     for a catalog served to API callers: one broken provider should not blank the
     listing. An operator choosing a model needs the opposite, because an empty
     dropdown and a provider whose key is wrong look identical.
+
+    ``serve_stale`` answers from the cache at any age (see
+    :meth:`ModelCache.get_or_discover`). ``force`` treats every cached entry as
+    expired so the provider is dialed, without clearing the cache first: the
+    in-flight registration still coalesces concurrent callers, so the background
+    refresher and a request arriving mid-tick share one dial rather than racing.
     """
     cache = get_model_cache()
     return await cache.get_or_discover(
         instance,
-        positive_ttl=config.model_cache_ttl_seconds,
-        negative_ttl=config.model_discovery_negative_ttl_seconds,
+        positive_ttl=0 if force else config.model_cache_ttl_seconds,
+        negative_ttl=0 if force else config.model_discovery_negative_ttl_seconds,
         discover=lambda: _discover_uncached(config, instance),
+        serve_stale=serve_stale and not force,
     )
 
 
@@ -509,7 +545,12 @@ async def test_provider_credentials(
     return ProviderDiscovery(provider=impl_name, models=list(models))
 
 
-async def discover_models_with_status(config: GatewayConfig) -> list[ProviderDiscovery]:
+async def discover_models_with_status(
+    config: GatewayConfig,
+    *,
+    serve_stale: bool = False,
+    force: bool = False,
+) -> list[ProviderDiscovery]:
     """Discover every configured instance's models concurrently, keeping errors.
 
     Deliberately not gated on ``config.model_discovery``: that flag governs what
@@ -523,7 +564,7 @@ async def discover_models_with_status(config: GatewayConfig) -> list[ProviderDis
     # cannot 500 the whole operator listing (this route awaits with no guard);
     # surface it as a per-provider error instead. Real cancellation still bubbles.
     results = await asyncio.gather(
-        *(discover_provider_models(config, name) for name in instances),
+        *(discover_provider_models(config, name, serve_stale=serve_stale, force=force) for name in instances),
         return_exceptions=True,
     )
     discoveries: list[ProviderDiscovery] = []
@@ -541,6 +582,8 @@ async def discover_models_with_status(config: GatewayConfig) -> list[ProviderDis
 async def discover_all_models(
     config: GatewayConfig,
     provider_filter: str | None = None,
+    *,
+    serve_stale: bool = False,
 ) -> list[tuple[str, Model]]:
     """Discover models from the configured providers with caching.
 
@@ -570,7 +613,7 @@ async def discover_all_models(
     # return_exceptions so a single provider cannot abort the catalog build; real
     # cancellation still bubbles.
     results = await asyncio.gather(
-        *(discover_provider_models(config, name) for name in instances),
+        *(discover_provider_models(config, name, serve_stale=serve_stale) for name in instances),
         return_exceptions=True,
     )
 
@@ -585,3 +628,69 @@ async def discover_all_models(
         # the API catalog so one bad provider does not blank the whole listing.
         result_models.extend((discovery.provider, model) for model in discovery.models)
     return result_models
+
+
+# --------------------------------------------------------------------------- #
+# Background refresh
+# --------------------------------------------------------------------------- #
+
+# Floor on the refresh cadence. ``model_cache_ttl_seconds`` is an operator-facing
+# freshness knob, and a very small value would otherwise turn into a re-dial storm
+# against every configured provider. Reads still serve the cache below this floor;
+# they are simply refreshed no faster than this.
+_MIN_REFRESH_INTERVAL_SECONDS = 30.0
+
+
+def background_discovery_enabled(config: GatewayConfig) -> bool:
+    """Whether reads may answer from the cache because a refresher fills it.
+
+    Tied to ``model_cache_ttl_seconds``, which is already the switch for this:
+    setting it to 0 is the documented way to disable discovery caching, and that
+    has to keep meaning "dial on every read" rather than silently becoming "serve
+    a cache nothing refreshes". There is deliberately no second knob for "cache
+    but do not refresh": that combination only produces a cache that goes stale
+    forever, which is not a mode worth offering.
+    """
+    return config.model_cache_ttl_seconds > 0
+
+
+def _refresh_interval(config: GatewayConfig) -> float:
+    return max(_MIN_REFRESH_INTERVAL_SECONDS, float(config.model_cache_ttl_seconds))
+
+
+async def refresh_discovery_cache(config: GatewayConfig) -> None:
+    """Re-dial every configured provider and store the result.
+
+    Failures are already per-provider (``discover_models_with_status`` reports
+    them rather than raising), so this only guards against an unexpected error
+    taking the refresher down with it.
+    """
+    await discover_models_with_status(config, force=True)
+
+
+async def run_discovery_refresher(config: GatewayConfig, interval: float | None = None) -> None:
+    """Keep the discovery cache warm so no read waits on a provider dial.
+
+    Discovery was the last cache in the gateway still filled on the request path,
+    which put ``model_discovery_timeout_seconds`` (10s by default, per unreachable
+    provider) on the critical path of a dashboard page load, and held that page's
+    database session open for the duration. This is the same refresher shape the
+    alias, policy, provider and price caches already use.
+
+    Primes once immediately so the first read is served from cache, then re-dials
+    on the interval. Every error is swallowed and retried on the next tick so one
+    bad round cannot freeze the catalog. Cancelled at shutdown.
+    """
+    while True:
+        try:
+            await refresh_discovery_cache(config)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Model discovery refresh failed; retrying on the next tick", exc_info=True)
+        await asyncio.sleep(interval if interval is not None else _refresh_interval(config))
+
+
+def reset_discovery_cache() -> None:
+    """Drop every cached discovery (shutdown, and tests)."""
+    get_model_cache().clear()

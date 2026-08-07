@@ -68,6 +68,7 @@ async def check_provider_health(
     instance: str,
     *,
     refresh: bool = False,
+    serve_stale: bool = False,
 ) -> ProviderHealth:
     """Report one instance's reachability via the shared model-discovery path.
 
@@ -77,10 +78,15 @@ async def check_provider_health(
     lands within ``_REFRESH_DEBOUNCE_SECONDS`` of the last dial is coalesced onto
     that recent result instead, so a burst of re-checks keeps the discovery
     subsystem's single-flight coalescing rather than detaching the in-flight task.
+
+    ``serve_stale`` answers from the cache at any age, for the polled monitor
+    view: the background refresher owns the dialing, so an hourly poll must not
+    be the thing that pays a 10s timeout for an unreachable provider. It is
+    ignored under ``refresh``, which exists precisely to bypass the cache.
     """
     if refresh and _refresh_should_redial(instance):
         get_model_cache().clear(instance)
-    discovery = await discover_provider_models(config, instance)
+    discovery = await discover_provider_models(config, instance, serve_stale=serve_stale and not refresh)
     return ProviderHealth(
         instance=instance,
         ok=discovery.error is None,
@@ -95,6 +101,7 @@ async def check_all_provider_health(
     config: GatewayConfig,
     *,
     refresh: bool = False,
+    serve_stale: bool = False,
 ) -> list[ProviderHealth]:
     """Check every configured instance concurrently, keeping per-provider errors.
 
@@ -105,7 +112,7 @@ async def check_all_provider_health(
     """
     instances = list(config.providers)
     results = await asyncio.gather(
-        *(check_provider_health(config, name, refresh=refresh) for name in instances),
+        *(check_provider_health(config, name, refresh=refresh, serve_stale=serve_stale) for name in instances),
         return_exceptions=True,
     )
     health: list[ProviderHealth] = []

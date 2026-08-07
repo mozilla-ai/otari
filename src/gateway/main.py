@@ -23,6 +23,16 @@ from gateway.services.dashboard_session_service import revoke_sessions_on_master
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
+from gateway.services.model_catalog_service import (
+    background_catalog_enabled,
+    clear_catalog_cache,
+    run_catalog_refresher,
+)
+from gateway.services.model_discovery_service import (
+    background_discovery_enabled,
+    reset_discovery_cache,
+    run_discovery_refresher,
+)
 from gateway.services.policy_store import (
     load_policies_at_startup,
     reset_policy_cache,
@@ -119,6 +129,8 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         policy_refresher: asyncio.Task[None] | None = None
         provider_refresher: asyncio.Task[None] | None = None
         price_refresher: asyncio.Task[None] | None = None
+        discovery_refresher: asyncio.Task[None] | None = None
+        catalog_refresher: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
@@ -169,6 +181,17 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # served the confirm; reload it on a TTL so sibling workers and replicas
             # converge, the same way aliases and provider credentials do.
             price_refresher = asyncio.create_task(run_price_snapshot_refresher())
+            # Discovery is the one cache that used to be filled on the request
+            # path, which put model_discovery_timeout_seconds (10s per
+            # unreachable provider) on a dashboard page load and held that
+            # request's database session open for the whole dial. The refresher
+            # owns the dialing now and reads answer from the cache. Not awaited:
+            # priming runs on its first tick so a slow provider cannot delay boot.
+            if background_discovery_enabled(config):
+                discovery_refresher = asyncio.create_task(run_discovery_refresher(config))
+            # Same shape for the models.dev catalog, whose fetch is bounded at 15s.
+            if background_catalog_enabled(config):
+                catalog_refresher = asyncio.create_task(run_catalog_refresher(config))
 
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
@@ -198,6 +221,16 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 price_refresher.cancel()
                 with suppress(asyncio.CancelledError):
                     await price_refresher
+            if discovery_refresher is not None:
+                discovery_refresher.cancel()
+                with suppress(asyncio.CancelledError):
+                    await discovery_refresher
+                reset_discovery_cache()
+            if catalog_refresher is not None:
+                catalog_refresher.cancel()
+                with suppress(asyncio.CancelledError):
+                    await catalog_refresher
+                clear_catalog_cache()
             # Only stop a writer that actually started; if start() raised there is
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:

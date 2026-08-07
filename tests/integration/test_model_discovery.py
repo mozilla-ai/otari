@@ -890,3 +890,180 @@ def test_provider_health_requires_master_key(
     """The endpoint describes gateway config, so it is master-key gated."""
     resp = two_provider_client.get("/v1/providers/health")
     assert resp.status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# Background refresh: no read dials a provider on the request path
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cached_discovery_client(postgres_url: str) -> Generator[TestClient]:
+    """A client on the production defaults, whose tests seed the cache themselves.
+
+    Identical to ``discovery_client``; named apart because these tests assert
+    what the *read* path does once the cache is warm, and each seeds it. The
+    refresher that fills it in production is suppressed suite-wide by the
+    ``_no_background_refresh`` fixture in conftest.
+    """
+    get_model_cache().clear()
+    yield from _make_client(
+        GatewayConfig(
+            database_url=postgres_url,
+            master_key="test-master-key",
+            host="127.0.0.1",
+            port=8000,
+            auto_migrate=False,
+            model_discovery=True,
+            model_cache_ttl_seconds=300,
+            providers={"openai": {"api_key": "sk-fake-for-test"}},
+        )
+    )
+
+
+def _warm_cache_with_expired_entry(model_id: str) -> None:
+    """Seed the discovery cache and backdate it well past model_cache_ttl_seconds."""
+    from any_llm.types.model import Model
+
+    cache = get_model_cache()
+    cache.set("openai", [Model(**_make_openai_model(model_id))])
+    cache._store["openai"].cached_at -= 10_000
+
+
+def test_models_read_serves_an_expired_cache_without_dialing(
+    cached_discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """The fix: an expired entry is served, not re-dialed, on GET /v1/models.
+
+    Before the background refresher, whichever request arrived after the TTL
+    lapsed paid ``model_discovery_timeout_seconds`` per unreachable provider and
+    held its database session open for the whole dial. That is what made an
+    operator's next click sit behind a page load.
+    """
+    _warm_cache_with_expired_entry("gpt-4o")
+
+    with patch(
+        "gateway.services.model_discovery_service.alist_models",
+        new_callable=AsyncMock,
+    ) as mock_alist:
+        resp = cached_discovery_client.get("/v1/models", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    assert "openai:gpt-4o" in [model["id"] for model in resp.json()["data"]]
+    mock_alist.assert_not_awaited()
+
+
+def test_discoverable_read_serves_an_expired_cache_without_dialing(
+    cached_discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """Same for the operator listing, and it reports when it was last dialed."""
+    _warm_cache_with_expired_entry("gpt-4o")
+
+    with patch(
+        "gateway.services.model_discovery_service.alist_models",
+        new_callable=AsyncMock,
+    ) as mock_alist:
+        resp = cached_discovery_client.get("/v1/models/discoverable", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    provider = resp.json()["providers"][0]
+    assert provider["provider"] == "openai"
+    assert [model["id"] for model in provider["models"]] == ["gpt-4o"]
+    # The age of the answer is reported rather than implied, so a cached verdict
+    # is never mistaken for a live one.
+    assert provider["checked_at"] is not None
+    mock_alist.assert_not_awaited()
+
+
+def test_discoverable_refresh_still_dials(
+    cached_discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """?refresh=true is the operator's escape hatch and must reach the provider."""
+    from any_llm.types.model import Model
+
+    _warm_cache_with_expired_entry("stale-model")
+
+    with (
+        patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            return_value=[Model(**_make_openai_model("fresh-model"))],
+        ) as mock_alist,
+    ):
+        resp = cached_discovery_client.get(
+            "/v1/models/discoverable?refresh=true", headers=discovery_master_header
+        )
+
+    assert resp.status_code == 200
+    assert [model["id"] for model in resp.json()["providers"][0]["models"]] == ["fresh-model"]
+    assert mock_alist.await_count == 1
+
+
+def test_provider_health_read_serves_an_expired_cache_without_dialing(
+    cached_discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """The hourly health poll fans out over every provider; it must not dial."""
+    _warm_cache_with_expired_entry("gpt-4o")
+
+    with patch(
+        "gateway.services.model_discovery_service.alist_models",
+        new_callable=AsyncMock,
+    ) as mock_alist:
+        resp = cached_discovery_client.get("/v1/providers/health", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["healthy"] == 1
+    assert body["total"] == 1
+    mock_alist.assert_not_awaited()
+
+
+@pytest.fixture
+def uncached_discovery_client(postgres_url: str) -> Generator[TestClient]:
+    """A client with discovery caching disabled (`model_cache_ttl_seconds = 0`)."""
+    get_model_cache().clear()
+    yield from _make_client(
+        GatewayConfig(
+            database_url=postgres_url,
+            master_key="test-master-key",
+            host="127.0.0.1",
+            port=8000,
+            auto_migrate=False,
+            model_discovery=True,
+            model_cache_ttl_seconds=0,
+            providers={"openai": {"api_key": "sk-fake-for-test"}},
+        )
+    )
+
+
+def test_models_read_dials_when_caching_is_disabled(
+    uncached_discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """`model_cache_ttl_seconds = 0` still means dial on every read.
+
+    It is the only switch for this, so it must not quietly become "serve a cache
+    nothing refreshes": a cached entry is ignored here, not served.
+    """
+    from any_llm.types.model import Model
+
+    _warm_cache_with_expired_entry("stale-model")
+
+    with (
+        patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            return_value=[Model(**_make_openai_model("fresh-model"))],
+        ) as mock_alist,
+    ):
+        resp = uncached_discovery_client.get("/v1/models", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    assert "openai:fresh-model" in [model["id"] for model in resp.json()["data"]]
+    assert mock_alist.await_count == 1

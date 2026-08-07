@@ -86,8 +86,20 @@ const BUILD_POLL_MS = 60_000;
 // automatic probe infrequent; operators can still force an immediate re-check.
 export const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000;
 
+// The four queries below are backed by provider or models.dev fan-out
+// gateway-side. That is cached and refreshed in the background now, so they are
+// normally fast, but they are the ones that go slow when a provider does. The
+// global default retries a failed query twice (see provider.tsx), which would
+// turn one slow failure into three sequential ones and hold a browser
+// connection slot for the whole time; on HTTP/1.1 (6 sockets per origin) enough
+// of those queue every other request behind them, including the POST an
+// operator just clicked. Failing once and showing the error is the honest
+// behavior, and it frees the socket.
+const NO_RETRY = { retry: false } as const;
+
 export function useModels() {
   return useQuery({
+    ...NO_RETRY,
     queryKey: [MODELS],
     queryFn: () => apiFetch<ModelListResponse>("/v1/models"),
     staleTime: 60_000,
@@ -120,6 +132,7 @@ export function useDashboardBuild() {
 // reach does not move minute to minute.
 export function useDiscoverableModels() {
   return useQuery({
+    ...NO_RETRY,
     queryKey: [DISCOVERABLE],
     queryFn: () => apiFetch<DiscoverableModelsResponse>("/v1/models/discoverable"),
     staleTime: 5 * 60_000,
@@ -171,6 +184,7 @@ export function useProviderDetail(providerId: string) {
 // (issue #302).
 export function useProviderHealth() {
   return useQuery({
+    ...NO_RETRY,
     queryKey: [PROVIDER_HEALTH],
     queryFn: () => apiFetch<ProviderHealthResponse>("/v1/providers/health"),
     staleTime: PROVIDER_HEALTH_REFRESH_MS,
@@ -276,6 +290,7 @@ export function useTestProviderCredentials() {
 // it, so this is cheap; kept fresh for a session since the catalog barely moves.
 export function useModelMetadata() {
   return useQuery({
+    ...NO_RETRY,
     queryKey: [METADATA],
     queryFn: () => apiFetch<ModelMetadataResponse>("/v1/models/metadata"),
     staleTime: 10 * 60_000,

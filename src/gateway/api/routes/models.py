@@ -18,10 +18,12 @@ from gateway.services.alias_service import effective_aliases
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
 from gateway.services.model_catalog_service import (
     ModelCatalogEntry,
+    background_catalog_enabled,
     build_metadata_map,
     load_models_dev_catalog,
 )
 from gateway.services.model_discovery_service import (
+    background_discovery_enabled,
     discover_all_models,
     discover_models_with_status,
     get_model_cache,
@@ -118,6 +120,13 @@ class DiscoverableProvider(BaseModel):
         description=(
             "True when discovery failed only because this backend serves no model-listing endpoint. "
             "The provider may still handle requests for models declared in config."
+        ),
+    )
+    checked_at: str | None = Field(
+        default=None,
+        description=(
+            "When this instance was last dialed, ISO 8601. Null when it has not been checked yet, "
+            "which is what the first read after a restart sees while the background refresh runs."
         ),
     )
     models: list[DiscoverableModel]
@@ -432,7 +441,16 @@ async def list_models(
     # Phase 1: auto-discovered models from upstream providers.
     if config.model_discovery:
         try:
-            discovered = await discover_all_models(config, provider_filter=provider)
+            # Cache-only when a refresher owns the dialing. This endpoint is
+            # reachable with any API key, so it deliberately has no ``refresh``
+            # escape hatch: forcing a fanout across every configured provider is
+            # an operator action, and lives on the master-key-gated
+            # /v1/models/discoverable and /v1/providers/health instead.
+            discovered = await discover_all_models(
+                config,
+                provider_filter=provider,
+                serve_stale=background_discovery_enabled(config),
+            )
         except Exception:
             logger.exception("Model discovery failed unexpectedly")
             discovered = []
@@ -535,6 +553,10 @@ async def list_models(
 @router.get("/models/discoverable", dependencies=[Depends(verify_master_key)])
 async def list_discoverable_models(
     config: Annotated[GatewayConfig, Depends(get_config)],
+    refresh: Annotated[
+        bool,
+        Query(description="Re-dial every provider instead of answering from the discovery cache."),
+    ] = False,
 ) -> DiscoverableModelsResponse:
     """List every model the configured provider credentials can reach.
 
@@ -543,14 +565,22 @@ async def list_discoverable_models(
     a provider with a bad key is distinguishable from one with no models. It is
     master-key gated because a provider error message describes the gateway's own
     configuration.
+
+    Answers from the discovery cache, which a background refresher keeps warm, so
+    the call does not wait on a slow or unreachable provider. Each provider
+    carries the ``checked_at`` its result was produced at; a null one has not been
+    dialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.
     """
-    discoveries = await discover_models_with_status(config)
+    serve_stale = background_discovery_enabled(config) and not refresh
+    discoveries = await discover_models_with_status(config, serve_stale=serve_stale, force=refresh)
+    cache = get_model_cache()
     providers = [
         DiscoverableProvider(
             provider=discovery.provider,
             ok=discovery.error is None,
             error=discovery.error,
             discovery_unsupported=discovery.discovery_unsupported,
+            checked_at=checked.isoformat() if (checked := cache.checked_at(discovery.provider)) else None,
             models=sorted(
                 (
                     DiscoverableModel(id=model.id, key=f"{discovery.provider}:{model.id}")
@@ -577,8 +607,11 @@ async def list_model_metadata(
     enrichment is disabled (``models_dev_metadata``) or models.dev could not be
     reached; the response is then empty and the UI falls back to bundled data.
     Master-key gated: it describes the gateway's configured providers.
+
+    Answers from the cached catalog, kept warm by a background refresher, so the
+    dashboard never waits on the models.dev fetch timeout.
     """
-    catalog = await load_models_dev_catalog(config)
+    catalog = await load_models_dev_catalog(config, serve_stale=background_catalog_enabled(config))
     entries = build_metadata_map(config, catalog)
     return ModelMetadataResponse(
         available=catalog is not None,

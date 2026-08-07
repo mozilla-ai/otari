@@ -73,17 +73,32 @@ export async function deleteSession(): Promise<void> {
   }
 }
 
+// Upper bound on any single management call. Nothing here should take this
+// long: the gateway bounds its own provider fan-out well below it. The point is
+// that a request which hangs anyway (dead socket, stalled proxy) gives its
+// browser connection slot back on a deadline we control instead of holding it
+// open. On HTTP/1.1 a browser allows only ~6 sockets per origin, so a handful of
+// hung requests is enough to queue everything an operator clicks afterwards.
+// Callers pass their own `signal` to override.
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Accept", "application/json");
   if (init.body != null && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
+  const signal = init.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS);
 
   let response: Response;
   try {
-    response = await fetch(path, { ...init, headers });
-  } catch {
+    response = await fetch(path, { ...init, headers, signal });
+  } catch (error) {
+    // A TimeoutError from AbortSignal.timeout means we gave up, not that the
+    // gateway is unreachable; saying so points at the right thing to look at.
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new ApiError(0, `The gateway did not respond within ${REQUEST_TIMEOUT_MS / 1000}s.`);
+    }
     throw new ApiError(0, "Network error: could not reach the gateway.");
   }
 

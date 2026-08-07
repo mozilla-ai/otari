@@ -1,6 +1,8 @@
 """Unit tests for the models.dev catalog parsing and mapping (no network)."""
 
+import time
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -94,3 +96,44 @@ def test_build_metadata_map_skips_unknown_providers() -> None:
 def test_build_metadata_map_empty_when_catalog_missing() -> None:
     config = _config({"openai": {"api_key": "sk-x"}})
     assert build_metadata_map(config, None) == {}
+
+
+@pytest.mark.asyncio
+async def test_stale_catalog_is_served_without_refetching() -> None:
+    """A dashboard read must not pay the 15s models.dev fetch timeout."""
+    mcs.clear_catalog_cache()
+    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=86400)
+
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value={"openai": {}})) as fetch:
+        await mcs.load_models_dev_catalog(config, force=True)
+        assert fetch.await_count == 1
+        # Age the entry past its TTL; a stale read still answers from cache.
+        mcs._cache.at = time.monotonic() - 200_000
+        result = await mcs.load_models_dev_catalog(config, serve_stale=True)
+        assert fetch.await_count == 1
+
+    assert result == {"openai": {}}
+
+
+@pytest.mark.asyncio
+async def test_stale_read_without_a_cache_entry_still_fetches() -> None:
+    """A cold worker fetches rather than reporting metadata unavailable."""
+    mcs.clear_catalog_cache()
+    config = GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=86400)
+
+    with patch.object(mcs, "_fetch", new=AsyncMock(return_value={"openai": {}})) as fetch:
+        result = await mcs.load_models_dev_catalog(config, serve_stale=True)
+
+    assert fetch.await_count == 1
+    assert result == {"openai": {}}
+
+
+def test_background_catalog_requires_caching_and_enrichment() -> None:
+    """Both existing knobs still mean what they say; there is no third one."""
+    assert mcs.background_catalog_enabled(GatewayConfig(models_dev_metadata=False)) is False
+    assert (
+        mcs.background_catalog_enabled(GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=0)) is False
+    )
+    assert (
+        mcs.background_catalog_enabled(GatewayConfig(models_dev_metadata=True, models_dev_cache_ttl_seconds=60)) is True
+    )

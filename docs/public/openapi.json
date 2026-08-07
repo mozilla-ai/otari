@@ -1536,6 +1536,18 @@
       "DiscoverableProvider": {
         "description": "One provider instance's discovery result.",
         "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When this instance was last dialed, ISO 8601. Null when it has not been checked yet, which is what the first read after a restart sees while the background refresh runs.",
+            "title": "Checked At"
+          },
           "discovery_unsupported": {
             "default": false,
             "description": "True when discovery failed only because this backend serves no model-listing endpoint. The provider may still handle requests for models declared in config.",
@@ -5837,6 +5849,17 @@
             ],
             "title": "Api Key Id"
           },
+          "api_key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Name"
+          },
           "attempt_count": {
             "anyOf": [
               {
@@ -6091,6 +6114,17 @@
             ],
             "title": "Total Tokens"
           },
+          "user_alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Alias"
+          },
           "user_id": {
             "anyOf": [
               {
@@ -6192,6 +6226,17 @@
               }
             ],
             "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
           },
           "requests": {
             "title": "Requests",
@@ -9185,8 +9230,22 @@
     },
     "/v1/models/discoverable": {
       "get": {
-        "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\nmaster-key gated because a provider error message describes the gateway's own\nconfiguration.",
+        "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\nmaster-key gated because a provider error message describes the gateway's own\nconfiguration.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
         "operationId": "list_discoverable_models_v1_models_discoverable_get",
+        "parameters": [
+          {
+            "description": "Re-dial every provider instead of answering from the discovery cache.",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Re-dial every provider instead of answering from the discovery cache.",
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9197,6 +9256,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -9215,7 +9284,7 @@
     },
     "/v1/models/metadata": {
       "get": {
-        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nMaster-key gated: it describes the gateway's configured providers.",
+        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nMaster-key gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
         "operationId": "list_model_metadata_v1_models_metadata_get",
         "responses": {
           "200": {

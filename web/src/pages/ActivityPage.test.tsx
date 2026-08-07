@@ -49,7 +49,7 @@ interface FetchCall {
 
 // Mock fetch for the usage list/count/summary reads plus the delete and
 // set-price mutations. Records every call so tests can assert URLs and bodies.
-function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageEntry[] } = {}) {
+function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageEntry[]; users?: string[] } = {}) {
   const rows = opts.rows ?? [];
   const total = opts.total ?? rows.length;
   const calls: FetchCall[] = [];
@@ -86,7 +86,16 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageE
           avg_latency_ms: null,
         },
         by_model: models.map((m) => ({ key: m, cost: 0, tokens: 0, requests: 0, is_other: false })),
-        by_user: [],
+        // The user and key pickers read these breakdowns, not a full /v1/users
+        // or /v1/keys listing. Label-free so an option's name and a chip's label
+        // are the bare id, which keeps the filter assertions readable.
+        by_user: (opts.users ?? ["alice", "bob"]).map((u) => ({
+          key: u,
+          cost: 0,
+          tokens: 0,
+          requests: 0,
+          is_other: false,
+        })),
         by_api_key: [],
         by_source: Array.from(new Set(rows.map((r) => r.source))).map((s) => ({
           key: s,
@@ -109,17 +118,8 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageE
       }
       return jsonResponse(rows);
     }
-    if (url.includes("/v1/users")) {
-      // Alias-free so an option's name and a chip's label are the bare user id,
-      // which keeps the filter assertions readable.
-      return jsonResponse([
-        { user_id: "alice", alias: null },
-        { user_id: "bob", alias: null },
-      ]);
-    }
-    if (url.includes("/v1/keys")) {
-      return jsonResponse([]);
-    }
+    // The page no longer reads /v1/users or /v1/keys; both fall through to the
+    // empty default below, and a test asserting that is at the end of this file.
     return jsonResponse([]);
   });
 
@@ -1307,5 +1307,39 @@ describe("ActivityPage filter serialization", () => {
       expect(hit, `no request to ${path}`).toBeDefined();
       expect(hit, `${path} dropped the tool filter`).toContain("tool=web_search");
     }
+  });
+});
+
+describe("ActivityPage table-scan avoidance", () => {
+  it("never reads the whole users or api_keys table", async () => {
+    // Both listings are fetched by paging every row (see fetchAllUsers /
+    // fetchAllKeys), so a deployment with many users or keys paid a sequential
+    // multi-megabyte load on every visit here, just to name filter options and
+    // label a page of rows. Both now come off the summary breakdown and the
+    // usage row itself. This asserts the request is gone, not merely smaller.
+    const { calls } = mockApi({ rows: [entry({ api_key_id: "key-1", api_key_name: "ci-bot" })] });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    await screen.findByText("gpt-4o");
+    const requested = calls.map((c) => c.url);
+    expect(requested.some((url) => url.includes("/v1/users"))).toBe(false);
+    expect(requested.some((url) => url.includes("/v1/keys"))).toBe(false);
+  });
+
+  it("labels an API key column from the row, not a client-side lookup", async () => {
+    const { calls } = mockApi({ rows: [entry({ api_key_id: "key-1", api_key_name: "ci-bot" })] });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    expect(await screen.findByText("ci-bot")).toBeInTheDocument();
+    expect(calls.map((c) => c.url).some((url) => url.includes("/v1/keys"))).toBe(false);
+  });
+
+  it("falls back to a short id when the row carries no key name", async () => {
+    // The label is null whenever the key was deleted or never named, so the
+    // column must not render an empty cell for a row that does have a key.
+    mockApi({ rows: [entry({ api_key_id: "abcdef123456", api_key_name: null })] });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    expect(await screen.findByText("abcdef12…")).toBeInTheDocument();
   });
 });

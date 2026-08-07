@@ -21,6 +21,7 @@ from gateway.core.config import PROVIDER_TYPE_ALIASES, GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ProviderCredential
 from gateway.services.model_discovery_service import (
+    background_discovery_enabled,
     discover_provider_models,
     get_model_cache,
     test_provider_credentials,
@@ -270,7 +271,11 @@ async def provider_health(
     ``discovery_unsupported`` and counted under ``degraded`` rather than as a
     reachability failure.
     """
-    results = await check_all_provider_health(config, refresh=refresh)
+    results = await check_all_provider_health(
+        config,
+        refresh=refresh,
+        serve_stale=background_discovery_enabled(config) and not refresh,
+    )
     checked_ats = [health.checked_at for health in results if health.checked_at is not None]
     return ProviderHealthResponse(
         providers=[_to_health_schema(health) for health in sorted(results, key=lambda item: item.instance)],
