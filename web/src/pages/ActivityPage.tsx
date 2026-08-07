@@ -919,8 +919,8 @@ export function ActivityPage() {
   // or filtering Activity to one user would make the typeahead suggest only the
   // models other users called and picking one would return an empty table.
   const entitySuggestFilters: UsageFilters = useMemo(
-    () => ({ ...modelSuggestFilters, user_id: undefined, api_key_id: undefined }),
-    [modelSuggestFilters],
+    () => ({ ...filters, user_id: undefined, api_key_id: undefined }),
+    [filters],
   );
   const entitySummary = useUsageSummary(entitySuggestFilters, "day", ENTITY_BREAKDOWNS);
   const keyOptions = realGroups(entitySummary.data?.by_api_key).map((r) => ({
@@ -1254,6 +1254,7 @@ export function ActivityPage() {
     void count.refetch();
     void contextSummary.refetch();
     void modelSummary.refetch();
+    void entitySummary.refetch();
     // Guarded because refetch() ignores `enabled`: without a picked source the
     // query is disabled by design and refetching it would fire a pointless
     // extra summary request.

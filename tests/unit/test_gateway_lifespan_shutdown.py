@@ -25,7 +25,7 @@ import pytest
 from fastapi import FastAPI
 
 from gateway.core.config import GatewayConfig
-from gateway.main import _REFRESHER_STOP_TIMEOUT_SECONDS, _create_lifespan, _stop_refresher
+from gateway.main import _REFRESHER_STOP_TIMEOUT_SECONDS, _create_lifespan, _stop_refresher, _stop_refreshers
 
 
 async def _absorbs_cancellation() -> None:
@@ -35,13 +35,17 @@ async def _absorbs_cancellation() -> None:
     marked cancelling and the next await would re-raise. With it, the task is back
     to a normal state and settles in for a full interval.
     """
+    absorbed = False
     while True:
         try:
             await asyncio.sleep(3600)  # stands in for the outbound fetch
         except asyncio.CancelledError:
+            if absorbed:
+                raise
             task = asyncio.current_task()
             assert task is not None
             task.uncancel()
+            absorbed = True
         # The refresher loop's own sleep, reached the same way it is after
         # `except Exception` swallows what looked like a timeout error.
         await asyncio.sleep(86400)
@@ -62,6 +66,26 @@ async def test_stop_refresher_returns_when_the_task_absorbs_its_cancellation() -
     assert _REFRESHER_STOP_TIMEOUT_SECONDS <= elapsed < _REFRESHER_STOP_TIMEOUT_SECONDS + 10
     assert not task.done()
     task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_stop_refreshers_bounds_multiple_stuck_tasks_together() -> None:
+    """Several cancellation-resistant refreshers share one shutdown bound."""
+    tasks = [asyncio.create_task(_absorbs_cancellation()) for _ in range(2)]
+    await asyncio.sleep(0)
+
+    started = asyncio.get_running_loop().time()
+    await _stop_refreshers([(task, f"test-{index}") for index, task in enumerate(tasks)])
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert _REFRESHER_STOP_TIMEOUT_SECONDS <= elapsed < _REFRESHER_STOP_TIMEOUT_SECONDS + 10
+    assert all(not task.done() for task in tasks)
+    for task in tasks:
+        task.cancel()
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    assert all(isinstance(result, asyncio.CancelledError) for result in results)
 
 
 @pytest.mark.asyncio

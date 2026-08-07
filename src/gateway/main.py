@@ -134,15 +134,14 @@ def _validate_platform_config(config: GatewayConfig) -> None:
 _REFRESHER_STOP_TIMEOUT_SECONDS = 5.0
 
 
-async def _stop_refresher(task: asyncio.Task[None], name: str) -> None:
-    """Cancel a lifespan refresher and wait for it, but never indefinitely.
+async def _wait_for_refresher_stop(task: asyncio.Task[None], name: str) -> None:
+    """Wait for a cancelled lifespan refresher, but never indefinitely.
 
     ``asyncio.wait`` rather than ``await task``: it takes a timeout, and it
     reports the outcome instead of re-raising it, so a refresher that died on an
     unexpected error is logged here rather than aborting the rest of shutdown
     (the log writer and the pooled search client still need closing).
     """
-    task.cancel()
     done, _pending = await asyncio.wait({task}, timeout=_REFRESHER_STOP_TIMEOUT_SECONDS)
     if not done:
         logger.warning(
@@ -153,6 +152,19 @@ async def _stop_refresher(task: asyncio.Task[None], name: str) -> None:
         return
     if not task.cancelled() and (error := task.exception()) is not None:
         logger.warning("%s refresher stopped with an unexpected error", name, exc_info=error)
+
+
+async def _stop_refresher(task: asyncio.Task[None], name: str) -> None:
+    """Cancel one lifespan refresher and wait for it, but never indefinitely."""
+    task.cancel()
+    await _wait_for_refresher_stop(task, name)
+
+
+async def _stop_refreshers(refreshers: list[tuple[asyncio.Task[None], str]]) -> None:
+    """Cancel all refreshers before waiting so their shutdown bounds overlap."""
+    for task, _name in refreshers:
+        task.cancel()
+    await asyncio.gather(*(_wait_for_refresher_stop(task, name) for task, name in refreshers))
 
 
 def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
@@ -246,22 +258,24 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             app.state.log_writer = log_writer
             yield
         finally:
+            refreshers = [
+                (alias_refresher, "alias"),
+                (policy_refresher, "policy"),
+                (provider_refresher, "provider"),
+                (price_refresher, "price snapshot"),
+                (discovery_refresher, "model discovery"),
+                (catalog_refresher, "models.dev catalog"),
+            ]
+            await _stop_refreshers([(task, name) for task, name in refreshers if task is not None])
             if alias_refresher is not None:
-                await _stop_refresher(alias_refresher, "alias")
                 reset_alias_cache()
             if policy_refresher is not None:
-                await _stop_refresher(policy_refresher, "policy")
                 reset_policy_cache()
             if provider_refresher is not None:
-                await _stop_refresher(provider_refresher, "provider")
                 reset_provider_cache()
-            if price_refresher is not None:
-                await _stop_refresher(price_refresher, "price snapshot")
             if discovery_refresher is not None:
-                await _stop_refresher(discovery_refresher, "model discovery")
                 reset_discovery_cache()
             if catalog_refresher is not None:
-                await _stop_refresher(catalog_refresher, "models.dev catalog")
                 clear_catalog_cache()
             # Only stop a writer that actually started; if start() raised there is
             # nothing to stop, but the refreshers above still needed cancelling.

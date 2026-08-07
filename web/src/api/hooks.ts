@@ -260,7 +260,10 @@ export function useReencryptProviderCredentials() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () =>
-      apiFetch<ReencryptProviderCredentialsResult>("/v1/provider-credentials/reencrypt", { method: "POST" }),
+      apiFetch<ReencryptProviderCredentialsResult>("/v1/provider-credentials/reencrypt", {
+        method: "POST",
+        signal: longRequestSignal(),
+      }),
     onSuccess: () => invalidateProviderViews(queryClient),
   });
 }

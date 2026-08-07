@@ -531,12 +531,18 @@ describe("ActivityPage", () => {
     expect(await screen.findByText("101–150 of 500")).toBeInTheDocument();
 
     const before = listCalls(calls).length;
+    const entitySummaryBefore = calls.filter((call) => call.url.includes("/v1/usage/summary") && call.url.includes("dimensions=user")).length;
     const button = screen.getByRole("button", { name: "Refresh" });
     await waitFor(() => expect(button).toBeEnabled());
     await user.click(button);
 
     // The list is refetched, and every fetch stays on the third page's offset.
     await waitFor(() => expect(listCalls(calls).length).toBeGreaterThan(before));
+    await waitFor(() =>
+      expect(calls.filter((call) => call.url.includes("/v1/usage/summary") && call.url.includes("dimensions=user")).length).toBeGreaterThan(
+        entitySummaryBefore,
+      ),
+    );
     expect(listCalls(calls).every((url) => url.includes("skip=100"))).toBe(true);
     expect(screen.getByText("101–150 of 500")).toBeInTheDocument();
   });
@@ -1351,7 +1357,7 @@ describe("ActivityPage suggestion scoping", () => {
     // and picking one returns an empty table. The user picker must drop it, or
     // it can only ever offer the user already selected.
     const { calls } = mockApi({ rows: [entry()] });
-    renderPage(<ActivityPage />, "/activity?user_id=alice&range=24h");
+    renderPage(<ActivityPage />, "/activity?model=gpt-4o&user_id=alice&range=24h");
 
     await screen.findByText("gpt-4o");
     const summaries = calls.map((c) => c.url).filter((url) => url.includes("/v1/usage/summary"));
@@ -1363,5 +1369,6 @@ describe("ActivityPage suggestion scoping", () => {
     const entityQuery = summaries.find((url) => url.includes("dimensions=user"));
     expect(entityQuery, "user/key picker summary").toBeDefined();
     expect(entityQuery).not.toContain("user_id=alice");
+    expect(entityQuery).toContain("model=gpt-4o");
   });
 });
