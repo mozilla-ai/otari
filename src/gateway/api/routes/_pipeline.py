@@ -2498,6 +2498,7 @@ def build_streaming_response(
             on_no_usage=_on_no_usage,
             on_incomplete=_on_incomplete,
             display_model=display_model,
+            keepalive_interval_seconds=config.streaming_keepalive_interval_ms / 1000,
         ),
         media_type="text/event-stream",
         headers=headers,
