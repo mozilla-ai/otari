@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import re
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Any, Literal, NamedTuple, TypeVar
 
 import httpx
@@ -223,8 +223,9 @@ def _provider_failure_http_exc(exc: BaseException, *, fallback_detail: str) -> H
     the same specific-but-safe statuses (400/404/429/504) the standalone
     adapters return, instead of a blanket 502. Falls back to a 502 carrying
     ``fallback_detail`` when the failure has no signal we can safely surface.
-    The classified detail is always a fixed string, so it cannot leak the raw
-    upstream message.
+    The classifier applies its caller-fault versus gateway-fault detail split,
+    so caller-fault details are sanitized provider diagnostics and gateway-fault
+    details remain fixed strings.
     """
     # Deferred import: _pipeline imports this module, so importing it at module
     # scope would be circular.
@@ -620,6 +621,16 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
 UpstreamErrorKind = Literal["timeout", "conn_err"]
 
 
+def upstream_exception_chain(exc: BaseException) -> Iterator[BaseException]:
+    """Yield an exception and its ``original_exception`` chain once each."""
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = getattr(current, "original_exception", None)
+
+
 def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | None, int | None]:
     """Classify the *shape* of an upstream exception, independent of retry policy.
 
@@ -668,11 +679,7 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
        ``original_exception``. Bounded by an ``id()``-based seen-set so a
        (pathological, self-referential) cycle terminates instead of looping.
     """
-    current: BaseException | None = exc
-    seen: set[int] = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-
+    for current in upstream_exception_chain(exc):
         if isinstance(
             current,
             (
@@ -701,18 +708,16 @@ def upstream_exception_shape(exc: BaseException) -> tuple[UpstreamErrorKind | No
         if class_name.endswith("ConnectionError"):
             return "conn_err", None
 
-        current = getattr(current, "original_exception", None)
-
     return None, None
 
 
 def upstream_error_message(exc: BaseException) -> str:
     """Best-effort human-readable text from an upstream exception (and its wrapper).
 
-    Concatenates the exception's ``message`` attribute and ``str()`` for both the
-    exception and any ``original_exception``, so a substring probe still matches
-    whether otari receives the raw SDK error today or the wrapped
-    ``AnyLLMError`` after any-llm flips to unified exceptions.
+    Concatenates the exception's ``message`` attribute and ``str()`` across its
+    ``original_exception`` chain, so a substring probe still matches whether
+    otari receives the raw SDK error today or a wrapped ``AnyLLMError`` after
+    any-llm flips to unified exceptions.
 
     Used both for classification and, on a caller-fault rejection, as the text
     the caller sees. Run it through :func:`redact_upstream_message` before it
@@ -720,9 +725,7 @@ def upstream_error_message(exc: BaseException) -> str:
     """
     parts: list[str] = []
     seen: set[str] = set()
-    for candidate in (exc, getattr(exc, "original_exception", None)):
-        if candidate is None:
-            continue
+    for candidate in upstream_exception_chain(exc):
         message = getattr(candidate, "message", None)
         candidates = (message, str(candidate)) if isinstance(message, str) else (str(candidate),)
         for part in candidates:
@@ -751,7 +754,7 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
     # Provider key formats: a known prefix plus the key body. Covers OpenAI
     # (sk-, sk-proj-), Anthropic (sk-ant-), Groq (gsk_), xAI (xai-), and
     # otari's own tk_ / gw_ tokens.
-    re.compile(r"\b(?:sk|pk|rk|gsk|xai|tk|gw|api|key)[-_][A-Za-z0-9._-]{8,}", re.IGNORECASE),
+    re.compile(r"\b(?:sk|pk|rk|gsk|xai|tk|gw)[-_][A-Za-z0-9._-]{8,}", re.IGNORECASE),
     # Google API keys, which carry a fixed prefix and no separator.
     re.compile(r"\bAIza[A-Za-z0-9._-]{10,}"),
     # An explicitly named credential, as it appears in a query string or an
@@ -765,9 +768,21 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
     # topology the caller has no business learning, and a credential is
     # sometimes embedded in one.
     re.compile(r"\bhttps?://\S+", re.IGNORECASE),
+    # Azure OpenAI and Mistral issue prefixless 32-character API keys.
+    re.compile(r"\b[A-Za-z0-9]{32}\b"),
     # Catch-all for key material with no recognizable prefix. Long unbroken
     # alphanumeric runs are tokens, not prose.
     re.compile(r"[A-Za-z0-9_-]{40,}"),
+)
+
+# Upstream APIs sometimes reflect the request that failed. Such an echo can
+# contain prompt text, tool arguments, or gateway-generated context, none of
+# which belongs in a client-facing error. Parameter paths such as
+# ``messages.0.content`` stay useful, while field/value pairs and JSON payloads
+# are rejected as a whole and make the caller-fault classifier use its fallback.
+_PAYLOAD_ECHO = re.compile(
+    r"(?:[\"']?(?:messages|input|prompt|tools?|tool_calls|response|request(?:_body)?|body)[\"']?\s*[:=])",
+    re.IGNORECASE,
 )
 
 
@@ -786,11 +801,13 @@ def redact_upstream_message(message: str) -> str:
     fixed detail for them.
     """
     redacted = message.strip()
+    if _PAYLOAD_ECHO.search(redacted):
+        return ""
     for pattern in _SECRET_SHAPES:
         redacted = pattern.sub(_REDACTION_PLACEHOLDER, redacted)
     redacted = " ".join(redacted.split())
     if len(redacted) > MAX_EXPOSED_DETAIL_CHARS:
-        redacted = redacted[:MAX_EXPOSED_DETAIL_CHARS].rstrip() + "..."
+        redacted = redacted[: MAX_EXPOSED_DETAIL_CHARS - len("...")].rstrip() + "..."
     return redacted
 
 

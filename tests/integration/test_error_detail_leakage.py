@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
+from gateway.api.routes._pipeline import PROVIDER_BAD_REQUEST_DETAIL
+
 
 def test_provider_error_does_not_leak_details(
     client: TestClient,
@@ -75,6 +77,25 @@ def test_caller_fault_error_still_redacts_credentials(
     assert response.status_code == 400
     assert "sk-proj-AAAAAAAAAAAAAAAAAAAA" not in response.text
     assert "10.0.0.4" not in response.text
+
+
+def test_caller_fault_error_does_not_echo_request_payloads(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    prompt = "do not expose this user prompt"
+    response = _post_chat(
+        client,
+        api_key_header,
+        _UpstreamError(
+            400,
+            f'Invalid request: {{"messages":[{{"role":"user","content":"{prompt}"}}],"tools":[]}}',
+        ),
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == PROVIDER_BAD_REQUEST_DETAIL
+    assert prompt not in response.text
 
 
 def test_gateway_fault_error_keeps_a_fixed_detail(

@@ -80,7 +80,7 @@ def test_chat_classifies_provider_error(
 
     assert response.status_code == expected_status
     assert response.json()["detail"] == expected_detail
-    if expected_detail is not _RAW:
+    if expected_detail != _RAW:
         assert "SECRET" not in response.text
 
 
@@ -194,7 +194,7 @@ def test_responses_classifies_provider_error(
 
     assert response.status_code == expected_status
     assert response.json()["detail"] == expected_detail
-    if expected_detail is not _RAW:
+    if expected_detail != _RAW:
         assert "SECRET" not in response.text
 
 
@@ -232,5 +232,5 @@ def test_messages_classifies_provider_error(
     assert detail["type"] == "error"
     assert detail["error"]["type"] == expected_type
     assert detail["error"]["message"] == expected_detail
-    if expected_detail is not _RAW:
+    if expected_detail != _RAW:
         assert "SECRET" not in response.text

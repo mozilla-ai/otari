@@ -78,6 +78,7 @@ from gateway.api.routes._platform import (
     redact_upstream_message,
     run_platform_attempts,
     upstream_error_message,
+    upstream_exception_chain,
     upstream_exception_shape,
 )
 from gateway.api.routes._platform import (
@@ -258,10 +259,7 @@ def _is_unsupported_feature_error(exc: BaseException) -> bool:
     ``NotImplementedError`` arrives wrapped in a generic ``ProviderError`` and a
     check against ``exc`` alone would stop matching.
     """
-    return any(
-        isinstance(candidate, NotImplementedError)
-        for candidate in (exc, getattr(exc, "original_exception", None))
-    )
+    return any(isinstance(candidate, NotImplementedError) for candidate in upstream_exception_chain(exc))
 
 
 def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
@@ -275,9 +273,12 @@ def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
     "404" is not an explanation the caller did not already have from the
     status. Requiring one letter is a low bar deliberately: it rejects the
     empty cases without second-guessing a provider that wrote a real sentence.
+    A message made entirely of redaction placeholders is empty for this
+    purpose, too.
     """
     redacted = redact_upstream_message(upstream_error_message(exc))
-    if not any(char.isalpha() for char in redacted):
+    explanatory = redacted.replace("[redacted]", "")
+    if not any(char.isalpha() for char in explanatory):
         return fallback
     return redacted
 
@@ -317,9 +318,7 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     # needs no probe into any-llm's wording, and the message it carries already
     # names the unsupported feature.
     if _is_unsupported_feature_error(exc):
-        return ProviderErrorMapping(
-            status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
-        )
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL))
     if status_code is None:
         return None
     # Account billing exhaustion, which several providers report as a 400/422
@@ -333,9 +332,7 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     if is_provider_billing_error(exc):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_BILLING_DETAIL)
     if status_code in (400, 422):
-        return ProviderErrorMapping(
-            status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
-        )
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL))
     if status_code == 404:
         return ProviderErrorMapping(
             status.HTTP_404_NOT_FOUND, _caller_fault_detail(exc, PROVIDER_MODEL_NOT_FOUND_DETAIL)

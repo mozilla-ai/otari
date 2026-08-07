@@ -264,6 +264,15 @@ def test_upstream_message_read_from_original_exception() -> None:
     assert "temperature must be between 0 and 2" in mapping.detail
 
 
+def test_upstream_message_and_unsupported_feature_read_from_nested_original_exceptions() -> None:
+    """The shared chain walk handles arbitrarily nested any-llm wrappers."""
+    nested = _WrappedError(400, _WrappedError(400, NotImplementedError(_CONTEXT_MANAGEMENT_MSG)))
+    mapping = classify_provider_error(nested)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "context_management" in mapping.detail
+
+
 @pytest.mark.parametrize(
     ("raw", "leaked"),
     [
@@ -281,6 +290,7 @@ def test_redaction_strips_credential_shapes(raw: str, leaked: str) -> None:
     credentials through. The gateway calls providers with the operator's key, so
     a message naming that key, a self-hosted api_base, or the account serving a
     managed model is not the caller's to read."""
+    assert leaked in raw
     assert leaked not in redact_upstream_message(raw)
 
 
@@ -328,9 +338,18 @@ def test_exposed_detail_is_length_capped() -> None:
     of it in a response detail."""
     mapping = classify_provider_error(_ParamError(400, None, "problem: " + "word " * 500))
     assert mapping is not None
-    assert len(mapping.detail) <= MAX_EXPOSED_DETAIL_CHARS + 3
+    assert len(mapping.detail) <= MAX_EXPOSED_DETAIL_CHARS
+    assert mapping.detail.endswith("...")
 
 
+def test_caller_fault_falls_back_after_the_message_is_completely_redacted() -> None:
+    mapping = classify_provider_error(_ParamError(400, None, "token=supersecretvalue123"))
+    assert mapping == (400, PROVIDER_BAD_REQUEST_DETAIL)
+
+
+def test_redaction_strips_prefixless_32_character_api_keys() -> None:
+    key = "0123456789abcdef0123456789abcdef"
+    assert key not in redact_upstream_message(f"Incorrect api-key provided: {key}")
 
 
 # The exact upstream Anthropic message for an out-of-credit account. Anthropic
