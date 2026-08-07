@@ -4,6 +4,7 @@ import logging
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from gateway.types.moderation import ModerationResponse, ModerationResult
@@ -347,6 +348,48 @@ def test_moderations_cost_tracked_with_pricing(
     latest = moderation_logs[-1]
     assert latest["cost"] is not None
     assert latest["cost"] > 0
+
+
+def test_moderations_billing_meters_tracked_with_pricing(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """POST /v1/moderations records auditable charge lines alongside cost."""
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:omni-moderation-latest",
+            "input_price_per_million": 2.0,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+
+    mock_resp = _mock_moderation_response()
+
+    with patch(
+        "gateway.api.routes.moderations.amoderation",
+        new_callable=AsyncMock,
+        return_value=mock_resp,
+    ):
+        resp = client.post(
+            "/v1/moderations",
+            json={"model": "openai:omni-moderation-latest", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+
+    usage_resp = client.get(
+        "/v1/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
+    )
+    logs = usage_resp.json()
+    assert len(logs) >= 1
+    latest = logs[0]
+    assert latest["billing_meters"] == {"requests": 1}
+    assert latest["pricing_breakdown"] == [
+        {"meter": "request", "units": 1, "unit_rate": pytest.approx(0.000002), "cost": pytest.approx(0.000002)}
+    ]
 
 
 def test_moderations_no_warning_when_pricing_missing(

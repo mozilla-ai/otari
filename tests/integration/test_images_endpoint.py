@@ -223,3 +223,37 @@ def test_images_cost_tracked_with_pricing(
     assert image_logs[0]["cost"] > 0
     # Cost should be n_images * input_price_per_million = 2 * 0.04 = 0.08
     assert image_logs[0]["cost"] == pytest.approx(0.08)
+
+
+def test_images_billing_meters_tracked_with_pricing(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """POST /v1/images/generations records auditable charge lines alongside cost."""
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:dall-e-3",
+            "input_price_per_million": 0.04,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+
+    mock_resp = _mock_images_response(n=2)
+
+    with patch("gateway.api.routes.images.aimage_generation", new_callable=AsyncMock, return_value=mock_resp):
+        resp = client.post(
+            "/v1/images/generations",
+            json={"model": "openai:dall-e-3", "prompt": "a cute cat", "n": 2},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+
+    usage_resp = client.get("/v1/usage", params={"endpoint": "/v1/images/generations"}, headers=master_key_header)
+    logs = usage_resp.json()
+    assert len(logs) >= 1
+    assert logs[0]["billing_meters"] == {"images": 2}
+    breakdown = logs[0]["pricing_breakdown"]
+    assert breakdown == [{"meter": "images", "units": 2, "unit_rate": 0.04, "cost": pytest.approx(0.08)}]
