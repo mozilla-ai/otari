@@ -147,7 +147,9 @@ def test_cache_control_and_non_stream_usage_round_trip(
     client: TestClient,
     api_key_header: dict[str, str],
 ) -> None:
-    """Block and automatic cache controls reach Anthropic unchanged."""
+    """Block and automatic cache controls reach Anthropic unchanged, and cache
+    usage reaches the client.
+    """
     system_block = {
         "type": "text",
         "text": "Stable system instructions",
