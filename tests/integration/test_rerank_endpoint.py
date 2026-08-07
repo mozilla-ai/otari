@@ -263,3 +263,35 @@ def test_rerank_cost_tracked_with_pricing(
     assert len(rerank_logs) >= 1
     assert rerank_logs[0]["cost"] is not None
     assert rerank_logs[0]["cost"] > 0
+
+
+def test_rerank_billing_meters_tracked_with_pricing(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """POST /v1/rerank records auditable charge lines alongside cost."""
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "cohere:rerank-v3.5",
+            "input_price_per_million": 2.0,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+
+    with patch(
+        "gateway.api.routes.rerank.arerank",
+        new_callable=AsyncMock,
+        return_value=_mock_rerank_response(),
+    ):
+        resp = client.post("/v1/rerank", json=RERANK_PAYLOAD, headers=api_key_header)
+    assert resp.status_code == 200
+
+    usage_resp = client.get("/v1/usage", params={"endpoint": "/v1/rerank"}, headers=master_key_header)
+    logs = usage_resp.json()
+    assert len(logs) >= 1
+    assert logs[0]["billing_meters"] == {"input_tokens": 100}
+    breakdown = logs[0]["pricing_breakdown"]
+    assert breakdown == [{"meter": "input", "units": 100, "rate_per_million": 2.0, "cost": pytest.approx(0.0002)}]

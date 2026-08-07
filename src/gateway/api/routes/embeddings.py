@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._passthrough import run_passthrough
+from gateway.api.routes._passthrough import BillingMeters, run_passthrough
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, ModelPricing
 from gateway.services.budget_service import estimate_cost
@@ -65,6 +65,16 @@ async def create_embedding(
             return input_token_cost(result.usage.prompt_tokens, pricing)
         return None
 
+    def compute_meters(
+        result: CreateEmbeddingResponse, pricing: ModelPricing | None, cost: float
+    ) -> BillingMeters | None:
+        if not result.usage or pricing is None:
+            return None
+        tokens = result.usage.prompt_tokens
+        rate = pricing.input_price_per_million
+        breakdown = [{"meter": "input", "units": tokens, "rate_per_million": rate, "cost": cost}]
+        return {"input_tokens": tokens}, breakdown
+
     async def call_provider(resolved: ResolvedProvider) -> CreateEmbeddingResponse:
         embedding_kwargs: dict[str, Any] = {
             "model": resolved.model,
@@ -93,5 +103,6 @@ async def create_embedding(
         enforce_require_pricing=True,
         usage_tokens=usage_tokens,
         compute_cost=compute_cost,
+        compute_meters=compute_meters,
     )
     return outcome.result

@@ -68,6 +68,11 @@ ResultT = TypeVar("ResultT")
 
 PASSTHROUGH_PROVIDER_ERROR_DETAIL = "The request could not be completed by the provider"
 
+# A route's non-token charge lines: the meters dict and the auditable breakdown,
+# matching the shape ``calculate_metered_cost`` and ``price_tool_calls`` already
+# write for the chat and tool-charge paths.
+BillingMeters = tuple[dict[str, Any], list[dict[str, Any]]]
+
 
 def resolve_passthrough_user_id(
     auth_result: tuple[APIKey | None, bool],
@@ -130,6 +135,7 @@ async def run_passthrough(
     enforce_require_pricing: bool = False,
     usage_tokens: Callable[[ResultT], tuple[int | None, int | None, int | None]] | None = None,
     compute_cost: Callable[[ResultT, ModelPricing | None], float | None] | None = None,
+    compute_meters: Callable[[ResultT, ModelPricing | None, float], BillingMeters | None] | None = None,
     map_provider_error: Callable[[Exception], HTTPException | None] | None = None,
     reserve_before_resolve: bool = False,
     relabel: bool = True,
@@ -167,6 +173,11 @@ async def run_passthrough(
             total)`` token counts for the usage log. Defaults to ``(0, 0, 0)``.
         compute_cost: Maps the result and pricing to the final USD cost, or
             ``None`` to leave the log's cost unset and reconcile at 0.0.
+        compute_meters: Maps the result, pricing, and the cost ``compute_cost``
+            just returned to this request's billing meters and charge lines, or
+            ``None`` to leave both unset. Only called when ``compute_cost``
+            returned a cost, so a route with no priced unit never needs to guard
+            against a missing cost itself.
         map_provider_error: Route-specific provider-exception mapping checked
             before the generic 502 (the error log and refund happen either way).
         reserve_before_resolve: Preserve the audio routes' historical ordering,
@@ -389,6 +400,9 @@ async def run_passthrough(
         cost = compute_cost(result, pricing) if compute_cost else None
         if cost is not None:
             usage_log.cost = cost
+            billing = compute_meters(result, pricing, cost) if compute_meters else None
+            if billing is not None:
+                usage_log.billing_meters, usage_log.pricing_breakdown = billing
 
         await log_writer.put(usage_log)
         await reconcile_reservation(db, reservation, cost if cost is not None else 0.0)

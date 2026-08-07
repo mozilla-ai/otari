@@ -228,3 +228,37 @@ def test_embeddings_cost_tracked_with_pricing(
     assert len(embedding_logs) >= 1
     assert embedding_logs[0]["cost"] is not None
     assert embedding_logs[0]["cost"] > 0
+
+
+def test_embeddings_billing_meters_tracked_with_pricing(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """POST /v1/embeddings records auditable charge lines alongside cost."""
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:text-embedding-3-small",
+            "input_price_per_million": 0.02,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+
+    mock_resp = _mock_embedding_response()
+
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
+        resp = client.post(
+            "/v1/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+
+    usage_resp = client.get("/v1/usage", params={"endpoint": "/v1/embeddings"}, headers=master_key_header)
+    logs = usage_resp.json()
+    assert len(logs) >= 1
+    assert logs[0]["billing_meters"] == {"input_tokens": 10}
+    breakdown = logs[0]["pricing_breakdown"]
+    assert breakdown == [{"meter": "input", "units": 10, "rate_per_million": 0.02, "cost": pytest.approx(2e-7)}]

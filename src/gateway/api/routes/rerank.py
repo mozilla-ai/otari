@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._passthrough import run_passthrough
+from gateway.api.routes._passthrough import BillingMeters, run_passthrough
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, ModelPricing
 from gateway.services.budget_service import estimate_cost
@@ -64,6 +64,14 @@ async def create_rerank(
             return input_token_cost(total_tokens, pricing)
         return None
 
+    def compute_meters(result: RerankResponse, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
+        total_tokens = result.usage.total_tokens if result.usage else None
+        if not pricing or not total_tokens:
+            return None
+        rate = pricing.input_price_per_million
+        breakdown = [{"meter": "input", "units": total_tokens, "rate_per_million": rate, "cost": cost}]
+        return {"input_tokens": total_tokens}, breakdown
+
     async def call_provider(resolved: ResolvedProvider) -> RerankResponse:
         rerank_kwargs: dict[str, Any] = {
             "model": resolved.model,
@@ -96,5 +104,6 @@ async def create_rerank(
         enforce_require_pricing=True,
         usage_tokens=usage_tokens,
         compute_cost=compute_cost,
+        compute_meters=compute_meters,
     )
     return outcome.result
