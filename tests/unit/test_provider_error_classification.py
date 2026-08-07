@@ -352,6 +352,18 @@ def test_redaction_strips_prefixless_32_character_api_keys() -> None:
     assert key not in redact_upstream_message(f"Incorrect api-key provided: {key}")
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "messages.0.content: input_value='private prompt'",
+        "content=private prompt",
+        "input_value=private prompt",
+    ],
+)
+def test_redaction_rejects_validation_payload_echoes(raw: str) -> None:
+    assert redact_upstream_message(raw) == ""
+
+
 # The exact upstream Anthropic message for an out-of-credit account. Anthropic
 # returns this as a 400 invalid_request_error, not a 402.
 _ANTHROPIC_BILLING_MSG = (

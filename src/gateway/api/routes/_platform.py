@@ -778,10 +778,11 @@ _SECRET_SHAPES: tuple[re.Pattern[str], ...] = (
 # Upstream APIs sometimes reflect the request that failed. Such an echo can
 # contain prompt text, tool arguments, or gateway-generated context, none of
 # which belongs in a client-facing error. Parameter paths such as
-# ``messages.0.content`` stay useful, while field/value pairs and JSON payloads
-# are rejected as a whole and make the caller-fault classifier use its fallback.
+# ``messages.0.content`` stay useful, while field/value pairs, including common
+# validation-error spellings, and JSON payloads are rejected as a whole and make
+# the caller-fault classifier use its fallback.
 _PAYLOAD_ECHO = re.compile(
-    r"(?:[\"']?(?:messages|input|prompt|tools?|tool_calls|response|request(?:_body)?|body)[\"']?\s*[:=])",
+    r"(?:[\"']?(?:messages|input|prompt|tools?|tool_calls|response|request(?:_body)?|body|content|input_value)[\"']?\s*[:=]|\b(?:messages|input|tools?|tool_calls)(?:\.\d+|\[[^]]+\])+\.(?:content|input_value)\s*:\s*(?:(?:input_)?value\s*=|[\"'{[]))",
     re.IGNORECASE,
 )
 
