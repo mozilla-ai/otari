@@ -161,7 +161,8 @@ async def run_passthrough(
             ``HTTPException`` raised here (e.g. an upload size check) refunds
             the reservation and propagates unchanged.
         lookup_pricing: Whether to resolve :class:`ModelPricing` for the model.
-            Audio has no measurable cost unit yet and skips the lookup.
+            Audio resolves it for per-request charge lines but the reservation
+            estimate stays 0 (no measurable cost unit yet, so no pre-call spend).
         estimate: Maps the pricing row to the reservation estimate in USD.
             Defaults to 0.0, which still enforces per-user state (user exists,
             not blocked, not already over budget).
@@ -292,6 +293,8 @@ async def run_passthrough(
         # unresolvable selector to 400; otherwise the estimate leaks.
         try:
             resolved = resolve_provider_selector(config, model, user_id)
+            if lookup_pricing:
+                pricing = await find_model_pricing(db, resolved.instance, resolved.model)
         except (ValueError, AnyLLMError) as exc:
             await refund_reservation(db, reservation)
             await _log_rejection(
