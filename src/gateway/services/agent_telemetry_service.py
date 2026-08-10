@@ -91,9 +91,9 @@ def event_dedup_key(record: TelemetryRecord, user_id: str | None = None) -> str:
         record.tool_name or "",
         record.decision or "",
         record.success if record.success is not None else "",
-        record.duration_ms or "",
-        record.status_code or "",
-        record.prompt_length or "",
+        record.duration_ms if record.duration_ms is not None else "",
+        record.status_code if record.status_code is not None else "",
+        record.prompt_length if record.prompt_length is not None else "",
     )
 
 
