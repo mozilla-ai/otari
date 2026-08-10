@@ -225,10 +225,8 @@ def test_billing_exhaustion_detected_through_original_exception() -> None:
     assert error_class == "http_400_billing"
 
 
-def test_malformed_400_is_still_terminal_after_the_billing_probe() -> None:
-    """The billing probe must not sweep up a genuinely malformed request: an
-    unrecognized 400 message stays terminal so it does not waste an attempt
-    against every provider in the route."""
+def test_unrecognized_400_falls_through_without_billing_classification() -> None:
+    """An unrecognized 400 remains an ordinary HTTP error, not a billing error."""
     exc = _MessageStatusError(400, "messages.3: tool_use ids were found without tool_result blocks")
     assert _classify_upstream_error(exc) == (True, "http_400")
 

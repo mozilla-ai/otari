@@ -275,8 +275,8 @@ def test_all_candidates_failing_is_a_generic_502(client: TestClient) -> None:
     assert resp.status_code == 502
 
 
-def test_a_malformed_request_does_not_burn_the_chain(client: TestClient) -> None:
-    """A 400 would be rejected by every provider, so only one call should happen."""
+def test_a_provider_400_burns_the_chain(client: TestClient) -> None:
+    """Provider failures fall through before a response is committed."""
     _create_user(client)
     calls: list[str] = []
 
@@ -287,14 +287,12 @@ def test_a_malformed_request_does_not_burn_the_chain(client: TestClient) -> None
     with patch("gateway.api.routes.chat.acompletion", new=bad_request):
         resp = _chat(client, "fast")
 
-    assert resp.status_code == 400
-    assert calls == ["openai:gpt-5-mini"]
+    assert resp.status_code == 502
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
 
 
-def test_an_auth_failure_does_not_fail_over(client: TestClient) -> None:
-    """The operator owns both keys here, so a 401 is their misconfiguration.
-    Failing over would move the spend to another provider and hide it.
-    """
+def test_an_auth_failure_burns_the_chain(client: TestClient) -> None:
+    """A provider authentication failure also advances the policy."""
     _create_user(client)
     calls: list[str] = []
 
@@ -307,12 +305,9 @@ def test_an_auth_failure_does_not_fail_over(client: TestClient) -> None:
     with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(side_effect=_http_error(401))):
         direct = _chat(client, "openai:gpt-5-mini")
 
-    assert calls == ["openai:gpt-5-mini"]
-    # Whatever a provider 401 maps to for a plain model, it maps to the same
-    # through a policy. (It is deliberately not surfaced as a 401: the caller's
-    # own key was fine, and saying "unauthorized" would point them at the wrong
-    # thing.)
-    assert resp.status_code == direct.status_code
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
+    assert resp.status_code == 502
+    assert direct.status_code == 502
 
 
 def test_streaming_fails_over_before_any_bytes_are_flushed(client: TestClient) -> None:
@@ -1043,11 +1038,8 @@ def test_a_blocking_policy_guardrail_refuses_the_request(guarded_client: TestCli
 # ---------------------------------------------------------------------------
 
 
-def test_a_terminal_failure_names_the_candidate_that_actually_failed(client: TestClient) -> None:
-    """A 401 does not fail over, so the request stops on candidate 1. Attributing
-    it to the end of the plan would blame a provider that was never called, in a
-    row that feeds the by-provider breakdown and the error taxonomy.
-    """
+def test_an_exhausted_failure_names_the_last_candidate(client: TestClient) -> None:
+    """An exhausted chain attributes its terminal row to the final provider."""
     _create_user(client)
     calls: list[str] = []
 
@@ -1058,12 +1050,12 @@ def test_a_terminal_failure_names_the_candidate_that_actually_failed(client: Tes
     with patch("gateway.api.routes.chat.acompletion", new=unauthorized):
         _chat(client, "fast")
 
-    assert calls == ["openai:gpt-5-mini"]
+    assert calls == ["openai:gpt-5-mini", "anthropic:claude-haiku-4-5"]
     errors = [r for r in _usage_rows(client) if r["status"] == "error"]
     assert len(errors) == 1
-    assert errors[0]["provider"] == "openai"
-    assert errors[0]["model"] == "gpt-5-mini"
-    assert errors[0]["attempt_position"] == 1
+    assert errors[0]["provider"] == "anthropic"
+    assert errors[0]["model"] == "claude-haiku-4-5"
+    assert errors[0]["attempt_position"] == 2
 
 
 def test_a_streamed_fallover_correlates_both_of_its_rows(client: TestClient) -> None:

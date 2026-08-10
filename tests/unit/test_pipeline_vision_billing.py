@@ -29,6 +29,7 @@ class _Recorder:
 
     def __init__(self) -> None:
         self.usage_logged: list[dict[str, Any]] = []
+        self.reserve_calls: list[dict[str, Any]] = []
         self.reconciled: list[float] = []
         self.refunded = 0
 
@@ -54,6 +55,7 @@ class _Recorder:
             return None
 
         async def fake_reserve(*args: Any, **kwargs: Any) -> ReservationHandle:
+            self.reserve_calls.append(kwargs)
             return ReservationHandle(user_id="user-1", estimate=0.0, reserved=True, strategy="for_update")
 
         async def fake_increase(*args: Any, **kwargs: Any) -> None:
@@ -145,3 +147,20 @@ async def test_vision_side_call_billed_on_successful_setup(monkeypatch: pytest.M
     assert len(recorder.usage_logged) == 1
     assert recorder.reconciled == [0.01]
     assert recorder.refunded == 0
+
+
+@pytest.mark.asyncio
+async def test_reservation_uses_the_resolved_provider_for_pricing(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorder = _Recorder()
+    recorder.install(monkeypatch, topup_status=None)
+
+    await _resolve(_config())
+
+    assert recorder.reserve_calls == [
+        {
+            "model": "gpt-4",
+            "pricing_provider": "openai",
+            "strategy": "for_update",
+            "counts_toward_budget": True,
+        }
+    ]
