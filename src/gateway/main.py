@@ -15,6 +15,7 @@ from gateway.api.main import register_routers
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.dashboard import get_dashboard_build_id, get_dashboard_dir
+from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
@@ -436,6 +437,13 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 X_API_KEY_HEADER,
             ],
         )
+
+    # Tracks what the gateway is serving right now, so the activity log can show
+    # requests in progress and not only settled ones. Unconditional: the entry is
+    # a dict insert and delete per request, and the middleware is what guarantees
+    # an entry never outlives its response (see gateway.inflight).
+    app.state.inflight = InFlightRegistry()
+    app.add_middleware(InFlightMiddleware, registry=app.state.inflight)
 
     if config.enable_metrics:
         from gateway.metrics import MetricsMiddleware

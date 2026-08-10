@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import {
   useDeleteUsage,
+  useInFlightRequests,
   useSetPricing,
   useSetUsagePrice,
   useRequestGroups,
@@ -23,6 +24,7 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { FilterChips, type FilterChip } from "@/components/FilterChips";
+import { InFlightRequests } from "@/components/InFlightRequests";
 import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
 import { PAGE_SIZE_OPTIONS, TablePagination } from "@/components/TablePagination";
 import {
@@ -879,6 +881,32 @@ export function ActivityPage() {
   const usage = useUsageLogs(filters, page, pageSize);
   const count = useUsageCount(filters);
 
+  // Requests in progress. A usage row is written when a request settles, so the
+  // log below can only describe the past: on a slow backend a 30-second call is
+  // invisible for its whole duration. Deliberately outside `filters`: a request
+  // that has not finished has no status, cost, or token count to filter on, and
+  // scoping it to the selected time window would hide live work whenever an
+  // operator was browsing last week.
+  const inFlight = useInFlightRequests();
+  const inFlightRows = inFlight.data?.requests ?? [];
+
+  // A tracked request that has left the in-flight list just settled, so its row
+  // exists in the log now. Pull it in, rather than leaving the operator watching a
+  // request disappear from one panel without appearing in the other until they
+  // press refresh. Keyed on ids, not on the count: one request finishing while
+  // another starts leaves the count unchanged.
+  const seenInFlightIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!inFlight.data) return;
+    const live = new Set((inFlight.data.requests ?? []).map((request) => request.id));
+    const settled = [...seenInFlightIds.current].some((id) => !live.has(id));
+    seenInFlightIds.current = live;
+    if (settled) {
+      void usage.refetch();
+      void count.refetch();
+    }
+  }, [inFlight.data, usage.refetch, count.refetch]);
+
   // Model suggestions: models with usage in the window (other filters applied, the
   // model filter omitted so the full list stays offered).
   const modelSuggestFilters: UsageFilters = useMemo(
@@ -1252,6 +1280,7 @@ export function ActivityPage() {
   const refresh = () => {
     void usage.refetch();
     void count.refetch();
+    void inFlight.refetch();
     void contextSummary.refetch();
     void modelSummary.refetch();
     void entitySummary.refetch();
@@ -1439,6 +1468,11 @@ export function ActivityPage() {
           />
         </FilterChips>
       </div>
+
+      {/* Above the log rather than above the filter cluster: the panel appears and
+          disappears on its own as traffic comes and goes, and putting it higher
+          would shift the controls under the operator's cursor. */}
+      <InFlightRequests requests={inFlightRows} total={inFlight.data?.total ?? 0} updatedAt={inFlight.dataUpdatedAt} />
 
       {hasSelection ? (
         <BulkActionBar

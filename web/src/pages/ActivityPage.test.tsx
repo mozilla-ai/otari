@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { UsageEntry } from "@/api/types";
+import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/api/types";
 import { ActivityPage } from "@/pages/ActivityPage";
 
 function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
@@ -49,9 +49,18 @@ interface FetchCall {
 
 // Mock fetch for the usage list/count/summary reads plus the delete and
 // set-price mutations. Records every call so tests can assert URLs and bodies.
-function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageEntry[]; users?: string[] } = {}) {
+function mockApi(
+  opts: {
+    rows?: UsageEntry[];
+    total?: number;
+    groupRows?: UsageEntry[];
+    users?: string[];
+    inFlight?: InFlightResponse;
+  } = {},
+) {
   const rows = opts.rows ?? [];
   const total = opts.total ?? rows.length;
+  const inFlight = opts.inFlight ?? { requests: [], total: 0 };
   const calls: FetchCall[] = [];
 
   const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -67,6 +76,11 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageE
     }
     if (url.includes("/v1/usage/count")) {
       return jsonResponse({ total });
+    }
+    // Ahead of the bare /v1/usage arm below, which would otherwise answer this
+    // with the row array and hand the in-flight panel the wrong shape.
+    if (url.includes("/v1/usage/in-flight")) {
+      return jsonResponse(inFlight);
     }
     if (url.includes("/v1/usage/summary")) {
       const models = Array.from(new Set(rows.map((r) => r.model)));
@@ -135,8 +149,8 @@ function renderPage(ui: ReactElement, route = "/activity") {
   );
 }
 
-// Only the list requests (not /count, /summary, or mutations) carry the
-// pagination + filter params.
+// Only the list requests (not /count, /summary, /in-flight, or mutations) carry
+// the pagination + filter params.
 function listCalls(calls: FetchCall[]): string[] {
   return calls
     .filter(
@@ -145,6 +159,7 @@ function listCalls(calls: FetchCall[]): string[] {
         c.url.includes("/v1/usage") &&
         !c.url.includes("/count") &&
         !c.url.includes("/summary") &&
+        !c.url.includes("/in-flight") &&
         !c.url.includes("/set-price"),
     )
     .map((c) => c.url);
@@ -383,6 +398,7 @@ describe("ActivityPage", () => {
         return jsonResponse({ detail: "summary exploded" }, 500);
       }
       if (url.includes("/v1/usage/count")) return jsonResponse({ total: 1 });
+      if (url.includes("/v1/usage/in-flight")) return jsonResponse({ requests: [], total: 0 });
       if (url.includes("/v1/usage")) return jsonResponse([entry()]);
       return jsonResponse([]);
     });
@@ -592,6 +608,9 @@ describe("ActivityPage", () => {
       }
       if (url.includes("/v1/usage/summary")) {
         return jsonResponse({ by_model: [], by_user: [], by_api_key: [], series: [] });
+      }
+      if (url.includes("/v1/usage/in-flight")) {
+        return jsonResponse({ requests: [], total: 0 });
       }
       if (url.includes("/v1/usage")) {
         return jsonResponse(Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })));
@@ -1370,5 +1389,150 @@ describe("ActivityPage suggestion scoping", () => {
     expect(entityQuery, "user/key picker summary").toBeDefined();
     expect(entityQuery).not.toContain("user_id=alice");
     expect(entityQuery).toContain("model=gpt-4o");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Requests in flight (issue #526)
+// ---------------------------------------------------------------------------
+
+function inFlightRequest(overrides: Partial<InFlightRequest> = {}): InFlightRequest {
+  return {
+    id: "live-1",
+    endpoint: "/v1/chat/completions",
+    model: "ollama:qwen3",
+    provider: "ollama",
+    user_id: "alice",
+    api_key_id: "key-1",
+    policy_name: null,
+    started_at: new Date().toISOString(),
+    elapsed_ms: 12_000,
+    ...overrides,
+  };
+}
+
+describe("ActivityPage in-flight panel", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows a request that has not settled yet", async () => {
+    // The reason the feature exists: on a slow local backend the log stays empty
+    // for the whole call, so without this panel the page reads as "nothing is
+    // happening" while a request is mid-flight.
+    mockApi({ rows: [], inFlight: { requests: [inFlightRequest()], total: 1 } });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    const panel = await screen.findByRole("region", { name: "Requests in flight" });
+    expect(within(panel).getByText("1 request in flight")).toBeInTheDocument();
+    expect(within(panel).getByText("ollama:qwen3")).toBeInTheDocument();
+    expect(within(panel).getByText("completions")).toBeInTheDocument();
+    expect(within(panel).getByText("alice")).toBeInTheDocument();
+    // Elapsed reads as a coarse wall-clock wait, seeded from the server's own
+    // measurement so it does not depend on the browser clock.
+    expect(within(panel).getByText(/^12s$/)).toBeInTheDocument();
+  });
+
+  it("renders nothing while the gateway is idle", async () => {
+    mockApi({ rows: [entry()], inFlight: { requests: [], total: 0 } });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    await screen.findByText("gpt-4o");
+    expect(screen.queryByRole("region", { name: "Requests in flight" })).not.toBeInTheDocument();
+  });
+
+  it("names the policy and formats a long wait in minutes", async () => {
+    mockApi({
+      rows: [],
+      inFlight: {
+        requests: [inFlightRequest({ policy_name: "cheap-first", elapsed_ms: 95_000 })],
+        total: 1,
+      },
+    });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    const panel = await screen.findByRole("region", { name: "Requests in flight" });
+    expect(within(panel).getByText("via cheap-first")).toBeInTheDocument();
+    expect(within(panel).getByText(/^1m 35s$/)).toBeInTheDocument();
+  });
+
+  it("says how many in-flight requests the response left out", async () => {
+    // The endpoint caps what it serializes, so the count and the list can differ;
+    // reading the list length as the total would under-report live traffic.
+    mockApi({ rows: [], inFlight: { requests: [inFlightRequest()], total: 7 } });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    const panel = await screen.findByRole("region", { name: "Requests in flight" });
+    expect(within(panel).getByText("7 requests in flight")).toBeInTheDocument();
+    expect(within(panel).getByText("showing the 1 longest-running")).toBeInTheDocument();
+  });
+
+  it("does not send the activity filters to the in-flight endpoint", async () => {
+    // A request in progress has no status, cost, or token count to filter on, and
+    // scoping it to the selected window would hide live work from an operator
+    // browsing last week.
+    const { calls } = mockApi({ rows: [], inFlight: { requests: [inFlightRequest()], total: 1 } });
+    renderPage(<ActivityPage />, "/activity?range=7d&status=error&model=gpt-4o");
+
+    await screen.findByRole("region", { name: "Requests in flight" });
+    const requested = calls.map((c) => c.url).filter((url) => url.includes("/v1/usage/in-flight"));
+    expect(requested.length).toBeGreaterThan(0);
+    for (const url of requested) {
+      expect(url).toBe("/v1/usage/in-flight");
+    }
+  });
+
+  it("re-reads the log once a tracked request settles", async () => {
+    // Otherwise the request vanishes from the panel and does not appear in the log
+    // until the operator presses refresh, which reads as a lost request.
+    let live: InFlightResponse = { requests: [inFlightRequest()], total: 1 };
+    const calls: FetchCall[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      calls.push({ url, method: "GET", body: undefined });
+      if (url.includes("/v1/usage/in-flight")) return jsonResponse(live);
+      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 0 });
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({
+          start_date: "",
+          end_date: "",
+          bucket: "day",
+          totals: {
+            cost: 0,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            request_count: 0,
+            error_count: 0,
+            avg_latency_ms: null,
+          },
+          by_model: [],
+          by_user: [],
+          by_api_key: [],
+          by_source: [],
+          series: [],
+        });
+      }
+      return jsonResponse([]);
+    });
+
+    renderPage(<ActivityPage />, "/activity?range=24h");
+    await screen.findByRole("region", { name: "Requests in flight" });
+    const before = listCalls(calls).length;
+
+    // The request settles: the next poll no longer carries it.
+    live = { requests: [], total: 0 };
+    await waitFor(
+      () => {
+        expect(screen.queryByRole("region", { name: "Requests in flight" })).not.toBeInTheDocument();
+      },
+      { timeout: 4000 },
+    );
+    await waitFor(() => {
+      expect(listCalls(calls).length).toBeGreaterThan(before);
+    });
   });
 });

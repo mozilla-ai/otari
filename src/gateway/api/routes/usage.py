@@ -8,9 +8,10 @@ external systems that need to sync usage data (billing, analytics).
 import csv
 import io
 from datetime import UTC, datetime, timedelta
+from time import monotonic
 from typing import Annotated, Any, Literal, NamedTuple, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import ColumnElement, and_, case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.core.sql import MAX_FILTER_VALUES, match_any
+from gateway.inflight import get_registry
 from gateway.models.entities import APIKey, UsageLog, User
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,
@@ -53,6 +55,11 @@ _BREAKDOWN_TOP_N = 100
 # the dashboard's fixed categorical palette); the breakdown tables, not the chart,
 # are the place to read a longer tail.
 _SERIES_TOP_N = 8
+
+# How many in-flight requests are serialized. A live panel is read at a glance, so
+# a fixed cap beats a pagination knob; the response reports the true count next to
+# the capped list, and the longest-running are the ones kept.
+_MAX_IN_FLIGHT_ROWS = 50
 
 # Sessions (``source_label``) are an order of magnitude higher-cardinality than
 # models or users: one agent workload can open hundreds of them in a month, and
@@ -229,6 +236,32 @@ class UsageEntry(BaseModel):
 class UsageCount(BaseModel):
     """Total number of usage logs matching a set of filters."""
 
+    total: int
+
+
+class InFlightEntry(BaseModel):
+    """One request the gateway is serving right now.
+
+    Field names match their ``UsageEntry`` counterparts so a request reads the
+    same way in flight as it does once it has settled. ``id`` is the exception: it
+    is an ephemeral tracking id, not the id of the usage row this will become.
+    """
+
+    id: str
+    endpoint: str
+    model: str
+    provider: str | None
+    user_id: str | None
+    api_key_id: str | None
+    policy_name: str | None
+    started_at: datetime
+    elapsed_ms: int
+
+
+class InFlightResponse(BaseModel):
+    """The requests in flight on the answering worker."""
+
+    requests: list[InFlightEntry]
     total: int
 
 
@@ -525,6 +558,45 @@ async def count_usage(
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
     total = (await db.execute(stmt)).scalar_one()
     return UsageCount(total=total)
+
+
+@router.get("/in-flight", dependencies=[Depends(verify_master_key)])
+async def list_in_flight(raw_request: Request) -> InFlightResponse:
+    """Requests the gateway is currently serving, longest-running first.
+
+    A usage row is written when a request settles, so the log alone cannot answer
+    "is anything happening right now": on a slow backend, a 30-second local model
+    call is invisible until it finishes. This reports what is in progress.
+
+    Read from an in-memory registry, so it describes the worker that answers this
+    call and not the deployment: with several uvicorn workers, poll it repeatedly
+    or read the ``gateway_active_requests`` metric for a process-wide total.
+    ``total`` is the true in-flight count even when ``requests`` is capped.
+    """
+    registry = get_registry(raw_request)
+    if registry is None:
+        return InFlightResponse(requests=[], total=0)
+    entries = registry.snapshot()
+    # One clock reading for the whole response, so two rows started together
+    # report the same elapsed time.
+    now = monotonic()
+    return InFlightResponse(
+        requests=[
+            InFlightEntry(
+                id=entry.id,
+                endpoint=entry.endpoint,
+                model=entry.model,
+                provider=entry.provider,
+                user_id=entry.user_id,
+                api_key_id=entry.api_key_id,
+                policy_name=entry.policy_name,
+                started_at=entry.started_at,
+                elapsed_ms=entry.elapsed_ms(now),
+            )
+            for entry in entries[:_MAX_IN_FLIGHT_ROWS]
+        ],
+        total=len(entries),
+    )
 
 
 @router.delete("", dependencies=[Depends(verify_master_key)])

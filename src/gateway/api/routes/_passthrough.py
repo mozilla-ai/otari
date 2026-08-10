@@ -45,6 +45,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
+from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
 from gateway.models.entities import APIKey, ModelPricing, UsageLog
@@ -385,6 +386,23 @@ async def run_passthrough(
             counts_toward_budget=not budget_exempt,
             **outcome,
         )
+
+    # Every gate has passed and the provider is about to be called, so the request
+    # is genuinely in flight from here until its response has been sent. Registered
+    # for the same reason as on the chat/messages/responses path, and it matters as
+    # much: an image generation routinely runs longer than a completion, and until
+    # it settles the activity log has nothing to show for it. The entry is dropped
+    # by InFlightMiddleware, not here.
+    track_request(
+        raw_request,
+        endpoint=endpoint,
+        # The same pair `_usage_row` stamps, so the row does not appear to change
+        # model when it settles.
+        model=resolved.model,
+        provider=resolved.instance,
+        user_id=user_id,
+        api_key_id=api_key_id,
+    )
 
     try:
         result = await call_provider(resolved)

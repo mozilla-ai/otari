@@ -663,6 +663,30 @@ export interface UsageCount {
   total: number;
 }
 
+// One request the gateway is serving right now. Field names match UsageEntry so a
+// request reads the same in flight as it does once logged; `id` is the exception,
+// an ephemeral tracking id rather than the id of the usage row it becomes.
+export interface InFlightRequest {
+  id: string;
+  endpoint: string;
+  model: string;
+  provider: string | null;
+  user_id: string | null;
+  api_key_id: string | null;
+  policy_name: string | null;
+  started_at: string;
+  // Server-measured, so the display never depends on the browser clock agreeing
+  // with the gateway's.
+  elapsed_ms: number;
+}
+
+export interface InFlightResponse {
+  requests: InFlightRequest[];
+  // The true in-flight count, which can exceed `requests.length`: the endpoint
+  // caps what it serializes.
+  total: number;
+}
+
 // Selection for a bulk usage mutation: either an explicit `ids` list (the current
 // page selection) or `by_filter: true` plus filter fields (everything matching).
 // Only imported rows (counts_toward_budget = false) are ever affected server-side.
