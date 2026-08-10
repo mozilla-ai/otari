@@ -392,6 +392,33 @@ def test_moderations_billing_meters_tracked_with_pricing(
     ]
 
 
+def test_moderations_unpriced_records_no_charge_lines(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """An unpriced moderation is free by design, so it records no charge line."""
+    with patch(
+        "gateway.api.routes.moderations.amoderation",
+        new_callable=AsyncMock,
+        return_value=_mock_moderation_response(),
+    ):
+        resp = client.post(
+            "/v1/moderations",
+            json={"model": "openai:unpriced-moderation-model", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+
+    usage_resp = client.get(
+        "/v1/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
+    )
+    latest = usage_resp.json()[0]
+    assert latest["cost"] == 0.0
+    assert latest["billing_meters"] is None
+    assert latest["pricing_breakdown"] is None
+
+
 def test_moderations_no_warning_when_pricing_missing(
     client: TestClient,
     api_key_header: dict[str, str],

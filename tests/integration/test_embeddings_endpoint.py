@@ -259,6 +259,6 @@ def test_embeddings_billing_meters_tracked_with_pricing(
     usage_resp = client.get("/v1/usage", params={"endpoint": "/v1/embeddings"}, headers=master_key_header)
     logs = usage_resp.json()
     assert len(logs) >= 1
-    assert logs[0]["billing_meters"] == {"input_tokens": 10}
+    assert logs[0]["billing_meters"] == {"total_input_tokens": 10}
     breakdown = logs[0]["pricing_breakdown"]
     assert breakdown == [{"meter": "input", "units": 10, "rate_per_million": 0.02, "cost": pytest.approx(2e-7)}]

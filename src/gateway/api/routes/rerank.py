@@ -70,7 +70,10 @@ async def create_rerank(
             return None
         rate = pricing.input_price_per_million
         breakdown = [{"meter": "input", "units": total_tokens, "rate_per_million": rate, "cost": cost}]
-        return {"input_tokens": total_tokens}, breakdown
+        # See embeddings: the canonical meter name is what the billed-token SQL and
+        # the dashboard read. Rerank logs the same count as its prompt tokens, so
+        # this reports the value the fallback already produced.
+        return {"total_input_tokens": total_tokens}, breakdown
 
     async def call_provider(resolved: ResolvedProvider) -> RerankResponse:
         rerank_kwargs: dict[str, Any] = {

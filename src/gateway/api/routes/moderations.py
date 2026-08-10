@@ -68,8 +68,14 @@ async def create_moderation(
     def compute_cost(result: ModerationResponse, pricing: ModelPricing | None) -> float:
         return flat_request_cost(pricing)
 
-    def compute_meters(result: ModerationResponse, pricing: ModelPricing | None, cost: float) -> BillingMeters:
-        breakdown = [{"meter": "request", "units": 1, "unit_rate": flat_request_cost(pricing), "cost": cost}]
+    def compute_meters(result: ModerationResponse, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
+        # An unpriced moderation is $0 by design, which is the common case here, so
+        # record nothing rather than a zero charge line the dashboard would render
+        # as a "billed meters" block explaining a charge that never happened. One
+        # request is billed, so the per-request rate is the cost itself.
+        if not cost:
+            return None
+        breakdown = [{"meter": "request", "units": 1, "unit_rate": cost, "cost": cost}]
         return {"requests": 1}, breakdown
 
     def usage_tokens(result: ModerationResponse) -> tuple[int | None, int | None, int | None]:

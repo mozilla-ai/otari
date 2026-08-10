@@ -73,7 +73,11 @@ async def create_embedding(
         tokens = result.usage.prompt_tokens
         rate = pricing.input_price_per_million
         breakdown = [{"meter": "input", "units": tokens, "rate_per_million": rate, "cost": cost}]
-        return {"input_tokens": tokens}, breakdown
+        # ``total_input_tokens`` rather than a route-local name: it is the meter the
+        # billed-token SQL and the dashboard's token bar already read by name, so
+        # the row's own meter becomes the source they use instead of the raw-column
+        # fallback (same value here, but the fallback stops being load-bearing).
+        return {"total_input_tokens": tokens}, breakdown
 
     async def call_provider(resolved: ResolvedProvider) -> CreateEmbeddingResponse:
         embedding_kwargs: dict[str, Any] = {

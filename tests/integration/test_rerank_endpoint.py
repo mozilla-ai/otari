@@ -292,6 +292,6 @@ def test_rerank_billing_meters_tracked_with_pricing(
     usage_resp = client.get("/v1/usage", params={"endpoint": "/v1/rerank"}, headers=master_key_header)
     logs = usage_resp.json()
     assert len(logs) >= 1
-    assert logs[0]["billing_meters"] == {"input_tokens": 100}
+    assert logs[0]["billing_meters"] == {"total_input_tokens": 100}
     breakdown = logs[0]["pricing_breakdown"]
     assert breakdown == [{"meter": "input", "units": 100, "rate_per_million": 2.0, "cost": pytest.approx(0.0002)}]
