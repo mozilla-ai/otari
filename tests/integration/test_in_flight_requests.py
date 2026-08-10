@@ -259,25 +259,40 @@ def test_a_pass_through_request_is_registered_too(
 
 
 @pytest.mark.parametrize(
-    ("model", "expected_status"),
-    [("", 400), ("nosuchprovider:nosuchmodel", 400)],
+    ("model", "registrations"),
+    [
+        # Rejected by the preamble's own gates, before the registration point.
+        ("", 0),
+        # Reaches the registration point: nothing resolved locally, so the raw
+        # selector is recorded, and the refusal comes from the dispatch that
+        # follows. The window is a function call wide, but it is not zero, so the
+        # honest claim is "refused by a gate, never listed", not "refused, never
+        # listed".
+        ("nosuchprovider:nosuchmodel", 1),
+    ],
 )
-def test_a_refused_request_is_never_registered(
+def test_which_refusals_reach_the_registry(
     client: TestClient,
     api_key_header: dict[str, str],
     model: str,
-    expected_status: int,
+    registrations: int,
 ) -> None:
-    """A request the gateway rejected was never in progress.
+    """Where the registration point sits relative to each refusal.
 
-    It already leaves a usage row of its own, so reporting it here would show
-    dropped traffic as live work.
+    Asserted on ``begin`` rather than on the registry being empty afterwards: the
+    middleware cleans up unconditionally, so an empty registry after the response
+    is true whether or not anything was ever recorded.
     """
-    resp = client.post(
-        "/v1/chat/completions",
-        json={"model": model, "messages": _MESSAGES},
-        headers=api_key_header,
-    )
+    with patch.object(InFlightRegistry, "begin", autospec=True, wraps=None) as begin:
+        begin.return_value = "tracked"
+        resp = client.post(
+            "/v1/chat/completions",
+            json={"model": model, "messages": _MESSAGES},
+            headers=api_key_header,
+        )
 
-    assert resp.status_code == expected_status
+    assert resp.status_code == 400
+    assert begin.call_count == registrations
+    # Either way nothing is left behind: cleanup does not depend on which gate
+    # refused, or on anything having been registered at all.
     assert len(_registry(client)) == 0

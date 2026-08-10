@@ -323,9 +323,14 @@ function StatusPill({ status }: { status: string }) {
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
       {/* The pulse is decorative: "in progress" beside it carries the same meaning
-          in text, so nothing here is encoded in motion alone. */}
+          in text, so nothing here is encoded in motion alone. That is also why it
+          can stop outright under `prefers-reduced-motion`: this is the one element
+          on the page that would otherwise animate indefinitely. */}
       {status === IN_FLIGHT_STATUS ? (
-        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--otari-brand-dark)]" aria-hidden="true" />
+        <span
+          className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--otari-brand-dark)] motion-reduce:animate-none"
+          aria-hidden="true"
+        />
       ) : null}
       {status}
     </span>
@@ -985,20 +990,35 @@ export function ActivityPage() {
   // the log's own `staleTime`, so a genuine settle still refreshes promptly and
   // the flapping case costs one extra pair of reads per interval instead of one
   // per poll.
+  //
+  // Deferred rather than dropped when the throttle bites: a settle is remembered
+  // on `settlePending` and served by the first poll past the window. Discarding it
+  // instead lost the row entirely, because the id is gone from the next poll and
+  // nothing re-detects it: two requests landing inside one 10-second window left
+  // the second one's row missing from the log until an unrelated later settle or a
+  // manual refresh. The flapping case is unchanged (it re-flags every poll either
+  // way, and still costs one refetch per interval).
+  //
+  // Keyed on `dataUpdatedAt` as well as the payload, so a deferred settle is
+  // reconsidered on the next poll: an idle registry answers every poll with the
+  // same `{requests: [], total: 0}`, which structural sharing hands back as the
+  // same object, so `data` alone stops changing the moment the last request lands.
   const seenInFlightIds = useRef<Set<string>>(new Set());
   const lastSettledRefetch = useRef(0);
+  const settlePending = useRef(false);
   useEffect(() => {
     if (!inFlight.data) return;
     const live = new Set((inFlight.data.requests ?? []).map((request) => request.id));
-    const settled = [...seenInFlightIds.current].some((id) => !live.has(id));
+    if ([...seenInFlightIds.current].some((id) => !live.has(id))) settlePending.current = true;
     seenInFlightIds.current = live;
-    if (!settled) return;
+    if (!settlePending.current) return;
     const now = Date.now();
     if (now - lastSettledRefetch.current < SETTLED_REFETCH_MIN_MS) return;
+    settlePending.current = false;
     lastSettledRefetch.current = now;
     void usage.refetch();
     void count.refetch();
-  }, [inFlight.data, usage.refetch, count.refetch]);
+  }, [inFlight.data, inFlight.dataUpdatedAt, usage.refetch, count.refetch]);
 
   // Model suggestions: models with usage in the window (other filters applied, the
   // model filter omitted so the full list stays offered).

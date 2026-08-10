@@ -568,10 +568,11 @@ async def list_in_flight(raw_request: Request) -> InFlightResponse:
     "is anything happening right now": on a slow backend, a 30-second local model
     call is invisible until it finishes. This reports what is in progress.
 
-    Read from an in-memory registry, so it describes the worker that answers this
-    call and not the deployment: with several uvicorn workers, poll it repeatedly
-    or read the ``gateway_active_requests`` metric for a process-wide total.
-    ``total`` is the true in-flight count even when ``requests`` is capped.
+    Read from an in-memory registry, so it describes the process that answers this
+    call and not the deployment: behind a load balancer, consecutive polls reach
+    different otari processes, and there is no deployment-wide total to ask for.
+    ``total`` is the true in-flight count for the answering process even when
+    ``requests`` is capped.
     """
     registry = get_registry(raw_request)
     if registry is None:

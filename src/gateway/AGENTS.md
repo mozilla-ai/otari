@@ -19,9 +19,11 @@ Read these together before changing request behavior, the flow spans several fil
 5. Usage + budget reconciliation: standalone writes a `UsageLog` row via the log writer and reconciles spend; platform reports usage upstream.
 
 A usage row therefore only exists once a request has settled. What is *currently*
-running lives in `src/gateway/inflight.py`: an in-memory, per-worker registry,
-populated once every gate has passed and the provider is about to be called (so a
-refused request never appears) and emptied by `InFlightMiddleware`, read by
+running lives in `src/gateway/inflight.py`: an in-memory, per-process registry,
+populated once the budget, access and model-resolution gates have passed and the
+provider is about to be called (so a request refused by one of those never
+appears; a later guardrail or tool-declaration refusal does appear while that
+check runs) and emptied by `InFlightMiddleware`, read by
 `GET /v1/usage/in-flight` for the dashboard's Activity page. There are three
 registration points, one per dispatch scaffold: `resolve_request_context`
 (chat/messages/responses), `run_passthrough` (embeddings, images, audio, rerank,

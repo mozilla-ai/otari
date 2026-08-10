@@ -1626,4 +1626,39 @@ describe("ActivityPage in-flight rows", () => {
     // rest fall inside the throttle window.
     expect(listCalls(calls).length - before).toBeLessThanOrEqual(1);
   }, 15_000);
+
+  it("still picks up a settle that the throttle deferred", async () => {
+    // Two requests landing inside one throttle window is the ordinary case on any
+    // gateway with traffic. The second settle must be deferred, not discarded: its
+    // id is gone from the next poll, so nothing re-detects it, and the row it
+    // became would stay missing from the log until an unrelated later settle.
+    let live: InFlightResponse = { requests: [inFlightRequest({ id: "A", model: "model-a" })], total: 1 };
+    let rows: UsageEntry[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/usage/in-flight")) return jsonResponse(live);
+      if (url.includes("/v1/usage/count")) return jsonResponse({ total: rows.length });
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({ by_model: [], by_user: [], by_api_key: [], by_source: [], series: [] });
+      }
+      return jsonResponse(rows);
+    });
+
+    renderPage(<ActivityPage />, "/activity?range=24h");
+    await waitFor(() => expect(screen.getByText("model-a")).toBeInTheDocument());
+
+    // A settles, which arms the throttle.
+    live = { requests: [], total: 0 };
+    rows = [entry({ id: "row-a", model: "settled-a" })];
+    await waitFor(() => expect(screen.getByText("settled-a")).toBeInTheDocument(), { timeout: 8000 });
+
+    // B runs and settles well inside the window A's refetch opened.
+    live = { requests: [inFlightRequest({ id: "B", model: "model-b" })], total: 1 };
+    await waitFor(() => expect(screen.getByText("model-b")).toBeInTheDocument(), { timeout: 8000 });
+    live = { requests: [], total: 0 };
+    rows = [entry({ id: "row-b", model: "settled-b" }), entry({ id: "row-a", model: "settled-a" })];
+
+    await waitFor(() => expect(screen.getByText("settled-b")).toBeInTheDocument(), { timeout: 25000 });
+  }, 45_000);
 });

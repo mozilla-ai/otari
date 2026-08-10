@@ -2710,7 +2710,7 @@
         {
           "name": "List In Flight",
           "request": {
-            "description": "Requests the gateway is currently serving, longest-running first.\n\nA usage row is written when a request settles, so the log alone cannot answer\n\"is anything happening right now\": on a slow backend, a 30-second local model\ncall is invisible until it finishes. This reports what is in progress.\n\nRead from an in-memory registry, so it describes the worker that answers this\ncall and not the deployment: with several uvicorn workers, poll it repeatedly\nor read the ``gateway_active_requests`` metric for a process-wide total.\n``total`` is the true in-flight count even when ``requests`` is capped.",
+            "description": "Requests the gateway is currently serving, longest-running first.\n\nA usage row is written when a request settles, so the log alone cannot answer\n\"is anything happening right now\": on a slow backend, a 30-second local model\ncall is invisible until it finishes. This reports what is in progress.\n\nRead from an in-memory registry, so it describes the process that answers this\ncall and not the deployment: behind a load balancer, consecutive polls reach\ndifferent otari processes, and there is no deployment-wide total to ask for.\n``total`` is the true in-flight count for the answering process even when\n``requests`` is capped.",
             "header": [],
             "method": "GET",
             "url": {

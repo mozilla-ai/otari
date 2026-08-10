@@ -7,10 +7,11 @@ actually running. This module holds the other half: what is in flight right now.
 
 Two deliberate properties:
 
-* **In-memory, per worker.** Nothing is persisted and nothing is shared between
-  processes, so a gateway run with several uvicorn workers reports only the
-  requests the answering worker is serving. Persisting would mean a write per
-  request on the hot path to record something that is stale a second later.
+* **In-memory, per process.** Nothing is persisted and nothing is shared between
+  processes, so a deployment running several otari processes behind a load
+  balancer reports only the requests the answering process is serving. Persisting
+  would mean a write per request on the hot path to record something that is stale
+  a second later.
 * **Removal is owned by the middleware, not the handler.** A streaming response
   outlives its route handler (the body is produced after the handler returns),
   and the settlement paths that write usage rows branch a dozen ways. The one
@@ -154,7 +155,11 @@ def track_request(
 
     The id is stashed on the ASGI scope for :class:`InFlightMiddleware` to clean
     up. Called once the request is authorized and about to be dispatched, so a
-    request the gateway refused never appears as in flight.
+    request refused on budget, access, or model-resolution grounds never appears as
+    in flight. Refusals raised *after* the call site (an input guardrail block, an
+    unresolvable MCP id, a bad tool declaration on the completion path) do appear
+    for as long as that check runs, which is honest: the gateway is working on the
+    request by then.
     """
     registry = get_registry(request)
     if registry is None:

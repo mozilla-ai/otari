@@ -1303,9 +1303,13 @@ async def resolve_request_context(
 
     # The request is authorized and about to be dispatched, so from here until the
     # response has been fully sent it is genuinely in flight and the activity log
-    # can show it as such. Registered after every gate rather than at the top of
-    # the preamble: a request the gateway refused was never in progress, and it
-    # already leaves a usage row of its own. `model` and `provider` are the pair the
+    # can show it as such. Registered after the budget, access and model-resolution
+    # gates rather than at the top of the preamble: a request refused by one of
+    # those was never in progress, and it already leaves a usage row of its own. The
+    # caller-facing checks that run after this (`prepare_gateway_tools`: input
+    # guardrails, MCP id resolution, tool opt-ins) do list the request while they
+    # run, which is honest, since each of them can make a network call of its own.
+    # `model` and `provider` are the pair the
     # usage row will carry (the resolved target, not the caller's selector and not
     # the display alias), so a request does not appear to change model at the moment
     # it settles. The raw selector is the fallback for the cases that resolve

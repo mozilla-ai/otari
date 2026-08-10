@@ -170,9 +170,12 @@ gateway.
   moment it clears the budget and access checks until its response has been fully
   sent (a streamed answer stays listed for as long as it is still producing
   tokens). Batches are the exception: the work runs on the provider's side after
-  the submission returns, so there is no in-flight window to show. A request the
-  gateway refused never appears as in progress: it was never running, and it lands
-  in the log with its reason. An in-progress row is not part of any page of the
+  the submission returns, so there is no in-flight window to show. A request
+  refused on budget, access, or model-resolution grounds never appears as in
+  progress: it was never running, and it lands in the log with its reason. A
+  completion refused later, by an input guardrail or a bad tool declaration, can be
+  listed for as long as that check takes, since the gateway really is working on it
+  by then. An in-progress row is not part of any page of the
   log, so it is never counted in the paginator, never selectable for a bulk delete
   or reprice, and has no request detail to open until it settles. It is dropped
   from view rather than shown misleadingly whenever the current view could not
@@ -183,8 +186,9 @@ gateway.
   so a busy gateway does not re-query it continuously. Live rows are read from the
   process that answers the poll, so a deployment running several otari processes
   behind a load balancer shows one process's traffic at a time, and which one it
-  shows can change between polls; the `gateway_active_requests` Prometheus metric
-  is the per-process count.
+  shows can change between polls. There is no deployment-wide total: the
+  `gateway_active_requests` Prometheus metric is close but not the same number, as
+  it counts every HTTP request a process is handling, dashboard polls included.
   The **Routing** column names the policy a caller asked for, if any, plus where
   this row sits in that policy's plan and how it turned out: "served on attempt 2
   of 2 (a fallback candidate)", or, on an attempt a fallback recovered from,
