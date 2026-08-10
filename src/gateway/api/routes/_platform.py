@@ -47,35 +47,15 @@ T = TypeVar("T")
 # listing it keeps the intent explicit and robust to changes in that predicate.
 _USAGE_NON_RETRYABLE_STATUS_CODES = {401, 402, 404, 409, 422}
 
-# Status codes that cause the gateway to move on to the next attempt in a
-# multi-attempt route. 401/403 are included because users configure
-# multi-attempt routing policies on the platform precisely to handle
-# credential outages — when they've opted in, an auth failure on one provider
-# should fall through to the next, not surface to the client. Single-attempt
-# requests still see auth errors directly because there's nothing to fall
-# back to.
-#
-# 404/405/409/410 mean "this model or endpoint is unavailable at THIS provider"
-# (deprecated, renamed, retired, or never offered). Recovering from a model
-# being retired is one of the main reasons users configure fallback, so these
-# fall through to the next entry rather than failing the whole request. They are
-# distinct from 400/422, which mean the request itself is malformed and would be
-# rejected by every provider, so falling through on those just wastes attempts.
-# The one exception is a provider that reports account billing exhaustion as a
-# 400/422 rather than the 402 the condition deserves: that is an account
-# condition, not a malformed request, and the next provider would serve it fine.
-# See :func:`is_provider_billing_error`.
-_FALLBACK_RETRYABLE_STATUS_CODES = {401, 403, 404, 405, 408, 409, 410, 429, 500, 502, 503, 504}
-_FALLBACK_NON_RETRYABLE_STATUS_CODES = {400, 422}
-
-# Statuses on which the billing probe runs. Anthropic reports "credit balance is
-# too low" as a 400 ``invalid_request_error``; DeepSeek uses 402 for
-# "Insufficient Balance"; OpenAI's "billing hard limit reached" is a 400. 429 is
-# deliberately excluded: OpenAI's ``insufficient_quota`` arrives as a 429, which
-# is already both failover-eligible and surfaced to the caller as a rate limit,
-# so backing off remains a sane client action and reclassifying it would only
-# change the wording.
-_BILLING_CANDIDATE_STATUS_CODES = {400, 402, 422}
+# Statuses on which the billing-message probe runs. A 402 is payment required by
+# definition, so it is handled directly in ``is_provider_billing_error`` without
+# depending on a provider's error text. Anthropic reports "credit balance is too
+# low" as a 400 ``invalid_request_error`` and OpenAI's "billing hard limit
+# reached" is a 400. 429 is deliberately excluded: OpenAI's
+# ``insufficient_quota`` arrives as a 429, which is already both failover-eligible
+# and surfaced to the caller as a rate limit, so backing off remains a sane client
+# action and reclassifying it would only change the wording.
+_BILLING_MESSAGE_CANDIDATE_STATUS_CODES = {400, 422}
 
 # Lowercase substrings that identify account-level billing exhaustion in an
 # upstream provider message. Deliberately narrow: a false positive turns a
@@ -94,15 +74,6 @@ _BILLING_MESSAGE_PROBES: tuple[str, ...] = (
     "exceeded your current quota",  # openai
     "insufficient credits",  # openrouter, together
 )
-
-# Phrases accepted only on a 402, whose reason phrase ("Payment Required") is
-# itself the billing signal. httpx stringifies any 402 as "Client error '402
-# Payment Required' for url ...", so on a 402 this probe is really a
-# status-code check with a phrase-shaped spelling. It is kept out of
-# :data:`_BILLING_MESSAGE_PROBES` because a 400/422 that merely echoes a
-# caller-supplied "payment required" string back in its message is a malformed
-# request, not an empty wallet.
-_BILLING_402_MESSAGE_PROBES = ("payment required",)
 
 # Streaming first-chunk timeouts (hybrid-mode fallback). Plain LLM streams
 # rarely take long to produce a first token, so a tight cap keeps failed-
@@ -266,8 +237,8 @@ async def run_platform_attempts(
     falling through. A tool-use loop's intermediate state (provider-specific
     ``tool_call`` ids / reasoning blocks) cannot be transparently replayed
     on a different provider. Pre-lock-in failures still walk the attempts
-    list and fall through to the next provider per the retryable
-    classification.
+    list and fall through to the next provider. Classification only labels the
+    attempt for logging and platform usage reporting.
 
     ``MaxToolIterationsExceeded`` is treated as a gateway-side cap hit, not
     an upstream failure — it raises a distinct 422 and does not advance to
@@ -392,7 +363,7 @@ async def run_platform_attempts(
         on_success(attempt)
         return result
 
-    # All attempts exhausted with retryable errors.
+    # All attempts exhausted after provider failures.
     logger.error(
         "All upstream attempts failed request_id=%s failures=%s",
         route.request_id,
@@ -825,49 +796,41 @@ def is_provider_billing_error(exc: BaseException) -> bool:
     account balance is per-provider, so the next attempt in the route can very
     plausibly succeed.
 
-    Gated on :data:`_BILLING_CANDIDATE_STATUS_CODES` so the probe can only ever
-    reinterpret a status that is otherwise a dead end, and matched against the
-    narrow :data:`_BILLING_MESSAGE_PROBES` (plus
-    :data:`_BILLING_402_MESSAGE_PROBES` on a 402) so an unrecognized phrasing
-    falls through to the existing generic handling instead of being
-    misclassified.
+    A 402 is always a billing error: HTTP defines it as payment required, even
+    when a provider SDK discards the response reason and body. The 400/422 probe
+    stays deliberately narrow so error reports do not falsely label malformed
+    requests as account billing exhaustion.
     """
     _kind, status_code = upstream_exception_shape(exc)
-    if status_code not in _BILLING_CANDIDATE_STATUS_CODES:
-        return False
-    probes = _BILLING_MESSAGE_PROBES
     if status_code == 402:
-        probes += _BILLING_402_MESSAGE_PROBES
+        return True
+    if status_code not in _BILLING_MESSAGE_CANDIDATE_STATUS_CODES:
+        return False
     message = upstream_error_message(exc).lower()
-    return any(probe in message for probe in probes)
+    return any(probe in message for probe in _BILLING_MESSAGE_PROBES)
 
 
 def _classify_upstream_error(exc: BaseException) -> tuple[bool, str]:
-    """Classify an upstream provider error.
+    """Classify an upstream provider error for observability.
 
-    Returns ``(retryable, error_class)``. ``error_class`` is a short string used
-    for logging and reporting back to the platform. Streaming-only failures still
-    pass through this classifier; the caller decides whether to actually retry.
+    All provider failures that reach an attempt walker before lock-in advance to
+    the next candidate. The boolean stays in the return shape for the generic
+    streaming iterator, but is always ``True`` here. Gateway-side failures,
+    cancellations, and tool loops that already produced an assistant response are
+    handled by the walker before this classifier runs.
     """
     kind, status_code = upstream_exception_shape(exc)
     if kind is not None:
         return True, kind
 
     if isinstance(status_code, int):
-        # Checked before the non-retryable set: a billing 400/402/422 is an
-        # account condition on THIS provider, so the route's next attempt is
-        # worth making. The distinct error_class keeps "we ran out of credit"
-        # separable from "the request was malformed" in logs and in what the
-        # gateway reports back to the platform.
+        # Keep account exhaustion distinguishable in logs and in reports to the
+        # platform, even though every provider error now advances the plan.
         if is_provider_billing_error(exc):
             return True, f"http_{status_code}_billing"
-        if status_code in _FALLBACK_NON_RETRYABLE_STATUS_CODES:
-            return False, f"http_{status_code}"
-        if status_code in _FALLBACK_RETRYABLE_STATUS_CODES or 500 <= status_code <= 599:
-            return True, f"http_{status_code}"
-        return False, f"http_{status_code}"
+        return True, f"http_{status_code}"
 
-    return False, "unknown"
+    return True, "unknown"
 
 
 async def _resolve_platform_mcp_servers(

@@ -1192,7 +1192,8 @@ async def resolve_request_context(
                 db,
                 user_id,
                 estimate,
-                model=model,
+                model=gate_model,
+                pricing_provider=gate_instance,
                 strategy=config.budget_strategy,
                 counts_toward_budget=not budget_exempt,
             )

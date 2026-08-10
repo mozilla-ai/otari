@@ -49,7 +49,7 @@ curl http://localhost:8000/v1/chat/completions \
   -d '{"model": "fast", "messages": [{"role": "user", "content": "hello"}]}'
 ```
 
-If `openai:gpt-5-mini` returns a retryable failure, Anthropic serves the request
+If `openai:gpt-5-mini` fails before it has produced a response, Anthropic serves the request
 instead and the caller never sees the difference: the response `model` says
 `fast`, and the billed usage row names the model that actually served. The
 attempt that failed gets its own row too, with `status: "absorbed"`, so the
@@ -477,9 +477,7 @@ searches it ran, and that charge lands on its error row.
 
 | Situation | Result |
 | --- | --- |
-| Selected candidate fails retryably | Next candidate is tried |
-| Selected candidate returns 400 or 422 | No failover: every provider would reject it |
-| Provider returns 401 or 403 | No failover. You own these credentials, so this is a misconfiguration to fix, not a reason to move traffic and spend to another provider and hide it |
+| Selected candidate fails before responding | Next candidate is tried |
 | A tool loop already produced its first assistant message | No failover: that state cannot be replayed on a different provider |
 | Guardrails service or sandbox unreachable | No failover: the same service serves every candidate |
 | All candidates fail | 502, or 504 if the last failure was a timeout |

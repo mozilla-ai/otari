@@ -117,20 +117,31 @@ async def get_budget_state(db: AsyncSession, user_id: str) -> BudgetState:
     )
 
 
-async def _is_model_free(db: AsyncSession, model: str) -> bool:
+async def _is_model_free(
+    db: AsyncSession,
+    model: str,
+    *,
+    pricing_provider: str | None = None,
+) -> bool:
     """Check if a model is free (both input and output prices are 0).
 
     Args:
         db: Database session
         model: Model identifier (e.g., "provider/model" or "model")
+        pricing_provider: Resolved provider instance, when ``model`` is already
+            the bare model name.
 
     Returns:
         True if the model is free, False otherwise or if pricing not found
 
     """
     try:
-        provider, model_name = AnyLLM.split_model_provider(model)
-        pricing = await find_model_pricing(db, provider_key(provider) or None, model_name)
+        if pricing_provider is None:
+            provider, model_name = AnyLLM.split_model_provider(model)
+            pricing_provider = provider_key(provider) or None
+        else:
+            model_name = model
+        pricing = await find_model_pricing(db, pricing_provider, model_name)
         if pricing:
             return pricing.input_price_per_million == 0 and pricing.output_price_per_million == 0
     except (AnyLLMError, ValueError, SQLAlchemyError) as e:
@@ -208,6 +219,7 @@ async def reserve_budget(
     estimate: float,
     *,
     model: str | None = None,
+    pricing_provider: str | None = None,
     strategy: str = "for_update",
     counts_toward_budget: bool = True,
 ) -> ReservationHandle:
@@ -274,7 +286,7 @@ async def reserve_budget(
 
     # Free models do not consume budget; nothing to reserve. Reconciliation will
     # add their (zero) cost to spend.
-    if model and await _is_model_free(db, model):
+    if model and await _is_model_free(db, model, pricing_provider=pricing_provider):
         return no_reservation
 
     if budget.max_budget is None:

@@ -1,11 +1,8 @@
 """Unit tests for the credential-agnostic attempt walker (issue #463).
 
-Two things are being pinned. First, the walk itself: order, when it advances,
-when it refuses to, and what status an exhausted plan produces. Second, the
-deliberate difference from the hybrid walker: 401/403 are terminal here, because
-a standalone operator owns every credential in their own config and failing over
-a broken key would move that traffic to another provider and hide the
-misconfiguration.
+The walk advances through every provider failure before lock-in, but stops for
+gateway-side refusals and a tool loop that has already produced an assistant
+response. The tests pin that boundary, ordering, and exhausted-plan status.
 """
 
 import asyncio
@@ -127,10 +124,11 @@ async def test_single_attempt_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_advances_past_a_retryable_failure() -> None:
+@pytest.mark.parametrize("status", [402, 503])
+async def test_advances_past_a_retryable_failure(status: int) -> None:
     chosen, result = await _walk(
         [_attempt(1, "gpt-5-mini"), _attempt(2, "claude-haiku-4-5", instance="anthropic")],
-        [_http_error(503), "ok"],
+        [_http_error(status), "ok"],
     )
     assert chosen.position == 2
     assert chosen.model == "claude-haiku-4-5"
@@ -138,8 +136,7 @@ async def test_advances_past_a_retryable_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stops_on_a_malformed_request_without_advancing() -> None:
-    """A 400 would be rejected by every provider, so falling through is waste."""
+async def test_advances_past_a_provider_rejection() -> None:
     second_ran = False
 
     async def run_attempt(attempt: Attempt, call_kwargs: dict[str, Any], mark_locked_in: Any) -> Any:
@@ -149,16 +146,27 @@ async def test_stops_on_a_malformed_request_without_advancing() -> None:
         second_ran = True
         return "ok"
 
-    with pytest.raises(HTTPException) as exc_info:
-        await walk_attempts(
-            attempts=[_attempt(1, "a"), _attempt(2, "b")],
-            base_request_fields={},
-            run_attempt=run_attempt,
-            max_tool_iterations=10,
-        )
+    chosen, result = await walk_attempts(
+        attempts=[_attempt(1, "a"), _attempt(2, "b")],
+        base_request_fields={},
+        run_attempt=run_attempt,
+        max_tool_iterations=10,
+    )
 
-    assert second_ran is False
-    assert exc_info.value.status_code == 400
+    assert second_ran is True
+    assert chosen.position == 2
+    assert result == "ok"
+
+
+@pytest.mark.asyncio
+async def test_advances_past_an_unclassified_provider_failure() -> None:
+    chosen, result = await _walk(
+        [_attempt(1, "gpt-5-mini"), _attempt(2, "claude-haiku-4-5", instance="anthropic")],
+        [RuntimeError("provider SDK lost its error metadata"), "ok"],
+    )
+
+    assert chosen.position == 2
+    assert result == "ok"
 
 
 @pytest.mark.asyncio
@@ -308,31 +316,21 @@ async def test_empty_plan_is_a_500_that_leaks_nothing() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Local classification: the deliberate divergence from hybrid
+# Local classification
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("status", [401, 403])
-def test_auth_failures_are_terminal_for_local_credentials(status: int) -> None:
-    """The hybrid walker retries these because a workspace key may have been
-    rotated upstream. Locally the operator owns the key, so a 401 is their bug:
-    failing over would move the spend and hide it.
-    """
+@pytest.mark.parametrize("status", [400, 401, 403, 413, 422])
+def test_provider_status_failures_fall_through_for_local_credentials(status: int) -> None:
     retryable, error_class = classify_local_attempt_error(_http_error(status))
-    assert retryable is False
+    assert retryable is True
     assert error_class == f"http_{status}"
 
 
-@pytest.mark.parametrize("status", [404, 405, 408, 409, 410, 429, 500, 502, 503, 504])
+@pytest.mark.parametrize("status", [402, 404, 405, 408, 409, 410, 429, 500, 502, 503, 504])
 def test_transient_and_model_gone_statuses_fall_through(status: int) -> None:
     retryable, _ = classify_local_attempt_error(_http_error(status))
     assert retryable is True
-
-
-@pytest.mark.parametrize("status", [400, 422])
-def test_malformed_request_statuses_are_terminal(status: int) -> None:
-    retryable, _ = classify_local_attempt_error(_http_error(status))
-    assert retryable is False
 
 
 @pytest.mark.parametrize(
@@ -346,7 +344,7 @@ def test_transport_failures_are_retryable(exc: BaseException, expected: str) -> 
 
 
 @pytest.mark.asyncio
-async def test_a_401_does_not_advance_the_plan() -> None:
+async def test_a_401_advances_the_plan() -> None:
     second_ran = False
 
     async def run_attempt(attempt: Attempt, call_kwargs: dict[str, Any], mark_locked_in: Any) -> Any:
@@ -356,14 +354,15 @@ async def test_a_401_does_not_advance_the_plan() -> None:
         second_ran = True
         return "ok"
 
-    with pytest.raises(HTTPException):
-        await walk_attempts(
-            attempts=[_attempt(1, "a"), _attempt(2, "b")],
-            base_request_fields={},
-            run_attempt=run_attempt,
-            max_tool_iterations=10,
-        )
-    assert second_ran is False
+    chosen, result = await walk_attempts(
+        attempts=[_attempt(1, "a"), _attempt(2, "b")],
+        base_request_fields={},
+        run_attempt=run_attempt,
+        max_tool_iterations=10,
+    )
+    assert second_ran is True
+    assert chosen.position == 2
+    assert result == "ok"
 
 
 # ---------------------------------------------------------------------------

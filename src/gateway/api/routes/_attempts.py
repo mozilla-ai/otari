@@ -49,18 +49,6 @@ from gateway.types.attempt import Attempt
 
 T = TypeVar("T")
 
-# Statuses worth trying the next candidate for, when the credentials are the
-# operator's own. Deliberately narrower than the hybrid set: 401/403 are absent.
-#
-# The hybrid walker retries them because a workspace's upstream key can be
-# rotated or revoked out from under the platform, so the next attempt may hold a
-# working credential. A standalone operator configured every provider in this
-# gateway's own config, so a 401 means *they* have a broken key: failing over
-# would move that traffic (and its spend) to another provider and hide the
-# misconfiguration behind a working response. Fail loudly instead.
-_LOCAL_RETRYABLE_STATUS_CODES = {404, 405, 408, 409, 410, 429, 500, 502, 503, 504}
-_LOCAL_NON_RETRYABLE_STATUS_CODES = {400, 401, 403, 422}
-
 ALL_ATTEMPTS_FAILED_DETAIL = "All upstream providers failed"
 ALL_ATTEMPTS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 # Fixed, non-leaky: an empty plan is a gateway bug, and the message must not
@@ -79,30 +67,22 @@ class AttemptFailure(NamedTuple):
 
 
 def classify_local_attempt_error(exc: BaseException) -> tuple[bool, str]:
-    """Classify a locally credentialed provider failure as ``(retryable, class)``.
+    """Classify a locally credentialed provider failure as ``(True, class)``.
 
-    Mirrors the hybrid classifier's shape so logs and reported error classes are
-    comparable, but applies :data:`_LOCAL_RETRYABLE_STATUS_CODES`. Transport
-    failures (timeout, connection error) are retryable in both.
+    The walker advances on every provider failure before lock-in. The boolean
+    remains for its generic callback shape; classifications only label logs and
+    usage rows. Gateway-side failures are caught before this function runs.
     """
     kind, status_code = upstream_exception_shape(exc)
     if kind is not None:
         return True, kind
 
     if isinstance(status_code, int):
-        # Checked first, as in the hybrid classifier: a provider reporting
-        # account billing exhaustion as a 400/402/422 is an account condition on
-        # *this* provider, not a malformed request, so the next candidate is
-        # worth trying even though the bare status is non-retryable.
         if is_provider_billing_error(exc):
             return True, f"http_{status_code}_billing"
-        if status_code in _LOCAL_NON_RETRYABLE_STATUS_CODES:
-            return False, f"http_{status_code}"
-        if status_code in _LOCAL_RETRYABLE_STATUS_CODES or 500 <= status_code <= 599:
-            return True, f"http_{status_code}"
-        return False, f"http_{status_code}"
+        return True, f"http_{status_code}"
 
-    return False, "unknown"
+    return True, "unknown"
 
 
 async def walk_attempts(
@@ -124,15 +104,14 @@ async def walk_attempts(
     produced its first assistant message.
 
     ``on_terminal`` is called with the candidate the walk actually stopped on,
-    before the terminal error is raised. The caller cannot infer it: only a
-    retryable exhaustion reaches the last candidate, while a non-retryable status,
-    a tool-loop lock-in, a gateway-side refusal for one candidate (a refused
-    reservation top-up, an unpriced fallback) or the tool-iteration cap all stop
-    the walk early, and attributing the failure to the end of the plan would name
-    a provider that was never called.
+    before the terminal error is raised. The caller cannot infer it: exhaustion
+    reaches the last candidate, while a tool-loop lock-in, a gateway-side refusal
+    for one candidate (a refused reservation top-up, an unpriced fallback), or the
+    tool-iteration cap can stop the walk early. In those cases, attributing the
+    failure to the end of the plan would name a provider that was never called.
 
-    ``on_absorbed`` is awaited for each attempt the walk *recovers* from, i.e. a
-    retryable failure with another candidate left to try. It exists so the caller can
+    ``on_absorbed`` is awaited for each provider failure the walk *recovers* from
+    with another candidate left to try. It exists so the caller can
     record the failure without it counting as a request error, since the request
     itself is still going to be served. It is not called for a terminal failure: that
     one is the request's outcome and the caller logs it as such.

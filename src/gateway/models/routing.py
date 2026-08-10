@@ -10,7 +10,7 @@ Two axes, deliberately separate:
 * ``select`` decides where the plan *starts*. Entries are evaluated in order and
   the first whose ``when`` matches wins; the ``default`` entry is the
   fallthrough. A ``router`` entry hands ordering to a router backend instead.
-* ``on_failure`` is what gets tried *after* a retryable failure, in order.
+* ``on_failure`` is what gets tried *after* a provider failure, in order.
 
 Collapsing them into one list would make "did this entry not apply, or did it
 fail?" ambiguous, and that ambiguity would surface in every log line and every
@@ -282,7 +282,7 @@ class PolicySpec(BaseModel):
     select: list[SelectEntry] = Field(min_length=1)
     on_failure: list[str] = Field(
         default_factory=list,
-        description="Selectors to try, in order, after a retryable failure on the selected candidate.",
+        description="Selectors to try, in order, after a provider failure on the selected candidate.",
     )
     guardrails: list[PolicyGuardrail] = Field(default_factory=list)
     # No `limits` yet, deliberately. The only per-request deadline that exists is

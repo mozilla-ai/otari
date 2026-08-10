@@ -107,9 +107,9 @@ Content-Type: application/json
 }
 ```
 
-Otari iterates `attempts` in order. On a retryable failure it moves to the
-next entry; on success it stops. The `attempt_id` of the entry that ultimately
-succeeded (or the last one tried, on total failure) is what Otari echoes
+Otari iterates `attempts` in order. On a provider failure before a response is
+committed, it moves to the next entry; on success it stops. The `attempt_id` of
+the entry that ultimately succeeded (or the last one tried, on total failure) is what Otari echoes
 back via `X-Correlation-ID` and reports through `/gateway/usage`.
 
 `extra_params` (optional, omitted for most providers) carries provider-specific
@@ -363,8 +363,8 @@ one per attempt, sharing the same `request_id` (recoverable via the original
 resolve response). The platform is responsible for correlating them.
 
 `is_final_attempt` tells the platform that the gateway will not try another
-planned fallback. It is `false` for a retryable failure followed by another
-attempt, and `true` for success, fallback exhaustion, a non-retryable failure,
+planned fallback. It is `false` for a provider failure followed by another
+attempt, and `true` for success, fallback exhaustion, a gateway-side refusal,
 or a failure after a tool loop has locked in to one provider. The marker lets
 the platform ignore later planned attempts that were never tried instead of
 waiting forever for usage reports that will never arrive.
@@ -376,8 +376,8 @@ waiting forever for usage reports that will never arrive.
 | `timeout` | `httpx.TimeoutException`, `asyncio.TimeoutError`, `TimeoutError`, or the OpenAI/Anthropic SDKs' own `APITimeoutError` |
 | `conn_err` | `httpx.NetworkError`, or the OpenAI/Anthropic SDKs' own `APIConnectionError` |
 | `http_<code>` | Provider returned an HTTP status code (e.g. `http_429`, `http_401`) |
-| `http_<code>_billing` | Provider returned a 400, 402, or 422 whose message identifies account billing exhaustion (e.g. Anthropic's "credit balance is too low", DeepSeek's "Insufficient Balance"). Reported as `http_400_billing` etc., keeping an empty provider wallet separable from a malformed request. Otari treats these as retryable, so the request walks on to the next attempt unless the failing attempt had already locked in (a tool loop whose upstream returned a first assistant message cannot be replayed on another provider, so its failure is terminal) |
-| `unknown` | Any other exception class |
+| `http_<code>_billing` | Provider returned a 400 or 422 whose message identifies account billing exhaustion (e.g. Anthropic's "credit balance is too low"), or any 402 Payment Required, including one whose SDK discarded the response message. Reported as `http_400_billing` etc., keeping an empty provider wallet separable from a malformed request. Like every provider error before lock-in, it advances to the next attempt. |
+| `unknown` | Any other exception class. It still advances to the next candidate. |
 
 Treat `error_class` as an open set of strings, not a closed enum: new tags are
 added as Otari learns to separate failure causes, and a handler that rejects an
@@ -426,8 +426,7 @@ The mechanism is a per-attempt **first-chunk gate**. For each attempt:
 
 1. Open the upstream stream (`acompletion(stream=True, ...)`). If this raises
    (provider returned `401` / `5xx` / network error before the stream even
-   opened), classify the error: retryable failures move to the next attempt;
-   non-retryable failures propagate.
+   opened), record the error and move to the next attempt.
 2. Wait for the first chunk with a bounded timeout. Non-final attempts use the
    per-attempt failover budget (`STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS`,
    default 2000 ms). The sole/final attempt has no next attempt to fall over to,
