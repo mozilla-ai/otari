@@ -466,10 +466,12 @@ async def receive_logs(
                     if behavioral is not None:
                         telemetry.append(behavioral)
 
-    # Behavioral events insert a row each, so they carry the same per-export bound
-    # as usage events: an 8 MiB body holds tens of thousands of them otherwise.
-    if len(telemetry) > _MAX_EVENTS_PER_EXPORT:
-        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Too many behavioral events in one OTLP export")
+    # Usage and behavioral events insert a row each and are disjoint by event name,
+    # so the bound is on their total: checked per-list, one export could persist
+    # twice _MAX_EVENTS_PER_EXPORT rows. The narrower check inside _ingest still
+    # covers /v1/traces, which has no behavioral path.
+    if len(pairs) + len(telemetry) > _MAX_EVENTS_PER_EXPORT:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Too many events in one OTLP export")
 
     response = ExportLogsServiceResponse()
     rejected = await _ingest(pairs, api_key=api_key, db=db, config=config) if pairs else 0

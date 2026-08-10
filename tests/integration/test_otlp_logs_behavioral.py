@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.api.routes.otlp import _MAX_EVENTS_PER_EXPORT
 from gateway.models.entities import AgentTelemetry, UsageLog, User
 
 from .otlp_helpers import log_record, logs_export
@@ -106,3 +107,44 @@ def test_otlp_logs_reject_behavior_for_soft_deleted_user(
     assert response.status_code == 200, response.text
     assert int(response.json()["partialSuccess"]["rejectedLogRecords"]) == 1
     assert db_session.query(AgentTelemetry).filter(AgentTelemetry.session_label == "s-gone").count() == 0
+
+
+def test_otlp_logs_export_limit_counts_usage_and_behavior_together(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The per-export row bound covers both event families, not each on its own.
+
+    Usage and behavioral events are disjoint by ``event.name``, so an export can hold
+    a full allowance of each and stay under a per-list check while persisting twice
+    the intended number of rows.
+    """
+    headers = _exempt_key(client, master_key_header, "floody")
+    half = _MAX_EVENTS_PER_EXPORT // 2
+    usage = [
+        log_record(
+            1784000030000000000 + index,
+            **{
+                "event.name": "api_request",
+                "model": "claude-opus-4-8",
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "request_id": f"req-flood-{index}",
+            },
+        )
+        for index in range(half + 1)
+    ]
+    behavior = [
+        log_record(
+            1784000040000000000 + index,
+            **{"event.name": "user_prompt", "session.id": "s-flood", "prompt_length": index},
+        )
+        for index in range(half)
+    ]
+    assert len(usage) <= _MAX_EVENTS_PER_EXPORT and len(behavior) <= _MAX_EVENTS_PER_EXPORT
+    assert len(usage) + len(behavior) > _MAX_EVENTS_PER_EXPORT
+
+    response = client.post("/v1/logs", json=logs_export(*usage, *behavior), headers=headers)
+
+    assert response.status_code == 413, response.text
+    assert db_session.query(AgentTelemetry).filter(AgentTelemetry.session_label == "s-flood").count() == 0
+    assert db_session.query(UsageLog).count() == 0
