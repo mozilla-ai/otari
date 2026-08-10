@@ -7,7 +7,9 @@ container lives in its own repo
 Docker Hub (``mzdotai/otari-sandbox-container``). It runs a Python REPL
 with a curated set of data-science libraries pre-installed.
 
-Wire shape against the sandbox container:
+The contract this drives is specified in ``docs/code-execution-protocol.md``;
+the shapes it returns are typed in :mod:`gateway.types.code_execution`. The
+three operations used here:
 
 * ``POST /sessions``         → creates a session, returns ``session_id``
 * ``POST /sessions/{id}/exec``  with ``{tool: "code_execution",
@@ -37,8 +39,10 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from opentelemetry import trace
+from pydantic import ValidationError
 
 from gateway.services.tool_usage import ToolUsageTally
+from gateway.types.code_execution import ExecResponse, ResultBlock, SessionHandle
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -141,8 +145,8 @@ class SandboxBackend:
             )
             response = await self._client.post(f"{self._sandbox_url}/sessions", json={})
             response.raise_for_status()
-            self._session_id = response.json()["session_id"]
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
+            self._session_id = SessionHandle.model_validate(response.json()).session_id
+        except (httpx.HTTPError, ValidationError, ValueError) as exc:
             await self._stack.aclose()
             raise SandboxNotReachableError(f"failed to create sandbox session at {self._sandbox_url}: {exc}") from exc
         return self
@@ -218,78 +222,50 @@ class SandboxBackend:
                     timeout=self._timeout_s + _EXEC_TIMEOUT_BUFFER_S,
                 )
                 response.raise_for_status()
-                body = response.json()
-            except (httpx.HTTPError, ValueError) as exc:
+                # A malformed body is a contract violation, indistinguishable to the
+                # caller from an unreachable backend: both mean this exec produced no
+                # usable result, so they raise the same error.
+                exec_response = ExecResponse.model_validate(response.json())
+            except (httpx.HTTPError, ValidationError, ValueError) as exc:
                 span.record_exception(exc)
                 span.set_status(trace.StatusCode.ERROR, str(exc))
                 raise SandboxNotReachableError(f"sandbox exec failed: {exc}") from exc
 
-            result_block = body.get("result_block")
-            if not isinstance(result_block, dict):
-                err = SandboxNotReachableError(f"sandbox returned malformed result: {body!r}")
-                span.record_exception(err)
-                span.set_status(trace.StatusCode.ERROR, str(err))
-                raise err
-
-            result = _flatten_result_block(result_block)
+            result = _flatten_result_block(exec_response.result_block)
             if result.startswith("[tool error]"):
                 span.set_status(trace.StatusCode.ERROR, result)
             return result
 
 
-def _flatten_result_block(block: dict[str, Any]) -> str:
-    """Render the sandbox's structured result as a single string for the model.
+def _flatten_result_block(block: ResultBlock) -> str:
+    """Render the structured result as a single string for the model.
 
-    The sandbox returns an Anthropic-shaped tool-result block — see
-    https://github.com/mozilla-ai/otari-sandbox-container/blob/main/sandbox/models.py:
+    The tool loop hands the model one string per tool call, so the block's
+    fields collapse into labelled sections. Errors come through as a non-zero
+    ``return_code`` or a non-empty ``stderr``; the contract has no top-level
+    ``is_error`` flag.
 
-        {
-          "type": "code_execution_tool_result"
-                  | "bash_code_execution_tool_result"
-                  | "text_editor_code_execution_tool_result",
-          "tool_use_id": "...",
-          "content": {
-            "type": "code_execution_result",
-            "stdout": "...",
-            "stderr": "...",
-            "return_code": 0,
-            "content": [file refs]
-          }
-        }
-
-    Note ``content`` is a single ``CodeExecutionResultContent`` object, NOT a
-    list of mixed blocks. Errors come through as a non-zero ``return_code``
-    or a non-empty ``stderr``; there is no top-level ``is_error`` flag.
-
-    Full structured output (file refs, separate exit codes per step) is a
-    future enhancement that lands alongside the Anthropic-content-block lift.
+    Passing the full structured result through to the caller (file refs as
+    content blocks, per-step exit codes) is a future enhancement that lands
+    alongside the Anthropic-content-block lift.
     """
-    content = block.get("content")
-    if not isinstance(content, dict):
-        return str(block)
-
-    stdout = content.get("stdout") or ""
-    stderr = content.get("stderr") or ""
-    return_code = content.get("return_code")
-    file_refs = content.get("content") or []
+    content = block.content
 
     parts: list[str] = []
-    if stdout:
-        parts.append(f"stdout:\n{stdout}")
-    if stderr:
-        parts.append(f"stderr:\n{stderr}")
-    if return_code not in (None, 0):
-        parts.append(f"return_code: {return_code}")
-    if isinstance(file_refs, list) and file_refs:
-        names = [f.get("filename", "?") for f in file_refs if isinstance(f, dict)]
-        if names:
-            parts.append("files: " + ", ".join(names))
+    if content.stdout:
+        parts.append(f"stdout:\n{content.stdout}")
+    if content.stderr:
+        parts.append(f"stderr:\n{content.stderr}")
+    if content.return_code not in (None, 0):
+        parts.append(f"return_code: {content.return_code}")
+    if content.content:
+        parts.append("files: " + ", ".join(ref.filename or "?" for ref in content.content))
 
     flattened = "\n".join(parts)
     if not flattened:
         return "(no output)"
     # Treat non-zero return_code or stderr-only output as error-shaped so the
     # model gets a clear signal it can recover from.
-    if (return_code not in (None, 0)) or (stderr and not stdout):
+    if (content.return_code not in (None, 0)) or (content.stderr and not content.stdout):
         return f"[tool error] {flattened}"
     return flattened
