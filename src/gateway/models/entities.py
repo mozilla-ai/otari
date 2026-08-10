@@ -544,6 +544,38 @@ class UsageLog(Base):
         }
 
 
+class AgentTelemetry(Base):
+    """Content-free outcome metrics and behavioral events from coding agents."""
+
+    __tablename__ = "agent_telemetry"
+    __table_args__ = (
+        UniqueConstraint("source", "dedup_key", name="uq_agent_telemetry_source_dedup"),
+        Index("ix_agent_telemetry_user_id_timestamp", "user_id", "timestamp"),
+        Index("ix_agent_telemetry_series_timestamp", "series_key", "timestamp"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+    kind: Mapped[str] = mapped_column()
+    name: Mapped[str] = mapped_column()
+    value: Mapped[float | None] = mapped_column()
+    temporality: Mapped[str | None] = mapped_column()
+    series_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    series_key: Mapped[str | None] = mapped_column()
+    tool_name: Mapped[str | None] = mapped_column()
+    decision: Mapped[str | None] = mapped_column()
+    success: Mapped[bool | None] = mapped_column()
+    duration_ms: Mapped[int | None] = mapped_column()
+    status_code: Mapped[int | None] = mapped_column()
+    prompt_length: Mapped[int | None] = mapped_column()
+    source: Mapped[str] = mapped_column(index=True)
+    session_label: Mapped[str | None] = mapped_column()
+    dedup_key: Mapped[str] = mapped_column()
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
 class FileObject(Base):
     """Uploaded file metadata for the OpenAI-compatible /v1/files API.
 

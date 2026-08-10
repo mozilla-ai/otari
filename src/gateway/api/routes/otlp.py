@@ -56,6 +56,8 @@ from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey
+from gateway.services.agent_telemetry_service import ingest as ingest_telemetry
+from gateway.services.agent_telemetry_service import map_behavioral_event
 from gateway.services.external_usage_service import (
     MAX_EVENTS_PER_BATCH,
     RESERVED_SOURCES,
@@ -439,22 +441,36 @@ async def receive_logs(
     assert isinstance(parsed, ExportLogsServiceRequest)
 
     pairs: list[tuple[str, ExternalUsageEvent]] = []
+    telemetry = []
     for resource_logs in parsed.resource_logs:
         for scope_logs in resource_logs.scope_logs:
             for record in scope_logs.log_records:
+                attrs = _attributes(record.attributes)
+                timestamp = _nanos_to_dt(record.time_unix_nano)
                 mapped = _build_event(
-                    _attributes(record.attributes),
+                    attrs,
                     fallback_event_id=None,
-                    default_timestamp=_nanos_to_dt(record.time_unix_nano),
+                    default_timestamp=timestamp,
                     duration_ms=None,
                 )
                 if mapped is not None:
                     pairs.append(mapped)
+                if timestamp is not None:
+                    behavioral = map_behavioral_event(
+                        str(attrs.get("event.name", "")),
+                        attrs,
+                        timestamp=timestamp,
+                        source="claude_code",
+                        user_id=api_key.user_id,
+                    )
+                    if behavioral is not None:
+                        telemetry.append(behavioral)
 
     response = ExportLogsServiceResponse()
-    if pairs:
-        rejected = await _ingest(pairs, api_key=api_key, db=db, config=config)
-        if rejected:
-            response.partial_success.rejected_log_records = rejected
-            response.partial_success.error_message = f"{rejected} usage event(s) rejected (see gateway logs)"
+    rejected = await _ingest(pairs, api_key=api_key, db=db, config=config) if pairs else 0
+    if telemetry:
+        rejected += (await ingest_telemetry(db, telemetry, api_key=api_key)).rejected
+    if rejected:
+        response.partial_success.rejected_log_records = rejected
+        response.partial_success.error_message = f"{rejected} log record(s) rejected (see gateway logs)"
     return _otlp_response(content_type, response)
