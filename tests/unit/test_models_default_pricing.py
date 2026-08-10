@@ -8,7 +8,7 @@ import pytest
 from gateway.api.routes.models import ModelObject, ModelPricingInfo, _alias_model, _apply_default_pricing
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
-from gateway.services.pricing_service import configure_default_pricing
+from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
 
 
 @pytest.fixture
@@ -51,6 +51,26 @@ def test_does_not_override_configured_price(default_pricing_on: None) -> None:
     assert obj.pricing is not None
     assert obj.pricing.input_price_per_million == 5.0
     assert obj.pricing_source == "configured"
+
+
+def test_catalog_prices_a_bedrock_model_under_a_custom_instance(default_pricing_on: None) -> None:
+    """The dashboard shows a rate for a Bedrock model behind a custom instance name.
+
+    The catalog keys its lookup on the instance, and genai-prices only files
+    ``anthropic.claude-sonnet-5`` under ``aws``, so before the implementation
+    fallback this listed as unpriced while the gateway happily billed the request at
+    the same (missing) rate.
+    """
+    config = GatewayConfig(providers={"aws-prod": {"provider_type": "bedrock"}})
+    configure_provider_types(config.provider_instance_type)
+    obj = ModelObject(id="aws-prod:anthropic.claude-sonnet-5", created=0, owned_by="aws-prod")
+
+    _apply_default_pricing(obj)
+
+    assert obj.pricing is not None
+    assert obj.pricing_source == "default"
+    assert obj.pricing.input_price_per_million > 0
+    assert obj.pricing.output_price_per_million > 0
 
 
 def test_prices_from_selector_when_given(default_pricing_on: None) -> None:

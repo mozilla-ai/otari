@@ -1,5 +1,6 @@
 """Shared pricing lookup utilities."""
 
+from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
@@ -36,6 +37,40 @@ def default_pricing_enabled() -> bool:
     """Whether the genai-prices default fallback is consulted on a DB miss."""
 
     return _default_pricing_enabled
+
+
+# Process-wide resolver from a provider *instance* name to the any-llm
+# implementation backing it, set once at startup from
+# ``GatewayConfig.provider_instance_type`` (see ``configure_provider_types``).
+# It lives here for the same reason the toggle above does: pricing keys on the
+# instance name, and the lookups below run deep in request/budget/catalog code
+# that does not carry the config object. A callable rather than a snapshot map,
+# because a provider added in the dashboard rewrites ``config.providers`` while
+# the worker runs.
+_provider_type_resolver: Callable[[str], str | None] | None = None
+
+
+def configure_provider_types(resolver: Callable[[str], str | None] | None) -> None:
+    """Register the instance to any-llm implementation lookup used for pricing."""
+
+    global _provider_type_resolver
+    _provider_type_resolver = resolver
+
+
+def _provider_implementation(instance: str | None) -> str | None:
+    """The any-llm implementation behind ``instance``, when it differs from it.
+
+    ``None`` when no resolver is registered, when the instance is unconfigured, or
+    when the instance name already *is* the implementation name (the common case,
+    which the instance-scoped lookup covers on its own).
+    """
+
+    if instance is None or _provider_type_resolver is None:
+        return None
+    implementation = _provider_type_resolver(instance)
+    if not implementation or implementation == instance:
+        return None
+    return implementation
 
 
 def _flat_rate(value: Decimal | TieredPrices) -> float:
@@ -101,7 +136,7 @@ def normalize_effective_at(value: datetime | None) -> datetime:
 # time. Bounded by clearing at a cap; the distinct key count is roughly
 # providers x models x recent days, so the cap is a backstop, not a normal path.
 _PRICE_CACHE_MAX = 16384
-_price_cache: dict[tuple[str | None, str, date], PriceCalculation | None] = {}
+_price_cache: dict[tuple[str | None, str | None, str, date], PriceCalculation | None] = {}
 
 
 class _TransientFailure:
@@ -125,13 +160,17 @@ def reset_price_cache() -> None:
 def _resolve_genai_price(provider: str | None, model: str, as_of: datetime) -> PriceCalculation | None:
     """Resolve a genai-prices calculation for a model, or ``None`` on a miss.
 
-    Memoized per (provider, model, day); see ``_resolve_genai_price_uncached``
-    for the matching rules.
+    Memoized per (provider, implementation, model, day); see
+    ``_resolve_genai_price_uncached`` for the matching rules. The implementation is
+    part of the key because it is registered state rather than a function of the
+    provider name, so re-typing an instance in the dashboard must not keep serving
+    the resolution made under its old ``provider_type`` for the rest of the day.
     """
-    key = (provider, model, as_of.date())
+    implementation = _provider_implementation(provider)
+    key = (provider, implementation, model, as_of.date())
     if key in _price_cache:
         return _price_cache[key]
-    result = _resolve_genai_price_uncached(provider, model, as_of)
+    result = _resolve_genai_price_uncached(provider, model, as_of, implementation)
     if isinstance(result, _TransientFailure):
         # A transient failure is not memoized: the next request retries rather
         # than inheriting a stale "unpriced" for the rest of the day.
@@ -142,14 +181,42 @@ def _resolve_genai_price(provider: str | None, model: str, as_of: datetime) -> P
     return result
 
 
+def _vendor_prefixed_attempts(model: str) -> list[tuple[str | None, str]]:
+    """Split a vendor-prefixed model id into ``(vendor, model)`` candidates.
+
+    Aggregating providers name a model after the vendor that built it
+    (``anthropic.claude-sonnet-5`` on Bedrock, ``openai.gpt-oss-120b``), sometimes
+    behind a region or routing prefix (``us.anthropic.claude-sonnet-5-v1:0``).
+    genai-prices files those ids under the *serving* provider, so a serving
+    provider it does not recognize leaves them unpriced: the provider-agnostic
+    fallback matches a provider on the vendor's name appearing in the model
+    (``claude`` selects ``anthropic``) and then finds no such dotted model id
+    there, which no amount of retrying that lookup can fix.
+
+    Each dot boundary is offered in turn, so a region prefix is skipped once it
+    fails to name a provider. Pricing under the vendor is an approximation of the
+    serving provider's rate, which is why this is tried only after every lookup
+    that could be exact; a name with no vendor prefix (``gpt-4.1``,
+    ``claude-3.5-sonnet``) yields candidates whose provider does not resolve, so it
+    is unaffected.
+    """
+
+    attempts: list[tuple[str | None, str]] = []
+    head, separator, rest = model.partition(".")
+    while separator and rest:
+        attempts.append((head, rest))
+        head, separator, rest = rest.partition(".")
+    return attempts
+
+
 def _resolve_genai_price_uncached(
-    provider: str | None, model: str, as_of: datetime
+    provider: str | None, model: str, as_of: datetime, implementation: str | None = None
 ) -> PriceCalculation | None | _TransientFailure:
     """Resolve a genai-prices calculation for a model, or ``None`` on a miss.
 
     Shared by pricing and by metadata lookups (e.g. context window) so both apply
     the same model matching: HuggingFace pinned-backend selectors, a
-    provider-scoped lookup, then a provider-agnostic fallback.
+    provider-scoped lookup, the backing implementation, then two fallbacks.
     """
 
     # Build the genai-prices lookups to try, most specific first:
@@ -158,16 +225,26 @@ def _resolve_genai_price_uncached(
     #      (`huggingface_<backend>`), which is where HF rates live; a bare
     #      `huggingface` provider has no rates. Auto/policy suffixes (`:cheapest`,
     #      ...) simply fail to match and fall through to require_pricing.
-    #   2. The provider-scoped lookup.
-    #   3. A provider-agnostic match, so a model under a provider id genai-prices
+    #   2. The provider-scoped lookup. Note this is scoped to the *instance* name,
+    #      which is what pricing keys on and is only sometimes a provider id
+    #      genai-prices knows.
+    #   3. The any-llm implementation backing that instance, so an instance named
+    #      anything else (`aws-prod` over `provider_type: bedrock`) still resolves.
+    #      Rates differ per serving provider, so this must precede any fallback:
+    #      Bedrock's Sonnet is not priced like Anthropic's.
+    #   4. A provider-agnostic match, so a model under a provider id genai-prices
     #      does not recognize still gets priced when its name is unambiguous.
+    #   5. Vendor-prefixed model ids, which the agnostic match cannot resolve.
     attempts: list[tuple[str | None, str]] = []
     if provider == "huggingface" and ":" in model:
         base_model, backend = model.rsplit(":", 1)
         attempts.append((f"huggingface_{backend}", base_model))
     attempts.append((provider, model))
+    if implementation is not None:
+        attempts.append((implementation, model))
     if provider is not None:
         attempts.append((None, model))
+    attempts.extend(_vendor_prefixed_attempts(model))
 
     for provider_id, model_ref in attempts:
         try:

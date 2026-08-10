@@ -49,7 +49,7 @@ from gateway.services.pricing_refresh_service import (
     load_persisted_price_snapshot,
     run_price_snapshot_refresher,
 )
-from gateway.services.pricing_service import configure_default_pricing
+from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
 from gateway.services.provider_store_service import (
     load_providers_at_startup,
     reset_provider_cache,
@@ -191,6 +191,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         configure_default_pricing(config.default_pricing)
+        # Bound method, not a snapshot: it reads config.providers on every call, so
+        # a provider added or re-typed in the dashboard is priced under the
+        # implementation it actually dispatches to.
+        configure_provider_types(config.provider_instance_type)
         log_writer: LogWriter
         alias_refresher: asyncio.Task[None] | None = None
         policy_refresher: asyncio.Task[None] | None = None

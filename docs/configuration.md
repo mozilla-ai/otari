@@ -463,8 +463,15 @@ written to the database.
 Limitations when enabled:
 
 - **Tiered pricing** is retained from the dataset and applied when a request crosses a configured context threshold.
+- Lookups key on the **provider instance name** first, then on the `provider_type` backing it, so an
+  instance you named yourself (`aws-prod` over `provider_type: bedrock`) is priced at its real provider's
+  rates rather than falling through.
 - A **provider-agnostic match** is attempted when the exact provider is not in the dataset; an ambiguous
   model *name* could resolve to a different provider's rate. Prefer configuring such models explicitly.
+- A **vendor-prefixed model id** (`anthropic.claude-sonnet-5`, `us.anthropic.claude-sonnet-5-v1:0`,
+  `openai.gpt-oss-120b`) is a last resort priced under the vendor named in the prefix when the serving
+  provider is not in the dataset. That is the vendor's own list price, not the reseller's, so configure it
+  explicitly where the difference matters.
 - **HuggingFace** is modeled per inference backend, so a model is priced only when you pin a backend with
   the `huggingface:<model>:<backend>` selector (see the model reference in `models.md`). Auto routing and
   the policy suffixes (`:cheapest`, `:fastest`, ...) cannot be priced from the id alone and fall through to

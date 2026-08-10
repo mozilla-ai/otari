@@ -57,10 +57,12 @@ def _reset_default_pricing() -> Generator[None, None, None]:
     test cannot mask another test that patches ``calc_price`` to fail.
     """
     from gateway.services.pricing_refresh_service import reset_price_refresh_state
-    from gateway.services.pricing_service import configure_default_pricing
+    from gateway.services.pricing_service import configure_default_pricing, configure_provider_types
 
     configure_default_pricing(False)
+    configure_provider_types(None)
     reset_price_refresh_state()
     yield
     configure_default_pricing(False)
+    configure_provider_types(None)
     reset_price_refresh_state()
