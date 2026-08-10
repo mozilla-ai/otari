@@ -1627,6 +1627,36 @@ describe("ActivityPage in-flight rows", () => {
     expect(listCalls(calls).length - before).toBeLessThanOrEqual(1);
   }, 15_000);
 
+  it("drops the live rows when the in-flight poll starts failing", async () => {
+    // TanStack keeps the last successful payload after a failed refetch, so
+    // without an explicit error arm the rows would stay on screen with their waits
+    // climbing against a frozen anchor, claiming work is running that may have
+    // landed minutes ago. That is the state the hook already refuses to cache
+    // across mounts, so it must not be reachable this way either.
+    let failing = false;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/usage/in-flight")) {
+        return failing
+          ? jsonResponse({ detail: "gateway restarting" }, 503)
+          : jsonResponse({ requests: [inFlightRequest({ model: "vanishing-model" })], total: 1 });
+      }
+      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 0 });
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({ by_model: [], by_user: [], by_api_key: [], by_source: [], series: [] });
+      }
+      return jsonResponse([]);
+    });
+
+    renderPage(<ActivityPage />, "/activity?range=24h");
+    await waitFor(() => expect(screen.getByText("vanishing-model")).toBeInTheDocument());
+
+    failing = true;
+    await waitFor(() => expect(screen.queryByText("vanishing-model")).not.toBeInTheDocument(), { timeout: 20000 });
+    expect(noLiveRow()).toBe(true);
+  }, 30_000);
+
   it("still picks up a settle that the throttle deferred", async () => {
     // Two requests landing inside one throttle window is the ordinary case on any
     // gateway with traffic. The second settle must be deferred, not discarded: its

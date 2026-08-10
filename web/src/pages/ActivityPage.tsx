@@ -1180,7 +1180,14 @@ export function ActivityPage() {
   // price, tools, provenance). The identity filters can be applied, so they are.
   const { inFlightRows, inFlightHidden } = useMemo(() => {
     const none = { inFlightRows: [] as ActivityRow[], inFlightHidden: 0 };
-    if (!inFlight.data || page > 0) return none;
+    // A failed poll leaves the list unknown, not unchanged. TanStack keeps the last
+    // successful payload, so without the `isError` arm the rows would stay on
+    // screen with their waits still climbing against a frozen anchor, asserting
+    // that work is running which may have landed minutes ago. That is the state
+    // `useInFlightRequests` already refuses to cache across mounts, so it must not
+    // be reached by a different route either. The failure reaches the operator
+    // through the page's error banner rather than as rows quietly disappearing.
+    if (!inFlight.data || inFlight.isError || page > 0) return none;
     if (filters.end_date || statusFilter || pricedFilter || toolFilter || sourceFilter || sessionFilter) return none;
     const matching = inFlight.data.requests.filter(
       (request) =>
@@ -1201,6 +1208,7 @@ export function ActivityPage() {
   }, [
     inFlight.data,
     inFlight.dataUpdatedAt,
+    inFlight.isError,
     page,
     filters.end_date,
     statusFilter,
@@ -1558,7 +1566,11 @@ export function ActivityPage() {
 
       {/* The timeline's summary error is included so a failed series request
           reads as a failure, not as an empty "No activity in this range" strip. */}
-      <ErrorBanner error={usage.error ?? count.error ?? contextSummary.error} />
+      {/* The in-flight error is last: a failure to read the log itself is the more
+          important thing to say. It is here at all so a live view that has gone
+          quiet is distinguishable from a gateway that has, since the rows are
+          dropped on failure rather than left to go stale. */}
+      <ErrorBanner error={usage.error ?? count.error ?? contextSummary.error ?? inFlight.error} />
 
       <div className="flex flex-col gap-3">
         <ActivityTimeline
