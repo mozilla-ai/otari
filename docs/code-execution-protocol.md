@@ -39,28 +39,52 @@ below is unchanged either way, which is what lets the same backend serve both.
 
 ## Operations
 
-Five operations, of which the first three are the whole execution path. A
+Six operations, of which the first three are the whole execution path. A
 backend MUST implement those three; the file operations are OPTIONAL and are
 used only by clients that move files in or out of a session.
 
 | Operation | Purpose | Request | Response |
 |---|---|---|---|
 | `CreateSession` | Lease a session | Optional lifetime hints | A session handle |
-| `Execute` | Run one tool call in a session | A tool call | A result block |
+| `Execute` | Run one tool call in a session | A tool call | A result block, plus execution metadata |
 | `DestroySession` | Release a session | A session id | Empty |
 | `ListFiles` | Enumerate a session's workspace | A session id, a path | File metadata |
 | `GetFile` | Read one file from the workspace | A session id, a path | File bytes |
+| `PutFile` | Write one file into the workspace | A session id, a path, file bytes | The stored path and size |
 
 ### CreateSession
 
-Leases a session and returns a handle. The handle's `session_id` addresses the
-session in every later operation. A backend MAY apply an idle timeout and a
-maximum lifetime, and MAY accept the client's hints for them or clamp them to
-its own ceilings; a client MUST NOT assume a session outlives the values the
-handle reports.
+Leases a session and returns a handle.
 
-A backend MAY refuse when at capacity. This is a retryable condition, distinct
-from a malformed request.
+Request fields, both OPTIONAL lifetime hints:
+
+| Field | Meaning |
+|---|---|
+| `idle_timeout_seconds` | Reclaim the session after this long without activity |
+| `max_lifetime_seconds` | Reclaim the session this long after creation |
+
+Response fields:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `session_id` | yes | A string addressing this session in every later operation |
+| `idle_timeout_seconds` | no | The idle timeout actually in force |
+| `max_lifetime_seconds` | no | The maximum lifetime actually in force |
+| `created_at` | no | When the session was created |
+| `last_activity_at` | no | When the session was last used |
+
+`session_id` is a string, not a number: a client may use it to address the
+session without reformatting it.
+
+A backend MAY accept the client's lifetime hints or clamp them to its own
+ceilings, and reports what is in force. A client MUST NOT assume a session
+outlives the values the handle reports.
+
+A backend MAY refuse when at capacity. This is a retryable condition in
+principle, distinct from a malformed request, and a backend SHOULD signal it
+distinctly so a client can tell the two apart. Note that Otari does not
+currently retry it: it surfaces as a failed request rather than a backoff, so a
+backend should not rely on the client re-offering the work.
 
 ### Execute
 
@@ -92,11 +116,13 @@ that are never released (an abandoned client, a crashed one), which is why the
 lifetime bounds on the handle exist. Releasing a session that does not exist is
 not an error worth distinguishing: it is already in the desired state.
 
-### ListFiles and GetFile
+### ListFiles, GetFile, and PutFile
 
-Enumerate and read files under the session's workspace, so a client can retrieve
-artifacts the code produced. Both MUST confine access to the addressed session's
-own workspace: a path escaping it MUST be refused rather than served.
+Enumerate, read, and write files under the session's workspace, so a client can
+seed inputs and retrieve artifacts the code produced. All three MUST confine
+access to the addressed session's own workspace: a path escaping it MUST be
+refused rather than served or written. A backend MAY cap the size of a written
+file and MUST refuse one that exceeds the cap rather than truncating it.
 
 ## Tool kinds
 
@@ -119,25 +145,55 @@ MUST still accept the kind it is asked for and MUST refuse an unknown one.
 
 ## Result blocks
 
-Every `Execute` returns a **result block** whose shape matches Anthropic's
-`code_execution_20250825` content blocks, so a consumer that already parses
-Anthropic responses needs no translation layer:
+An `Execute` response carries the outcome in a **result block**, under a
+`result_block` field, alongside execution metadata:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `result_block` | yes | The outcome of the call (below) |
+| `tool_use_id` | yes | The call's correlation id, echoed from the request or generated |
+| `execution_time_ms` | no | How long the backend spent executing |
+
+The result block itself matches Anthropic's `code_execution_20250825` content
+blocks, so a consumer that already parses Anthropic responses needs no
+translation layer for it. A full response:
 
 ```json
 {
-  "type": "code_execution_tool_result",
   "tool_use_id": "srvtoolu_...",
-  "content": {
-    "type": "code_execution_result",
-    "stdout": "...",
-    "stderr": "...",
-    "return_code": 0,
-    "content": [
-      {"type": "code_execution_output", "file_id": "...", "filename": "chart.png"}
-    ]
+  "execution_time_ms": 84,
+  "result_block": {
+    "type": "code_execution_tool_result",
+    "tool_use_id": "srvtoolu_...",
+    "content": {
+      "type": "code_execution_result",
+      "stdout": "...",
+      "stderr": "...",
+      "return_code": 0,
+      "content": [
+        {"type": "code_execution_output", "file_id": "...", "filename": "chart.png"}
+      ]
+    }
   }
 }
 ```
+
+Note the envelope: the result block is nested under `result_block`, not returned
+bare. A backend that returns the block at the top level is not conforming, and a
+client validating against this contract will reject it.
+
+Result-block fields:
+
+| Field | Required | Meaning |
+|---|---|---|
+| `type` | yes | The tool kind that ran (below) |
+| `tool_use_id` | yes | The call's correlation id |
+| `content` | yes | The outcome payload |
+
+`content` is REQUIRED even for a run that produced nothing: a run with no output
+returns a `content` whose `stdout` and `stderr` are empty and whose
+`return_code` is `0`, not a block with `content` omitted. Its own fields are all
+OPTIONAL and default as shown in the example.
 
 The block's `type` corresponds to the tool kind that ran:
 `code_execution_tool_result`, `bash_code_execution_tool_result`, or
@@ -154,6 +210,13 @@ Two details are easy to get wrong, and both are load-bearing:
   a backend reports that the code failed. An `Execute` that ran code and
   collected its failure output is a *successful* operation; only a backend that
   could not run the call at all fails the operation itself.
+
+  Concretely, this rules out the error variant of Anthropic's content-block
+  union: a version 1 backend MUST NOT return a `content` of type
+  `code_execution_tool_result_error` carrying an `error_code`. Report the
+  failure through `return_code` and `stderr` instead. A client reading this
+  contract has no reason to inspect `content.type`, so an error variant would be
+  read as an empty successful run, and the call would be billed as one.
 
 For a `text_editor_code_execution` `create`, the file's content is not echoed
 back in the result: it is already on the originating tool-use input as
@@ -197,9 +260,9 @@ a backend (or a proxy in front of one) MAY require it. In Otari's hybrid mode
 this is how the platform's authenticated proxy admits the request and derives
 tenancy from the caller's workspace, so the backend behind it never has to.
 
-Tenancy, when a backend is multi-tenant, is injected by whatever authenticated
-the caller. A backend that expects tenancy MUST fail closed when it is absent
-rather than defaulting to some placeholder tenant.
+Tenancy, when a backend is multi-tenant, is injected by whichever component
+authenticates the caller. A backend that expects tenancy MUST fail closed when
+it is absent, rather than defaulting to a placeholder tenant.
 
 ## HTTP/JSON binding
 
@@ -213,6 +276,7 @@ document. Payloads are JSON; the operation names above map to:
 | `DestroySession` | `DELETE /sessions/{session_id}` |
 | `ListFiles` | `GET /sessions/{session_id}/files/list` |
 | `GetFile` | `GET /sessions/{session_id}/files?path=...` |
+| `PutFile` | `POST /sessions/{session_id}/files` (multipart: `file`, optional `path`) |
 
 Paths are relative to the backend's base URL, which Otari takes from
 `sandbox_url` (`OTARI_SANDBOX_URL`). Field names on the wire are exactly the
@@ -222,12 +286,13 @@ Status codes:
 
 | Condition | Status |
 |---|---|
-| Session created | `201` |
+| Session created, file written | `201` |
 | Execute succeeded (including code that failed) | `200` |
 | Session destroyed | `204` |
-| Unknown session | `404` |
+| Unknown session, or unknown file | `404` |
 | Malformed request, or unknown tool kind | `400` or `422` |
 | Path outside the session workspace | `403` |
+| File larger than the backend's cap | `413` |
 | At capacity, session not leased | `503` |
 
 A bearer credential, where the deployment uses one, is sent as

@@ -6,6 +6,7 @@ Mocks the HTTP layer with `respx` so the suite needs no sandbox container.
 from __future__ import annotations
 
 import json
+import traceback
 from typing import Any
 
 import httpx
@@ -578,3 +579,159 @@ async def test_enter_raises_when_session_handle_lacks_id(monkeypatch: pytest.Mon
     with pytest.raises(SandboxNotReachableError, match="failed to create"):
         async with SandboxBackend(sandbox_url="http://sandbox:8080"):
             pass
+
+
+@pytest.mark.asyncio
+async def test_documented_exec_response_shape_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The full response documented in docs/code-execution-protocol.md.
+
+    Pinned verbatim against the spec's example, envelope included, so the
+    published contract and this client cannot drift apart silently.
+    """
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(201, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200,
+                json={
+                    "tool_use_id": "srvtoolu_abc",
+                    "execution_time_ms": 84,
+                    "result_block": {
+                        "type": "code_execution_tool_result",
+                        "tool_use_id": "srvtoolu_abc",
+                        "content": {
+                            "type": "code_execution_result",
+                            "stdout": "3.14\n",
+                            "stderr": "",
+                            "return_code": 0,
+                            "content": [
+                                {
+                                    "type": "code_execution_output",
+                                    "file_id": "file_1",
+                                    "filename": "chart.png",
+                                }
+                            ],
+                        },
+                    },
+                },
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(3.14)"})
+
+    assert result == "stdout:\n3.14\n\nfiles: chart.png"
+
+
+@pytest.mark.asyncio
+async def test_schema_violation_message_omits_the_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A contract violation must not carry program output into logs or spans.
+
+    `stdout` here holds the kind of thing sandboxed code can emit (a credential
+    it was handed). The error names the offending field, never its value.
+    """
+    secret = "sk-live-do-not-log-this"
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(201, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200,
+                json={
+                    "result_block": {
+                        "type": "code_execution_tool_result",
+                        # `content` must be an object; a list violates the contract.
+                        "content": [{"stdout": secret}],
+                    }
+                },
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        with pytest.raises(SandboxNotReachableError) as excinfo:
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+
+    rendered = "".join(traceback.format_exception(excinfo.value))
+    assert secret not in rendered
+    assert "result_block.content" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_session_handle_violation_message_omits_the_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    secret = "sk-live-do-not-log-this"
+    _patched_async_client(
+        {("POST", "/sessions"): httpx.Response(201, json={"session_id": {"nested": secret}})},
+        monkeypatch,
+    )
+
+    with pytest.raises(SandboxNotReachableError) as excinfo:
+        async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+            pass
+
+    rendered = "".join(traceback.format_exception(excinfo.value))
+    assert secret not in rendered
+    assert "session_id" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        pytest.param(
+            {"stdout": "42\n", "stderr": None, "return_code": 0},
+            "stdout:\n42\n",
+            id="stderr-null",
+        ),
+        pytest.param(
+            {"stdout": None, "stderr": "boom", "return_code": 1},
+            "[tool error] stderr:\nboom\nreturn_code: 1",
+            id="stdout-null",
+        ),
+        pytest.param(
+            {"stdout": "done", "return_code": 0, "content": None},
+            "stdout:\ndone",
+            id="file-refs-null",
+        ),
+        pytest.param(
+            {"stdout": "file body", "return_code": 0, "content": "inline text"},
+            "stdout:\nfile body",
+            id="file-refs-not-a-list",
+        ),
+        pytest.param(
+            {"stdout": "ok", "return_code": 0, "content": [{"filename": None}, "bare-id"]},
+            "stdout:\nok\nfiles: ?",
+            id="file-ref-unnameable",
+        ),
+    ],
+)
+async def test_renderable_fields_absorb_unusable_values(
+    content: dict[str, Any], expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A payload carrying usable output must not be discarded over a cosmetic field.
+
+    Each case is one the pre-typing renderer absorbed (`... or ""`, an
+    `isinstance` guard, a per-entry filter). Rejecting them would turn a run
+    that produced real output into a failed tool call, and for the eager-open
+    path into a 502.
+    """
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(201, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200,
+                json={"result_block": {"type": "code_execution_tool_result", "content": content}},
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+
+    assert result == expected

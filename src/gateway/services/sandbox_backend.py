@@ -11,7 +11,8 @@ The contract this drives is specified in ``docs/code-execution-protocol.md``;
 the shapes it returns are typed in :mod:`gateway.types.code_execution`. The
 three operations used here:
 
-* ``POST /sessions``         → creates a session, returns ``session_id``
+* ``POST /sessions``         → creates a session, returns a handle carrying
+                              ``session_id``
 * ``POST /sessions/{id}/exec``  with ``{tool: "code_execution",
                                         input: {code: "…"},
                                         timeout_seconds: int}``
@@ -100,6 +101,26 @@ class SandboxNotReachableError(RuntimeError):
     """Raised when the sandbox container can't be reached or returns malformed data."""
 
 
+def _contract_violation(exc: ValidationError) -> str:
+    """Summarise a schema violation without quoting the payload.
+
+    Pydantic's ``ValidationError`` subclasses ``ValueError``, so every handler
+    below must catch it *before* the clause that catches ``ValueError``.
+    Reordering them silently routes schema violations through the generic
+    handler and reintroduces the leak this exists to prevent.
+
+    Pydantic renders the offending values into ``str(exc)`` (``input_value=...``),
+    and a result block carries arbitrary program output from model-generated
+    code, so rendering it would put that output into logs and spans. The field
+    locations and error types are the diagnostically useful part and carry none
+    of it.
+    """
+    fields = ", ".join(
+        f"{'.'.join(str(part) for part in error['loc']) or '(root)'}: {error['type']}" for error in exc.errors()
+    )
+    return f"response does not match the code-execution contract ({fields})"
+
+
 class SandboxBackend:
     """Async context manager that owns one sandbox session for a request's lifetime.
 
@@ -146,7 +167,12 @@ class SandboxBackend:
             response = await self._client.post(f"{self._sandbox_url}/sessions", json={})
             response.raise_for_status()
             self._session_id = SessionHandle.model_validate(response.json()).session_id
-        except (httpx.HTTPError, ValidationError, ValueError) as exc:
+        except ValidationError as exc:
+            await self._stack.aclose()
+            raise SandboxNotReachableError(
+                f"failed to create sandbox session at {self._sandbox_url}: {_contract_violation(exc)}"
+            ) from None
+        except (httpx.HTTPError, ValueError) as exc:
             await self._stack.aclose()
             raise SandboxNotReachableError(f"failed to create sandbox session at {self._sandbox_url}: {exc}") from exc
         return self
@@ -226,7 +252,15 @@ class SandboxBackend:
                 # caller from an unreachable backend: both mean this exec produced no
                 # usable result, so they raise the same error.
                 exec_response = ExecResponse.model_validate(response.json())
-            except (httpx.HTTPError, ValidationError, ValueError) as exc:
+            except ValidationError as exc:
+                # Raised `from None`, and the summary is built rather than rendered,
+                # so neither the message nor the chained traceback carries the
+                # payload into the span. See _contract_violation.
+                err = SandboxNotReachableError(f"sandbox exec failed: {_contract_violation(exc)}")
+                span.record_exception(err)
+                span.set_status(trace.StatusCode.ERROR, str(err))
+                raise err from None
+            except (httpx.HTTPError, ValueError) as exc:
                 span.record_exception(exc)
                 span.set_status(trace.StatusCode.ERROR, str(exc))
                 raise SandboxNotReachableError(f"sandbox exec failed: {exc}") from exc
