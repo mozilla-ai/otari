@@ -197,7 +197,7 @@ def test_a_zero_weight_candidate_is_drained_not_removed() -> None:
     # `{a: 1, b: 0}` is how a provider is drained without being deleted: it takes no
     # traffic but stays in the plan as a failover target, at the tail.
     pool = ["openai:gpt-5", "openai:gpt-5-mini"]
-    weights = {"openai:gpt-5": 1, "openai:gpt-5-mini": 0}
+    weights: dict[str, float] = {"openai:gpt-5": 1, "openai:gpt-5-mini": 0}
     for seed in range(25):
         assert _rank(pool, weights, seed=seed) == ["openai:gpt-5", "openai:gpt-5-mini"]
     assert declared_shares(weights, pool)["openai:gpt-5-mini"] == 0.0
