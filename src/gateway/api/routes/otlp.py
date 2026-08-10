@@ -56,8 +56,8 @@ from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey
+from gateway.services.agent_telemetry_service import TelemetryRecord, map_behavioral_event
 from gateway.services.agent_telemetry_service import ingest as ingest_telemetry
-from gateway.services.agent_telemetry_service import map_behavioral_event
 from gateway.services.external_usage_service import (
     MAX_EVENTS_PER_BATCH,
     RESERVED_SOURCES,
@@ -441,7 +441,7 @@ async def receive_logs(
     assert isinstance(parsed, ExportLogsServiceRequest)
 
     pairs: list[tuple[str, ExternalUsageEvent]] = []
-    telemetry = []
+    telemetry: list[TelemetryRecord] = []
     for resource_logs in parsed.resource_logs:
         for scope_logs in resource_logs.scope_logs:
             for record in scope_logs.log_records:
@@ -465,6 +465,11 @@ async def receive_logs(
                     )
                     if behavioral is not None:
                         telemetry.append(behavioral)
+
+    # Behavioral events insert a row each, so they carry the same per-export bound
+    # as usage events: an 8 MiB body holds tens of thousands of them otherwise.
+    if len(telemetry) > _MAX_EVENTS_PER_EXPORT:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "Too many behavioral events in one OTLP export")
 
     response = ExportLogsServiceResponse()
     rejected = await _ingest(pairs, api_key=api_key, db=db, config=config) if pairs else 0

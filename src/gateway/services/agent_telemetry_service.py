@@ -6,11 +6,11 @@ from datetime import UTC, datetime
 from math import isfinite
 from typing import Any, Iterable
 
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import AgentTelemetry, APIKey, User
+from gateway.models.entities import AgentTelemetry, APIKey
+from gateway.repositories.users_repository import get_active_user
 
 _MAX_NUMBER = 1_000_000_000
 _EVENTS = {"tool_result", "tool_decision", "user_prompt", "api_error"}
@@ -68,6 +68,20 @@ def _bounded_int(value: Any) -> int | None:
     return int(number)
 
 
+def _bounded_bool(value: Any) -> bool | None:
+    """Read a boolean attribute that may arrive as a real bool or as a string.
+
+    Claude Code emits ``success`` on ``tool_result`` as the string ``"true"`` /
+    ``"false"``, not an OTLP boolValue, so a strict isinstance check would null out
+    the outcome field on every tool result.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in {"true", "false"}:
+        return value.strip().lower() == "true"
+    return None
+
+
 def _identifier(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -115,10 +129,9 @@ def map_behavioral_event(
     if name == "tool_decision":
         fields = {"tool_name": tool_name, "decision": decision if decision in {"accept", "reject"} else None}
     elif name == "tool_result":
-        success = attrs.get("success")
         fields = {
             "tool_name": tool_name,
-            "success": success if isinstance(success, bool) else None,
+            "success": _bounded_bool(attrs.get("success")),
             "duration_ms": _bounded_int(attrs.get("duration_ms")),
         }
     elif name == "api_error":
@@ -148,10 +161,9 @@ async def ingest(
     if not records:
         return IngestResult()
     user_id = api_key.user_id
-    user_exists = user_id and (
-        await db.execute(select(User.user_id).where(User.user_id == user_id))
-    ).scalar_one_or_none()
-    if not user_exists:
+    # Same active-user gate the usage path applies: a soft-deleted user's exporter
+    # can still hold a live key, and its events must be rejected, not stored.
+    if not user_id or await get_active_user(db, user_id) is None:
         return IngestResult(rejected=len(records))
     accepted = duplicate = 0
     try:
