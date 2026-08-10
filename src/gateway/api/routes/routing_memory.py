@@ -220,7 +220,7 @@ def _canonical(config: GatewayConfig, selector: str, user_id: str | None = None)
 
 
 def _validated_scores(config: GatewayConfig, user_id: str, examples: list[ScoredExample]) -> dict[str, str]:
-    """Refuse a score key no learned policy could ever ask about, and normalize the rest.
+    """Refuse a score key no learned policy could ever ask about, and canonicalize the rest.
 
     The failure this prevents is the worst one the feature has. A mistyped selector
     is otherwise accepted with a 200, counts toward the seed count, and produces
@@ -235,16 +235,17 @@ def _validated_scores(config: GatewayConfig, user_id: str, examples: list[Scored
     ``provider/model`` and ``instance:model`` spellings compare equal.
 
     Accepting those spellings is only safe if the stored key is the one the router
-    looks up, and the router matches ``qualities`` keys against the policy's
-    candidate selectors *by exact string*. So the returned map rewrites every
-    accepted key to the spelling its policy uses; without it, a key spelled
-    ``openai/gpt-4o`` against a policy naming ``openai:gpt-4o`` passes validation
-    and then never matches, which is the failure above with a 200 in front of it.
+    looks up, so the returned map rewrites every accepted key to its canonical
+    ``instance:model`` form, which is what :meth:`KnnRoutingMemory._score`
+    canonicalizes the candidate pool to. Storing a *policy's* spelling instead
+    would only move the mismatch: two learned policies for one user that spell the
+    same model differently would agree with one and be invisible to the other.
 
-    When no learned policy resolves for the user, only resolvability is enforced
-    and keys are stored as sent: teaching a pool before writing the policy that
-    reads it is a legitimate order of operations, and refusing it would make the
-    API demand a specific sequence.
+    When no learned policy resolves for the user, only resolvability is enforced:
+    teaching a pool before writing the policy that reads it is a legitimate order
+    of operations, and refusing it would make the API demand a specific sequence.
+    Those keys are canonicalized too, so the policy written afterwards matches them
+    however it spells its candidates.
     """
     known: dict[str, str] = {}
     for spec in effective_policies(config, user_id).values():
@@ -265,7 +266,7 @@ def _validated_scores(config: GatewayConfig, user_id: str, examples: list[Scored
             if canonical is None or (known and canonical not in known):
                 rejected.append(selector)
                 continue
-            normalized[selector] = known.get(canonical, selector)
+            normalized[selector] = canonical
     if rejected:
         expected = (
             f" Candidates this user's learned policies can use: {', '.join(sorted(known.values()))}."
@@ -354,9 +355,10 @@ async def rank_candidates(
     the batch is embedded, so this is the call an operator makes most often and the
     one most likely to meet a misconfigured ``router_embedding_model``.
 
-    Score keys are stored in the spelling the policy uses (see
-    :func:`_validated_scores`), because the router matches them against its
-    candidate selectors by exact string.
+    Score keys are stored canonically as ``instance:model`` (see
+    :func:`_validated_scores`), which is the form the router canonicalizes its
+    candidates to, so how a policy spells a candidate cannot decide whether it
+    matches.
     """
     backend = _knn(config)
     await _require_user(db, request.user_id)

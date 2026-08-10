@@ -623,9 +623,11 @@ class RoutingMemory(Base):
     neighbors of an incoming request's task embedding within one user's records
     and votes on the cheapest candidate that is still good enough. One record is
     one example (one prompt), so the vote is over distinct prompts; ``qualities``
-    maps each model to its ``[0, 1]`` score for this prompt. Records are written
-    by the preference-collection flow, never by live traffic (passive learning is
-    a fast-follow).
+    maps each model to its ``[0, 1]`` score for this prompt, keyed on canonical
+    ``instance:model`` so a candidate's spelling never decides whether it matches
+    (the router canonicalizes what it reads, so older rows keyed on another
+    spelling still match). Records are written by the preference-collection flow,
+    never by live traffic (passive learning is a fast-follow).
 
     Vectors are stored as a JSON list of floats for SQLite/PostgreSQL
     portability and scanned linearly in Python. That holds into the low thousands
