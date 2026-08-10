@@ -150,6 +150,23 @@ test.describe("dashboard core flows", () => {
     await expect(chained).toContainText(/\+1 on failure/);
   });
 
+  test("renames a policy in place", async ({ page }) => {
+    await login(page);
+    await nav(page).getByRole("link", { name: "Routing" }).click();
+
+    const chained = page.getByRole("row").filter({ has: page.getByRole("rowheader", { name: "chained" }) });
+    await chained.getByRole("button", { name: "Edit" }).click();
+    await page.getByRole("textbox", { name: /Policy name/ }).fill("renamed");
+    await page.getByRole("button", { name: "Save" }).click();
+
+    // A rename moves the row rather than copying it, so the old name has to be
+    // gone: two rows would mean callers could still reach the policy either way.
+    const renamed = page.getByRole("row").filter({ has: page.getByRole("rowheader", { name: "renamed" }) });
+    await expect(renamed).toBeVisible();
+    await expect(renamed).toContainText(/\+1 on failure/);
+    await expect(page.getByRole("rowheader", { name: "chained" })).toBeHidden();
+  });
+
   // The share card is the one flow whose output cannot be checked in jsdom: it
   // ends in a PNG, and jsdom has no canvas, no toBlob and no object URLs, so the
   // unit tests can only assert the wiring around a mocked rasterizer. Two bugs got

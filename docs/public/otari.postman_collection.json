@@ -1421,7 +1421,7 @@
               },
               "raw": "{\n  \"model_key\": \"string\",\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
             },
-            "description": "Set or update pricing for a model.\n\nRejects an alias: pricing, budgets, and usage all key on the resolved\ntarget, so a row stored under an alias name would never be read.",
+            "description": "Set or update pricing for a model.\n\nRejects an alias or a routing policy: pricing, budgets, and usage all key on\nthe model a request resolves to, so a row stored under either name would\nnever be read.",
             "header": [
               {
                 "key": "Content-Type",
@@ -1996,7 +1996,7 @@
               },
               "raw": "{\n  \"name\": \"string\",\n  \"spec\": {}\n}"
             },
-            "description": "Create or update a stored policy, global or scoped to one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).",
+            "description": "Create or update a stored policy, global or scoped to one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).\n\n``rename_from`` renames the row instead of keying on ``name``. It is part of\nthis write rather than an endpoint of its own so that an edit which both renames\na policy and re-targets it cannot land half-applied, leaving the old name serving\nthe new spec. The new name is validated exactly as a fresh one is, because a\nrename can walk a policy into every collision a create can.",
             "header": [
               {
                 "key": "Content-Type",

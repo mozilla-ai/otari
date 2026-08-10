@@ -469,6 +469,79 @@ def test_policies_are_listed_as_models(client: TestClient) -> None:
     assert {"fast", "solo", "thrifty"} <= ids
 
 
+def test_a_policy_does_not_withhold_its_candidates_from_the_catalog(client: TestClient) -> None:
+    """A policy is not an alias: it decides where traffic goes among models the
+    caller may name directly, so listing it must not delete them.
+
+    The regression this guards emptied the catalog: every selector of every policy
+    was withheld, ``on_failure`` chains included, so one failover policy could hide
+    most of a deployment's models. On the dashboard the row came back from the
+    discovery endpoint with no price at all, which read as "this model is free".
+    """
+    for key in ("openai:gpt-5-mini", "openai:gpt-5-nano", "anthropic:claude-haiku-4-5"):
+        priced = client.post(
+            "/v1/pricing",
+            json={"model_key": key, "input_price_per_million": 1.0, "output_price_per_million": 2.0},
+            headers=HEADERS,
+        )
+        assert priced.status_code == 200, priced.text
+
+    resp = client.get("/v1/models", headers=HEADERS)
+    assert resp.status_code == 200
+    entries = {model["id"]: model for model in resp.json()["data"]}
+
+    # The default target, a conditional target, and an on_failure candidate.
+    assert {"openai:gpt-5-mini", "openai:gpt-5-nano", "anthropic:claude-haiku-4-5"} <= set(entries)
+    assert entries["openai:gpt-5-mini"]["pricing"]["input_price_per_million"] == 1.0
+
+
+def test_a_price_aimed_at_a_static_policy_names_its_target(client: TestClient) -> None:
+    """Refused for the same reason an alias name is: billing keys on the resolved
+    model, so the row would be written and never read.
+    """
+    resp = client.post(
+        "/v1/pricing",
+        json={"model_key": "solo", "input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert "routing policy" in detail
+    assert "openai:gpt-5-mini" in detail
+
+
+def test_a_price_aimed_at_a_dynamic_policy_names_every_candidate(client: TestClient) -> None:
+    resp = client.post(
+        "/v1/pricing",
+        json={"model_key": "thrifty", "input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert "openai:gpt-5-nano" in detail
+    assert "openai:gpt-5-mini" in detail
+
+
+def test_a_price_aimed_at_a_stored_policy_is_refused_too(client: TestClient) -> None:
+    """The cache the check reads is refreshed by the write, so a policy created a
+    moment ago is already a name pricing must refuse.
+    """
+    created = client.post(
+        "/v1/routing/policies",
+        json={"name": "priceable", "spec": _spec("openai:gpt-5-mini")},
+        headers=HEADERS,
+    )
+    assert created.status_code == 200, created.text
+
+    resp = client.post(
+        "/v1/pricing",
+        json={"model_key": "priceable", "input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 400, resp.text
+    assert "routing policy" in resp.json()["detail"]
+
+
 # ---------------------------------------------------------------------------
 # Reach on the other model-taking endpoints
 # ---------------------------------------------------------------------------
@@ -589,6 +662,157 @@ def test_a_config_policy_cannot_be_deleted_through_the_api(client: TestClient) -
     resp = client.delete("/v1/routing/policies/fast", headers=HEADERS)
     assert resp.status_code == 404
     assert "config.yml" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Renaming a stored policy
+# ---------------------------------------------------------------------------
+
+
+def _rename(client: TestClient, old: str, new: str, spec: dict[str, Any], **extra: Any) -> Any:
+    return client.post(
+        "/v1/routing/policies",
+        json={"name": new, "rename_from": old, "spec": spec, **extra},
+        headers=HEADERS,
+    )
+
+
+def test_renaming_moves_the_row_rather_than_copying_it(client: TestClient) -> None:
+    """A rename must leave exactly one policy behind. Creating the new name and
+    leaving the old one serving would double the caller-facing surface silently.
+    """
+    _create_user(client)
+    created = client.post(
+        "/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS
+    )
+    assert created.status_code == 200, created.text
+
+    renamed = _rename(client, "quick", "speedy", _spec("openai:gpt-5-mini"))
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "speedy"
+    # The same row, so its history is intact rather than restarting at the rename.
+    assert renamed.json()["created_at"] == created.json()["created_at"]
+
+    names = [item["name"] for item in client.get("/v1/routing/policies", headers=HEADERS).json()]
+    assert "speedy" in names
+    assert "quick" not in names
+
+
+def test_the_new_name_serves_and_the_old_one_stops_resolving(client: TestClient) -> None:
+    _create_user(client)
+    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+    assert _rename(client, "quick", "speedy", _spec("openai:gpt-5-mini")).status_code == 200
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("gpt-5-mini"))) as mock:
+        resp = _chat(client, "speedy")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["model"] == "speedy"
+    assert _awaited_model(mock) == "openai:gpt-5-mini"
+
+    stale = _chat(client, "quick")
+    assert stale.status_code == 400
+    assert "quick" in stale.json()["detail"]
+
+
+def test_a_rename_can_change_the_spec_in_the_same_write(client: TestClient) -> None:
+    """The rename rides on the upsert precisely so this cannot land half-applied,
+    leaving the old name pointing at the new target or the reverse.
+    """
+    _create_user(client)
+    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+
+    renamed = _rename(client, "quick", "speedy", _spec("anthropic:claude-haiku-4-5"))
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["spec"]["select"] == [{"default": "anthropic:claude-haiku-4-5"}]
+
+    with patch("gateway.api.routes.chat.acompletion", new=AsyncMock(return_value=_completion("claude-haiku-4-5"))) as m:
+        assert _chat(client, "speedy").status_code == 200
+    assert _awaited_model(m) == "anthropic:claude-haiku-4-5"
+
+
+def test_renaming_onto_an_existing_policy_is_refused(client: TestClient) -> None:
+    """Without this the rename would be an upsert onto the target name, deleting a
+    working policy to make room for another.
+    """
+    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+    client.post(
+        "/v1/routing/policies", json={"name": "taken", "spec": _spec("anthropic:claude-haiku-4-5")}, headers=HEADERS
+    )
+
+    clash = _rename(client, "quick", "taken", _spec("openai:gpt-5-mini"))
+    assert clash.status_code == 409
+    assert "taken" in clash.json()["detail"]
+
+    # Both survive, and the occupant keeps its own spec.
+    by_name = {item["name"]: item for item in client.get("/v1/routing/policies", headers=HEADERS).json()}
+    assert by_name["quick"]["spec"]["select"] == [{"default": "openai:gpt-5-mini"}]
+    assert by_name["taken"]["spec"]["select"] == [{"default": "anthropic:claude-haiku-4-5"}]
+
+
+def test_renaming_a_policy_that_does_not_exist_is_a_404(client: TestClient) -> None:
+    resp = _rename(client, "ghost", "speedy", _spec("openai:gpt-5-mini"))
+    assert resp.status_code == 404
+    assert "ghost" in resp.json()["detail"]
+    # And it did not fall back to creating the new name.
+    names = [item["name"] for item in client.get("/v1/routing/policies", headers=HEADERS).json()]
+    assert "speedy" not in names
+
+
+def test_a_config_policy_cannot_be_renamed_through_the_api(client: TestClient) -> None:
+    resp = _rename(client, "fast", "speedy", _spec("openai:gpt-5-mini"))
+    assert resp.status_code == 404
+    assert "config.yml" in resp.json()["detail"]
+
+
+def test_a_rename_is_validated_like_a_fresh_name(client: TestClient) -> None:
+    """A rename can walk a policy into every collision a create can, so the new name
+    goes through the same checks rather than being trusted because the row existed.
+    """
+    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+
+    shadowing = _rename(client, "quick", "fast", _spec("openai:gpt-5-mini"))
+    assert shadowing.status_code == 400
+    assert "config.yml" in shadowing.json()["detail"]
+
+    client.post("/v1/aliases", json={"name": "cheap", "target": "openai:gpt-5-nano"}, headers=HEADERS)
+    aliased = _rename(client, "quick", "cheap", _spec("openai:gpt-5-mini"))
+    assert aliased.status_code == 400
+    assert "alias" in aliased.json()["detail"]
+
+    delimited = _rename(client, "quick", "openai:gpt-5-mini", _spec("openai:gpt-5-mini"))
+    assert delimited.status_code == 400
+
+
+def test_a_rename_stays_inside_its_scope(client: TestClient) -> None:
+    """Scope is the other half of the key. Renaming a user's override must not reach
+    the global policy that shares its name, or vice versa.
+    """
+    _create_user(client)
+    client.post("/v1/routing/policies", json={"name": "shared", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+    client.post(
+        "/v1/routing/policies",
+        json={"name": "shared", "spec": _spec("anthropic:claude-haiku-4-5"), "user_id": "test-user"},
+        headers=HEADERS,
+    )
+
+    renamed = _rename(client, "shared", "scoped", _spec("anthropic:claude-haiku-4-5"), user_id="test-user")
+    assert renamed.status_code == 200, renamed.text
+
+    rows = {(item["name"], item["user_id"]) for item in client.get("/v1/routing/policies", headers=HEADERS).json()}
+    assert ("scoped", "test-user") in rows
+    assert ("shared", None) in rows
+    assert ("shared", "test-user") not in rows
+
+
+def test_rename_from_the_same_name_is_a_plain_update(client: TestClient) -> None:
+    """A form that always sends `rename_from` must not 409 against the policy it is
+    editing just because the name did not change.
+    """
+    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+
+    resp = _rename(client, "quick", "quick", _spec("anthropic:claude-haiku-4-5"))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["spec"]["select"] == [{"default": "anthropic:claude-haiku-4-5"}]
 
 
 def test_a_global_stored_policy_may_not_shadow_a_config_one(client: TestClient) -> None:

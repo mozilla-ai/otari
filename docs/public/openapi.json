@@ -3502,6 +3502,18 @@
             "title": "Name",
             "type": "string"
           },
+          "rename_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current name of the policy to rename, in the same scope. The stored row keeps its id and created_at and takes `name` and `spec`. Omit to create or update the policy named `name`. Renaming changes what callers must send as `model`; usage already recorded keeps the old name.",
+            "title": "Rename From"
+          },
           "spec": {
             "additionalProperties": true,
             "description": "The policy body: select (with exactly one `default` entry, last), optional on_failure and guardrails. Same schema as a `routing.policies` entry in config.yml, and closed to unknown keys, so a typo is a 400 rather than a silently ignored setting.",
@@ -9891,7 +9903,7 @@
         ]
       },
       "post": {
-        "description": "Set or update pricing for a model.\n\nRejects an alias: pricing, budgets, and usage all key on the resolved\ntarget, so a row stored under an alias name would never be read.",
+        "description": "Set or update pricing for a model.\n\nRejects an alias or a routing policy: pricing, budgets, and usage all key on\nthe model a request resolves to, so a row stored under either name would\nnever be read.",
         "operationId": "set_pricing_v1_pricing_post",
         "requestBody": {
           "content": {
@@ -10821,7 +10833,7 @@
         ]
       },
       "post": {
-        "description": "Create or update a stored policy, global or scoped to one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).",
+        "description": "Create or update a stored policy, global or scoped to one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).\n\n``rename_from`` renames the row instead of keying on ``name``. It is part of\nthis write rather than an endpoint of its own so that an edit which both renames\na policy and re-targets it cannot land half-applied, leaving the old name serving\nthe new spec. The new name is validated exactly as a fresh one is, because a\nrename can walk a policy into every collision a create can.",
         "operationId": "set_policy_v1_routing_policies_post",
         "requestBody": {
           "content": {

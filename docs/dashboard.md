@@ -311,7 +311,11 @@ hand.
   sending anything to a provider or billing anything; it lists the candidates
   that were *dropped* as well as the ones kept, which is how you catch a fallback
   chain that has quietly filtered down to a single attempt. A policy from
-  `config.yml` is read-only here. See [Routing policies](routing.md).
+  `config.yml` is read-only here. **Edit** lets you change the policy name, which
+  renames it in place: callers have to send the new name from then on, and usage
+  already recorded stays under the old one. Who a policy applies to is fixed once
+  it exists, so moving one between scopes still means delete and recreate.
+  See [Routing policies](routing.md).
   A policy can also hand its choice to a **router** that sends easy prompts to a
   cheaper model and keeps the strong one for the rest: open the policy form and use
   **Let a router pick the cheapest good-enough model**, then name the models it may

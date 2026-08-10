@@ -260,15 +260,18 @@ never puts the hidden name back in the listing. Whether real models are listed i
 governed by `model_discovery` alone. With discovery on, aliases appear alongside
 the discovered models, including any target you aliased.
 
-A [routing policy](routing.md) withholds its targets from the listing the same way
-an alias does, and with a wider reach: a policy can name up to five selectors (its
-head plus an `on_failure` chain), and **every** one of them is withheld, not just
-the default. So a model you can still call directly can disappear from
-`GET /v1/models` because an unrelated policy lists it as a fallback. That is
-deliberate, since the listing is the wrong place to publish where a policy sends
-traffic, but it does mean the catalogue is not a complete inventory of what is
-callable. `otari routing explain` and the dashboard's Routing page show the
-targets to an operator.
+A [routing policy](routing.md) does **not** withhold its targets, which is where it
+parts company with an alias. The policy name is listed as its own entry, and every
+selector it can reach stays in the catalogue as itself. Withholding them was tried
+and reverted: a policy can name up to five selectors (its head plus an `on_failure`
+chain), so one failover policy could empty most of a catalogue, and a candidate
+priced by the [genai-prices fallback](configuration.md) then disappeared from the
+dashboard together with its rate. `GET /v1/models/{key}` never withheld them
+either, so nothing was really being kept off the wire.
+
+If you do want a model reachable only under a curated name, that is what an alias
+is for. Use `otari routing explain` or the dashboard's Routing page to see which
+policy sends traffic where.
 
 Constraints, checked at startup: a target must be of the form `instance:model` or
 `provider:model` whose prefix is a configured instance or a known provider; an

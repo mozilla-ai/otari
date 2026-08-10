@@ -291,9 +291,10 @@ def _policy_catalog_entries(
     a policy created in the dashboard worked but was invisible in the catalog.
 
     A static policy is an alias in every way the catalog cares about (one name, one
-    target, priced from the target), so it is folded into the alias map and inherits
-    that handling, including having its target withheld from the listing. A dynamic
-    one is listed separately by :func:`_dynamic_policy_model`.
+    target, priced from the target), so it is folded into the alias map and listed
+    that way. Its target stays in the listing though, unlike an alias's: see the
+    note in :func:`list_models`. A dynamic one is listed separately by
+    :func:`_dynamic_policy_model`.
     """
     static: dict[str, str] = {}
     dynamic: dict[str, PolicySpec] = {}
@@ -303,20 +304,6 @@ def _policy_catalog_entries(
         else:
             static[name] = spec.default_target
     return static, dynamic
-
-
-def _policy_target_keys(config: GatewayConfig, caller_user_id: str | None) -> set[str]:
-    """Canonical pricing keys of every selector any policy in force can reach.
-
-    Withheld from the listing for the same reason alias targets are: a policy exists
-    partly so the provider/model behind it stays private, and that has to hold for
-    its fallback candidates too, not just its default.
-    """
-    return {
-        normalize_pricing_key(config, selector)
-        for spec in effective_policies(config, caller_user_id).values()
-        for selector in spec.static_selectors()
-    }
 
 
 def _pricing_key_candidates(config: GatewayConfig, target: str) -> list[str]:
@@ -423,18 +410,27 @@ async def list_models(
     # Read once: phase 2 withholds these targets and phase 3 lists the names, and
     # the two must agree even if a write lands between them.
     # A static policy is an alias for catalog purposes (one name, one target,
-    # priced from the target), so it joins the alias map and inherits all of that
-    # handling. Startup validation refuses a policy that collides with an alias
-    # name, so this merge cannot silently shadow one.
+    # priced from the target), so it joins the alias map and is listed the same
+    # way. Startup validation refuses a policy that collides with an alias name,
+    # so this merge cannot silently shadow one.
+    configured_aliases = effective_aliases(config, caller_user_id)
     static_policies, dynamic_policies = _policy_catalog_entries(config, caller_user_id)
-    aliases = {**effective_aliases(config, caller_user_id), **static_policies}
+    aliases = {**configured_aliases, **static_policies}
     # Alias targets are withheld from every phase that could surface the real
     # model, discovery (phase 1) as well as pricing-only (phase 2): publishing the
     # target under either would expose the provider:model name the alias exists to
-    # hide. Computed before phase 1 so discovery honors it too. Policy candidates
-    # are withheld on the same grounds, including a dynamic policy's, whose names
-    # never reach the alias map.
-    alias_targets = _alias_target_keys(config, aliases) | _policy_target_keys(config, caller_user_id)
+    # hide. Computed before phase 1 so discovery honors it too.
+    #
+    # A *policy's* candidates are not withheld, which is why only the alias map
+    # feeds this. The two indirections look alike but exist for different reasons:
+    # an alias is a naming device whose whole purpose is to stand in for a target,
+    # while a policy decides where traffic goes among models the caller may name
+    # directly anyway. Hiding its candidates cost more than it bought: one policy
+    # naming a fallback chain could empty most of the catalog, a model priced by
+    # the genai-prices default then vanished from the dashboard along with its
+    # rate, and GET /v1/models/{key} served the same model with its price all
+    # along, so nothing was actually kept off the wire.
+    alias_targets = _alias_target_keys(config, configured_aliases)
 
     merged: dict[str, ModelObject] = {}
 

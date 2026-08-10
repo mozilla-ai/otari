@@ -186,6 +186,7 @@ function mockApi(
     aliases?: AliasResponse[];
     discoverable?: DiscoverableModelsResponse;
     metadata?: ModelMetadataResponse;
+    settings?: GatewaySettings;
   } = {},
 ) {
   return vi.spyOn(apiClient, "apiFetch").mockImplementation(async (input, init) => {
@@ -198,7 +199,7 @@ function mockApi(
       return null as never;
     }
     if (url.includes("/v1/settings")) {
-      return SETTINGS as never;
+      return (opts.settings ?? SETTINGS) as never;
     }
     // Specific /v1/models/* routes before the /v1/models/ catch-all (which 404s,
     // matching the server's route order).
@@ -977,5 +978,46 @@ describe("ModelsPage", () => {
     await user.click(screen.getByRole("button", { name: "Price a model" }));
 
     expect(within(await screen.findByRole("alertdialog")).getByLabelText("Model key")).toHaveValue("");
+  });
+
+  // A model the catalogue withheld (an alias target) still reaches the table
+  // through the discovery endpoint, and the price the gateway would charge for it
+  // does not come with it. Calling that "not priced" claims free metering for a
+  // model the fallback bills, which is the one thing the pricing table must not
+  // get wrong.
+  const WITHHELD = {
+    catalog: { object: "list" as const, data: [catalogModel("myopus", "otari", "default", [3, 15], 200000)] },
+    pricing: [],
+    discoverable: {
+      providers: [
+        {
+          provider: "anthropic",
+          ok: true,
+          error: null,
+          discovery_unsupported: false,
+          models: [{ id: "claude-opus-4", key: "anthropic:claude-opus-4" }],
+        },
+      ],
+    },
+  };
+
+  it("reports an unknown rate for a withheld model when default pricing is on", async () => {
+    mockApi(WITHHELD);
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("anthropic:claude-opus-4");
+
+    expect(within(await selectModel(user, "anthropic:claude-opus-4")).getByText("rate unknown")).toBeInTheDocument();
+  });
+
+  it("reports it as unpriced when default pricing is off, where that is the truth", async () => {
+    mockApi({ ...WITHHELD, settings: { ...SETTINGS, default_pricing: false } });
+    const user = userEvent.setup();
+
+    renderWithClient(<ModelsPage />);
+    await screen.findByText("anthropic:claude-opus-4");
+
+    expect(within(await selectModel(user, "anthropic:claude-opus-4")).getByText("not priced")).toBeInTheDocument();
   });
 });

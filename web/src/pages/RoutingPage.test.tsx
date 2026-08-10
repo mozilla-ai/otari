@@ -136,9 +136,16 @@ function mockApi(
     if (url.includes("/v1/routing/policies")) {
       if (method === "POST") {
         // An upsert, like the real endpoint: appending would put two rows under
-        // one name and scope, which is a state the API cannot produce.
+        // one name and scope, which is a state the API cannot produce. And
+        // `rename_from` moves the row rather than keying on `name`, so the old
+        // name has to leave the list; a mock that only added the new one would
+        // pass a test that the real API would fail.
         const row = policy(body.name, body.spec, { user_id: body.user_id ?? null });
-        list = [...list.filter((item) => !(item.name === row.name && item.user_id === row.user_id)), row];
+        const vacated: string[] = [row.name, ...(body.rename_from ? [body.rename_from as string] : [])];
+        list = [
+          ...list.filter((item) => item.user_id !== row.user_id || !vacated.includes(item.name)),
+          row,
+        ];
         return jsonResponse(row);
       }
       if (method === "DELETE") {
@@ -311,6 +318,98 @@ describe("RoutingPage", () => {
     // is dead config. Saying so here beats a 400 from the server.
     expect(screen.getByText("Must be under 100.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create policy" })).toBeDisabled();
+  });
+
+  it("renames a policy through the name field, sending rename_from", async () => {
+    // The name is the key, so an edit that changes it has to say which row it moves.
+    // Posting the new name alone would create a second policy and leave the old one
+    // serving callers.
+    const { calls } = mockApi([policy("fast", CHAIN)]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("fast")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    const nameField = screen.getByRole("textbox", { name: /policy name/i });
+    await user.clear(nameField);
+    await user.type(nameField, "speedy");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("/v1/routing/policies"));
+    const body = post!.body as { name: string; rename_from?: string; spec: PolicySpec };
+    expect(body.name).toBe("speedy");
+    expect(body.rename_from).toBe("fast");
+    // The rest of the policy rides along on the same write, so a rename cannot land
+    // half-applied.
+    expect(body.spec.on_failure).toEqual(["anthropic:claude-haiku-4-5"]);
+    expect(await screen.findByText("speedy")).toBeInTheDocument();
+    expect(screen.queryByText("fast")).not.toBeInTheDocument();
+  });
+
+  it("omits rename_from when an edit leaves the name alone", async () => {
+    // Sending it unchanged would be harmless server-side, but a plain spec edit
+    // reading as a rename in the audit log is not.
+    const { calls } = mockApi([policy("fast", CHAIN)]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("fast")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("/v1/routing/policies"));
+    expect((post!.body as { rename_from?: string }).rename_from).toBeUndefined();
+  });
+
+  it("says what a pending rename will do before it is saved", async () => {
+    mockApi([policy("fast", CHAIN)]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("fast")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    const nameField = screen.getByRole("textbox", { name: /policy name/i });
+    await user.clear(nameField);
+    await user.type(nameField, "speedy");
+
+    // Renaming changes what callers must send and splits historical usage, so the
+    // consequence belongs next to the field rather than in a release note.
+    expect(screen.getByText(/Callers have to send the new name/)).toBeInTheDocument();
+    expect(screen.getByText(/usage already recorded keeps the old one/)).toBeInTheDocument();
+  });
+
+  it("refuses a renamed policy whose new name carries a delimiter", async () => {
+    // Same rule as a create: ":" or "/" would shadow a real model selector.
+    const { calls } = mockApi([policy("fast", CHAIN)]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("fast")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    const nameField = screen.getByRole("textbox", { name: /policy name/i });
+    await user.clear(nameField);
+    await user.type(nameField, "openai:gpt-5");
+
+    expect(screen.getByText(/cannot contain/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+  });
+
+  it("keeps an alias name fixed, since the alias API cannot rename", async () => {
+    mockApi([], "http://guardrails:8000", [
+      { name: "gpt", target: "openai:gpt-5-mini", source: "stored", user_id: null },
+    ]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("gpt")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    expect(screen.queryByRole("textbox", { name: /policy name/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/An alias name is its key/)).toBeInTheDocument();
   });
 
   it("does not offer Edit for a policy the form would silently truncate", async () => {

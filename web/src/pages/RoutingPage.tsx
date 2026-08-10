@@ -390,6 +390,11 @@ function PolicyForm({
   const effectiveTarget = routed ? (candidates[safeIndex] ?? "") : target;
 
   const nameHasDelimiter = /[:/]/.test(name);
+  // A policy's name is its key, so a rename is a move rather than an edit: the API
+  // takes it as `rename_from` on the same write as the spec. Aliases have no such
+  // verb, so their name stays fixed here.
+  const previousName = existing?.name ?? "";
+  const renaming = editing && !editingAlias && name.trim() !== "" && name.trim() !== previousName;
   const scopeReady = userId === null || userId.trim() !== "";
   const conditionsReady = conditions.every((c) => c.target.trim() !== "" && c.threshold > 0 && c.threshold < 100);
   const guardrailsReady = guardrails.every((g) => g.profile.trim() !== "");
@@ -487,7 +492,10 @@ function PolicyForm({
       );
       return;
     }
-    save.mutate({ name: name.trim(), spec, user_id: scope }, { onSuccess: onClose });
+    save.mutate(
+      { name: name.trim(), spec, user_id: scope, ...(renaming ? { rename_from: previousName } : {}) },
+      { onSuccess: onClose },
+    );
   };
 
   return (
@@ -512,13 +520,12 @@ function PolicyForm({
           <ErrorBanner error={save.error ?? saveAlias.error} />
 
           <div className="grid gap-4 sm:grid-cols-2">
-            {editing ? (
+            {editingAlias ? (
               <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium text-[var(--otari-ink)]">Policy name</span>
-                <code className="text-sm text-[var(--otari-muted)]">{existing.name}</code>
+                <span className="text-sm font-medium text-[var(--otari-ink)]">Alias name</span>
+                <code className="text-sm text-[var(--otari-muted)]">{previousName}</code>
                 <span className="text-xs text-[var(--otari-muted)]">
-                  The name and who it applies to are the key and cannot be changed here. Delete and recreate to
-                  change either.
+                  An alias name is its key and cannot be changed here. Delete and recreate to change it.
                 </span>
               </div>
             ) : (
@@ -528,10 +535,20 @@ function PolicyForm({
                 onChange={setName}
                 placeholder="fast"
                 isRequired
-                autoFocus
+                // Only on create. Dropping an operator who clicked Edit to change a
+                // target into the name box invites a typo in the one field that is
+                // the policy's identity.
+                autoFocus={!editing}
                 description={
                   nameHasDelimiter ? (
                     <span className="text-red-700">A policy name cannot contain “:” or “/”.</span>
+                  ) : renaming ? (
+                    <span>
+                      Renames <code>{previousName}</code> on save. Callers have to send the new name from then
+                      on, and usage already recorded keeps the old one.
+                    </span>
+                  ) : editing ? (
+                    "What callers send as `model`. Change it to rename the policy."
                   ) : (
                     "What callers send as `model`."
                   )
@@ -565,7 +582,14 @@ function PolicyForm({
             )}
           </div>
 
-          {editing ? null : <ScopePicker userId={userId} onChange={setUserId} />}
+          {editing ? (
+            <p className="text-xs text-[var(--otari-muted)]">
+              Who this applies to is the other half of the key. It cannot be changed here: delete and recreate to
+              move it between scopes.
+            </p>
+          ) : (
+            <ScopePicker userId={userId} onChange={setUserId} />
+          )}
 
           {/* Conditional tier-down */}
           {conditions.length > 0 ? (

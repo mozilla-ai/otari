@@ -40,8 +40,13 @@ const ALIAS_OWNED_BY = "otari";
 
 // Where a row's price comes from. "configured" is a DB price and the only kind
 // editable here; "default" is the genai-prices fallback; "alias" is inherited
-// from a target; "none" means metered at no cost.
-type PriceSource = "configured" | "default" | "alias" | "none";
+// from a target; "none" means metered at no cost. "unknown" is the one case the
+// dashboard cannot answer: a model the catalogue did not list (an alias target)
+// that discovery still reports, with default pricing on. The gateway would meter
+// it at the fallback rate, but only `GET /v1/models` computes that rate, and it
+// withheld the row, so claiming "not priced" here would be a guess that reads as
+// a fact.
+type PriceSource = "configured" | "default" | "alias" | "none" | "unknown";
 
 // Capability filter options. These test the model's own metadata (models.dev),
 // so they line up with the per-model Features chips shown in the table, not the
@@ -342,6 +347,9 @@ function SourceChip({ source }: { source: PriceSource }) {
         {source}
       </Chip>
     );
+  }
+  if (source === "unknown") {
+    return <span className="text-xs text-[var(--otari-muted)]">rate unknown</span>;
   }
   return <span className="text-xs text-[var(--otari-muted)]">not priced</span>;
 }
@@ -1048,6 +1056,7 @@ export function ModelsPage() {
   const pricing = usePricing();
   const discoverable = useDiscoverableModels();
   const metadata = useModelMetadata();
+  const settings = useSettings();
 
   const setPricing = useSetPricing();
   const [search, setSearch] = useState("");
@@ -1178,6 +1187,11 @@ export function ModelsPage() {
         releaseDate: metadataByKey[row.key]?.release_date ?? null,
       }));
     const seen = new Set(out.map((row) => row.key));
+    // These rows exist because discovery reaches a model the catalogue withheld
+    // (an alias target). With the genai-prices fallback on, such a model is still
+    // metered, so "not priced" would be wrong; the rate is simply not knowable
+    // from here. With the fallback off, unpriced really does mean unpriced.
+    const unpricedSource: PriceSource = settings.data?.default_pricing ? "unknown" : "none";
     for (const provider of discoverable.data?.providers ?? []) {
       for (const model of provider.models) {
         if (seen.has(model.key)) {
@@ -1197,12 +1211,12 @@ export function ModelsPage() {
           cacheWritePrice: null,
           cacheWrite1hPrice: null,
           pricingTiers: [],
-          source: "none",
+          source: unpricedSource,
         });
       }
     }
     return out;
-  }, [rows, discoverable.data, metadataByKey]);
+  }, [rows, discoverable.data, metadataByKey, settings.data?.default_pricing]);
 
   const discoveredErrors = (discoverable.data?.providers ?? []).filter((provider) => !provider.ok);
 

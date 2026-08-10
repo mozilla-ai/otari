@@ -513,6 +513,17 @@ curl -X POST http://localhost:8000/v1/routing/policies \
 # What is in force, from config.yml and storage alike, in every scope.
 curl http://localhost:8000/v1/routing/policies -H "Otari-Key: Bearer <master-key>"
 
+# Rename one. `rename_from` names the policy to move; `name` is what it becomes.
+# The spec goes along on the same write, so a rename cannot land half-applied.
+curl -X POST http://localhost:8000/v1/routing/policies \
+  -H "Otari-Key: Bearer <master-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "rename_from": "fast",
+        "name": "speedy",
+        "spec": {"select": [{"default": "openai:gpt-5-mini"}]}
+      }'
+
 # Delete one. user_id selects the scope; omit it for the global policy.
 curl -X DELETE http://localhost:8000/v1/routing/policies/fast \
   -H "Otari-Key: Bearer <master-key>"
@@ -522,6 +533,15 @@ A stored policy scoped to a user takes precedence over a `config.yml` policy of
 the same name, and a global stored policy is refused if one already exists in
 `config.yml`, because config wins during resolution and the stored one would be
 dead config.
+
+A rename stays inside one scope, since who a policy applies to is the other half
+of its key; to move a policy between scopes, delete it and create it again. The
+new name goes through the same checks a fresh one does, so a rename cannot walk a
+policy into a collision a create would have refused. Two things a rename does not
+do: callers naming the old name start getting a 400, and usage already recorded
+keeps the old `policy_name`, so per-policy spend before and after a rename does
+not add up on its own. A `config.yml` policy has no row to move, so renaming it
+means editing the file.
 
 `POST /v1/routing/policies/explain` is the API form of `otari routing explain`,
 and it also accepts an unsaved draft `spec`, which is what the dashboard uses to
@@ -579,7 +599,14 @@ routed row (see [the Activity page](dashboard.md#observability)).
 `GET /v1/models` lists policies. A one-target policy reports its target's price. A
 policy that selects per request (a condition or a router) has no single target, so
 it reports `pricing_source: "dynamic"` with a null price rather than quoting a rate
-that is wrong whenever the policy does its job.
+that is wrong whenever the policy does its job. A policy's candidates stay in the
+listing as themselves; unlike an [alias](models.md#model-aliases), a policy hides
+nothing.
+
+A price cannot be set on a policy name. `POST /v1/pricing` refuses it (400, naming
+the candidates to price instead) for the same reason it refuses an alias name:
+pricing, budgets, and usage key on the model a request resolves to, so a row stored
+under the policy name would be written and never read.
 
 Tools Otari runs itself ([built-in tools](tools.md)) are billed per call onto the
 row that **settled** the request, not spread across attempts. So a request that

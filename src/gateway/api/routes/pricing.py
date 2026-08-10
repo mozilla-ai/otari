@@ -13,6 +13,7 @@ from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, v
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
 from gateway.services.alias_service import all_alias_names, resolve_effective_alias
+from gateway.services.policy_store import all_policy_names, resolve_effective_policy
 from gateway.services.pricing_refresh_service import (
     PricingRefreshError,
     confirm_price_refresh,
@@ -280,6 +281,31 @@ async def _get_pricing_history(db: AsyncSession, model_keys: list[str]) -> list[
     return []
 
 
+def _policy_pricing_detail(config: GatewayConfig, request: SetPricingRequest) -> str:
+    """400 detail for a price aimed at a routing policy name.
+
+    Names the candidates when they are knowable, because the operator's next
+    action is to price them: a policy resolves to one of its own selectors, and
+    that is the key the price has to be stored under.
+    """
+    spec = resolve_effective_policy(config, request.model_key)
+    if spec is None:
+        return (
+            f"'{request.model_key}' is a routing policy, not a model. Pricing keys on the model a request "
+            "resolves to, so set the price for the policy's candidates instead."
+        )
+    if not spec.is_dynamic:
+        return (
+            f"'{request.model_key}' is a routing policy for '{spec.default_target}', not a model. Pricing keys "
+            f"on the model a request resolves to, so set the price for '{spec.default_target}' instead."
+        )
+    candidates = ", ".join(f"'{selector}'" for selector in spec.static_selectors())
+    return (
+        f"'{request.model_key}' is a routing policy, not a model, and it selects a candidate per request. "
+        f"Pricing keys on the model a request resolves to, so set a price for each candidate instead: {candidates}."
+    )
+
+
 @router.post("", dependencies=[Depends(verify_master_key)])
 async def set_pricing(
     request: SetPricingRequest,
@@ -288,14 +314,17 @@ async def set_pricing(
 ) -> PricingResponse:
     """Set or update pricing for a model.
 
-    Rejects an alias: pricing, budgets, and usage all key on the resolved
-    target, so a row stored under an alias name would never be read.
+    Rejects an alias or a routing policy: pricing, budgets, and usage all key on
+    the model a request resolves to, so a row stored under either name would
+    never be read.
     """
-    # Checked against the raw key: an alias name can never contain a selector
-    # delimiter (see ``validate_alias``), so normalization would leave it
-    # unchanged anyway, and this reads as the same lookup request dispatch does.
-    # Scope-blind: a name that is an alias for even one user is still not a model
-    # key, so a pricing row stored under it would never be read.
+    # Both checked against the raw key: neither an alias nor a policy name can
+    # contain a selector delimiter (see ``validate_alias``), so normalization would
+    # leave it unchanged anyway, and this reads as the same lookup request dispatch
+    # does. Scope-blind: a name that is an indirection for even one user is still
+    # not a model key, so a pricing row stored under it would never be read.
+    if request.model_key in all_policy_names(config):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_policy_pricing_detail(config, request))
     if request.model_key in all_alias_names(config):
         alias_target = resolve_effective_alias(config, request.model_key)
         detail = (

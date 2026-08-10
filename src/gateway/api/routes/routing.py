@@ -65,6 +65,14 @@ class PolicyRequest(BaseModel):
             "A user-scoped policy resolves only for that user and shadows a global one of the same name."
         ),
     )
+    rename_from: str | None = Field(
+        default=None,
+        description=(
+            "Current name of the policy to rename, in the same scope. The stored row keeps its id and "
+            "created_at and takes `name` and `spec`. Omit to create or update the policy named `name`. "
+            "Renaming changes what callers must send as `model`; usage already recorded keeps the old name."
+        ),
+    )
 
 
 class PolicyResponse(BaseModel):
@@ -285,6 +293,29 @@ async def _require_user(db: AsyncSession, user_id: str) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{user_id}' not found")
 
 
+def _missing_policy_detail(config: GatewayConfig, name: str, user_id: str | None, verb: str) -> str:
+    """Explain a stored policy that is not there, naming the scope that was searched.
+
+    A config.yml policy is visible in the listing but has no row, so "not found" on
+    its own reads as a bug. Saying which of the two it is turns the 404 into the
+    answer: edit config.yml, or check the scope.
+    """
+    if user_id is None and name in config.routing.policies:
+        return f"Routing policy '{name}' is defined in config.yml and cannot be {verb} through the API."
+    scope = "global" if user_id is None else f"scoped to user '{user_id}'"
+    return f"Routing policy '{name}' ({scope}) not found"
+
+
+async def _name_is_taken(db: AsyncSession, name: str, user_id: str | None) -> bool:
+    """True when a stored policy already answers to ``name`` in this scope."""
+    existing = (
+        await db.execute(
+            select(RoutingPolicy.id).where(RoutingPolicy.name == name, RoutingPolicy.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+    return existing is not None
+
+
 async def _refresh_quietly(db: AsyncSession, name: str) -> None:
     """Refresh this worker's cache after a committed write.
 
@@ -345,6 +376,12 @@ async def set_policy(
     body this build would refuse at load. The cache is refreshed twice: once before
     validating (so the shadowing checks see other writers' policies) and once after
     committing (so this worker serves the new policy immediately).
+
+    ``rename_from`` renames the row instead of keying on ``name``. It is part of
+    this write rather than an endpoint of its own so that an edit which both renames
+    a policy and re-targets it cannot land half-applied, leaving the old name serving
+    the new spec. The new name is validated exactly as a fresh one is, because a
+    rename can walk a policy into every collision a create can.
     """
     if request.user_id is not None:
         await _require_user(db, request.user_id)
@@ -354,14 +391,34 @@ async def set_policy(
     await _validate_router_pricing(config, db, spec)
 
     # Scope is part of the identity: the upsert must not turn a global policy into
-    # a user-scoped one (or vice versa) just because the names match.
+    # a user-scoped one (or vice versa) just because the names match. A rename moves
+    # the name half of that key and leaves the scope alone.
+    renaming = request.rename_from is not None and request.rename_from != request.name
+    lookup_name = request.rename_from if request.rename_from is not None else request.name
     policy = (
         await db.execute(
             select(RoutingPolicy).where(
-                RoutingPolicy.name == request.name, RoutingPolicy.user_id == request.user_id
+                RoutingPolicy.name == lookup_name, RoutingPolicy.user_id == request.user_id
             )
         )
     ).scalar_one_or_none()
+    if renaming:
+        if policy is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=_missing_policy_detail(config, lookup_name, request.user_id, "renamed"),
+            )
+        # Without this the rename would be an upsert onto the target name, silently
+        # destroying whatever policy already answered to it.
+        if await _name_is_taken(db, request.name, request.user_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Routing policy '{request.name}' already exists in this scope. Delete it first, or "
+                    "pick another name."
+                ),
+            )
+        policy.name = request.name
     # Round-tripped through the model so the stored document is normalized (defaults
     # filled, key order stable) rather than whatever shape the client happened to
     # send. Otherwise two equivalent writes would produce different rows.
@@ -383,8 +440,9 @@ async def set_policy(
     # An operator changing where traffic goes is worth a line in the log: this is the
     # object that decides which model spends money.
     logger.info(
-        "Routing policy written name=%s scope=%s candidates=%d dynamic=%s router=%s",
+        "Routing policy written name=%s renamed_from=%s scope=%s candidates=%d dynamic=%s router=%s",
         policy.name,
+        request.rename_from if renaming else "-",
         policy.user_id or "global",
         # A router entry contributes its whole pool, since the walker cascades
         # through the ranking. Counting one head candidate here logged
@@ -419,11 +477,10 @@ async def delete_policy(
         )
     ).scalar_one_or_none()
     if policy is None:
-        scope = "global" if user_id is None else f"scoped to user '{user_id}'"
-        detail = f"Routing policy '{name}' ({scope}) not found"
-        if user_id is None and name in config.routing.policies:
-            detail = f"Routing policy '{name}' is defined in config.yml and cannot be deleted through the API."
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_missing_policy_detail(config, name, user_id, "deleted"),
+        )
 
     await db.delete(policy)
     try:

@@ -143,6 +143,8 @@ export interface SetRoutingPolicyRequest {
   name: string;
   spec: PolicySpec;
   user_id?: string | null;
+  /** Current name of the policy to rename, in the same scope. Omit to create or update `name`. */
+  rename_from?: string;
 }
 
 export interface ExplainCandidate {

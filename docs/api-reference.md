@@ -286,7 +286,7 @@ See [Routing policies](routing.md).
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | `GET` | `/v1/routing/policies` | List every policy in force, from `config.yml` and from storage, in every scope. | Master key |
-| `POST` | `/v1/routing/policies` | Create or update a stored policy. Body is `{name, spec, user_id?}`; `spec` is the same document a `routing.policies` entry takes. Omit `user_id` for a global one. | Master key |
+| `POST` | `/v1/routing/policies` | Create or update a stored policy. Body is `{name, spec, user_id?, rename_from?}`; `spec` is the same document a `routing.policies` entry takes. Omit `user_id` for a global one. `rename_from` renames an existing policy in the same scope to `name` on the same write: 404 if it does not exist, 409 if `name` is already taken. | Master key |
 | `POST` | `/v1/routing/policies/explain` | Compile a policy and return the plan without dispatching anything. Takes a saved `name`, an unsaved draft `spec`, or both (the draft wins). Optional `user_id`, `key_id`, `allowed_models`, `budget_used_pct`, `budget_remaining_usd` simulate the request. Returns the ordered candidates **and** the ones that were dropped, with reasons. For a weighted policy it also returns `router_weights`, the share each candidate takes once filtering is applied. | Master key |
 | `DELETE` | `/v1/routing/policies/{name}` | Delete a stored policy. `user_id` query param selects the scope. Policies from `config.yml` cannot be deleted here. | Master key |
 
