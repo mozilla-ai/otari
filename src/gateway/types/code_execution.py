@@ -37,13 +37,25 @@ __all__ = [
 ]
 
 
-def _blank_if_null(value: Any) -> Any:
-    """Absorb an explicit ``null`` into the empty string.
+def _rendered_text(value: Any) -> Any:
+    """Coerce whatever a backend put in a render-only field into text.
 
-    A backend that models an absent stream as an optional field serialises it
-    as ``null`` rather than omitting it, which a plain ``str`` would reject.
+    ``null`` becomes empty: a backend that models an absent stream as an
+    optional field serialises it that way rather than omitting it, and a plain
+    ``str`` would reject it.
+
+    Anything else non-string is stringified rather than dropped. Dropping it
+    would be the more dangerous choice: a backend that puts a structure in
+    ``stderr`` is still reporting a failure, and discarding it renders the run
+    as clean, unmarked output that then bills as a success. Stringifying keeps
+    the signal, and matches what the pre-typing renderer did by interpolating
+    the value straight into the rendered section.
     """
-    return "" if value is None else value
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 def _file_refs_only(value: Any) -> Any:
@@ -59,7 +71,7 @@ def _file_refs_only(value: Any) -> Any:
     return [entry for entry in value if isinstance(entry, dict)]
 
 
-_RenderedStr = Annotated[str, BeforeValidator(_blank_if_null)]
+_RenderedStr = Annotated[str, BeforeValidator(_rendered_text)]
 _FileRefs = Annotated[list["CodeExecutionFileRef"], BeforeValidator(_file_refs_only)]
 
 

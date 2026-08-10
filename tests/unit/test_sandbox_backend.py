@@ -735,3 +735,62 @@ async def test_renderable_fields_absorb_unusable_values(
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
 
     assert result == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        pytest.param(
+            {"stdout": "", "stderr": {"message": "boom"}, "return_code": 0},
+            "[tool error] stderr:\n{'message': 'boom'}",
+            id="stderr-only-is-an-object",
+        ),
+        pytest.param(
+            {"stdout": "ok", "stderr": {"message": "warn"}, "return_code": 0},
+            "stdout:\nok\nstderr:\n{'message': 'warn'}",
+            id="stderr-object-alongside-stdout",
+        ),
+        pytest.param(
+            {"stdout": ["a", "b"], "return_code": 0},
+            "stdout:\n['a', 'b']",
+            id="stdout-is-a-list",
+        ),
+        pytest.param(
+            {"stdout": "ok", "return_code": 0, "content": [{"filename": {"nested": 1}}]},
+            "stdout:\nok\nfiles: {'nested': 1}",
+            id="filename-is-an-object",
+        ),
+    ],
+)
+async def test_structured_values_in_render_only_fields_keep_the_signal(
+    content: dict[str, Any], expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A structure where text was expected is rendered, not dropped.
+
+    The first case is why stringifying beats discarding. Blanking a structured
+    `stderr` would leave a stderr-only run with nothing to render, so it would
+    come back `(no output)` with no `[tool error]` marker and bill as a
+    successful call, which is the failure the error-variant exclusion in
+    docs/code-execution-protocol.md exists to prevent.
+
+    The second case pins the surrounding semantics: stderr *alongside* stdout at
+    `return_code: 0` is not error-shaped either way, so only the stderr-only
+    shape distinguishes the two coercions.
+    """
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(201, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200,
+                json={"result_block": {"type": "code_execution_tool_result", "content": content}},
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+
+    assert result == expected
