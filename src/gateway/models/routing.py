@@ -26,12 +26,14 @@ would quietly not do what it says.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 __all__ = [
     "MAX_CANDIDATES",
+    "WEIGHTED_BACKEND",
     "PolicyGuardrail",
     "PolicySpec",
     "RoutingConfig",
@@ -44,6 +46,12 @@ __all__ = [
 # enforced by refusing the policy rather than by truncating it: a silently
 # shortened chain is a failover policy that does less than it says.
 MAX_CANDIDATES = 5
+
+# The one backend name this schema knows, because it is the only one whose
+# parameters live in the policy document (`weights`). Defined here rather than
+# imported from ``services.routing.backends`` because that module imports this
+# one; ``backends`` re-exports it, so there is still a single spelling.
+WEIGHTED_BACKEND = "weighted"
 
 _COMPARATORS = ("gte", "gt", "lte", "lt")
 
@@ -178,6 +186,15 @@ class SelectEntry(BaseModel):
             "already listed, so a router that declines can never leave the plan empty."
         ),
     )
+    weights: dict[str, float] | None = Field(
+        default=None,
+        description=(
+            "Share of traffic per candidate, for a `router: weighted` entry. Any non-negative numbers: "
+            "they are normalized, so {a: 70, b: 30} and {a: 7, b: 3} are the same 70/30 split. A "
+            "candidate left out gets 0, which keeps it in the plan as a failover target while sending it "
+            "no traffic; that is how a provider is drained without being deleted."
+        ),
+    )
 
     @model_validator(mode="after")
     def _exactly_one_destination(self) -> SelectEntry:
@@ -231,6 +248,44 @@ class SelectEntry(BaseModel):
             if selector in seen:
                 raise ValueError(f"'{selector}' is listed twice in `candidates`; each candidate appears once")
             seen.add(selector)
+        return self
+
+    @model_validator(mode="after")
+    def _weights_belong_to_the_weighted_router(self) -> SelectEntry:
+        """``weights`` is the weighted backend's parameter, so it means nothing elsewhere.
+
+        Refused on any other entry rather than ignored: a weight map on a `knn`
+        entry or a static target reads as a traffic split and would do nothing.
+
+        Required on a weighted entry, with no "unweighted means even" shorthand.
+        Omission of a *candidate* already means zero share (that is how a provider
+        is drained), so an omitted map would have to mean the opposite of an
+        omitted key. Writing the same number for each candidate says "even split"
+        without that contradiction.
+        """
+        if self.router is None or self.router.strip().lower() != WEIGHTED_BACKEND:
+            if self.weights is not None:
+                raise ValueError(
+                    f"`weights` only applies to a `router: {WEIGHTED_BACKEND}` entry: it is the traffic "
+                    "split that backend draws from. No other entry reads it."
+                )
+            return self
+        if not self.weights:
+            raise ValueError(
+                f"a `router: {WEIGHTED_BACKEND}` entry needs `weights`: the share of traffic each "
+                "candidate takes. For an even split, give every candidate the same number "
+                "(e.g. {a: 1, b: 1})."
+            )
+        for selector, weight in self.weights.items():
+            if not math.isfinite(weight) or weight < 0:
+                raise ValueError(
+                    f"weight for '{selector}' must be a finite, non-negative number; got {weight}"
+                )
+        if not any(weight > 0 for weight in self.weights.values()):
+            raise ValueError(
+                "every weight is 0, so this entry could never select anything and the policy would "
+                "always serve its default target. Give at least one candidate a positive weight."
+            )
         return self
 
     @property
@@ -321,6 +376,32 @@ class PolicySpec(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _weight_keys_name_candidates(self) -> PolicySpec:
+        """Every weight has to name a model the router could actually pick.
+
+        Checked here rather than on the entry because the pool includes the
+        policy's ``default`` target, which lives outside the entry. Weighting the
+        default is legitimate (that is how it takes a share of the traffic rather
+        than only serving as the last resort), so the check has to see it.
+
+        A typo'd key is refused instead of ignored: the split it describes would be
+        nothing like the split that runs, and the weights that *are* recognized
+        renormalize to fill the gap silently.
+        """
+        weights = self.router_weights
+        if not weights:
+            return self
+        pool = self.router_candidates
+        unknown = [selector for selector in weights if selector not in pool]
+        if unknown:
+            raise ValueError(
+                f"weight key(s) {', '.join(repr(item) for item in unknown)} do not name a candidate of "
+                f"this policy. Weights may name {', '.join(pool)} (the router's candidates plus the "
+                "default target)."
+            )
+        return self
+
     @property
     def router_backend(self) -> str | None:
         """The router backend named by ``select``, if any."""
@@ -328,6 +409,18 @@ class PolicySpec(BaseModel):
             if entry.router is not None:
                 return entry.router
         return None
+
+    @property
+    def router_weights(self) -> dict[str, float]:
+        """The declared traffic split, empty for a policy that is not weighted.
+
+        Kept as declared rather than normalized: normalizing needs the pool that
+        survived this caller's allow-list, which is a request-time fact.
+        """
+        for entry in self.select:
+            if entry.router is not None and entry.weights:
+                return dict(entry.weights)
+        return {}
 
     @property
     def router_candidates(self) -> list[str]:

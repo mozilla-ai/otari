@@ -29,9 +29,11 @@ import { ConfirmButton, CopyableValue, EmptyState, ErrorBanner, PageHeader } fro
  */
 type RoutingRow = RoutingPolicyResponse & { kind: "policy" | "alias" };
 
-/** The one router backend the form can write. Others are shown read-only rather
- *  than rewritten as this one on save. */
+/** The router backends the form can write. Any other is shown read-only rather
+ *  than rewritten as one of these on save. */
 const KNN_BACKEND = "knn";
+const WEIGHTED_BACKEND = "weighted";
+type RouterBackend = typeof KNN_BACKEND | typeof WEIGHTED_BACKEND;
 
 /** Server-side cap on a compiled plan (`MAX_CANDIDATES` in models/routing.py). */
 const MAX_CANDIDATES = 5;
@@ -97,11 +99,17 @@ function isEditableInForm(spec: PolicySpec): boolean {
   if (routerIndex !== -1 && lastConditionIndex !== -1 && routerIndex < lastConditionIndex) return false;
   return spec.select.every((entry) => {
     if (entry.default !== undefined) return entry.when === undefined;
-    // A router entry is editable: the form models the backend and its pool, which
-    // is the whole entry. An unknown backend is still shown read-only, because
-    // saving it back through the "learned routing" control would silently rewrite
-    // it as kNN.
-    if (entry.router !== undefined) return entry.router === KNN_BACKEND && (entry.candidates?.length ?? 0) > 0;
+    // A router entry is editable: the form models the backend, its pool and (for
+    // the weighted backend) the split, which is the whole entry. An unknown backend
+    // is still shown read-only, because saving it back through one of these
+    // controls would silently rewrite it as a backend the operator did not choose.
+    if (entry.router !== undefined) {
+      if ((entry.candidates?.length ?? 0) === 0) return false;
+      if (entry.router === KNN_BACKEND) return true;
+      // A weighted entry without weights cannot be saved back (the API refuses it),
+      // so the form would have to invent a split. Read-only says so instead.
+      return entry.router === WEIGHTED_BACKEND && Object.keys(entry.weights ?? {}).length > 0;
+    }
     const when = entry.when;
     if (when === undefined || entry.target === undefined) return false;
     const keys = Object.keys(when);
@@ -144,6 +152,23 @@ function routerBackendOf(spec: PolicySpec): string | undefined {
   return spec.select.find((entry) => entry.router !== undefined)?.router;
 }
 
+/** The declared traffic split, empty unless the policy is weighted. */
+function weightsOf(spec: PolicySpec): Record<string, number> {
+  return spec.select.find((entry) => entry.router !== undefined)?.weights ?? {};
+}
+
+/** Each candidate's percentage of the traffic, normalized like the server does.
+ *
+ *  Weights are relative, so the form shows what the operator actually gets: 7 and 3
+ *  read as 70% and 30%. A candidate with no weight takes none of the traffic and
+ *  stays in the plan as a failover target, which is how a provider is drained.
+ */
+function sharesOf(weights: number[]): number[] {
+  const total = weights.reduce((sum, weight) => sum + Math.max(0, weight), 0);
+  if (total <= 0) return weights.map(() => 0);
+  return weights.map((weight) => (Math.max(0, weight) * 100) / total);
+}
+
 /** The conditional entries, i.e. everything that is not the fallthrough. */
 function conditionsOf(spec: PolicySpec): { threshold: number; target: string }[] {
   return spec.select
@@ -154,9 +179,21 @@ function conditionsOf(spec: PolicySpec): { threshold: number; target: string }[]
 /** One line summarising what a policy serves, for the table. */
 function servesSummary(policy: RoutingPolicyResponse): string {
   const chain = policy.spec.on_failure ?? [];
-  const learned = candidatesOf(policy.spec);
-  if (learned.length > 0) {
-    return `Learned · ${learned.length} candidates, ${defaultTargetOf(policy.spec)} by default`;
+  const pool = candidatesOf(policy.spec);
+  if (pool.length > 0 && routerBackendOf(policy.spec) === WEIGHTED_BACKEND) {
+    // The split shape, not the model names: two provider:model strings do not fit a
+    // table cell, and the shares are what distinguishes one weighted policy from
+    // another. The pool is spelled out in the editor and in explain.
+    const declared = weightsOf(policy.spec);
+    const target = defaultTargetOf(policy.spec);
+    const full = pool.includes(target) ? pool : [...pool, target];
+    const split = sharesOf(full.map((selector) => declared[selector] ?? 0))
+      .map((share) => `${Math.round(share)}%`)
+      .join(" / ");
+    return `Weighted · ${split} across ${full.length} models`;
+  }
+  if (pool.length > 0) {
+    return `Learned · ${pool.length} candidates, ${defaultTargetOf(policy.spec)} by default`;
   }
   if (policy.is_dynamic) {
     const total = 1 + chain.length;
@@ -300,7 +337,21 @@ function PolicyForm({
   // where the default target joins the pool if it was left out.
   const [candidates, setCandidates] = useState<string[]>(existing ? initialPool(existing.spec) : []);
   const [safeIndex, setSafeIndex] = useState<number>(existing ? initialSafeIndex(existing.spec) : 0);
+  // Which backend orders the pool. The two share the pool control, because both are
+  // "these models, one of them per request"; they differ in what decides and in
+  // whether a share sits next to each entry.
+  const [backend, setBackend] = useState<RouterBackend>(
+    existing && routerBackendOf(existing.spec) === WEIGHTED_BACKEND ? WEIGHTED_BACKEND : KNN_BACKEND,
+  );
+  // Parallel to `candidates`, so a weight follows its model when one is removed.
+  const [weights, setWeights] = useState<number[]>(() => {
+    if (existing === null) return [];
+    const declared = weightsOf(existing.spec);
+    return initialPool(existing.spec).map((selector) => declared[selector] ?? 0);
+  });
   const routed = candidates.length > 0;
+  const weighted = routed && backend === WEIGHTED_BACKEND;
+  const shares = sharesOf(weights);
   // With a router, the fallthrough is the marked model; without one it is the single
   // "Serves" field.
   const effectiveTarget = routed ? (candidates[safeIndex] ?? "") : target;
@@ -315,6 +366,9 @@ function PolicyForm({
     (candidates.length >= 2 &&
       candidates.every((entry) => entry.trim() !== "") &&
       effectiveTarget.trim() !== "");
+  // An all-zero split would select nothing and the policy would always serve its
+  // default, so the API refuses it. Caught here so the form cannot author it.
+  const splitReady = !weighted || weights.some((weight) => weight > 0);
   // The server caps the compiled plan at MAX_CANDIDATES, counting the routed pool
   // plus the failure chain. Enforced here too so the form cannot author a policy it
   // then fails to save: a rule the UI knows about should not arrive as a 400.
@@ -329,6 +383,7 @@ function PolicyForm({
     conditionsReady &&
     guardrailsReady &&
     candidatesReady &&
+    splitReady &&
     !overCandidateCap &&
     chain.every((entry) => entry.trim() !== "");
 
@@ -344,13 +399,30 @@ function PolicyForm({
         // After the conditions, before the fallthrough: an explicit tier-down is
         // the operator overriding the router, and the router is what runs when no
         // condition applies.
-        ...(routed ? [{ router: KNN_BACKEND, candidates: candidates.map((entry) => entry.trim()) }] : []),
+        ...(routed
+          ? [
+              {
+                router: backend,
+                candidates: candidates.map((entry) => entry.trim()),
+                // Keyed by selector, which is how the server reads it. Only for the
+                // weighted backend: a weight map on a knn entry is refused, because
+                // it would read as a split and do nothing.
+                ...(weighted
+                  ? {
+                      weights: Object.fromEntries(
+                        candidates.map((entry, index) => [entry.trim(), weights[index] ?? 0]),
+                      ),
+                    }
+                  : {}),
+              },
+            ]
+          : []),
         { default: effectiveTarget.trim() },
       ],
       ...(chain.length > 0 ? { on_failure: chain.map((entry) => entry.trim()) } : {}),
       ...(guardrails.length > 0 ? { guardrails } : {}),
     }),
-    [conditions, candidates, routed, effectiveTarget, chain, guardrails],
+    [conditions, candidates, routed, backend, weighted, weights, effectiveTarget, chain, guardrails],
   );
 
   // An alias has exactly one target, so growing one a chain, a condition, or a
@@ -433,8 +505,9 @@ function PolicyForm({
                   )}
                 </span>
                 <span className="text-xs text-[var(--otari-muted)]">
-                  A router picks per request, so this policy has no single target. The model marked below is
-                  what serves when the router does not choose.
+                  {weighted
+                    ? "The split picks per request, so this policy has no single target. The model marked below is what serves a caller who opts out."
+                    : "A router picks per request, so this policy has no single target. The model marked below is what serves when the router does not choose."}
                 </span>
               </div>
             ) : (
@@ -497,14 +570,19 @@ function PolicyForm({
             </div>
           ) : null}
 
-          {/* Learned routing */}
+          {/* The routed pool: one control for both backends, because both are "these
+              models, one of them per request". What differs is who decides, and
+              whether a share sits next to each entry. */}
           {candidates.length > 0 ? (
             <div className="flex flex-col gap-3 rounded-lg border border-[var(--otari-line)] p-3">
               <div>
-                <span className="text-sm font-medium text-[var(--otari-ink)]">The router chooses between</span>
+                <span className="text-sm font-medium text-[var(--otari-ink)]">
+                  {weighted ? "Split traffic between" : "The router chooses between"}
+                </span>
                 <p className="text-xs text-[var(--otari-muted)]">
-                  For each request, the cheapest of these that past scoring says is good enough. Every model
-                  here needs pricing, because the router weighs quality against cost.
+                  {weighted
+                    ? "Each request goes to one of these, drawn in proportion to its share. Shares are relative, so 70 and 30 mean the same as 7 and 3. No pricing needed."
+                    : "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost."}
                 </p>
               </div>
               {candidates.map((entry, index) => (
@@ -519,6 +597,29 @@ function PolicyForm({
                       isRequired
                     />
                   </div>
+                  {weighted ? (
+                    <div className="flex items-end gap-2">
+                      <Field
+                        label="Share"
+                        value={String(weights[index] ?? 0)}
+                        onChange={(value) =>
+                          setWeights((prev) =>
+                            prev.map((weight, i) =>
+                              i === index ? Math.max(0, Number(value) || 0) : weight,
+                            ),
+                          )
+                        }
+                        // The percentage, not the number they typed: relative weights
+                        // are easy to write and hard to read, and this is the line
+                        // that says a zero-weight model is drained rather than gone.
+                        description={
+                          (weights[index] ?? 0) > 0
+                            ? `${Math.round(shares[index] ?? 0)}% of requests`
+                            : "No traffic; still tried if another fails"
+                        }
+                      />
+                    </div>
+                  ) : null}
                   <label className="flex items-center gap-2 pb-2 text-xs text-[var(--otari-ink)]">
                     <input
                       type="radio"
@@ -526,12 +627,13 @@ function PolicyForm({
                       checked={safeIndex === index}
                       onChange={() => setSafeIndex(index)}
                     />
-                    Serves when unsure
+                    {weighted ? "Serves on opt-out" : "Serves when unsure"}
                   </label>
                   <Button
                     variant="ghost"
                     onPress={() => {
                       setCandidates((prev) => prev.filter((_, i) => i !== index));
+                      setWeights((prev) => prev.filter((_, i) => i !== index));
                       // Keep the mark on the same model where possible; if the marked
                       // one went, fall back to the first, never to nothing.
                       setSafeIndex((prev) => (index < prev ? prev - 1 : index === prev ? 0 : prev));
@@ -542,13 +644,30 @@ function PolicyForm({
                 </div>
               ))}
               <p className="text-xs text-[var(--otari-muted)]">
-                The marked model serves whenever the router does not choose: too few scored examples, a weakly
-                supported pick, a request carrying tools, or a caller sending <code>Otari-Router: off</code>.
-                Mark the one you would have picked without a router.
+                {weighted ? (
+                  <>
+                    The marked model serves a caller who sends <code>Otari-Router: off</code>, which is the way
+                    to pin traffic to one provider during an incident. A retryable failure moves to another
+                    model in this pool, by the same shares, before any fallback below.
+                  </>
+                ) : (
+                  <>
+                    The marked model serves whenever the router does not choose: too few scored examples, a
+                    weakly supported pick, a request carrying tools, or a caller sending{" "}
+                    <code>Otari-Router: off</code>. Mark the one you would have picked without a router.
+                  </>
+                )}
               </p>
               {candidates.length < 2 ? (
                 <p className="text-xs text-red-700">
-                  Name at least two models. Ranking one is not a routing decision.
+                  Name at least two models. {weighted ? "Splitting traffic one way" : "Ranking one"} is not a
+                  routing decision.
+                </p>
+              ) : null}
+              {weighted && !splitReady ? (
+                <p className="text-xs text-red-700">
+                  Give at least one model a share above zero, or this policy can never send traffic anywhere
+                  but its marked model.
                 </p>
               ) : null}
               <div className="flex flex-wrap items-baseline gap-2">
@@ -560,7 +679,12 @@ function PolicyForm({
                       ? "cursor-not-allowed text-sm text-[var(--otari-muted)] opacity-60"
                       : "text-sm text-[var(--otari-brand)] hover:underline"
                   }
-                  onClick={() => setCandidates((prev) => [...prev, ""])}
+                  onClick={() => {
+                    setCandidates((prev) => [...prev, ""]);
+                    // Zero, not an invented share: adding a provider must not move
+                    // traffic onto it before the operator says how much.
+                    setWeights((prev) => [...prev, 0]);
+                  }}
                 >
                   + Another model
                 </button>
@@ -719,11 +843,30 @@ function PolicyForm({
                 // the pool starts from the model this policy already serves and the
                 // operator adds the cheaper one rather than restating everything.
                 onClick={() => {
+                  setBackend(KNN_BACKEND);
                   setCandidates([target.trim() || "", ""]);
+                  setWeights([]);
                   setSafeIndex(0);
                 }}
               >
                 + Let a router pick the cheapest good-enough model
+              </button>
+            ) : null}
+            {candidates.length === 0 ? (
+              <button
+                type="button"
+                className="text-[var(--otari-brand)] hover:underline"
+                // An even split of the policy's own target with one more provider:
+                // the neutral starting point for load balancing, which the operator
+                // then skews. Seeding 90/10 would be guessing at a canary.
+                onClick={() => {
+                  setBackend(WEIGHTED_BACKEND);
+                  setCandidates([target.trim() || "", ""]);
+                  setWeights([50, 50]);
+                  setSafeIndex(0);
+                }}
+              >
+                + Split traffic across providers by weight
               </button>
             ) : null}
             {guardrails.length === 0 ? (
@@ -767,11 +910,17 @@ function PolicyForm({
               Cancel
             </Button>
             <span className="text-xs text-[var(--otari-muted)]">In effect for new requests within 30s.</span>
-            {candidates.length > 0 ? (
+            {routed && !weighted ? (
               <span className="text-xs text-[var(--otari-muted)]">
                 A new router serves the model above until it has scored examples. Recording them is an API
                 job for now (<code>POST /v1/routing/preferences/rank</code>); open <b>Examples</b> on the row
                 afterwards to watch it warm up.
+              </span>
+            ) : null}
+            {weighted ? (
+              <span className="text-xs text-[var(--otari-muted)]">
+                Each request is drawn independently, so the shares hold over traffic rather than over any ten
+                requests, and they behave the same behind any number of replicas.
               </span>
             ) : null}
             {outgrewAlias ? (
@@ -842,11 +991,12 @@ export function RoutingPage() {
         cell: (policy) => (
           <div className="flex items-center gap-2">
             <span className="text-sm text-[var(--otari-ink)]">{servesSummary(policy)}</span>
-            {/* "Learned" rather than "Dynamic" when a router decides: both are true,
-                but only one tells the reader what to do next (teach it). */}
+            {/* The backend's own name rather than "Dynamic" when a router decides:
+                all of them are true, but only one tells the reader what to do next
+                (teach it, or move the shares). */}
             {candidatesOf(policy.spec).length > 0 ? (
               <Chip size="sm" color="accent">
-                Learned
+                {routerBackendOf(policy.spec) === WEIGHTED_BACKEND ? "Weighted" : "Learned"}
               </Chip>
             ) : policy.is_dynamic ? (
               <Chip size="sm" color="accent">
@@ -907,7 +1057,9 @@ export function RoutingPage() {
           // of scored examples is the one number in there that changes. Outlined
           // rather than ghost so it reads as the row's distinct affordance next to
           // Edit and Delete.
-          const readiness = candidatesOf(policy.spec).length > 0 && (
+          // Only for a backend that learns: a weighted policy has nothing to teach,
+          // so offering Examples on one would promise a screen that cannot help it.
+          const readiness = routerBackendOf(policy.spec) === KNN_BACKEND && (
             <Button
               size="sm"
               variant="outline"
@@ -967,7 +1119,7 @@ export function RoutingPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Routing"
-        description="Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. It can also let a router learn which prompts a cheaper model handles just as well."
+        description="Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. It can also split traffic across providers by weight, or let a router learn which prompts a cheaper model handles just as well."
         action={
           adding || editing !== null ? undefined : (
             <Button
@@ -995,6 +1147,7 @@ export function RoutingPage() {
           <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-[var(--otari-muted)]">
             <li>Create a policy and point it at the model that should normally serve.</li>
             <li>Add a fallback chain so a provider outage does not become a failed request.</li>
+            <li>Or split the traffic across two providers by weight, and move the shares as you learn.</li>
             <li>
               Or let a router choose per request between a cheap and a strong model, then teach it with a few
               scored examples.

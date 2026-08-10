@@ -305,6 +305,13 @@ hand.
   the policy's target, so there is one list rather than a separate "Serves" field:
   the fallback is always one of the models the router may pick. Those rows are tagged
   `Learned`.
+  To spread load instead of choosing per prompt, use **Split traffic across providers
+  by weight**: name the models and give each a **share**. Shares are relative, so 70
+  and 30 mean the same as 7 and 3, and the form shows what each comes to as a
+  percentage. A share of zero drains a provider without removing it: it takes no
+  traffic and still catches a failure. The marked model here is what serves a caller
+  who sends `Otari-Router: off`. Those rows are tagged `Weighted` and summarised by
+  their split. See [weighted routing](routing.md#load-balance-across-providers-weighted-routing).
 - **Examples**, on a learned policy's row: opens inline under that row and answers the
   question the table cannot. A router chooses nothing until it has scored examples, and
   until then the policy serves its default target on every request, which looks exactly
@@ -314,7 +321,8 @@ hand.
   caller shares warms once per caller. Recording examples is an API job in this release
   (`POST /v1/routing/preferences/rank`); the panel links to the recipe. It is offered
   for `config.yml` policies too, since reading readiness is safe for a policy this page
-  cannot change. See [learned routing](routing.md#let-a-router-choose-learned-routing).
+  cannot change, and not at all for a weighted policy, which has nothing to teach. See
+  [learned routing](routing.md#let-a-router-choose-learned-routing).
 
 ### Access
 

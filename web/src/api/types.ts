@@ -100,10 +100,15 @@ export interface PolicySelectEntry {
   target?: string;
   /** The fallthrough. Exactly one entry carries it, and it must come last. */
   default?: string;
-  /** A router backend that ranks `candidates` per request, e.g. "knn". */
+  /** A router backend that orders `candidates` per request: "weighted" to split
+   *  traffic by share, "knn" to learn which prompts a cheaper model handles. */
   router?: string;
   /** The pool a `router` entry orders. Required there, meaningless elsewhere. */
   candidates?: string[];
+  /** Share of traffic per candidate, for a `router: "weighted"` entry only.
+   *  Relative, not percentages: {a: 70, b: 30} and {a: 7, b: 3} are one split. A
+   *  candidate left out takes no traffic and stays in the plan as a failover. */
+  weights?: Record<string, number>;
 }
 
 export interface PolicyGuardrail {
@@ -171,10 +176,15 @@ export interface ExplainPolicyResponse {
   candidates: ExplainCandidate[];
   dropped: ExplainDropped[];
   guardrails: Record<string, unknown>[];
-  /** Set when the policy defers to a router. The plan above is then the decline
-   *  path: explain dispatches nothing, so it cannot rank. */
+  /** Set when the policy defers to a router. For a router that needs request state
+   *  (knn) the plan above is then the decline path: explain dispatches nothing, so
+   *  it cannot rank. A weighted policy is the exception, see `router_weights`. */
   router_backend?: string | null;
   router_candidates?: string[];
+  /** For a weighted policy, the share of traffic each candidate takes, normalized
+   *  over the candidates the simulated caller may use. The plan above is then the
+   *  real ordering by share rather than a decline path. */
+  router_weights?: Record<string, number>;
 }
 
 // --- Learned routing (the kNN router a policy can name) --------------------

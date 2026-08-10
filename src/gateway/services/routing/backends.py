@@ -17,12 +17,17 @@ this build does not have serves its default target and warns once.
   hold a policy's shape while its pool is still being taught.
 * ``knn`` → :class:`gateway.services.routing.knn.KnnRoutingMemory`, imported
   lazily so a gateway with no learned policy never loads the embedding path.
+* ``weighted`` → :class:`gateway.services.routing.weighted.WeightedRouterBackend`,
+  a load balancer: one candidate per request, drawn in proportion to the weights
+  the policy declares.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+from gateway.models.routing import WEIGHTED_BACKEND
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -30,12 +35,16 @@ if TYPE_CHECKING:
 __all__ = [
     "KNN_BACKEND",
     "NOOP_BACKEND",
+    "WEIGHTED_BACKEND",
     "NoOpRouterBackend",
     "RouterBackend",
     "RoutingContext",
     "RoutingDecision",
+    "backend_is_weighted",
+    "backend_requires_pricing",
     "clear_router_backend_cache",
     "get_router_backend",
+    "known_backends",
     "owes_missing_backend_warning",
 ]
 
@@ -70,6 +79,11 @@ class RoutingContext:
     has_tools: bool = False
     is_trace_continuation: bool = False
     trace_key: str | None = None
+    weights: dict[str, float] = field(default_factory=dict)
+    """Per-candidate traffic weights the policy declared, for a backend that takes
+    its parameters from the policy document rather than from the environment. Empty
+    for every other backend. Kept as declared: normalizing needs ``candidate_pool``,
+    which is already filtered to this caller."""
 
 
 @dataclass
@@ -84,6 +98,11 @@ class RoutingDecision:
     ordered_models: list[str]
     confidence: float
     rationale: str
+    log_decision: bool = True
+    """Whether this decision earns its INFO line. A learned router's pick is
+    unreconstructable after the fact and worth one; a load balancer's draw is one
+    line per request forever, and the usage row already records what served. The
+    backend decides, because only it knows how often it is asked."""
 
     @classmethod
     def decline(cls, rationale: str) -> RoutingDecision:
@@ -133,6 +152,32 @@ def clear_router_backend_cache() -> None:
     _warned_missing.clear()
 
 
+def known_backends() -> tuple[str, ...]:
+    """Backend names this build resolves, for an error message that lists them."""
+    return (KNN_BACKEND, NOOP_BACKEND, WEIGHTED_BACKEND)
+
+
+def backend_is_weighted(name: str | None) -> bool:
+    """Whether this name selects the weighted load balancer.
+
+    A named check because the weighted backend is the one whose decision needs no
+    request state, so several synchronous surfaces (``explain``, the CLI) special
+    case it, and each of them would otherwise repeat the same normalization.
+    """
+    return name is not None and name.strip().lower() == WEIGHTED_BACKEND
+
+
+def backend_requires_pricing(name: str | None) -> bool:
+    """Whether a policy naming this backend must have every candidate priced.
+
+    Only the kNN router does: it scores quality against cost, so one unpriced
+    candidate makes it decline every request. The weighted router balances on
+    operator-declared capacity and never reads a price, so demanding pricing there
+    would refuse a working policy.
+    """
+    return name is not None and name.strip().lower() == KNN_BACKEND
+
+
 def owes_missing_backend_warning(policy_name: str, name: str) -> bool:
     """Whether this ``(policy, backend)`` pair still owes its one warning.
 
@@ -159,6 +204,15 @@ def get_router_backend(config: GatewayConfig, name: str) -> RouterBackend | None
     backend = name.strip().lower()
     if backend == NOOP_BACKEND:
         return NoOpRouterBackend()
+    if backend == WEIGHTED_BACKEND:
+        # Instantiated per call rather than cached, because the backend is stateless:
+        # everything it reads about the policy arrives on the RoutingContext, and the
+        # draw comes from a stream shared across instances. Imported inside the
+        # function only to keep this module free of intra-package imports (``decide``
+        # imports the split helpers at module level, so nothing is deferred by it).
+        from gateway.services.routing.weighted import WeightedRouterBackend
+
+        return WeightedRouterBackend()
     if backend == KNN_BACKEND:
         # Imported lazily: the kNN backend pulls in any_llm embeddings and the
         # example store, neither of which a gateway without a learned policy needs.

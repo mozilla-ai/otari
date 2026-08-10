@@ -15,6 +15,7 @@ request could actually use.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 
 from any_llm.exceptions import AnyLLMError
@@ -25,15 +26,23 @@ from gateway.models.routing import PolicySpec
 from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.routing.backends import (
-    KNN_BACKEND,
-    NOOP_BACKEND,
     RoutingContext,
+    backend_is_weighted,
     get_router_backend,
+    known_backends,
     owes_missing_backend_warning,
 )
 from gateway.services.routing.compiler import RouterOrdering
+from gateway.services.routing.weighted import declared_shares, describe_split, explain_ordering
 
-__all__ = ["ROUTER_DEADLINE_SECONDS", "RoutingSignal", "decide_ordering"]
+__all__ = [
+    "ROUTER_DEADLINE_SECONDS",
+    "RoutingSignal",
+    "WeightedShare",
+    "decide_ordering",
+    "explain_router_ordering",
+    "usable_candidates",
+]
 
 # A ranking that has not answered by now is not worth the caller's latency. The
 # work behind it is an outbound embedding call plus a read of the stored examples,
@@ -114,11 +123,11 @@ async def decide_ordering(
                 policy_name,
                 backend_name,
                 spec.default_target,
-                ", ".join((KNN_BACKEND, NOOP_BACKEND)),
+                ", ".join(known_backends()),
             )
         return None
 
-    pool = _usable_candidates(config, spec.router_candidates, user_id=user_id, allowlist=allowlist)
+    pool = usable_candidates(config, spec.router_candidates, user_id=user_id, allowlist=allowlist)
     default_model = spec.default_target
     if not pool:
         return RouterOrdering([], rationale="no candidate in the pool is usable by this caller")
@@ -134,6 +143,7 @@ async def decide_ordering(
         has_tools=signal.has_tools,
         is_trace_continuation=signal.is_continuation,
         trace_key=signal.conversation_id,
+        weights=spec.router_weights,
     )
     try:
         async with asyncio.timeout(ROUTER_DEADLINE_SECONDS):
@@ -156,8 +166,12 @@ async def decide_ordering(
         return RouterOrdering([], rationale=f"router error ({type(exc).__name__})")
     # One line per routed request, at info: which model the money went to and why
     # is the first thing an operator asks when a bill or a quality complaint
-    # arrives, and the decision is not otherwise reconstructable.
-    logger.info(
+    # arrives, and the decision is not otherwise reconstructable. A backend whose
+    # decision *is* reconstructable (the weighted split is written in the policy,
+    # and the usage row names what served) opts down to debug, because at load
+    # balancer volume this line would be the log.
+    logger.log(
+        logging.INFO if decision.log_decision else logging.DEBUG,
         "Router '%s' on policy '%s': %s (confidence=%.2f) -> %s",
         backend_name,
         policy_name,
@@ -172,7 +186,81 @@ async def decide_ordering(
     )
 
 
-def _usable_candidates(
+@dataclass(frozen=True)
+class WeightedShare:
+    """One candidate's share of a weighted policy's traffic, for display.
+
+    Carries both spellings because the two readers need different ones: the API
+    reports ``selector`` (what the policy document says, so a form can bind it to
+    the field the operator edits), and the CLI matches ``canonical`` against a
+    compiled attempt, which identifies itself as ``instance:model``.
+    """
+
+    selector: str
+    canonical: str
+    share_pct: float
+
+
+def explain_router_ordering(
+    config: GatewayConfig,
+    spec: PolicySpec,
+    *,
+    user_id: str | None = None,
+    allowlist: list[str] | None = None,
+) -> tuple[RouterOrdering | None, list[WeightedShare]]:
+    """The ordering to show on a surface that has no request to route.
+
+    Returns ``(None, [])`` for a policy whose router needs request state, which is
+    every backend but one: kNN has no prompt to embed here, so the compiler falls
+    through to the default target, and that decline path is what ``explain``
+    documents.
+
+    The weighted backend is the exception, because its split is written in the
+    policy rather than derived from the request. So explain shows the real answer:
+    candidates heaviest share first, with shares normalized over the pool that
+    survived this caller's allow-list. Deliberately not a sample of the draw, which
+    would make the same command print a different plan on every run.
+
+    The *ordering* covers the whole declared pool, unlike the request path, which
+    filters before ranking. Filtering here too would hand the compiler a pool with
+    the forbidden candidates already gone, so they would never appear in
+    :attr:`CompiledPlan.dropped` with their reason, and that list is most of the
+    point of ``explain``: a balanced policy that compiles down to one provider for
+    this caller is exactly what an operator needs to find before an outage does.
+    """
+    if not backend_is_weighted(spec.router_backend):
+        return None, []
+    declared = spec.router_candidates
+    usable = usable_candidates(config, declared, user_id=user_id, allowlist=allowlist)
+    if not usable:
+        # Nothing survived filtering. The compiler raises NoEligibleCandidatesError
+        # for that, with the per-candidate reasons, which is the better answer.
+        return None, []
+
+    weights = spec.router_weights
+    shares = declared_shares(weights, usable)
+    displayed: list[WeightedShare] = []
+    for selector in explain_ordering(usable, weights):
+        try:
+            resolved = resolve_provider_selector(config, selector, user_id)
+        except (ValueError, AnyLLMError):  # pragma: no cover - usable_candidates already resolved these
+            continue
+        displayed.append(
+            WeightedShare(
+                selector=selector,
+                canonical=f"{resolved.instance}:{resolved.model}",
+                share_pct=shares[selector],
+            )
+        )
+    ordering = RouterOrdering(
+        selectors=explain_ordering(declared, weights),
+        confidence=(displayed[0].share_pct / 100.0) if displayed else 0.0,
+        rationale=f"weighted split ({describe_split(usable, weights)})",
+    )
+    return ordering, displayed
+
+
+def usable_candidates(
     config: GatewayConfig,
     candidates: list[str],
     *,
@@ -184,6 +272,10 @@ def _usable_candidates(
     Selectors are kept in the form the policy wrote them (the compiler resolves
     them again for dispatch); resolution here is only to test the allow-list,
     which matches on the canonical ``instance:model``.
+
+    Public because ``explain`` needs the same pool: a weighted policy's shares are
+    normalized over what survived filtering, so computing them from the declared
+    pool would report a split that is not the one running.
     """
     usable: list[str] = []
     for selector in candidates:

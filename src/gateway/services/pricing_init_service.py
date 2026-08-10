@@ -135,20 +135,21 @@ async def warn_if_gateway_tools_lack_pricing(config: GatewayConfig, db: AsyncSes
 async def warn_if_router_candidates_lack_pricing(config: GatewayConfig, db: AsyncSession) -> None:
     """Warn at startup when a learned policy has an unpriced candidate.
 
-    A router scores candidates by cost, so it declines the moment one of them has
-    no price, and the policy quietly serves its default target forever. That looks
-    like a broken router rather than a missing pricing row, which is what this
-    line exists to say.
+    The *learned* router scores candidates by cost, so it declines the moment one
+    of them has no price, and the policy quietly serves its default target forever.
+    That looks like a broken router rather than a missing pricing row, which is what
+    this line exists to say. The weighted router reads no prices, so it is exempt.
 
     A warning rather than a refusal, unlike the same check on the write path
     (``POST /v1/routing/policies``, which 400s). Refusing here would take a running
     gateway down over an optimization that has a safe fallback; refusing a write
     costs an operator one corrected request, with the policy in front of them.
     """
+    from gateway.services.routing.backends import backend_requires_pricing
     from gateway.services.routing.knn import unpriced_router_candidates
 
     for name, spec in config.routing.policies.items():
-        if spec.router_backend is None:
+        if not backend_requires_pricing(spec.router_backend):
             continue
         missing = await unpriced_router_candidates(config, db, spec.router_candidates)
         if missing:

@@ -1824,6 +1824,14 @@
             "title": "Router Candidates",
             "type": "array"
           },
+          "router_weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy. A weighted split needs no request state, so unlike a learned router's ranking it is knowable here: the plan above is the real ordering by share, not the decline path.",
+            "title": "Router Weights",
+            "type": "object"
+          },
           "selection_reason": {
             "title": "Selection Reason",
             "type": "string"

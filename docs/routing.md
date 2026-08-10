@@ -82,8 +82,9 @@ routing:
 The `default` entry is the fallthrough and must come last: an entry after it could
 never be reached, so the gateway refuses to start rather than leave you with a
 silently dead rule. A third kind of entry, `router`, hands the choice to a backend
-that ranks candidates per request; see [learned
-routing](#let-a-router-choose-learned-routing).
+that orders the candidates per request: `weighted` to [split the traffic by
+weight](#load-balance-across-providers-weighted-routing), `knn` to [learn which
+prompts a cheaper model handles](#let-a-router-choose-learned-routing).
 
 ### `when` conditions
 
@@ -112,6 +113,109 @@ Two rules worth knowing, because both are silent-failure traps otherwise:
   rule could never fire. Tiering down keeps a caller *under* a cap; it is not a way
   to keep serving past one. `lt`/`lte` thresholds are not restricted: "still under
   the cap" is a reachable condition.
+
+## Load balance across providers (weighted routing)
+
+A `select` entry can name the `weighted` router, which draws one candidate per
+request in proportion to the weights you give it.
+
+```yaml
+routing:
+  policies:
+    balanced:
+      select:
+        - router: weighted
+          candidates: [openai:gpt-5, anthropic:claude-sonnet-4-5]
+          weights:
+            openai:gpt-5: 70
+            anthropic:claude-sonnet-4-5: 30
+        - default: openai:gpt-5        # serves when a caller opts out
+      on_failure: [gemini:gemini-2.0-flash]
+```
+
+Callers keep sending `balanced`, and about seven requests in ten go to OpenAI. The
+response `model` says `balanced` whichever provider served, so moving the split is
+a config change and never a client change.
+
+Weights are **normalized, not percentages**: `{70, 30}` and `{7, 3}` are the same
+split, so a ratio can be written as a ratio. What they express is capacity you are
+choosing to use, not anything the gateway derives, which is why (unlike the
+[learned router](#let-a-router-choose-learned-routing)) a weighted candidate needs
+no [pricing](configuration.md) row.
+
+**A candidate left out of `weights` gets zero**, which is how a provider is drained
+without being deleted:
+
+```yaml
+          weights:
+            openai:gpt-5: 100
+            anthropic:claude-sonnet-4-5: 0    # takes no traffic, still catches a failure
+```
+
+A zero-weight candidate stays in the plan at its tail, so it backs up a failure
+while serving none of the traffic. Set both sides to zero and the policy is refused
+at startup: it could never select anything. An even split is written out
+(`{a: 1, b: 1}`) rather than implied by omitting the map, because omitting a
+*candidate* already means zero and one key cannot mean both.
+
+### What it does and does not promise
+
+- **Each request is an independent draw.** Nothing is remembered between requests,
+  so the split is exactly as correct behind twenty replicas as behind one, and none
+  of the caveats in [Routing at scale](routing-scaling.md) apply. The ratio
+  converges statistically: a burst of ten requests is not necessarily seven and
+  three.
+- **A retryable failure stays inside the pool.** The draw continues without
+  replacement, so the whole ordering is the plan: the second attempt is another
+  weighted provider (itself chosen by weight) and `on_failure` is only reached once
+  the pool is exhausted. A provider having a bad minute therefore sheds its share to
+  the others without any health tracking.
+- **No stickiness.** A conversation can move between providers turn to turn, which
+  can cost a warm prompt cache. If that matters more than the split, the learned
+  router's `trace_sticky` behavior is the shape to look at; weighted routing
+  deliberately keeps no per-conversation state.
+- **No health awareness.** Weights are not adjusted when a provider starts failing.
+  Failover is what handles that, one request at a time.
+- **`Otari-Router: off` serves the `default` target**, exactly as it does for the
+  learned router. On a weighted policy that pins the caller to one provider, which
+  is a useful escape hatch during an incident.
+
+### Reading it back
+
+The usage row names the model that served and carries
+`selection_reason: router:weighted`, which is where the split is verifiable after
+the fact. A weighted decision is deliberately **not** logged per request: at load
+balancer volume that line would be the log, and unlike a learned router's pick it
+is reconstructable from the policy plus the usage rows. Raise the gateway to debug
+to see each draw.
+
+`otari routing explain` shows the split itself, because a weighted decision needs
+no request state:
+
+```console
+$ otari routing explain balanced
+balanced: 3 candidate(s), selected by router:weighted
+  1. openai:gpt-5    [weighted 70%]  dispatches as openai:gpt-5
+  2. anthropic:claude-sonnet-4-5    [weighted 30%]  dispatches as anthropic:claude-sonnet-4-5
+  3. gemini:gemini-2.0-flash    [on_failure]  dispatches as gemini:gemini-2.0-flash
+```
+
+Shares are normalized over the candidates the caller may actually use, so a policy
+whose heavy candidate is filtered out by an allow-list reports the split that is
+really running (and lists the dropped candidate with its reason):
+
+```console
+$ otari routing explain balanced --allowed-model 'anthropic:*'
+balanced: 1 candidate(s), selected by router:weighted
+  1. anthropic:claude-sonnet-4-5    [weighted 100%]  dispatches as anthropic:claude-sonnet-4-5
+  x  openai:gpt-5    dropped: is not in allowed_models for this caller
+```
+
+`POST /v1/routing/policies/explain` returns the same numbers as `router_weights`,
+which is what the dashboard's Routing page renders.
+
+Standalone only, like every policy. The candidate cap counts the whole pool plus
+`on_failure`, so a three-provider split leaves room for two failover entries.
 
 ## Let a router choose (learned routing)
 
