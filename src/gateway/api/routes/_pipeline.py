@@ -2982,11 +2982,9 @@ def raise_all_streaming_attempts_failed(
 
     Gateway-side backend failures (sandbox / web_search eager-open) get a 502
     with a backend-specific detail so operators don't chase a fake provider
-    outage. Provider failures are classified when there is a single attempt,
-    or when the failure is a non-retryable invalid request (400/422): that
-    short-circuits the fallback and is definitive regardless of attempt count,
-    matching the non-streaming path. Otherwise the multi-attempt aggregate
-    surfaces (504 when the last failure was a timeout, else 502).
+    outage. A single attempt preserves its classified provider error. Once a
+    multi-attempt route is exhausted, it surfaces the aggregate result: 504
+    when the last failure was a timeout, otherwise 502.
     """
     if isinstance(exc, SandboxNotReachableError):
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
@@ -2995,9 +2993,7 @@ def raise_all_streaming_attempts_failed(
         logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
-    mapping = classify_provider_error(exc)
-    invalid_request = mapping is not None and mapping.status_code == status.HTTP_400_BAD_REQUEST
-    if invalid_request or len(route.attempts) <= 1:
+    if len(route.attempts) <= 1:
         raise adapter.provider_error(exc) from exc
     kind, _ = upstream_exception_shape(exc)
     if kind == "timeout":

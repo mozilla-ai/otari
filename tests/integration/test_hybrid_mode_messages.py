@@ -393,16 +393,13 @@ def test_hybrid_mode_returns_502_and_reports_every_attempt_when_all_fail(
     ]
 
 
-def test_hybrid_mode_non_retryable_error_raises_immediately(
+def test_hybrid_mode_falls_through_on_provider_400(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A 400 from the upstream is non-retryable — the runner stops the
-    iteration at the first attempt rather than walking the rest of the route,
-    and surfaces the classified 400 (a malformed request no provider would
-    accept) rather than a generic 502.
-    """
+    """A provider 400 advances to the next candidate like every pre-lock-in failure."""
     calls: list[dict[str, Any]] = []
+    usage_reports: list[dict[str, Any]] = []
 
     async def fake_post_platform(
         url: str,
@@ -420,6 +417,7 @@ def test_hybrid_mode_non_retryable_error_raises_immediately(
                     ]
                 ),
             )
+        usage_reports.append(body)
         return httpx.Response(204)
 
     async def fake_amessages(**kwargs: Any) -> MessageResponse:
@@ -443,13 +441,15 @@ def test_hybrid_mode_non_retryable_error_raises_immediately(
         headers={"Authorization": "Bearer user_test_token"},
     )
 
-    assert response.status_code == 400
-    # The classified 400 is delivered in the Anthropic error envelope with the
-    # matching error.type, not a bare {"detail": <str>}.
-    detail = response.json()["detail"]
-    assert detail["type"] == "error"
-    assert detail["error"]["type"] == "invalid_request_error"
-    assert len(calls) == 1, "Non-retryable error must short-circuit the attempts loop"
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": {"type": "error", "error": {"type": "api_error", "message": "All upstream providers failed"}}
+    }
+    assert len(calls) == 2
+    assert sorted((r["correlation_id"], r["is_final_attempt"], r.get("error_class")) for r in usage_reports) == [
+        ("att-1", False, "http_400"),
+        ("att-2", True, "http_400"),
+    ]
 
 
 def test_hybrid_mode_resolves_workspace_mcp_server_ids(
