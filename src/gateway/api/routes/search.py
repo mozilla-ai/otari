@@ -59,6 +59,7 @@ from gateway.api.routes._pipeline import (
     rate_limit_headers,
 )
 from gateway.core.config import GatewayConfig
+from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
 from gateway.rate_limit import check_rate_limit
@@ -336,6 +337,22 @@ async def _dispatch_search(
             counts_toward_budget=not budget_exempt,
             **overrides,
         )
+
+    # Every gate has passed and the search provider is about to be called, so the
+    # request is genuinely in flight from here until its response has been sent.
+    # Registered for the same reason as on the chat and pass-through paths, and a
+    # dropped search cannot be seen settling in Activity either. The entry is
+    # dropped by InFlightMiddleware, not here.
+    track_request(
+        raw_request,
+        endpoint=SEARCH_ENDPOINT,
+        # The same pair the usage row carries for search: the tool name and its
+        # provider, so a search does not appear to change model when it settles.
+        model=tool.name,
+        provider=tool.provider,
+        user_id=user_id,
+        api_key_id=api_key_id,
+    )
 
     try:
         outcome = await run_search(tool, _search_query(request))
