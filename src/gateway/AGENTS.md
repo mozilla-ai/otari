@@ -20,9 +20,14 @@ Read these together before changing request behavior, the flow spans several fil
 
 A usage row therefore only exists once a request has settled. What is *currently*
 running lives in `src/gateway/inflight.py`: an in-memory, per-worker registry,
-populated at the end of `resolve_request_context` (so a refused request never
-appears) and emptied by `InFlightMiddleware`, read by `GET /v1/usage/in-flight` for
-the dashboard's Activity page. Removal belongs to the middleware and not to any
+populated once every gate has passed and the provider is about to be called (so a
+refused request never appears) and emptied by `InFlightMiddleware`, read by
+`GET /v1/usage/in-flight` for the dashboard's Activity page. There are three
+registration points, one per dispatch scaffold: `resolve_request_context`
+(chat/messages/responses), `run_passthrough` (embeddings, images, audio, rerank,
+moderations), and `_dispatch_search`. A new provider-calling scaffold needs its
+own `track_request` call or it is invisible to the panel. Removal belongs to the
+middleware and not to any
 settlement path: a streaming response outlives its route handler, and the
 `finally` that wraps the whole ASGI call is the only place that runs exactly once
 per request (the same reason `gateway_active_requests` is instrumented there).

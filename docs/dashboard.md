@@ -160,23 +160,31 @@ gateway.
 
 - **Activity**: the per-request log of what the gateway served, with filters.
   Use it to inspect individual requests, their models, and their outcomes.
-  A usage row is written when a request settles, so the log itself only describes
-  the past. **Requests in flight** fills that gap: while the gateway is serving
-  anything, a panel above the log lists what is running right now, longest wait
-  first, with the model, the endpoint, the billed user, the policy if one was
-  named, and a wait that ticks up as you watch. It is how a 30-second call to a
-  local model looks like progress rather than like nothing happening. Every request
-  the gateway serves is listed, completions and embeddings and image generations
-  alike, from the moment it clears the budget and access checks until its response
-  has been fully sent (a streamed answer stays listed for as long as it is still
-  producing tokens). A request the gateway refused never appears: it was never in
-  progress, and it lands in the log below with its reason. The panel is
-  not filtered by the controls above it, because a request that has not finished
-  has no outcome, cost, or token count to filter on; it disappears when the
-  gateway goes quiet, and the log below refreshes on its own as each request
-  lands. The list is read from the worker that answers the poll, so a gateway run
-  with several worker processes shows one worker's traffic at a time; the
-  `gateway_active_requests` Prometheus metric is the process-wide count.
+  A usage row is written when a request settles, so the log would otherwise only
+  describe the past. Requests still running appear in the same table, pinned above
+  the settled rows with the status **in progress** and, in place of a total time, a
+  wait that ticks up as you watch. When the request lands, the row resolves in
+  place into the success or error row it became, so a 30-second call to a local
+  model reads as progress rather than as nothing happening. Completions,
+  embeddings, image generations, audio, and searches all appear, each from the
+  moment it clears the budget and access checks until its response has been fully
+  sent (a streamed answer stays listed for as long as it is still producing
+  tokens). Batches are the exception: the work runs on the provider's side after
+  the submission returns, so there is no in-flight window to show. A request the
+  gateway refused never appears as in progress: it was never running, and it lands
+  in the log with its reason. An in-progress row is not part of any page of the
+  log, so it is never counted in the paginator, never selectable for a bulk delete
+  or reprice, and has no request detail to open until it settles. It is dropped
+  from view rather than shown misleadingly whenever the current view could not
+  honestly include it: on page 2 onward, in a window that ends in the past, and
+  under any filter on something the request has not got yet (status, priced, tool,
+  source, session). The model, user, key, endpoint, and provider filters do apply
+  to it. The log refreshes on its own as requests land, at most every 10 seconds,
+  so a busy gateway does not re-query it continuously. Live rows are read from the
+  process that answers the poll, so a deployment running several otari processes
+  behind a load balancer shows one process's traffic at a time, and which one it
+  shows can change between polls; the `gateway_active_requests` Prometheus metric
+  is the per-process count.
   The **Routing** column names the policy a caller asked for, if any, plus where
   this row sits in that policy's plan and how it turned out: "served on attempt 2
   of 2 (a fallback candidate)", or, on an attempt a fallback recovered from,

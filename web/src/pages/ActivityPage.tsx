@@ -13,6 +13,7 @@ import {
   useUsageSummary,
 } from "@/api/hooks";
 import type {
+  InFlightRequest,
   SummaryDimension,
   UsageEntry,
   UsageFilters,
@@ -24,7 +25,6 @@ import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { FilterChips, type FilterChip } from "@/components/FilterChips";
-import { InFlightRequests } from "@/components/InFlightRequests";
 import { SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
 import { PAGE_SIZE_OPTIONS, TablePagination } from "@/components/TablePagination";
 import {
@@ -112,17 +112,92 @@ function timeAgo(iso: string): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+// ---------- requests in flight ----------
+//
+// A usage row is written when a request settles, so the log alone can only
+// describe the past: on a slow backend a 30-second call is invisible for its whole
+// duration. A tracked request is therefore rendered as a row in this same table,
+// pinned above the settled rows and carrying the status below, so that when it
+// lands the row resolves in place into the success or error row it became. The
+// synthetic row is shaped as a `UsageEntry` so the table's columns, widths,
+// selection, and detail machinery need no separate code path: the outcome fields
+// are null, which the shared formatters already render as their own placeholder.
+const IN_FLIGHT_STATUS = "in progress";
+
+// Browser-local timestamp the wait counts up from, present only on a synthetic
+// row. Derived from the poll's `dataUpdatedAt` minus the server's own `elapsed_ms`,
+// so the wait never depends on the browser clock agreeing with the gateway's.
+type ActivityRow = UsageEntry & { inFlightStartedAtMs?: number };
+
+const isInFlightRow = (row: ActivityRow): boolean => row.status === IN_FLIGHT_STATUS;
+
+function inFlightRow(request: InFlightRequest, startedAtMs: number): ActivityRow {
+  return {
+    inFlightStartedAtMs: startedAtMs,
+    id: request.id,
+    user_id: request.user_id,
+    api_key_id: request.api_key_id,
+    timestamp: request.started_at,
+    model: request.model,
+    provider: request.provider,
+    endpoint: request.endpoint,
+    prompt_tokens: null,
+    completion_tokens: null,
+    total_tokens: null,
+    cache_read_tokens: null,
+    cache_write_tokens: null,
+    cost: null,
+    status: IN_FLIGHT_STATUS,
+    error_message: null,
+    status_code: null,
+    policy_name: request.policy_name,
+    latency_ms: null,
+    source: "gateway",
+    source_label: null,
+    // Never selectable: bulk delete and reprice target logged rows, and this one
+    // does not exist in the table yet. `true` is what the page's existing
+    // disabled-key rule keys on, so no extra case is needed there.
+    counts_toward_budget: true,
+  };
+}
+
+// Coarser than the settled Total time column: this is a wall-clock wait an
+// operator is watching rather than a measurement, so sub-second precision is
+// noise. Minutes appear because a stuck local model is the case this exists for.
+function formatElapsed(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+// The wait, ticking between the 2s polls: on the one row whose whole point is that
+// it has not finished, a number that only moved when a response landed would read
+// as stalled. Each live row owns its interval so the `columns` array stays
+// referentially stable and DataTable's per-row cache is not rebuilt every second
+// (see the DataTable docstring).
+function InFlightWait({ startedAtMs }: { startedAtMs: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  // Never negative: a poll can resolve between the tick and the paint.
+  return <span className="tabular-nums">{formatElapsed(Math.max(0, now - startedAtMs))}</span>;
+}
+
 // Stable row-key getter and row class so DataTable's per-row cache holds
 // across re-renders (see the DataTable docstring); an inline arrow here would
 // rebuild every row on each selection click.
-const getActivityRowKey = (e: UsageEntry): string => e.id;
+const getActivityRowKey = (e: ActivityRow): string => e.id;
 
 // An absorbed attempt is a failure a routing policy recovered from, so the
 // request it belongs to succeeded. Styling it like an error would make a working
 // fallback chain read as an outage, which is the same reason the server keeps it
 // out of error_count. Amber says "something happened here" without saying "this
 // request failed".
-const activityRowClassName = (e: UsageEntry): string | undefined => {
+const activityRowClassName = (e: ActivityRow): string | undefined => {
+  if (isInFlightRow(e)) return "bg-[var(--otari-brand-tint)]";
   if (e.status === "error") return "bg-red-50";
   if (e.status === "absorbed") return "bg-amber-50";
   return undefined;
@@ -165,6 +240,11 @@ const TOOL_OPTIONS: { label: string; value: string }[] = [
 const TOOL_BREAKDOWN: SummaryDimension[] = ["tool"];
 
 const DEFAULT_PAGE_SIZE = 50;
+
+// Floor on how often a settled in-flight request may pull the log again. Matches
+// the log's own `staleTime` in `useUsageLogs`, so this never delays a refresh the
+// query would have served from cache anyway.
+const SETTLED_REFETCH_MIN_MS = 10_000;
 
 // The only breakdown this page reads: the in-window models behind the typeahead.
 // The typeahead reads `by_model`; the source picker's option list piggybacks on
@@ -241,7 +321,12 @@ function StatusPill({ status }: { status: string }) {
         ? "border-amber-200 bg-amber-50 text-amber-700"
         : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]";
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
+      {/* The pulse is decorative: "in progress" beside it carries the same meaning
+          in text, so nothing here is encoded in motion alone. */}
+      {status === IN_FLIGHT_STATUS ? (
+        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--otari-brand-dark)]" aria-hidden="true" />
+      ) : null}
       {status}
     </span>
   );
@@ -881,30 +966,38 @@ export function ActivityPage() {
   const usage = useUsageLogs(filters, page, pageSize);
   const count = useUsageCount(filters);
 
-  // Requests in progress. A usage row is written when a request settles, so the
-  // log below can only describe the past: on a slow backend a 30-second call is
-  // invisible for its whole duration. Deliberately outside `filters`: a request
-  // that has not finished has no status, cost, or token count to filter on, and
-  // scoping it to the selected time window would hide live work whenever an
-  // operator was browsing last week.
+  // Requests in progress, read unfiltered: the endpoint has no filters, because a
+  // request that has not finished has no outcome, cost, or token count to filter
+  // on. Which of them belong in the current view is decided below.
   const inFlight = useInFlightRequests();
-  const inFlightRows = inFlight.data?.requests ?? [];
 
   // A tracked request that has left the in-flight list just settled, so its row
-  // exists in the log now. Pull it in, rather than leaving the operator watching a
-  // request disappear from one panel without appearing in the other until they
-  // press refresh. Keyed on ids, not on the count: one request finishing while
-  // another starts leaves the count unchanged.
+  // exists in the log now. Pull it in, so the operator watches the live row turn
+  // into its settled one rather than vanish until they press refresh. Keyed on
+  // ids, not on the count: one request finishing while another starts leaves the
+  // count unchanged.
+  //
+  // Rate-limited, because the registry is per-process: a deployment running
+  // several otari processes behind a load balancer answers consecutive polls from
+  // different processes, so a request that is still running reads as settled on
+  // every poll. Unthrottled that refetches the log and its `COUNT(*)` every two
+  // seconds for as long as the gateway has any traffic at all. The ceiling matches
+  // the log's own `staleTime`, so a genuine settle still refreshes promptly and
+  // the flapping case costs one extra pair of reads per interval instead of one
+  // per poll.
   const seenInFlightIds = useRef<Set<string>>(new Set());
+  const lastSettledRefetch = useRef(0);
   useEffect(() => {
     if (!inFlight.data) return;
     const live = new Set((inFlight.data.requests ?? []).map((request) => request.id));
     const settled = [...seenInFlightIds.current].some((id) => !live.has(id));
     seenInFlightIds.current = live;
-    if (settled) {
-      void usage.refetch();
-      void count.refetch();
-    }
+    if (!settled) return;
+    const now = Date.now();
+    if (now - lastSettledRefetch.current < SETTLED_REFETCH_MIN_MS) return;
+    lastSettledRefetch.current = now;
+    void usage.refetch();
+    void count.refetch();
   }, [inFlight.data, usage.refetch, count.refetch]);
 
   // Model suggestions: models with usage in the window (other filters applied, the
@@ -1053,6 +1146,59 @@ export function ActivityPage() {
 
   const rows = usage.data ?? [];
 
+  // The live rows to pin above this page, and how many the endpoint left out.
+  //
+  // Kept separate from `rows` throughout: `rows` is what the paginator counts and
+  // what the bulk actions target, and a request that has not been logged belongs
+  // in neither. Newest-first like the rest of the table, so the row an operator
+  // just triggered appears at the top and stays there as it resolves (the endpoint
+  // serves the longest-running first, which is the order the cap applies in).
+  //
+  // Suppressed rather than shown wherever the current view cannot honestly include
+  // them: page 2 onward (they are not part of any page's slice), a window that ends
+  // in the past, and any filter on something a request has not got yet (outcome,
+  // price, tools, provenance). The identity filters can be applied, so they are.
+  const { inFlightRows, inFlightHidden } = useMemo(() => {
+    const none = { inFlightRows: [] as ActivityRow[], inFlightHidden: 0 };
+    if (!inFlight.data || page > 0) return none;
+    if (filters.end_date || statusFilter || pricedFilter || toolFilter || sourceFilter || sessionFilter) return none;
+    const matching = inFlight.data.requests.filter(
+      (request) =>
+        (modelFilters.length === 0 || modelFilters.includes(request.model)) &&
+        (userFilters.length === 0 || (request.user_id !== null && userFilters.includes(request.user_id))) &&
+        (apiKeyFilters.length === 0 || (request.api_key_id !== null && apiKeyFilters.includes(request.api_key_id))) &&
+        (!endpointFilter || request.endpoint === endpointFilter) &&
+        (!providerFilter || request.provider === providerFilter),
+    );
+    return {
+      inFlightRows: matching
+        .map((request) => inFlightRow(request, inFlight.dataUpdatedAt - request.elapsed_ms))
+        .reverse(),
+      // Only meaningful when nothing was filtered out locally; a filtered view
+      // cannot say how many of the requests the endpoint dropped would have matched.
+      inFlightHidden: matching.length === inFlight.data.requests.length ? inFlight.data.total - matching.length : 0,
+    };
+  }, [
+    inFlight.data,
+    inFlight.dataUpdatedAt,
+    page,
+    filters.end_date,
+    statusFilter,
+    pricedFilter,
+    toolFilter,
+    sourceFilter,
+    sessionFilter,
+    modelFilters,
+    userFilters,
+    apiKeyFilters,
+    endpointFilter,
+    providerFilter,
+  ]);
+
+  // What the table renders: live rows pinned above the logged page.
+  const tableRows = useMemo<ActivityRow[]>(() => [...inFlightRows, ...rows], [inFlightRows, rows]);
+  const inFlightIds = useMemo(() => new Set(inFlightRows.map((row) => row.id)), [inFlightRows]);
+
   // What served each routed request on this page. Built from the page itself where
   // possible (a group's attempts are written milliseconds apart, so they are
   // usually adjacent in a newest-first list), and looked up for the groups whose
@@ -1150,9 +1296,10 @@ export function ActivityPage() {
   ];
 
   // Selection targets imported rows only; enforced gateway rows are disabled so
-  // bulk delete / set-price can never reach them.
+  // bulk delete / set-price can never reach them. Over `tableRows`, so a live row
+  // is disabled too: it carries `counts_toward_budget` true for exactly that.
   const selectableKeys = useMemo(() => rows.filter((r) => !r.counts_toward_budget).map((r) => r.id), [rows]);
-  const disabledKeys = useMemo(() => rows.filter((r) => r.counts_toward_budget).map((r) => r.id), [rows]);
+  const disabledKeys = useMemo(() => tableRows.filter((r) => r.counts_toward_budget).map((r) => r.id), [tableRows]);
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
   const pageSelectedCount = selectedIds.length;
   const hasSelection = selection.allMatching || pageSelectedCount > 0;
@@ -1312,7 +1459,7 @@ export function ActivityPage() {
   // Memoized on its per-render inputs (the key labels and the routing outcomes,
   // both themselves memoized) so DataTable's per-row cache holds: a fresh array
   // every render would rebuild all rows per click.
-  const columns = useMemo<DataTableColumn<UsageEntry>[]>(() => {
+  const columns = useMemo<DataTableColumn<ActivityRow>[]>(() => {
     const apiKeyLabel = (entry: UsageEntry): string =>
       entry.api_key_id === null ? "—" : (entry.api_key_name ?? `${entry.api_key_id.slice(0, 8)}…`);
     return [
@@ -1365,7 +1512,19 @@ export function ActivityPage() {
       { id: "api_key", header: "API key", cell: (e) => <span className="text-[var(--otari-muted)]">{apiKeyLabel(e)}</span> },
       { id: "tokens", header: "Tokens", align: "end", cell: (e) => <TokenBar entry={e} /> },
       { id: "cost", header: "Cost", align: "end", cell: (e) => formatUSD(e.cost) },
-      { id: "latency", header: "Total time", align: "end", cell: (e) => formatLatency(e.latency_ms) },
+      {
+        id: "latency",
+        header: "Total time",
+        align: "end",
+        // A live row has no total yet, so the column carries the wait so far. Same
+        // column deliberately: it is the number an operator is already reading down.
+        cell: (e) =>
+          e.inFlightStartedAtMs === undefined ? (
+            formatLatency(e.latency_ms)
+          ) : (
+            <InFlightWait startedAtMs={e.inFlightStartedAtMs} />
+          ),
+      },
       { id: "status", header: "Status", cell: (e) => <StatusPill status={e.status} /> },
     ];
   }, [groupOutcomes]);
@@ -1469,11 +1628,6 @@ export function ActivityPage() {
         </FilterChips>
       </div>
 
-      {/* Above the log rather than above the filter cluster: the panel appears and
-          disappears on its own as traffic comes and goes, and putting it higher
-          would shift the controls under the operator's cursor. */}
-      <InFlightRequests requests={inFlightRows} total={inFlight.data?.total ?? 0} updatedAt={inFlight.dataUpdatedAt} />
-
       {hasSelection ? (
         <BulkActionBar
           selectedCount={effectiveCount}
@@ -1495,7 +1649,7 @@ export function ActivityPage() {
       <DataTable
         ariaLabel="Activity log"
         columns={columns}
-        rows={rows}
+        rows={tableRows}
         getRowKey={getActivityRowKey}
         isLoading={usage.isLoading}
         emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
@@ -1503,11 +1657,26 @@ export function ActivityPage() {
         selectedKeys={selection.selectedKeys}
         onSelectionChange={selection.onSelectionChange}
         disabledKeys={disabledKeys}
-        onRowAction={(key) => setExpandedId((current) => (current === key ? null : key))}
+        // A live row has no detail to open: every field the panel reads (tokens,
+        // cost, the pricing breakdown, the attempt plan) is written when the
+        // request settles. Clicking it does nothing until it does.
+        onRowAction={(key) => {
+          if (inFlightIds.has(key)) return;
+          setExpandedId((current) => (current === key ? null : key));
+        }}
         rowClassName={activityRowClassName}
         detailKey={expandedId}
         renderDetail={renderDetail}
       />
+
+      {/* Only when the endpoint's cap actually bit, which takes more concurrency
+          than a live view can usefully list anyway. */}
+      {inFlightHidden > 0 ? (
+        <p className="text-xs text-[var(--otari-muted)]">
+          {inFlightHidden.toLocaleString()} further {inFlightHidden === 1 ? "request is" : "requests are"} in flight
+          beyond the {inFlightRows.length.toLocaleString()} listed; the longest-running are shown.
+        </p>
+      ) : null}
 
       <TablePagination
         page={page}

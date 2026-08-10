@@ -851,9 +851,10 @@ export function useUsageCount(filters: UsageFilters, enabled = true) {
 // costs nothing.
 const IN_FLIGHT_POLL_MS = 2_000;
 
-// Requests the gateway is serving right now. Unfiltered by design: the activity
-// filters describe logged rows, and a request in progress has no outcome, cost, or
-// token count to filter on yet.
+// Requests the gateway is serving right now, rendered as in-progress rows above
+// the activity log. The read takes no filters: a request in progress has no
+// outcome, cost, or token count for the log's filters to match on, so which of
+// them the current view may show is decided at the call site.
 //
 // Never cached across mounts (`staleTime: 0`) and never kept as placeholder data:
 // a stale in-flight list is worse than none, since it claims work is running that
@@ -864,8 +865,8 @@ export function useInFlightRequests() {
     queryFn: () => apiFetch<InFlightResponse>("/v1/usage/in-flight"),
     refetchInterval: IN_FLIGHT_POLL_MS,
     staleTime: 0,
-    // A 404 is version skew: a gateway older than this dashboard has no such
-    // endpoint, and retrying cannot fix that. The panel renders nothing instead.
+    // Retrying a 404 cannot help: a gateway that does not serve this endpoint
+    // never will. Fail fast on it and add no rows rather than re-asking.
     retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 3,
   });
 }

@@ -4,12 +4,14 @@ from collections.abc import MutableMapping
 from typing import Any
 
 import pytest
+from starlette.requests import Request
 from starlette.types import Receive, Scope, Send
 
 from gateway.inflight import (
     INFLIGHT_SCOPE_KEY,
     InFlightMiddleware,
     InFlightRegistry,
+    track_request,
 )
 
 
@@ -69,6 +71,42 @@ class TestRegistry:
         # A clock reading taken before the entry (a caller passing a stale `now`)
         # must not report a request that started in the future.
         assert entry.elapsed_ms(entry.started_monotonic - 5) == 0
+
+
+class TestTrackRequest:
+    @staticmethod
+    def _request(registry: InFlightRegistry | None) -> Request:
+        class _App:
+            state = type("_State", (), {"inflight": registry})()
+
+        return Request({"type": "http", "method": "POST", "path": "/v1/chat/completions", "app": _App()})
+
+    def test_an_untracked_app_is_a_no_op(self) -> None:
+        """A bare ASGI scope has nowhere to record anything; tracking must not raise."""
+        request = self._request(None)
+
+        track_request(request, endpoint="/v1/chat/completions", model="openai:gpt-4o")
+
+        assert INFLIGHT_SCOPE_KEY not in request.scope
+
+    def test_tracking_twice_replaces_rather_than_strands_the_first_entry(self) -> None:
+        """The middleware drops only the id the scope carries.
+
+        No path registers twice today, but if one ever did, shadowing the first id
+        would leak that entry for the life of the process, and the panel would show
+        a request that has long since finished.
+        """
+        registry = InFlightRegistry()
+        request = self._request(registry)
+
+        track_request(request, endpoint="/v1/chat/completions", model="first")
+        first_id = request.scope[INFLIGHT_SCOPE_KEY]
+        track_request(request, endpoint="/v1/chat/completions", model="second")
+
+        assert len(registry) == 1
+        (entry,) = registry.snapshot()
+        assert entry.model == "second"
+        assert entry.id == request.scope[INFLIGHT_SCOPE_KEY] != first_id
 
 
 async def _receive() -> MutableMapping[str, Any]:

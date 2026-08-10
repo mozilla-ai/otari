@@ -159,6 +159,11 @@ def track_request(
     registry = get_registry(request)
     if registry is None:
         return
+    # Replace rather than shadow. The middleware only ever drops the id the scope
+    # carries, so a second registration on one request would strand the first
+    # entry for the life of the process. No path reaches here twice today; this is
+    # what keeps that from becoming a leak if one ever does.
+    registry.finish(request.scope.get(INFLIGHT_SCOPE_KEY))
     request.scope[INFLIGHT_SCOPE_KEY] = registry.begin(
         endpoint=endpoint,
         model=model,
