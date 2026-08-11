@@ -1,11 +1,13 @@
 """Content-free coding-agent telemetry mapping, ingestion, and aggregation helpers."""
 
 import hashlib
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite
 from typing import Any, Iterable
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,19 +16,17 @@ from gateway.repositories.users_repository import get_active_user
 
 _MAX_NUMBER = 1_000_000_000
 _EVENTS = {"tool_result", "tool_decision", "user_prompt", "api_error"}
+# TelemetryRecord fields that feed event_dedup_key() but are not their own
+# AgentTelemetry column (the dedup key that derives from them is what's stored).
+_DEDUP_ONLY_FIELDS = ("tool_use_id", "event_sequence")
 
 
 @dataclass(frozen=True)
 class TelemetryRecord:
-    kind: str
     name: str
     timestamp: datetime
     source: str
     dedup_key: str
-    value: float | None = None
-    temporality: str | None = None
-    series_start: datetime | None = None
-    series_key: str | None = None
     tool_name: str | None = None
     decision: str | None = None
     success: bool | None = None
@@ -34,6 +34,8 @@ class TelemetryRecord:
     status_code: int | None = None
     prompt_length: int | None = None
     session_label: str | None = None
+    tool_use_id: str | None = None
+    event_sequence: int | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +110,8 @@ def event_dedup_key(record: TelemetryRecord, user_id: str | None = None) -> str:
         record.duration_ms if record.duration_ms is not None else "",
         record.status_code if record.status_code is not None else "",
         record.prompt_length if record.prompt_length is not None else "",
+        record.tool_use_id or "",
+        record.event_sequence if record.event_sequence is not None else "",
     )
 
 
@@ -125,6 +129,8 @@ def map_behavioral_event(
     tool_name = _identifier(attrs.get("tool_name") or attrs.get("tool.name"))
     decision = _identifier(attrs.get("decision"))
     timestamp = _timestamp(timestamp)
+    tool_use_id = _identifier(attrs.get("tool_use_id")) if name in {"tool_result", "tool_decision"} else None
+    event_sequence = _bounded_int(attrs.get("event.sequence"))
     fields: dict[str, Any] = {}
     if name == "tool_decision":
         fields = {"tool_name": tool_name, "decision": decision if decision in {"accept", "reject"} else None}
@@ -139,15 +145,75 @@ def map_behavioral_event(
     else:
         fields = {"prompt_length": _bounded_int(attrs.get("prompt_length"))}
     provisional = TelemetryRecord(
-        kind="event",
         name=name,
         timestamp=timestamp,
         source=source,
         dedup_key="",
         session_label=_session(attrs),
+        tool_use_id=tool_use_id,
+        event_sequence=event_sequence,
         **fields,
     )
     return TelemetryRecord(**{**provisional.__dict__, "dedup_key": event_dedup_key(provisional, user_id)})
+
+
+def _build_row(api_key: APIKey, user_id: str | None, record: TelemetryRecord) -> AgentTelemetry:
+    row_fields = {k: v for k, v in record.__dict__.items() if k not in _DEDUP_ONLY_FIELDS}
+    return AgentTelemetry(api_key_id=api_key.id, user_id=user_id, **row_fields)
+
+
+async def _existing_dedup_keys(db: AsyncSession, source: str, dedup_keys: list[str]) -> set[str]:
+    rows = (
+        await db.execute(
+            select(AgentTelemetry.dedup_key).where(
+                AgentTelemetry.source == source,
+                AgentTelemetry.dedup_key.in_(dedup_keys),
+            )
+        )
+    ).scalars().all()
+    return set(rows)
+
+
+async def _insert_same_source_batch(
+    db: AsyncSession, source: str, rows: list[AgentTelemetry]
+) -> IngestResult:
+    """Insert a same-source batch, retrying only rows that don't collide.
+
+    Mirrors ``external_usage_service._insert_rows``: one ``add_all`` + ``commit``
+    for the whole batch; on a uniqueness collision, roll back, re-query which
+    ``(source, dedup_key)`` pairs already exist, and retry only the survivors as
+    one bulk insert; if that also collides, fall back to row-at-a-time for the
+    still-colliding remainder.
+    """
+    db.add_all(rows)
+    try:
+        await db.commit()
+        return IngestResult(accepted=len(rows))
+    except IntegrityError:
+        await db.rollback()
+
+    existing = await _existing_dedup_keys(db, source, [row.dedup_key for row in rows])
+    survivors = [row for row in rows if row.dedup_key not in existing]
+    duplicate = len(rows) - len(survivors)
+    if not survivors:
+        return IngestResult(duplicate=duplicate)
+    db.add_all(survivors)
+    try:
+        await db.commit()
+        return IngestResult(accepted=len(survivors), duplicate=duplicate)
+    except IntegrityError:
+        await db.rollback()
+
+    accepted = still_duplicate = 0
+    for row in survivors:
+        db.add(row)
+        try:
+            await db.commit()
+            accepted += 1
+        except IntegrityError:
+            await db.rollback()
+            still_duplicate += 1
+    return IngestResult(accepted=accepted, duplicate=duplicate + still_duplicate)
 
 
 async def ingest(
@@ -156,7 +222,12 @@ async def ingest(
     *,
     api_key: APIKey,
 ) -> IngestResult:
-    """Persist telemetry rows, treating uniqueness collisions as replay duplicates."""
+    """Persist telemetry rows, treating uniqueness collisions as replay duplicates.
+
+    Batch-inserts by source (the unique constraint is ``(source, dedup_key)``)
+    rather than one savepoint per record, so ingesting a large export issues a
+    small, bounded number of database round trips.
+    """
     records = list(records)
     if not records:
         return IngestResult()
@@ -165,18 +236,18 @@ async def ingest(
     # can still hold a live key, and its events must be rejected, not stored.
     if not user_id or await get_active_user(db, user_id) is None:
         return IngestResult(rejected=len(records))
+
+    by_source: dict[str, list[TelemetryRecord]] = defaultdict(list)
+    for record in records:
+        by_source[record.source].append(record)
+
     accepted = duplicate = 0
     try:
-        for record in records:
-            row = AgentTelemetry(api_key_id=api_key.id, user_id=user_id, **record.__dict__)
-            try:
-                async with db.begin_nested():
-                    db.add(row)
-                    await db.flush()
-                accepted += 1
-            except IntegrityError:
-                duplicate += 1
-        await db.commit()
+        for source, source_records in by_source.items():
+            rows = [_build_row(api_key, user_id, record) for record in source_records]
+            result = await _insert_same_source_batch(db, source, rows)
+            accepted += result.accepted
+            duplicate += result.duplicate
     except SQLAlchemyError:
         await db.rollback()
         raise

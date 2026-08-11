@@ -148,3 +148,128 @@ def test_otlp_logs_export_limit_counts_usage_and_behavior_together(
     assert response.status_code == 413, response.text
     assert db_session.query(AgentTelemetry).filter(AgentTelemetry.session_label == "s-flood").count() == 0
     assert db_session.query(UsageLog).count() == 0
+
+
+def test_concurrent_tool_results_with_distinct_tool_use_id_both_persist(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    response = client.post(
+        "/v1/logs",
+        json=logs_export(
+            log_record(
+                1784000000000000000,
+                **{
+                    "event.name": "tool_result",
+                    "session.id": "s-1",
+                    "tool.name": "Bash",
+                    "success": True,
+                    "duration_ms": 42,
+                    "tool_use_id": "tool-1",
+                },
+            ),
+            log_record(
+                1784000000000000000,
+                **{
+                    "event.name": "tool_result",
+                    "session.id": "s-1",
+                    "tool.name": "Bash",
+                    "success": True,
+                    "duration_ms": 42,
+                    "tool_use_id": "tool-2",
+                },
+            ),
+        ),
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert db_session.query(AgentTelemetry).count() == 2
+
+
+def test_exact_duplicate_tool_result_export_is_not_double_stored(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    headers = _exempt_key(client, master_key_header)
+    record = log_record(
+        1784000000000000000,
+        **{
+            "event.name": "tool_result",
+            "session.id": "s-1",
+            "tool.name": "Bash",
+            "success": True,
+            "duration_ms": 42,
+            "tool_use_id": "tool-1",
+            "event.sequence": 7,
+        },
+    )
+    response = client.post("/v1/logs", json=logs_export(record, record), headers=headers)
+
+    assert response.status_code == 200, response.text
+    assert db_session.query(AgentTelemetry).count() == 1
+
+
+def _key_with_capture_override(
+    client: TestClient, master_key_header: dict[str, str], user_id: str, *, capture: bool | None
+) -> tuple[dict[str, str], str]:
+    client.post("/v1/users", json={"user_id": user_id}, headers=master_key_header)
+    payload: dict[str, object] = {
+        "key_name": f"logs-import-{user_id}",
+        "user_id": user_id,
+        "exclude_from_budget": True,
+    }
+    if capture is not None:
+        payload["capture_agent_telemetry"] = capture
+    response = client.post("/v1/keys", json=payload, headers=master_key_header)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    return {"Otari-Key": f"Bearer {body['key']}"}, str(body["id"])
+
+
+def test_capture_toggle_off_blocks_behavioral_row_but_not_usage(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    headers, key_id = _key_with_capture_override(client, master_key_header, "bob", capture=False)
+    response = client.post(
+        "/v1/logs",
+        json=logs_export(
+            log_record(
+                1784000000000000000,
+                **{"event.name": "tool_result", "session.id": "s-1", "tool.name": "Bash", "success": True},
+            ),
+            log_record(
+                1784000001000000000,
+                **{
+                    "event.name": "api_request",
+                    "session.id": "s-1",
+                    "model": "claude-sonnet-4-6",
+                    "request_id": "req-1",
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                },
+            ),
+        ),
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert db_session.query(AgentTelemetry).count() == 0
+    assert db_session.query(UsageLog).count() == 1
+
+    patch = client.patch(
+        f"/v1/keys/{key_id}", json={"capture_agent_telemetry": None}, headers=master_key_header
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["capture_agent_telemetry"] is None
+
+    response = client.post(
+        "/v1/logs",
+        json=logs_export(
+            log_record(
+                1784000002000000000,
+                **{"event.name": "tool_result", "session.id": "s-1", "tool.name": "Bash", "success": True},
+            ),
+        ),
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    assert db_session.query(AgentTelemetry).count() == 1
