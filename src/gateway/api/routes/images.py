@@ -85,6 +85,12 @@ async def create_image(
         }
         return await aimage_generation(**image_kwargs)
 
+    # Only an explicitly configured rate counts (pricing_use_defaults=False), for
+    # the same unit mismatch audio, moderations, and search avoid: images bill per
+    # image (per_image_cost reads input_price_per_million as raw USD per image)
+    # while genai-prices quotes USD per million tokens. gpt-image-1 is in that
+    # dataset at 5.0, which would bill $5.00 for one image and, because this route
+    # reserves its estimate, hold that $5.00 against the budget before the call.
     outcome = await run_passthrough(
         endpoint="/v1/images/generations",
         raw_request=raw_request,
@@ -96,6 +102,7 @@ async def create_image(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        pricing_use_defaults=False,
         estimate=estimate,
         enforce_require_pricing=True,
         compute_cost=compute_cost,
