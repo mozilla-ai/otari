@@ -103,7 +103,10 @@ async def create_transcription(
     # (tokens, seconds, etc.), so the reservation estimate is 0; the reservation
     # still enforces existing per-user state (user exists, not blocked, not
     # already over budget). When pricing is configured, the cost is recorded as
-    # an auditable per-request charge line.
+    # an auditable per-request charge line. Only an explicitly configured rate
+    # counts (pricing_use_defaults=False): genai-prices quotes audio models such
+    # as gpt-4o-transcribe per million tokens, which this per-request convention
+    # would misread as a per-million-request rate.
     outcome = await run_passthrough(
         endpoint="/v1/audio/transcriptions",
         raw_request=raw_request,
@@ -116,6 +119,7 @@ async def create_transcription(
         user=user,
         call_provider=call_provider,
         lookup_pricing=True,
+        pricing_use_defaults=False,
         reserve_before_resolve=True,
         relabel=False,
         compute_cost=compute_cost,
@@ -207,6 +211,10 @@ async def create_speech(
     # (tokens, seconds, characters, etc.), so the reservation estimate is 0; the
     # reservation still enforces existing per-user state. When pricing is
     # configured, the cost is recorded as an auditable per-request charge line.
+    # Only an explicitly configured rate counts (pricing_use_defaults=False):
+    # genai-prices quotes speech models such as gpt-4o-mini-tts per million
+    # tokens, which this per-request convention would misread as a
+    # per-million-request rate.
     outcome = await run_passthrough(
         endpoint="/v1/audio/speech",
         raw_request=raw_request,
@@ -219,6 +227,7 @@ async def create_speech(
         user=request.user,
         call_provider=call_provider,
         lookup_pricing=True,
+        pricing_use_defaults=False,
         reserve_before_resolve=True,
         relabel=False,
         compute_cost=compute_cost,

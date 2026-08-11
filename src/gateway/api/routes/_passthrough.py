@@ -131,6 +131,7 @@ async def run_passthrough(
     user: str | None,
     call_provider: Callable[[ResolvedProvider], Awaitable[ResultT]],
     lookup_pricing: bool = True,
+    pricing_use_defaults: bool = True,
     estimate: Callable[[ModelPricing | None], float] | None = None,
     enforce_require_pricing: bool = False,
     usage_tokens: Callable[[ResultT], tuple[int | None, int | None, int | None]] | None = None,
@@ -163,6 +164,12 @@ async def run_passthrough(
         lookup_pricing: Whether to resolve :class:`ModelPricing` for the model.
             Audio resolves it for per-request charge lines but the reservation
             estimate stays 0 (no measurable cost unit yet, so no pre-call spend).
+        pricing_use_defaults: Whether the pricing lookup may fall back to the
+            genai-prices dataset. A route that bills per request passes False for
+            the reason :func:`find_model_pricing` documents: those rates are USD
+            per million *tokens*, so under a per-request convention they would be
+            charged as USD per million *requests* and write a charge line at the
+            wrong unit for a rate nobody configured.
         estimate: Maps the pricing row to the reservation estimate in USD.
             Defaults to 0.0, which still enforces per-user state (user exists,
             not blocked, not already over budget).
@@ -293,8 +300,6 @@ async def run_passthrough(
         # unresolvable selector to 400; otherwise the estimate leaks.
         try:
             resolved = resolve_provider_selector(config, model, user_id)
-            if lookup_pricing:
-                pricing = await find_model_pricing(db, resolved.instance, resolved.model)
         except (ValueError, AnyLLMError) as exc:
             await refund_reservation(db, reservation)
             await _log_rejection(
@@ -304,6 +309,16 @@ async def run_passthrough(
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
             _raise_for_unresolvable_model(model, exc)
+        if lookup_pricing:
+            # Unlike the branch below, the reservation is already held here, so a
+            # failed lookup must refund before propagating or the estimate leaks.
+            try:
+                pricing = await find_model_pricing(
+                    db, resolved.instance, resolved.model, use_defaults=pricing_use_defaults
+                )
+            except Exception:
+                await refund_reservation(db, reservation)
+                raise
     else:
         try:
             resolved = resolve_provider_selector(config, model, user_id)
@@ -317,7 +332,9 @@ async def run_passthrough(
             )
             _raise_for_unresolvable_model(model, exc)
         if lookup_pricing:
-            pricing = await find_model_pricing(db, resolved.instance, resolved.model)
+            pricing = await find_model_pricing(
+                db, resolved.instance, resolved.model, use_defaults=pricing_use_defaults
+            )
         # Reserve first so user/blocked/budget rejections (404/403) precede the
         # missing-pricing rejection (402); refund if we then reject for no pricing.
         reservation = await _reserve(

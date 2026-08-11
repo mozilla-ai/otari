@@ -7,6 +7,8 @@ import pytest
 from any_llm.types.audio import Transcription
 from fastapi.testclient import TestClient
 
+from gateway.services.pricing_service import configure_default_pricing, reset_price_cache
+
 
 def _mock_transcription_response() -> Transcription:
     """Build a real Transcription for testing."""
@@ -492,6 +494,47 @@ def test_speech_unpriced_records_no_charge_lines(
         "/v1/usage", params={"endpoint": "/v1/audio/speech", "status": "success"}, headers=master_key_header
     )
     latest = usage_resp.json()[0]
+    assert latest["cost"] == 0.0
+    assert latest["billing_meters"] is None
+    assert latest["pricing_breakdown"] is None
+
+
+def test_transcription_ignores_genai_prices_defaults(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """Default (genai-prices) rates never price audio, even with default_pricing on.
+
+    Those rates are USD per million tokens, but audio bills per request, so
+    honoring one would write a charge line at the wrong unit for a rate the
+    operator never configured. gpt-4o-transcribe is in the dataset, so it is the
+    case that would regress.
+    """
+    configure_default_pricing(True)
+    reset_price_cache()
+    try:
+        with patch(
+            "gateway.api.routes.audio.atranscription",
+            new_callable=AsyncMock,
+            return_value=_mock_transcription_response(),
+        ):
+            resp = client.post(
+                "/v1/audio/transcriptions",
+                files={"file": ("test.mp3", b"audio-data", "audio/mpeg")},
+                data={"model": "openai:gpt-4o-transcribe"},
+                headers=api_key_header,
+            )
+        assert resp.status_code == 200
+    finally:
+        configure_default_pricing(False)
+        reset_price_cache()
+
+    usage_resp = client.get(
+        "/v1/usage", params={"endpoint": "/v1/audio/transcriptions", "status": "success"}, headers=master_key_header
+    )
+    latest = usage_resp.json()[0]
+    assert latest["model"] == "gpt-4o-transcribe"
     assert latest["cost"] == 0.0
     assert latest["billing_meters"] is None
     assert latest["pricing_breakdown"] is None
