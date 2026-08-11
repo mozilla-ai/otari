@@ -8,17 +8,10 @@ on:
       # The dashboard bundles this guide (web/src/pages/DocsPage.tsx), so a change
       # to it changes the built app; build and test it.
       - 'docs/dashboard.md'
-      # The gateway side of serving the bundle, plus its tests. They skip
-      # themselves when no bundle is present, so otari-tests.yml never runs them
-      # and this workflow is the only place they execute. Scoped to all of
-      # src/gateway rather than to the modules that serve the bundle today: the
-      # cache headers, auth exemptions and mounts these tests pin all live in
-      # main.py now, and naming files here would silently drop the coverage the
-      # day a refactor moves them. Before the bundle stopped being committed
-      # these tests ran in every otari-tests.yml run, so this keeps that reach.
-      - 'src/gateway/**'
-      - 'tests/unit/test_gateway_root_page.py'
-      - 'tests/unit/test_dashboard_build.py'
+      # Frontend paths only. The gateway side of serving the bundle is covered by
+      # otari-dashboard-serving.yml, which is triggered by src/gateway/** and runs
+      # the pytest half; these two jobs (vitest, and Playwright against a built
+      # bundle) test web/ and would only add runtime to a backend PR.
       - '.github/workflows/otari-dashboard.yml'
   pull_request:
     branches: [ main ]
@@ -27,17 +20,10 @@ on:
       # The dashboard bundles this guide (web/src/pages/DocsPage.tsx), so a change
       # to it changes the built app; build and test it.
       - 'docs/dashboard.md'
-      # The gateway side of serving the bundle, plus its tests. They skip
-      # themselves when no bundle is present, so otari-tests.yml never runs them
-      # and this workflow is the only place they execute. Scoped to all of
-      # src/gateway rather than to the modules that serve the bundle today: the
-      # cache headers, auth exemptions and mounts these tests pin all live in
-      # main.py now, and naming files here would silently drop the coverage the
-      # day a refactor moves them. Before the bundle stopped being committed
-      # these tests ran in every otari-tests.yml run, so this keeps that reach.
-      - 'src/gateway/**'
-      - 'tests/unit/test_gateway_root_page.py'
-      - 'tests/unit/test_dashboard_build.py'
+      # Frontend paths only. The gateway side of serving the bundle is covered by
+      # otari-dashboard-serving.yml, which is triggered by src/gateway/** and runs
+      # the pytest half; these two jobs (vitest, and Playwright against a built
+      # bundle) test web/ and would only add runtime to a backend PR.
       - '.github/workflows/otari-dashboard.yml'
   workflow_dispatch:
 
@@ -80,13 +66,9 @@ jobs:
     # (Playwright's webServer, see web/playwright.config.ts) and walk the core
     # multi-page flows a real operator does.
     #
-    # Scoped to the workflow's paths, which cover web/** plus all of src/gateway,
-    # so a backend change that breaks a dashboard-served flow is caught here even
-    # when it lands nowhere near the modules that mount the bundle.
-    #
-    # This job also owns the dashboard-serving unit tests. They skip themselves
-    # when no bundle is present (it is built, not committed), so the main test
-    # suite in otari-tests.yml no longer exercises them; here a bundle exists.
+    # Scoped to this workflow's web/** paths. A change elsewhere in src/gateway that
+    # breaks a dashboard-served flow is not caught here; the pytest half of that
+    # coverage lives in otari-dashboard-serving.yml, which src/gateway/** triggers.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -117,18 +99,8 @@ jobs:
       working-directory: web
       run: npx playwright install --with-deps chromium
 
-    # Built here rather than via `npm run e2e` (which builds then runs Playwright)
-    # so the pytest step below and Playwright share one build instead of two.
-    - name: Build dashboard
-      working-directory: web
-      run: npm run build
-
-    # These are skipped by the main suite, which has no bundle. They cover what
-    # Playwright cannot see from the browser: the /pwa mount, cache headers, and
-    # the /dashboard-build.json id.
-    - name: Test the gateway serves the built bundle
-      run: uv run pytest -v tests/unit/test_gateway_root_page.py tests/unit/test_dashboard_build.py
-
+    # `npm run e2e` builds the bundle first (see web/package.json), so a local run
+    # and CI serve the same freshly built dashboard.
     - name: Run end-to-end tests
       working-directory: web
-      run: npx playwright test
+      run: npm run e2e

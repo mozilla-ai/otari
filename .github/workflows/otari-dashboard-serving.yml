@@ -1,0 +1,85 @@
+name: Otari Dashboard Serving
+
+# The gateway half of serving the dashboard: /, the hashed /assets mount, the /pwa
+# mount, cache headers, and the /dashboard-build.json id.
+#
+# These tests need a built bundle, which is no longer committed, so they skip
+# themselves in otari-tests.yml and this is the only job that runs them. They used
+# to run in every otari-tests.yml run, back when the bundle was in the tree, and
+# this restores that reach for backend changes.
+#
+# Kept separate from otari-dashboard.yml rather than widening its paths: a path
+# filter applies to a whole workflow, so putting src/gateway/** there would also
+# run vitest and Playwright on every backend PR, neither of which tests anything a
+# Python change can affect. This job is the pytest half only, and it is selected by
+# marker (`-m dashboard_bundle`) rather than by filename, so a dashboard-serving
+# test added later is picked up wherever it lives. See
+# tests/unit/_dashboard_bundle_support.py.
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/gateway/**'
+      - 'tests/unit/**'
+      # The bundle these tests are served, and the guide bundled into it.
+      - 'web/**'
+      - 'docs/dashboard.md'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/otari-dashboard-serving.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/gateway/**'
+      - 'tests/unit/**'
+      - 'web/**'
+      - 'docs/dashboard.md'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/otari-dashboard-serving.yml'
+  workflow_dispatch:
+
+jobs:
+  serving:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        python-version: "3.14"
+
+    - name: Install Python deps
+      run: uv sync --dev --frozen
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: web/package-lock.json
+
+    - name: Install web deps
+      working-directory: web
+      run: npm ci
+
+    - name: Build dashboard
+      working-directory: web
+      run: npm run build
+
+    # Two ways this job could pass while proving nothing, both closed here. If the
+    # marker selects no tests pytest exits 5, which fails the step. If the bundle is
+    # missing the tests all skip and pytest still exits 0, so the bundle is asserted
+    # first rather than trusted from the step above.
+    - name: Test the gateway serves the built bundle
+      run: |
+        if [ ! -f src/gateway/static/dashboard/index.html ]; then
+          echo "::error::No built bundle, so the dashboard-serving tests would all skip."
+          exit 1
+        fi
+        uv run pytest -v -m dashboard_bundle tests/unit

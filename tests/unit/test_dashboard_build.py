@@ -8,7 +8,7 @@ offer an ordinary reload instead.
 
 from pathlib import Path
 
-import pytest
+from _dashboard_bundle_support import requires_dashboard_bundle
 from fastapi.testclient import TestClient
 
 from gateway.core.config import GatewayConfig
@@ -42,7 +42,7 @@ def test_build_id_is_short_and_opaque(tmp_path: Path) -> None:
     assert build_id.isalnum()
 
 
-@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built")
+@requires_dashboard_bundle
 def test_endpoint_reports_the_served_bundle(tmp_path: Path) -> None:
     app = create_app(_config(tmp_path))
 
@@ -57,7 +57,7 @@ def test_endpoint_reports_the_served_bundle(tmp_path: Path) -> None:
     assert body["version"]
 
 
-@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built")
+@requires_dashboard_bundle
 def test_endpoint_is_public_and_uncacheable(tmp_path: Path) -> None:
     # The poll only works if it is not served from cache, and it has to answer
     # the login screen too, which has no key to send.
@@ -70,7 +70,7 @@ def test_endpoint_is_public_and_uncacheable(tmp_path: Path) -> None:
     assert "no-store" in response.headers["cache-control"]
 
 
-@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built")
+@requires_dashboard_bundle
 def test_index_html_is_uncacheable_so_a_reload_gets_the_new_bundle(tmp_path: Path) -> None:
     # The whole prompt rests on this: "Update now" is a plain reload, which only
     # helps if the browser refetches the page rather than reusing a cached copy
