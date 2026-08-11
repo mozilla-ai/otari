@@ -426,7 +426,14 @@ export function DataTable<Row extends object>({
       </Container>
       {detailHost && detailRow && renderDetail
         ? createPortal(
-            <div className="otari-detail-reveal">
+            // Keyed by the row it belongs to. The host node is stable now, so
+            // without this the panel would be reconciled across a jump from one
+            // row to another and keep the previous row's state (RouterReadiness
+            // seeds its user picker from its props once, at mount). A poll that
+            // rebuilds `rows` leaves detailKey alone, so the fix above still
+            // holds: only a different row remounts, which is also what replays
+            // the reveal animation under the newly opened row.
+            <div key={detailKey} className="otari-detail-reveal">
               <div>{renderDetail(detailRow)}</div>
             </div>,
             detailHost,

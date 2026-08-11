@@ -267,8 +267,8 @@ describe("DataTable", () => {
   it("keeps the detail panel attached through row reorders, removal, and return", async () => {
     // The host <tr> lives outside react-aria's collection, so react's row
     // reconciliation (sorting, filtering, pagination) must not strand or
-    // duplicate it: the insert effect re-runs on row changes and its cleanup
-    // removes the host when the target row disappears.
+    // duplicate it: the insert effect re-runs on row changes and detaches the
+    // host when the target row disappears.
     const renderDetail = (r: Row) => <div>{`detail for ${r.name}`}</div>;
     const detailFor = (name: string) =>
       screen.getByRole("row", { name: new RegExp(name) }).nextElementSibling?.textContent ?? null;
@@ -318,6 +318,37 @@ describe("DataTable", () => {
     await waitFor(() => expect(screen.getByText("detail for Bravo")).toBeInTheDocument());
     expect(document.querySelector(".otari-detail-row")).toBe(host);
     expect(mounts).toBe(1);
+  });
+
+  it("remounts the detail panel when it jumps to a different row", async () => {
+    // The other half of the poll fix: the host node is stable now, so nothing
+    // else stops the panel being reconciled across a jump from one row to the
+    // next (clicking another row while one is open, no close in between). A
+    // panel that seeds state from its row at mount, as RouterReadiness does
+    // with its user picker, would then narrate the new row with the old row's
+    // state.
+    let mounts = 0;
+    function Panel({ row }: { row: Row }) {
+      const [seeded] = useState(row.name);
+      useEffect(() => {
+        mounts += 1;
+      }, []);
+      return <div>{`detail for ${row.name}, seeded from ${seeded}`}</div>;
+    }
+    const renderDetail = (r: Row) => <Panel row={r} />;
+
+    const { rerender } = render(<DataTable {...base({ detailKey: "b", renderDetail })} />);
+    await waitFor(() => expect(screen.getByText(/detail for Bravo/)).toBeInTheDocument());
+
+    rerender(<DataTable {...base({ detailKey: "c", renderDetail })} />);
+    await waitFor(() => expect(screen.getByText(/detail for Charlie/)).toBeInTheDocument());
+    expect(screen.getByText("detail for Charlie, seeded from Charlie")).toBeInTheDocument();
+    expect(mounts).toBe(2);
+    // Still one host, now sitting under the row it belongs to.
+    expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(1);
+    expect(document.querySelector('tbody tr[data-key="c"]')?.nextSibling).toBe(
+      document.querySelector(".otari-detail-row"),
+    );
   });
 
   it("still fires onRowAction on a row click while a selection is active", async () => {
