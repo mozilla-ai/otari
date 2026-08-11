@@ -14,7 +14,7 @@ from gateway.api.deps import set_config
 from gateway.api.main import register_routers
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
-from gateway.dashboard import get_dashboard_build_id, get_dashboard_dir
+from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
 from gateway.log_config import logger
 from gateway.rate_limit import RateLimiter
@@ -416,6 +416,18 @@ def create_app(config: GatewayConfig) -> FastAPI:
         async def dashboard_build() -> dict[str, str]:
             return {"build": get_dashboard_build_id(dashboard_dir), "version": __version__}
     else:
+        # Hybrid mode has no local management API, so the tutorial is the intended
+        # root there and there is nothing to report. In standalone mode a missing
+        # bundle means nobody built it, which is the ordinary state of a source
+        # checkout now that the bundle is gitignored rather than committed. Say so
+        # once at startup, so "/" serving the tutorial reads as a build step not
+        # taken rather than as a broken dashboard.
+        if not config.is_hybrid_mode:
+            logger.info(
+                'No dashboard bundle found at gateway/%s, so "/" serves the get-started tutorial '
+                "(the API is unaffected). Run `make dashboard` to build it; the Docker image builds it for you.",
+                DASHBOARD_PACKAGE_PATH,
+            )
 
         @app.get("/", response_class=HTMLResponse, include_in_schema=False)
         async def root_index() -> str:
