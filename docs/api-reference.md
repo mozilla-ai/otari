@@ -188,6 +188,13 @@ and counted as failures rather than only in the caller's own logs.
 |--------|------|-------------|------|
 | `POST` | `/v1/images/generations` | Generate images from text prompts. | API key or master key |
 
+Image generation bills per generated image, not per token, so a usage row carries
+zero tokens and an `images` meter. Unlike audio and moderations it is subject to
+`require_pricing`, so an unpriced image model is rejected with 402 under the
+default configuration. See
+[per-image pricing](configuration.md#per-image-pricing-image-generation) for how
+to set the rate.
+
 ### Audio
 
 | Method | Path | Description | Auth |

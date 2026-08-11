@@ -165,11 +165,12 @@ async def run_passthrough(
             Audio resolves it for per-request charge lines but the reservation
             estimate stays 0 (no measurable cost unit yet, so no pre-call spend).
         pricing_use_defaults: Whether the pricing lookup may fall back to the
-            genai-prices dataset. A route that bills per request passes False for
-            the reason :func:`find_model_pricing` documents: those rates are USD
-            per million *tokens*, so under a per-request convention they would be
-            charged as USD per million *requests* and write a charge line at the
-            wrong unit for a rate nobody configured.
+            genai-prices dataset. A route whose billable unit is not a token
+            passes False for the reason :func:`find_model_pricing` documents:
+            those rates are USD per million *tokens*, so a per-request route
+            would charge them as USD per million *requests* and a per-image route
+            as USD per image, writing a charge line at the wrong unit for a rate
+            nobody configured.
         estimate: Maps the pricing row to the reservation estimate in USD.
             Defaults to 0.0, which still enforces per-user state (user exists,
             not blocked, not already over budget).

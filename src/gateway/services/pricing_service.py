@@ -278,11 +278,17 @@ async def find_model_pricing(
     database always takes precedence over defaults. The default fallback is gated
     by ``GatewayConfig.default_pricing`` via :func:`configure_default_pricing`.
 
-    ``use_defaults=False`` skips that fallback for keys that are not models at
-    all. The genai-prices lookup falls back to a provider-agnostic match on the
-    bare name, so a search tool an operator happened to name after a real model
-    would otherwise pick up that model's per-million-token rate and be billed
-    under a per-request convention.
+    ``use_defaults=False`` skips that fallback for any caller whose billable unit
+    is not a token, because every dataset rate is quoted per million *tokens*.
+    Two kinds of caller need it. A key that is not a model at all (a search tool,
+    a gateway-run tool): the genai-prices lookup falls back to a provider-agnostic
+    match on the bare name, so a tool an operator happened to name after a real
+    model would pick up that model's rate. And a real model billed under a
+    non-token unit (audio and moderations per request, images per image):
+    ``gpt-4o-transcribe`` and ``gpt-image-1`` are both in the dataset, and their
+    per-million-token rates, read under :func:`flat_request_cost` or
+    :func:`per_image_cost`, become a per-request or per-image rate, writing a
+    charge line at the wrong unit for a rate nobody configured.
     """
 
     lookup_time = normalize_effective_at(as_of)

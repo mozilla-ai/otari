@@ -408,17 +408,35 @@ pricing:
   openai:tts-1:
     input_price_per_million: 15000.0  # $0.015 per speech request
   openai:omni-moderation-latest:
-    input_price_per_million: 0.0      # free, and priced explicitly
+    input_price_per_million: 0.0      # free (same effect as leaving it unset)
 ```
 
 The key is the resolved `provider:model`, the same key every other route uses. [Search tools](#search-tools) follow the same convention under `<provider>:<tool>`.
 
 Two behaviors are worth knowing before you rely on this:
 
-- **Leaving the rate unset is free by design.** These endpoints are exempt from `require_pricing`, so an unpriced model is served, the usage row records a $0 cost, and no charge line is written. That is deliberate: a $0 charge line would render in Activity as a billed meter explaining a charge that never happened. Set a rate to get the charge line.
+- **Leaving the rate unset is free by design.** These endpoints are exempt from `require_pricing`, so an unpriced model is served, the usage row records a $0 cost, and no charge line is written. That is deliberate: a $0 charge line would render in Activity as a billed meter explaining a charge that never happened. Set a nonzero rate to get the charge line; a rate of `0.0` is treated the same as no rate at all.
 - **[Default pricing](#default-pricing) never applies here.** The genai-prices dataset quotes rates in USD per million *tokens*, and some audio models are in it (`openai:gpt-4o-transcribe`, `openai:gpt-4o-mini-tts`). Honoring one would charge a token rate as a request rate, so per-request routes resolve their rate from what you configured and nothing else, whether or not `default_pricing` is on. Search works the same way.
 
-Audio differs from moderations and search in one respect: it reserves $0 against the budget before the call rather than reserving the configured rate. The per-user gate still applies (an unknown, blocked, or already-over-budget user is refused), but the cost lands on the budget at reconciliation instead of being held up front, so concurrent audio requests cannot see each other's holds. Spend stays truthful either way. A duration-based meter that would give audio a real pre-call estimate is tracked in [#376](https://github.com/mozilla-ai/otari/issues/376).
+One dashboard consequence of recording a $0 cost rather than no cost: these rows read as priced, so they do not appear under Activity's `Priced?` filter or in the Usage page's "unpriced requests" count. That count is for rows whose cost is unknown; an audio row with no rate configured is knowingly free, not unknown.
+
+Audio differs from moderations and search in one respect: it reserves $0 against the budget before the call rather than reserving the configured rate. The per-user gate still applies (an unknown, blocked, or already-over-budget user is refused), but the cost lands on the budget at reconciliation instead of being held up front, so concurrent audio requests cannot see each other's holds. That makes the cap soft for audio: requests already in flight can settle past `max_budget`, by at most the configured rate times the number of concurrent audio requests. Spend stays truthful either way, and the next request is refused. A duration-based meter that would give audio a real pre-call estimate is tracked in [#376](https://github.com/mozilla-ai/otari/issues/376).
+
+#### Per-image pricing (image generation)
+
+Image generation (`/v1/images/generations`) bills per generated image, and it overloads `input_price_per_million` with a *third* unit: **raw USD per image**, unscaled. Unlike the per-request rate above, there is no division by a million.
+
+```yaml
+pricing:
+  openai:dall-e-3:
+    input_price_per_million: 0.04   # $0.04 per image
+  openai:gpt-image-1:
+    input_price_per_million: 0.19   # $0.19 per image
+```
+
+The cost is the rate times the number of images returned (falling back to the requested `n` when a provider omits the count), and each usage row records an `images` meter with the matching charge line.
+
+Unlike audio and moderations, image generation is **not** exempt from `require_pricing`: an unpriced image model is rejected with HTTP 402 under the default `require_pricing: true`. It also reserves its estimate before the call, so the rate is held against the budget for the requested image count and reconciled to the delivered count. [Default pricing](#default-pricing) is not consulted here either, for the same unit reason: the dataset carries `openai:gpt-image-1` at 5.0 USD per million tokens, which read as a per-image rate would bill $5.00 for one image.
 
 ### Default pricing
 
@@ -451,9 +469,14 @@ Limitations when enabled:
   the `huggingface:<model>:<backend>` selector (see the model reference in `models.md`). Auto routing and
   the policy suffixes (`:cheapest`, `:fastest`, ...) cannot be priced from the id alone and fall through to
   `require_pricing`.
-- **Per-request routes are excluded.** Audio, moderations, and search bill a flat rate per request, and the
-  dataset's rates are per million tokens, so defaults are not consulted for them. See
-  [per-request pricing](#per-request-pricing-audio-and-moderations).
+- **Routes that do not bill by the token are excluded.** Audio, moderations, and search bill a flat rate per
+  request; image generation bills per image. Every dataset rate is per million tokens, so defaults are not
+  consulted for any of them: honoring one would charge a token rate under a unit that is not a token. For
+  audio, moderations, and search that means an unpriced model stays free (they are exempt from
+  `require_pricing`); for images it means an image model priced only in the dataset now falls through to
+  `require_pricing` and is rejected with 402 rather than billed at roughly a million times its real rate. See
+  [per-request pricing](#per-request-pricing-audio-and-moderations) and
+  [per-image pricing](#per-image-pricing-image-generation).
 
 > **Fail-closed by default.** With `require_pricing: true` (the default), a request for a model
 > that has no pricing entry is rejected with HTTP 402 rather than served free and unmetered; an
