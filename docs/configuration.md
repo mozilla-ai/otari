@@ -416,7 +416,7 @@ The key is the resolved `provider:model`, the same key every other route uses. [
 Two behaviors are worth knowing before you rely on this:
 
 - **Leaving the rate unset is free by design.** These endpoints are exempt from `require_pricing`, so an unpriced model is served, the usage row records a $0 cost, and no charge line is written. That is deliberate: a $0 charge line would render in Activity as a billed meter explaining a charge that never happened. Set a rate to get the charge line.
-- **[Default pricing](#default-pricing) does not price audio.** The genai-prices dataset quotes rates in USD per million *tokens*, and some audio models are in it (`openai:gpt-4o-transcribe`, `openai:gpt-4o-mini-tts`). Honoring one here would charge a token rate as a request rate, so audio resolves its rate from what you configured and nothing else, whether or not `default_pricing` is on. Search behaves the same way.
+- **[Default pricing](#default-pricing) never applies here.** The genai-prices dataset quotes rates in USD per million *tokens*, and some audio models are in it (`openai:gpt-4o-transcribe`, `openai:gpt-4o-mini-tts`). Honoring one would charge a token rate as a request rate, so per-request routes resolve their rate from what you configured and nothing else, whether or not `default_pricing` is on. Search works the same way.
 
 Audio differs from moderations and search in one respect: it reserves $0 against the budget before the call rather than reserving the configured rate. The per-user gate still applies (an unknown, blocked, or already-over-budget user is refused), but the cost lands on the budget at reconciliation instead of being held up front, so concurrent audio requests cannot see each other's holds. Spend stays truthful either way. A duration-based meter that would give audio a real pre-call estimate is tracked in [#376](https://github.com/mozilla-ai/otari/issues/376).
 
@@ -451,8 +451,8 @@ Limitations when enabled:
   the `huggingface:<model>:<backend>` selector (see the model reference in `models.md`). Auto routing and
   the policy suffixes (`:cheapest`, `:fastest`, ...) cannot be priced from the id alone and fall through to
   `require_pricing`.
-- **Audio and search are excluded.** Both bill a flat rate per request, and the dataset's rates are per
-  million tokens, so defaults are not consulted for them. See
+- **Per-request routes are excluded.** Audio, moderations, and search bill a flat rate per request, and the
+  dataset's rates are per million tokens, so defaults are not consulted for them. See
   [per-request pricing](#per-request-pricing-audio-and-moderations).
 
 > **Fail-closed by default.** With `require_pricing: true` (the default), a request for a model

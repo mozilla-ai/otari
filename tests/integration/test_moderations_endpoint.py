@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.services.pricing_service import configure_default_pricing, reset_price_cache
 from gateway.types.moderation import ModerationResponse, ModerationResult
 
 
@@ -440,3 +441,44 @@ def test_moderations_no_warning_when_pricing_missing(
     assert resp.status_code == 200
     offending = [r for r in caplog.records if "No pricing configured" in r.getMessage()]
     assert offending == []
+
+
+def test_moderations_ignores_genai_prices_defaults(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """Default (genai-prices) rates never price moderations, even with default_pricing on.
+
+    Those rates are USD per million tokens, but moderation bills per request, so
+    honoring one would charge a token rate as a request rate. The dataset has no
+    moderation models, so the case that regresses is an operator pointing this
+    endpoint at a model name the dataset does carry.
+    """
+    resp_obj = ModerationResponse(
+        id="modr-test",
+        model="gpt-4o",
+        results=[ModerationResult(flagged=False, categories={}, category_scores={})],
+    )
+    configure_default_pricing(True)
+    reset_price_cache()
+    try:
+        with patch("gateway.api.routes.moderations.amoderation", new_callable=AsyncMock, return_value=resp_obj):
+            resp = client.post(
+                "/v1/moderations",
+                json={"model": "openai:gpt-4o", "input": "hello"},
+                headers=api_key_header,
+            )
+        assert resp.status_code == 200
+    finally:
+        configure_default_pricing(False)
+        reset_price_cache()
+
+    usage_resp = client.get(
+        "/v1/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
+    )
+    latest = usage_resp.json()[0]
+    assert latest["model"] == "gpt-4o"
+    assert latest["cost"] == 0.0
+    assert latest["billing_meters"] is None
+    assert latest["pricing_breakdown"] is None
