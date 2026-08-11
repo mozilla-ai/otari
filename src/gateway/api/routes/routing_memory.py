@@ -49,7 +49,7 @@ from gateway.models.entities import RouterPreference, RoutingMemory
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.policy_store import effective_policies
 from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.routing import KNN_BACKEND, get_router_backend
+from gateway.services.routing import KNN_BACKEND, backend_learns, get_router_backend
 from gateway.services.routing.knn import KnnRoutingMemory
 
 router = APIRouter(prefix="/v1/routing", tags=["routing"])
@@ -153,7 +153,12 @@ class TaskPool(BaseModel):
 
 
 class LearnedPolicy(BaseModel):
-    """A policy whose selection depends on the router, for the status overview."""
+    """A policy whose selection depends on routing memory, for the status overview.
+
+    Only a *learned* policy belongs here. A weighted policy names a router too, but
+    its split is written in the policy document, so listing it under a warmth report
+    would tie it to a pool it never reads.
+    """
 
     name: str
     backend: str
@@ -245,11 +250,13 @@ def _validated_scores(config: GatewayConfig, user_id: str, examples: list[Scored
     teaching a pool before writing the policy that reads it is a legitimate order
     of operations, and refusing it would make the API demand a specific sequence.
     Those keys are canonicalized too, so the policy written afterwards matches them
-    however it spells its candidates.
+    however it spells its candidates. A weighted policy does not count as one that
+    resolves: it reads no examples, so letting its pool narrow what may be taught
+    would refuse the very examples the learned policy being prepared needs.
     """
     known: dict[str, str] = {}
     for spec in effective_policies(config, user_id).values():
-        if spec.router_backend is None:
+        if not backend_learns(spec.router_backend):
             continue
         for selector in [*spec.router_candidates, spec.default_target]:
             canonical = _canonical(config, selector, user_id)
@@ -305,8 +312,9 @@ def _learned_policies(config: GatewayConfig, user_id: str | None) -> list[Learne
     policies: list[LearnedPolicy] = []
     for name, spec in effective_policies(config, user_id).items():
         backend = spec.router_backend
-        if backend is None:
+        if not backend_learns(backend):
             continue
+        assert backend is not None  # backend_learns() is False for None
         policies.append(
             LearnedPolicy(
                 name=name,

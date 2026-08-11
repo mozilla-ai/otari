@@ -10,8 +10,8 @@ a helper:
   served and carries ``selection_reason: router:weighted``, which is the only
   record of the split, because a weighted decision is deliberately not logged per
   request.
-* A retryable failure stays inside the balanced pool before reaching
-  ``on_failure``, so a provider having a bad minute sheds its share.
+* A failure stays inside the balanced pool before reaching ``on_failure``, so a
+  provider having a bad minute sheds its share.
 * A drained (zero-weight) candidate takes no traffic and still backs a failure.
 * The split is bounded by the caller's allow-list, like every other policy.
 * No pricing is required, unlike the learned router: weight is operator-declared
@@ -158,8 +158,8 @@ def _chat(
 ) -> tuple[Any, list[str]]:
     """POST a chat request, returning the response and the models the provider saw.
 
-    ``fail`` names models that raise a retryable upstream error, which is how a
-    failover inside the balanced pool is exercised.
+    ``fail`` names models that raise an upstream error, which is how a failover
+    inside the balanced pool is exercised.
     """
     calls: list[str] = []
 
@@ -217,7 +217,7 @@ def test_every_served_request_is_attributable_to_the_router(client: TestClient) 
     assert {row["selection_reason"] for row in rows} == {"router:weighted"}
 
 
-def test_a_retryable_failure_stays_inside_the_balanced_pool(client: TestClient) -> None:
+def test_a_provider_failure_stays_inside_the_balanced_pool(client: TestClient) -> None:
     # The draw continues without replacement, so the second attempt is the next
     # weighted candidate rather than the operator's on_failure entry. A provider
     # having a bad minute therefore sheds its share to the others for free.

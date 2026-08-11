@@ -2596,7 +2596,7 @@
         "type": "object"
       },
       "LearnedPolicy": {
-        "description": "A policy whose selection depends on the router, for the status overview.",
+        "description": "A policy whose selection depends on routing memory, for the status overview.\n\nOnly a *learned* policy belongs here. A weighted policy names a router too, but\nits split is written in the policy document, so listing it under a warmth report\nwould tie it to a pool it never reads.",
         "properties": {
           "backend": {
             "title": "Backend",

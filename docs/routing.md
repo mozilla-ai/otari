@@ -165,11 +165,11 @@ at startup: it could never select anything. An even split is written out
   of the caveats in [Routing at scale](routing-scaling.md) apply. The ratio
   converges statistically: a burst of ten requests is not necessarily seven and
   three.
-- **A retryable failure stays inside the pool.** The draw continues without
-  replacement, so the whole ordering is the plan: the second attempt is another
-  weighted provider (itself chosen by weight) and `on_failure` is only reached once
-  the pool is exhausted. A provider having a bad minute therefore sheds its share to
-  the others without any health tracking.
+- **A failure stays inside the pool.** The draw continues without replacement, so
+  the whole ordering is the plan: a candidate that fails before it has produced a
+  response hands the request to another weighted provider (itself chosen by weight),
+  and `on_failure` is only reached once the pool is exhausted. A provider having a
+  bad minute therefore sheds its share to the others without any health tracking.
 - **No stickiness.** A conversation can move between providers turn to turn, which
   can cost a warm prompt cache. If that matters more than the split, the learned
   router's `trace_sticky` behavior is the shape to look at; weighted routing
@@ -209,7 +209,12 @@ $ otari routing explain balanced --allowed-model 'anthropic:*'
 balanced: 1 candidate(s), selected by router:weighted
   1. anthropic:claude-sonnet-4-5    [weighted 100%]  dispatches as anthropic:claude-sonnet-4-5
   x  openai:gpt-5    dropped: is not in allowed_models for this caller
+  x  gemini:gemini-2.0-flash    dropped: is not in allowed_models for this caller
 ```
+
+The `on_failure` entry is filtered by the same allow-list, so this caller has no
+fallback left either: a split that reads as three providers deep is one provider
+deep for them, which is the kind of thing this command exists to surface.
 
 `POST /v1/routing/policies/explain` returns the same numbers as `router_weights`,
 which is what the dashboard's Routing page renders.

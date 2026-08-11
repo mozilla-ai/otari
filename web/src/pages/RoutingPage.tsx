@@ -668,8 +668,9 @@ function PolicyForm({
                 {weighted ? (
                   <>
                     The marked model serves a caller who sends <code>Otari-Router: off</code>, which is the way
-                    to pin traffic to one provider during an incident. A retryable failure moves to another
-                    model in this pool, by the same shares, before any fallback below.
+                    to pin traffic to one provider during an incident. A model that fails before responding
+                    moves the request to another model in this pool, by the same shares, before any fallback
+                    below.
                   </>
                 ) : (
                   <>

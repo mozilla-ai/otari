@@ -19,10 +19,11 @@ simplest correct design and not a placeholder for a smarter one:
   candidate with no pricing row still takes its share. Weight is the operator's
   statement about capacity, not a number the gateway derives.
 * **The whole ordering is the plan.** The draw continues without replacement over
-  the candidates that were not picked, so a retryable failure lands on another
-  weighted provider (itself chosen by weight) before the policy's ``on_failure``
-  chain is reached. A provider that is failing therefore sheds its share to the
-  others for free, without any health tracking.
+  the candidates that were not picked, so a provider that fails before it has
+  responded hands the request to another weighted provider (itself chosen by
+  weight) before the policy's ``on_failure`` chain is reached. A provider that is
+  failing therefore sheds its share to the others for free, without any health
+  tracking.
 
 Zero-weight candidates are not excluded from the plan, only from the draw: they
 sit at its tail in declared order. That is what makes ``{a: 100, b: 0}`` a drain
@@ -63,18 +64,20 @@ def declared_shares(weights: Mapping[str, float], pool: Sequence[str]) -> dict[s
     is not permitted, the 30 candidate really does serve every request, and
     reporting it as 30% would describe a split that is not happening.
 
-    An all-zero pool falls back to an even split. Policy validation guarantees at
-    least one positive weight, so this only happens when every weighted candidate
-    was filtered out and the drained one is all that is left; serving it evenly
-    beats declining, and it is what the plan would do anyway.
+    An all-zero pool reports the head taking everything, because that is what the
+    draw does with it: :func:`weighted_ordering` has nothing to sample and keeps
+    declared order, so the first candidate serves every request. Policy validation
+    guarantees at least one positive weight, so this only happens when every
+    weighted candidate was filtered out and the drained ones are all that is left.
+    An even split would read as a balanced policy that is not balancing, and these
+    numbers exist to say what is running.
     """
     if not pool:
         return {}
     raw = {selector: max(0.0, float(weights.get(selector, 0.0))) for selector in pool}
     total = sum(raw.values())
     if total <= 0:
-        even = 100.0 / len(pool)
-        return {selector: even for selector in pool}
+        return {selector: 100.0 if index == 0 else 0.0 for index, selector in enumerate(pool)}
     return {selector: weight * 100.0 / total for selector, weight in raw.items()}
 
 
@@ -83,9 +86,9 @@ def weighted_ordering(
 ) -> list[str]:
     """Order ``pool`` by repeated weighted draw without replacement.
 
-    The head is the request's provider; the rest is the order a retryable failure
-    walks, each step drawn by weight among what is left. Candidates whose weight is
-    zero are never drawn, so they land at the tail in declared order.
+    The head is the request's provider; the rest is the order a failure walks, each
+    step drawn by weight among what is left. Candidates whose weight is zero are
+    never drawn, so they land at the tail in declared order.
     """
     remaining = list(pool)
     ordered: list[str] = []

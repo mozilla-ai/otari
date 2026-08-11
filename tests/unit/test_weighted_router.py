@@ -7,9 +7,9 @@ makes that a plausible implementation would break:
 * A split is *normalized*, not percentages, and a candidate omitted from
   ``weights`` is drained rather than defaulted, so a drained provider stays in the
   plan as a failover target.
-* The draw is without replacement over the whole pool, so the ordering a retryable
-  failure walks is itself weighted, and a zero-weight candidate can never win the
-  head (including at the floating-point boundary).
+* The draw is without replacement over the whole pool, so the ordering a failure
+  walks is itself weighted, and a zero-weight candidate can never win the head
+  (including at the floating-point boundary).
 * Shares are normalized over the candidates the *caller* may use, so a policy
   whose heavy candidate is filtered out reports the split that is really running.
 """
@@ -24,11 +24,12 @@ import pytest
 from pydantic import ValidationError
 
 from gateway.core.config import GatewayConfig
-from gateway.models.routing import PolicySpec
+from gateway.models.routing import PolicySpec, RoutingConfig
 from gateway.services.routing.backends import (
     WEIGHTED_BACKEND,
     RoutingContext,
     backend_is_weighted,
+    backend_learns,
     backend_requires_pricing,
     get_router_backend,
 )
@@ -183,8 +184,8 @@ def test_the_head_follows_the_weights() -> None:
 
 
 def test_the_whole_pool_is_ordered_so_a_failure_stays_balanced() -> None:
-    # The draw continues without replacement, so a retryable failure lands on
-    # another weighted provider rather than jumping to on_failure.
+    # The draw continues without replacement, so a failure lands on another
+    # weighted provider rather than jumping to on_failure.
     pool = ["openai:gpt-5", "anthropic:claude-sonnet-4-5", "mistral:mistral-large-latest"]
     ordered = _rank(
         pool,
@@ -218,22 +219,35 @@ def test_a_zero_weight_candidate_never_wins_the_boundary_draw() -> None:
     assert ordered[0] == "openai:gpt-5"
 
 
-def test_a_fully_drained_pool_falls_back_to_an_even_split() -> None:
+def test_a_fully_drained_pool_serves_its_one_survivor() -> None:
     # Only reachable when every weighted candidate was filtered out for this caller
     # and the drained one is all that is left. Serving it beats declining.
     assert declared_shares({"a:b": 0}, ["a:b"]) == {"a:b": 100.0}
 
 
-def test_a_drained_pool_of_two_reports_an_even_split_but_serves_declared_order() -> None:
-    # The reported split and the draw disagree here, deliberately. `declared_shares`
-    # has no order to express, so an even split is the only honest thing to print;
-    # the draw has one, and keeping it declared makes the last resort predictable
-    # rather than random. Pinned so the divergence is a decision, not a surprise.
+def test_a_drained_pool_reports_the_head_that_actually_serves() -> None:
+    # The draw has nothing to sample here, so `weighted_ordering` keeps declared
+    # order and the first candidate serves every request. The reported split has to
+    # say that: an even one would describe a balanced policy that is not balancing,
+    # and these numbers are what `explain`, the CLI and `router_weights` print.
     pool = ["openai:gpt-5", "openai:gpt-5-mini"]
     weights: dict[str, float] = {"openai:gpt-5": 0, "openai:gpt-5-mini": 0}
-    assert declared_shares(weights, pool) == {"openai:gpt-5": 50.0, "openai:gpt-5-mini": 50.0}
+    assert declared_shares(weights, pool) == {"openai:gpt-5": 100.0, "openai:gpt-5-mini": 0.0}
     for seed in range(10):
         assert weighted_ordering(pool, weights, random.Random(seed)) == pool
+
+
+def test_a_drained_pool_agrees_between_the_split_and_the_ordering() -> None:
+    # The property the case above is an instance of: whatever `declared_shares`
+    # calls the majority share is the candidate `weighted_ordering` leads with, so
+    # no surface can report a split the runtime does not serve.
+    pool = ["a:b", "c:d", "e:f"]
+    weights: dict[str, float] = {"a:b": 0, "c:d": 0, "e:f": 0}
+    shares = declared_shares(weights, pool)
+    heaviest = max(shares, key=lambda selector: shares[selector])
+    for seed in range(10):
+        assert weighted_ordering(pool, weights, random.Random(seed))[0] == heaviest
+    assert explain_ordering(pool, weights)[0] == heaviest
 
 
 def test_the_zero_weight_tail_keeps_declared_order() -> None:
@@ -279,6 +293,29 @@ def test_a_weighted_decision_is_not_logged_per_request() -> None:
         )
     )
     assert decision.log_decision is False
+
+
+def test_a_weighted_policy_is_not_a_consumer_of_routing_memory() -> None:
+    # A weighted policy names a router, but it reads no examples, so the routing
+    # memory surfaces must not claim it. `/v1/routing/status` would report it under
+    # a warmth it never uses, and `rank` would let its pool decide which score keys
+    # a user may teach, refusing the examples a learned policy is being prepared with.
+    from gateway.api.routes.routing_memory import ScoredExample, _learned_policies, _validated_scores
+
+    weighted_config = GatewayConfig(
+        master_key="test-master-key",
+        model_discovery=False,
+        providers={"openai": {"api_key": "sk-openai"}, "anthropic": {"api_key": "sk-anthropic"}},
+        routing=RoutingConfig(
+            policies={"balanced": _spec({"openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30})}
+        ),
+    )
+    assert not backend_learns(WEIGHTED_BACKEND)
+    assert backend_learns(" KNN ")
+    assert _learned_policies(weighted_config, "alice") == []
+    assert _validated_scores(
+        weighted_config, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-5-mini": 1.0})]
+    ) == {"openai:gpt-5-mini": "openai:gpt-5-mini"}
 
 
 def test_the_backend_is_registered_and_needs_no_pricing(config: GatewayConfig) -> None:

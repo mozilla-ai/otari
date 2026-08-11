@@ -350,9 +350,9 @@ def routing_explain(
         click.echo(f"  x  {dropped.selector}    dropped: {dropped.detail}")
     if weighted_shares:
         click.echo(
-            "  weighted: one candidate is drawn per request in proportion to its share, and a retryable "
-            "failure falls to the next draw before on_failure. Shares are normalized over the candidates "
-            "this caller may use, so they reflect the filtering above."
+            "  weighted: one candidate is drawn per request in proportion to its share, and a candidate "
+            "that fails before responding falls to the next draw before on_failure. Shares are normalized "
+            "over the candidates this caller may use, so they reflect the filtering above."
         )
     elif spec.router_backend is not None:
         # The plan above is the *decline* path, because a router needs a live

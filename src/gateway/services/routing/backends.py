@@ -41,6 +41,7 @@ __all__ = [
     "RoutingContext",
     "RoutingDecision",
     "backend_is_weighted",
+    "backend_learns",
     "backend_requires_pricing",
     "clear_router_backend_cache",
     "get_router_backend",
@@ -165,6 +166,17 @@ def backend_is_weighted(name: str | None) -> bool:
     case it, and each of them would otherwise repeat the same normalization.
     """
     return name is not None and name.strip().lower() == WEIGHTED_BACKEND
+
+
+def backend_learns(name: str | None) -> bool:
+    """Whether this backend decides from taught examples, so routing memory applies.
+
+    Only the kNN router does. The weighted router's split is written in the policy
+    document, so a weighted policy has nothing to teach and nothing to warm: it must
+    not be reported as a consumer of routing memory, and it must not gate which score
+    keys ``POST /v1/routing/preferences/rank`` accepts for a user.
+    """
+    return name is not None and name.strip().lower() == KNN_BACKEND
 
 
 def backend_requires_pricing(name: str | None) -> bool:
