@@ -1,5 +1,5 @@
 import type { CardModel, CardStat } from "@/lib/shareCard";
-import { formatTokens } from "@/lib/format";
+import { formatNumber, formatTokens } from "@/lib/format";
 
 // The card is rasterized to a PNG and posted publicly, which makes it a different
 // medium from the dashboard it draws on, and the differences are load-bearing:
@@ -70,6 +70,12 @@ export interface ShareCardProps {
   models: CardModel[];
   /** Up to three, excluding whichever one is the hero. */
   stats: CardStat[];
+  /**
+   * Requests in the window with no configured price. Printed as the asterisk's
+   * legend when a caveated stat is shown: the card is posted as a standalone
+   * file, so a mark whose meaning lives only in the docs is unreadable.
+   */
+  unpricedRequests?: number;
 }
 
 /**
@@ -108,7 +114,7 @@ function OtariMark({ color, height }: { color: string; height: number }) {
 }
 
 export function ShareCard(props: ShareCardProps) {
-  const { ratio, theme, title, scope, hero, models, stats } = props;
+  const { ratio, theme, title, scope, hero, models, stats, unpricedRequests } = props;
   const palette = theme === "dark" ? DARK : LIGHT;
   const { width, height } = CARD_SIZES[ratio];
   const isLandscape = ratio === "landscape";
@@ -127,6 +133,15 @@ export function ShareCard(props: ShareCardProps) {
   const rowHeight = Math.max(34, Math.min(isLandscape ? 40 : 56, Math.floor((rowsBudget - rowGap * (rowCount - 1)) / rowCount)));
   // A long list needs the hero to give up some height; nothing else can yield.
   const heroSize = rowCount > 5 ? 150 : 200;
+  // Only when a caveated stat is actually on the card, so the legend never
+  // explains a mark the viewer cannot see.
+  const showsCaveat = (hero?.caveated ?? false) || stats.some((stat) => stat.caveated);
+  const caveatLegend =
+    showsCaveat && unpricedRequests !== undefined && unpricedRequests > 0
+      ? `* ${formatNumber(unpricedRequests)} requests unpriced`
+      : showsCaveat
+        ? "* some requests unpriced"
+        : null;
 
   return (
     <div
@@ -232,7 +247,10 @@ export function ShareCard(props: ShareCardProps) {
           color: palette.muted,
         }}
       >
-        <span>{scope}</span>
+        <span>
+          {scope}
+          {caveatLegend !== null ? ` · ${caveatLegend}` : ""}
+        </span>
         {/* Hardcoded, never derived from `location`: a self-hosted gateway would
             otherwise publish its own internal hostname onto a public image. */}
         <span style={{ display: "flex", alignItems: "center", gap: 14, color: palette.ink, fontWeight: 600 }}>

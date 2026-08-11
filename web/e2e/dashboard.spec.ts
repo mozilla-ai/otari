@@ -211,6 +211,15 @@ test.describe("dashboard core flows", () => {
       .poll(async () => preview.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 20_000 })
       .toBeGreaterThan(0);
 
+    // The preview must settle. The rasterize effect once carried two arrays that
+    // were rebuilt on every render, so its own setPreview re-armed the debounce
+    // and the card re-encoded every 300ms for as long as the dialog stayed open.
+    // jsdom cannot show this (rasterize throws there, and React bails on an
+    // identical error string, so nothing re-renders); a real browser can.
+    const firstSrc = await preview.evaluate((el: HTMLImageElement) => el.src);
+    await page.waitForTimeout(2500);
+    expect(await preview.evaluate((el: HTMLImageElement) => el.src)).toBe(firstSrc);
+
     // The card node itself, not the dialog: it is rendered off-screen as a sibling
     // of the dialog's own section so it can be rasterized at full size.
     const card = page.locator('[data-testid="share-card"]');

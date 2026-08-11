@@ -39,6 +39,19 @@ describe("ShareCard", () => {
     expect(screen.getByText("Spend*")).toBeInTheDocument();
   });
 
+  it("prints a legend for the caveat asterisk, which travels with the file", () => {
+    renderCard({
+      hero: { id: "cost", label: "Spend", value: "$412.00", caveated: true },
+      unpricedRequests: 63,
+    });
+    expect(screen.getByText(/63 requests unpriced/)).toBeInTheDocument();
+  });
+
+  it("does not explain a mark the card is not showing", () => {
+    renderCard({ hero: { id: "requests", label: "Requests", value: "7" }, unpricedRequests: 63 });
+    expect(screen.queryByText(/unpriced/)).not.toBeInTheDocument();
+  });
+
   it("hardcodes the otari URL rather than deriving it from the gateway's own host", () => {
     renderCard();
     expect(screen.getByText("otari.ai")).toBeInTheDocument();

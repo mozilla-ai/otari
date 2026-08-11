@@ -13,6 +13,12 @@ import { CARD_SIZES, ShareCard, type CardRatio } from "./ShareCard";
 // the card claims. That is why there is no window or filter control in here.
 const STORE_KEY = "otari.share.presentation.v1";
 
+// The value sets a stored presentation is validated against on read.
+const HERO_IDS = ["cost", "requests", "tokens", "latency"] as const satisfies readonly StatId[];
+const RATIOS = ["square", "landscape"] as const satisfies readonly CardRatio[];
+const THEMES = ["dark", "light"] as const;
+export const ROW_CHOICES = [1, 3, 5, 9] as const;
+
 interface Presentation {
   hero: StatId;
   ratio: CardRatio;
@@ -41,9 +47,21 @@ function loadPresentation(): Presentation {
     if (typeof parsed !== "object" || parsed === null) {
       return DEFAULTS;
     }
-    // Merged over the defaults rather than trusted: a stored shape from an older
-    // build (or a hand-edited one) must not be able to crash the panel.
-    return { ...DEFAULTS, ...(parsed as Partial<Presentation>) };
+    // Validated field by field, not spread. A spread copies unknown values
+    // straight through, and a stored `ratio` this build no longer has reaches
+    // CARD_SIZES[ratio] and throws on the destructure. Anything unrecognized
+    // falls back to its default rather than taking the whole object down.
+    const stored = parsed as Record<string, unknown>;
+    const pick = <T,>(value: unknown, allowed: readonly T[], fallback: T): T =>
+      allowed.includes(value as T) ? (value as T) : fallback;
+    return {
+      hero: pick(stored.hero, HERO_IDS, DEFAULTS.hero),
+      ratio: pick(stored.ratio, RATIOS, DEFAULTS.ratio),
+      theme: pick(stored.theme, THEMES, DEFAULTS.theme),
+      rows: pick(stored.rows, ROW_CHOICES, DEFAULTS.rows),
+      hideDollars: typeof stored.hideDollars === "boolean" ? stored.hideDollars : DEFAULTS.hideDollars,
+      title: typeof stored.title === "string" ? stored.title.slice(0, TITLE_MAX) : DEFAULTS.title,
+    };
   } catch {
     return DEFAULTS;
   }
@@ -92,8 +110,12 @@ export function ShareDialog(props: ShareDialogProps) {
     [totals, series, presentation.hideDollars],
   );
   const hero = resolveHero(stats, presentation.hero);
-  const secondary = stats.filter((stat) => stat.id !== hero?.id).slice(0, 3);
-  const shown = models.slice(0, presentation.rows);
+  // Memoized because both feed the rasterize effect's dependency list. As fresh
+  // arrays on every render they made that effect re-run after its own setPreview,
+  // which re-armed the 300ms debounce and re-encoded the card on a loop for as
+  // long as the dialog stayed open.
+  const secondary = useMemo(() => stats.filter((stat) => stat.id !== hero?.id).slice(0, 3), [stats, hero?.id]);
+  const shown = useMemo(() => models.slice(0, presentation.rows), [models, presentation.rows]);
   const scope = `${windowLabel} · UTC${scopeSuffix}`;
 
   // Rasterize the card the user will actually post, debounced so dragging a
@@ -266,7 +288,7 @@ export function ShareDialog(props: ShareDialogProps) {
             </Field>
             <Field label="Model rows">
               <div className="inline-flex gap-1.5">
-                {[1, 3, 5, 9].map((rows) => (
+                {ROW_CHOICES.map((rows) => (
                   <Button
                     key={rows}
                     size="sm"
@@ -311,7 +333,13 @@ export function ShareDialog(props: ShareDialogProps) {
                 <Button
                   variant="primary"
                   isDisabled={busy || blocked}
-                  onPress={() => withBlob(async (blob) => { await copyBlobAsImage(blob); }, "Image copied")}
+                  onPress={() =>
+                    withBlob(async (blob) => {
+                      if (!(await copyBlobAsImage(blob))) {
+                        throw new Error("The image could not be copied to the clipboard.");
+                      }
+                    }, "Image copied")
+                  }
                 >
                   Copy image
                 </Button>
@@ -334,6 +362,7 @@ export function ShareDialog(props: ShareDialogProps) {
             hero={hero}
             models={shown}
             stats={secondary}
+            unpricedRequests={totals?.unpriced_requests}
           />
         </div>
       </div>

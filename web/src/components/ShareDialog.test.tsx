@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UsageGroupRow, UsageTotals } from "@/api/types";
 
@@ -111,6 +112,27 @@ describe("ShareDialog", () => {
     );
     expect(screen.getByRole("button", { name: "Download PNG" })).toBeDisabled();
     expect(screen.getByText(/Waiting for the current numbers/i)).toBeInTheDocument();
+  });
+
+  it("does not claim a copy that failed", async () => {
+    const user = userEvent.setup();
+    const shareImage = await import("@/lib/shareImage");
+    vi.spyOn(shareImage, "rasterize").mockResolvedValue(new Blob(["x"], { type: "image/png" }));
+    vi.spyOn(shareImage, "canCopyImages").mockReturnValue(true);
+    // The clipboard write is refused (denied permission, insecure origin, ...).
+    vi.spyOn(shareImage, "copyBlobAsImage").mockResolvedValue(false);
+    renderDialog();
+    await user.click(screen.getByRole("button", { name: "Copy image" }));
+    expect(await screen.findByText(/could not be copied/i)).toBeInTheDocument();
+    expect(screen.queryByText("Image copied")).not.toBeInTheDocument();
+  });
+
+  it("falls back per field when stored presentation holds an unknown value", () => {
+    // A shape from an older build (or hand-edited storage) used to reach
+    // CARD_SIZES[ratio] and crash on the destructure.
+    localStorage.setItem("otari.share.presentation.v1", JSON.stringify({ ratio: "portrait", rows: 4, theme: "neon" }));
+    renderDialog();
+    expect(screen.getByRole("button", { name: "Download PNG" })).toBeInTheDocument();
   });
 
   it("survives a corrupt stored presentation instead of crashing", () => {
