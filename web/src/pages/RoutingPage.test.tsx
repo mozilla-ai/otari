@@ -580,6 +580,40 @@ describe("RoutingPage", () => {
     expect(shares[2]).toHaveValue("0");
   });
 
+  it("will not save a split that names the same model twice", async () => {
+    // Two rows collapse to one key in the weight map, so the split saved would not be
+    // the split shown (and the API refuses a repeated candidate regardless).
+    const { calls } = mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("balanced")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    const second = screen.getByRole("combobox", { name: /model 2/i });
+    await user.clear(second);
+    await user.type(second, "openai:gpt-5");
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByText(/name each model once/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+  });
+
+  it("names a router backend it does not know without claiming it learns", async () => {
+    // Only "knn" learns. Labelling every other backend "Learned" would make the table
+    // lie about the first backend added after this line was written.
+    mockApi([
+      policy("future", {
+        select: [{ router: "cheapest", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] }, { default: "openai:gpt-5" }],
+      }),
+    ]);
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("future")).closest("tr")!;
+    expect(within(row).getByText("Routed")).toBeInTheDocument();
+    expect(within(row).queryByText("Learned")).not.toBeInTheDocument();
+  });
+
   it("does not offer the examples panel for a weighted policy, which learns nothing", async () => {
     mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
     renderPage(<RoutingPage />);

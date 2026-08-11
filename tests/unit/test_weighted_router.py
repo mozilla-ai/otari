@@ -224,6 +224,18 @@ def test_a_fully_drained_pool_falls_back_to_an_even_split() -> None:
     assert declared_shares({"a:b": 0}, ["a:b"]) == {"a:b": 100.0}
 
 
+def test_a_drained_pool_of_two_reports_an_even_split_but_serves_declared_order() -> None:
+    # The reported split and the draw disagree here, deliberately. `declared_shares`
+    # has no order to express, so an even split is the only honest thing to print;
+    # the draw has one, and keeping it declared makes the last resort predictable
+    # rather than random. Pinned so the divergence is a decision, not a surprise.
+    pool = ["openai:gpt-5", "openai:gpt-5-mini"]
+    weights: dict[str, float] = {"openai:gpt-5": 0, "openai:gpt-5-mini": 0}
+    assert declared_shares(weights, pool) == {"openai:gpt-5": 50.0, "openai:gpt-5-mini": 50.0}
+    for seed in range(10):
+        assert weighted_ordering(pool, weights, random.Random(seed)) == pool
+
+
 def test_the_zero_weight_tail_keeps_declared_order() -> None:
     ordered = weighted_ordering(["a:b", "c:d", "e:f"], {"c:d": 0, "e:f": 0, "a:b": 1}, random.Random(1))
     assert ordered == ["a:b", "c:d", "e:f"]

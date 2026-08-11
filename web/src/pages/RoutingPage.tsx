@@ -152,6 +152,20 @@ function routerBackendOf(spec: PolicySpec): string | undefined {
   return spec.select.find((entry) => entry.router !== undefined)?.router;
 }
 
+/** What to call the backend that decides, for a chip or a one-line summary.
+ *
+ *  Named per backend rather than "Dynamic", because the backend's name is what tells
+ *  the reader what to do next (teach it, or move the shares). A backend this build
+ *  does not know gets the neutral word: it is routed, and claiming it learns would be
+ *  a guess about a backend added after this line was written.
+ */
+function routerLabelOf(spec: PolicySpec): string {
+  const backend = routerBackendOf(spec);
+  if (backend === WEIGHTED_BACKEND) return "Weighted";
+  if (backend === KNN_BACKEND) return "Learned";
+  return "Routed";
+}
+
 /** The declared traffic split, empty unless the policy is weighted. */
 function weightsOf(spec: PolicySpec): Record<string, number> {
   return spec.select.find((entry) => entry.router !== undefined)?.weights ?? {};
@@ -193,7 +207,7 @@ function servesSummary(policy: RoutingPolicyResponse): string {
     return `Weighted · ${split} across ${full.length} models`;
   }
   if (pool.length > 0) {
-    return `Learned · ${pool.length} candidates, ${defaultTargetOf(policy.spec)} by default`;
+    return `${routerLabelOf(policy.spec)} · ${pool.length} candidates, ${defaultTargetOf(policy.spec)} by default`;
   }
   if (policy.is_dynamic) {
     const total = 1 + chain.length;
@@ -360,11 +374,18 @@ function PolicyForm({
   const scopeReady = userId === null || userId.trim() !== "";
   const conditionsReady = conditions.every((c) => c.target.trim() !== "" && c.threshold > 0 && c.threshold < 100);
   const guardrailsReady = guardrails.every((g) => g.profile.trim() !== "");
+  // A model named twice is refused by the API, and on a weighted policy it would
+  // also collapse in the weight map: two rows, one key, so the split submitted is
+  // not the split the form showed. Checked over the named rows only, so a pair of
+  // still-empty rows reads as unfinished rather than as a duplicate.
+  const namedCandidates = candidates.map((entry) => entry.trim()).filter((entry) => entry !== "");
+  const duplicateCandidate = new Set(namedCandidates).size !== namedCandidates.length;
   // Two, not one: ranking a single model is not a decision, and the API refuses it.
   const candidatesReady =
     !routed ||
     (candidates.length >= 2 &&
       candidates.every((entry) => entry.trim() !== "") &&
+      !duplicateCandidate &&
       effectiveTarget.trim() !== "");
   // An all-zero split would select nothing and the policy would always serve its
   // default, so the API refuses it. Caught here so the form cannot author it.
@@ -662,6 +683,14 @@ function PolicyForm({
                 <p className="text-xs text-red-700">
                   Name at least two models. {weighted ? "Splitting traffic one way" : "Ranking one"} is not a
                   routing decision.
+                </p>
+              ) : null}
+              {duplicateCandidate ? (
+                <p className="text-xs text-red-700">
+                  Name each model once.{" "}
+                  {weighted
+                    ? "A model listed twice has one share, not two, so the split saved would not be the one shown."
+                    : "A pool that repeats a model is refused."}
                 </p>
               ) : null}
               {weighted && !splitReady ? (
@@ -991,12 +1020,9 @@ export function RoutingPage() {
         cell: (policy) => (
           <div className="flex items-center gap-2">
             <span className="text-sm text-[var(--otari-ink)]">{servesSummary(policy)}</span>
-            {/* The backend's own name rather than "Dynamic" when a router decides:
-                all of them are true, but only one tells the reader what to do next
-                (teach it, or move the shares). */}
             {candidatesOf(policy.spec).length > 0 ? (
               <Chip size="sm" color="accent">
-                {routerBackendOf(policy.spec) === WEIGHTED_BACKEND ? "Weighted" : "Learned"}
+                {routerLabelOf(policy.spec)}
               </Chip>
             ) : policy.is_dynamic ? (
               <Chip size="sm" color="accent">
