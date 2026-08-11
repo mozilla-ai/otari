@@ -70,9 +70,11 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     The completion-param fields are derived from any-llm's ``CompletionParams``
     (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
     forwards. Fields below either tighten a derived field (``messages``,
-    ``response_format``) or add gateway-internal behavior (``mcp_servers``,
-    ``mcp_server_ids``, ``guardrails``, ``tools_header``, ``max_tool_iterations``)
-    that is stripped before the request is forwarded upstream.
+    ``response_format``), declare an OpenAI wire param ``CompletionParams`` does
+    not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), or
+    add gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
+    ``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped
+    before the request is forwarded upstream.
     """
 
     messages: list[dict[str, Any]] = Field(min_length=1)
@@ -82,6 +84,17 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # any-llm types ``stream`` as ``bool | None``; keep the OpenAI wire contract
     # (a non-nullable boolean defaulting to false) for stable SDK generation.
     stream: bool = False
+    # Part of the OpenAI chat wire contract, but absent from any-llm's
+    # ``CompletionParams``, so derivation cannot supply it and the derived base
+    # (pydantic's default ``extra="ignore"``) dropped a caller's value before the
+    # provider call. Declared here so it survives ``model_dump`` and rides
+    # any-llm's ``**kwargs`` passthrough into the provider request. Left as a
+    # free-form string rather than an enum: the tier vocabulary is
+    # provider-specific ("flex"/"priority"/"scale" on OpenAI,
+    # "standard_only"/"priority" on Anthropic) and grows independently of this
+    # gateway, so the provider is the right place to reject an unknown value.
+    # ``ResponsesParams`` already declares it, so /v1/responses never had the gap.
+    service_tier: str | None = None
 
     @field_validator("messages")
     @classmethod

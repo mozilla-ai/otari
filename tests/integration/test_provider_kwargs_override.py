@@ -212,3 +212,91 @@ async def test_completion_params_reach_provider(
     assert captured_kwargs, f"acompletion was never called (status {response.status_code})"
     for name, value in params.items():
         assert captured_kwargs.get(name) == value, f"{name} was dropped before the provider call"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_service_tier_reaches_provider(
+    client_with_model_in_provider: TestClient,
+    stream: bool,
+) -> None:
+    """``service_tier`` must reach ``acompletion``, streaming or not.
+
+    It is part of the OpenAI chat wire contract but absent from any-llm's
+    ``CompletionParams``, so derivation cannot supply it: the derived base ignores
+    unknown fields, and a caller's tier was silently dropped while the provider's
+    own ``service_tier`` still came back on the response, making the request look
+    honored. ``ChatCompletionRequest`` declares the field by hand for that reason,
+    so this guards the hand-declared path the derivation guard cannot cover.
+    """
+    captured_kwargs: dict[str, Any] = {}
+
+    async def mock_acompletion(**kwargs: Any) -> None:
+        captured_kwargs.update(kwargs)
+        raise _MockCompletionError
+
+    master_key_header = {API_KEY_HEADER: "Bearer test-master-key"}
+
+    create_user = client_with_model_in_provider.post(
+        "/v1/users",
+        json={"user_id": "test-user", "alias": "Test User"},
+        headers=master_key_header,
+    )
+    assert create_user.status_code == 200
+
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        response = client_with_model_in_provider.post(
+            "/v1/chat/completions",
+            json={
+                "model": "openai:gpt-4",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "user": "test-user",
+                "service_tier": "flex",
+                "stream": stream,
+            },
+            headers=master_key_header,
+        )
+
+    assert captured_kwargs, f"acompletion was never called (status {response.status_code})"
+    assert captured_kwargs.get("service_tier") == "flex", "service_tier was dropped before the provider call"
+
+
+@pytest.mark.asyncio
+async def test_unset_service_tier_does_not_reach_provider(
+    client_with_model_in_provider: TestClient,
+) -> None:
+    """An unset ``service_tier`` stays out of the kwargs rather than forcing a null.
+
+    ``exclude_unset=True`` covers this for every derived field; the hand-declared
+    one has to hold the same line, or every request would pin the provider (and
+    every OpenAI-compatible upstream that rejects a null tier) to an explicit
+    ``service_tier=None``.
+    """
+    captured_kwargs: dict[str, Any] = {}
+
+    async def mock_acompletion(**kwargs: Any) -> None:
+        captured_kwargs.update(kwargs)
+        raise _MockCompletionError
+
+    master_key_header = {API_KEY_HEADER: "Bearer test-master-key"}
+
+    create_user = client_with_model_in_provider.post(
+        "/v1/users",
+        json={"user_id": "test-user", "alias": "Test User"},
+        headers=master_key_header,
+    )
+    assert create_user.status_code == 200
+
+    with patch("gateway.api.routes.chat.acompletion", new=mock_acompletion):
+        response = client_with_model_in_provider.post(
+            "/v1/chat/completions",
+            json={
+                "model": "openai:gpt-4",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "user": "test-user",
+            },
+            headers=master_key_header,
+        )
+
+    assert captured_kwargs, f"acompletion was never called (status {response.status_code})"
+    assert "service_tier" not in captured_kwargs
