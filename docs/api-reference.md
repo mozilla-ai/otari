@@ -195,6 +195,14 @@ and counted as failures rather than only in the caller's own logs.
 | `POST` | `/v1/audio/transcriptions` | Transcribe audio to text (multipart upload). | API key or master key |
 | `POST` | `/v1/audio/speech` | Generate speech from text (TTS). | API key or master key |
 
+Audio bills per request rather than per token, under the same convention as
+[moderations](#moderations) and search, so a usage row carries zero tokens and a
+cost taken from the flat rate configured for the model. Like moderations, audio
+is exempt from `require_pricing`: with no rate configured the request is served
+and logged at $0 with no charge line. See
+[per-request pricing](configuration.md#per-request-pricing-audio-and-moderations)
+for how to set the rate.
+
 ### Files
 
 OpenAI-compatible file storage. Upload a file, then reference it from a chat

@@ -397,6 +397,29 @@ pricing:
 
 At `min_input_tokens` and above, an entry replaces only the rates it lists for the entire request. Omitted rates inherit the base price. The dashboard's model detail editor exposes the same controls, and each usage row records the resulting billable meters and rate breakdown for auditability.
 
+#### Per-request pricing (audio and moderations)
+
+Audio (`/v1/audio/transcriptions`, `/v1/audio/speech`) and moderations report no token usage, so they bill a flat rate per request instead. `ModelPricing` only has per-million-token columns, so these routes reuse `input_price_per_million` with a different unit: **USD per million requests**. Divide by a million to read it as a per-request charge, so `6000.0` charges $0.006 per request.
+
+```yaml
+pricing:
+  openai:whisper-1:
+    input_price_per_million: 6000.0   # $0.006 per transcription
+  openai:tts-1:
+    input_price_per_million: 15000.0  # $0.015 per speech request
+  openai:omni-moderation-latest:
+    input_price_per_million: 0.0      # free, and priced explicitly
+```
+
+The key is the resolved `provider:model`, the same key every other route uses. [Search tools](#search-tools) follow the same convention under `<provider>:<tool>`.
+
+Two behaviors are worth knowing before you rely on this:
+
+- **Leaving the rate unset is free by design.** These endpoints are exempt from `require_pricing`, so an unpriced model is served, the usage row records a $0 cost, and no charge line is written. That is deliberate: a $0 charge line would render in Activity as a billed meter explaining a charge that never happened. Set a rate to get the charge line.
+- **[Default pricing](#default-pricing) does not price audio.** The genai-prices dataset quotes rates in USD per million *tokens*, and some audio models are in it (`openai:gpt-4o-transcribe`, `openai:gpt-4o-mini-tts`). Honoring one here would charge a token rate as a request rate, so audio resolves its rate from what you configured and nothing else, whether or not `default_pricing` is on. Search behaves the same way.
+
+Audio differs from moderations and search in one respect: it reserves $0 against the budget before the call rather than reserving the configured rate. The per-user gate still applies (an unknown, blocked, or already-over-budget user is refused), but the cost lands on the budget at reconciliation instead of being held up front, so concurrent audio requests cannot see each other's holds. Spend stays truthful either way. A duration-based meter that would give audio a real pre-call estimate is tracked in [#376](https://github.com/mozilla-ai/otari/issues/376).
+
 ### Default pricing
 
 Default pricing is **off by default**. When you enable it (`default_pricing: true` in `config.yml`, or
@@ -428,6 +451,9 @@ Limitations when enabled:
   the `huggingface:<model>:<backend>` selector (see the model reference in `models.md`). Auto routing and
   the policy suffixes (`:cheapest`, `:fastest`, ...) cannot be priced from the id alone and fall through to
   `require_pricing`.
+- **Audio and search are excluded.** Both bill a flat rate per request, and the dataset's rates are per
+  million tokens, so defaults are not consulted for them. See
+  [per-request pricing](#per-request-pricing-audio-and-moderations).
 
 > **Fail-closed by default.** With `require_pricing: true` (the default), a request for a model
 > that has no pricing entry is rejected with HTTP 402 rather than served free and unmetered; an
