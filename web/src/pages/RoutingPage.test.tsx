@@ -551,7 +551,7 @@ describe("RoutingPage", () => {
     // The field holds what was typed, so a decimal point survives the keystroke that
     // follows it. "Infinity" and a negative parse but are refused, matching the API's
     // finite, non-negative rule rather than being coerced to something else on save.
-    mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
+    const { calls } = mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
     const user = userEvent.setup();
     renderPage(<RoutingPage />);
 
@@ -560,10 +560,6 @@ describe("RoutingPage", () => {
 
     const shares = screen.getAllByRole("textbox", { name: /share/i });
     await user.clear(shares[0]);
-    await user.type(shares[0], "7.5");
-    expect(shares[0]).toHaveValue("7.5");
-
-    await user.clear(shares[0]);
     await user.type(shares[0], "Infinity");
     expect(screen.getByText(/Every share is a number of zero or more/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
@@ -571,6 +567,17 @@ describe("RoutingPage", () => {
     await user.clear(shares[0]);
     await user.type(shares[0], "-5");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    // The decimal has to survive the round trip, not only the keystroke: a field
+    // that renders "7.5" but posts 7 would be the same bug one layer down.
+    await user.clear(shares[0]);
+    await user.type(shares[0], "7.5");
+    expect(shares[0]).toHaveValue("7.5");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("/v1/routing/policies"));
+    const spec = (post!.body as { spec: PolicySpec }).spec;
+    expect(spec.select[0].weights).toEqual({ "openai:gpt-5": 7.5, "anthropic:claude-sonnet-4-5": 30 });
   });
 
   it("edits a weighted policy whose backend name is spelled loosely", async () => {
@@ -587,12 +594,28 @@ describe("RoutingPage", () => {
         { default: "openai:gpt-5" },
       ],
     };
-    mockApi([policy("balanced", loose, { is_dynamic: true })]);
+    const { calls } = mockApi([policy("balanced", loose, { is_dynamic: true })]);
+    const user = userEvent.setup();
     renderPage(<RoutingPage />);
 
     const row = (await screen.findByText("balanced")).closest("tr")!;
     expect(within(row).getByText("Weighted")).toBeInTheDocument();
-    expect(within(row).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    // Loading it as weighted is half the claim; saving it back unchanged is the
+    // other half. The spelling is normalized on the way out, which is what the
+    // gateway would have resolved it to anyway.
+    const shares = screen.getAllByRole("textbox", { name: /share/i });
+    expect(shares[0]).toHaveValue("70");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("/v1/routing/policies"));
+    const spec = (post!.body as { spec: PolicySpec }).spec;
+    expect(spec.select[0]).toEqual({
+      router: "weighted",
+      candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
+      weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30 },
+    });
   });
 
   it("will not save a split where every share is zero", async () => {
