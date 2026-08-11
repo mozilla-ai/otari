@@ -15,7 +15,7 @@ from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, ModelPricing
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import flat_request_cost
+from gateway.services.pricing_service import flat_request_cost, per_request_meters
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(prefix="/v1", tags=["audio"])
@@ -91,13 +91,7 @@ async def create_transcription(
         return flat_request_cost(pricing)
 
     def compute_meters(result: Transcription, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
-        # One request is one billed meter. Skip the $0 charge line for an unpriced
-        # model, same as moderations: a reader sees no charge line because there
-        # is no charge, not because of a bug.
-        if not cost:
-            return None
-        breakdown = [{"meter": "request", "units": 1, "unit_rate": cost, "cost": cost}]
-        return {"requests": 1}, breakdown
+        return per_request_meters(cost)
 
     # Audio is exempt from require_pricing and has no measurable cost unit yet
     # (tokens, seconds, etc.), so the reservation estimate is 0; the reservation
@@ -199,13 +193,7 @@ async def create_speech(
         return flat_request_cost(pricing)
 
     def compute_meters(result: bytes, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
-        # One request is one billed meter. Skip the $0 charge line for an unpriced
-        # model, same as moderations: a reader sees no charge line because there
-        # is no charge, not because of a bug.
-        if not cost:
-            return None
-        breakdown = [{"meter": "request", "units": 1, "unit_rate": cost, "cost": cost}]
-        return {"requests": 1}, breakdown
+        return per_request_meters(cost)
 
     # Audio is exempt from require_pricing and has no measurable cost unit yet
     # (tokens, seconds, characters, etc.), so the reservation estimate is 0; the

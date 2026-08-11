@@ -12,7 +12,7 @@ from gateway.api.routes._passthrough import BillingMeters, run_passthrough
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, ModelPricing
 from gateway.services.log_writer import LogWriter
-from gateway.services.pricing_service import flat_request_cost
+from gateway.services.pricing_service import flat_request_cost, per_request_meters
 from gateway.services.provider_kwargs import ResolvedProvider
 from gateway.types.moderation import ModerationResponse
 
@@ -72,14 +72,7 @@ async def create_moderation(
         return flat_request_cost(pricing)
 
     def compute_meters(result: ModerationResponse, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
-        # An unpriced moderation is $0 by design, which is the common case here, so
-        # record nothing rather than a zero charge line the dashboard would render
-        # as a "billed meters" block explaining a charge that never happened. One
-        # request is billed, so the per-request rate is the cost itself.
-        if not cost:
-            return None
-        breakdown = [{"meter": "request", "units": 1, "unit_rate": cost, "cost": cost}]
-        return {"requests": 1}, breakdown
+        return per_request_meters(cost)
 
     def usage_tokens(result: ModerationResponse) -> tuple[int | None, int | None, int | None]:
         return (None, 0, None)

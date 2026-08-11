@@ -333,6 +333,30 @@ def flat_request_cost(pricing: ModelPricing | None) -> float:
     return pricing.input_price_per_million / 1_000_000
 
 
+PerRequestMeters = tuple[dict[str, int], list[dict[str, float | int | str]]]
+
+
+def per_request_meters(cost: float) -> PerRequestMeters | None:
+    """This request's billing meters and charge line, priced per request.
+
+    One request is one billed meter, so the per-request rate is the cost itself.
+    Charge lines carry ``unit_rate`` rather than ``rate_per_million``, the same
+    shape :func:`price_tool_calls` writes, which is what tells a reader and the
+    dashboard which unit convention applies.
+
+    Returns ``None`` when the request is free, the common case on these routes
+    since they are exempt from ``require_pricing`` and an unset or ``0.0`` rate
+    both settle at $0: a zero charge line would render in Activity as a billed
+    meter explaining a charge that never happened. Shared by every route billing
+    per request (audio transcription, audio speech, moderations) so the shape
+    cannot drift between them, for the reason the unit conventions above are
+    named helpers rather than inline expressions.
+    """
+    if not cost:
+        return None
+    return {"requests": 1}, [{"meter": "request", "units": 1, "unit_rate": cost, "cost": cost}]
+
+
 GATEWAY_TOOL_PRICING_PROVIDER = "otari"
 
 
