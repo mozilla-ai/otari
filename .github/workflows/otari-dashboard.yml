@@ -9,10 +9,14 @@ on:
       # to it changes the built app; build and test it.
       - 'docs/dashboard.md'
       # The gateway side of serving the bundle, plus its tests. They skip
-      # themselves when no bundle is present, so otari-tests.yml never runs them;
-      # this workflow is the only place they execute.
-      - 'src/gateway/dashboard.py'
-      - 'src/gateway/main.py'
+      # themselves when no bundle is present, so otari-tests.yml never runs them
+      # and this workflow is the only place they execute. Scoped to all of
+      # src/gateway rather than to the modules that serve the bundle today: the
+      # cache headers, auth exemptions and mounts these tests pin all live in
+      # main.py now, and naming files here would silently drop the coverage the
+      # day a refactor moves them. Before the bundle stopped being committed
+      # these tests ran in every otari-tests.yml run, so this keeps that reach.
+      - 'src/gateway/**'
       - 'tests/unit/test_gateway_root_page.py'
       - 'tests/unit/test_dashboard_build.py'
       - '.github/workflows/otari-dashboard.yml'
@@ -24,10 +28,14 @@ on:
       # to it changes the built app; build and test it.
       - 'docs/dashboard.md'
       # The gateway side of serving the bundle, plus its tests. They skip
-      # themselves when no bundle is present, so otari-tests.yml never runs them;
-      # this workflow is the only place they execute.
-      - 'src/gateway/dashboard.py'
-      - 'src/gateway/main.py'
+      # themselves when no bundle is present, so otari-tests.yml never runs them
+      # and this workflow is the only place they execute. Scoped to all of
+      # src/gateway rather than to the modules that serve the bundle today: the
+      # cache headers, auth exemptions and mounts these tests pin all live in
+      # main.py now, and naming files here would silently drop the coverage the
+      # day a refactor moves them. Before the bundle stopped being committed
+      # these tests ran in every otari-tests.yml run, so this keeps that reach.
+      - 'src/gateway/**'
       - 'tests/unit/test_gateway_root_page.py'
       - 'tests/unit/test_dashboard_build.py'
       - '.github/workflows/otari-dashboard.yml'
@@ -72,11 +80,9 @@ jobs:
     # (Playwright's webServer, see web/playwright.config.ts) and walk the core
     # multi-page flows a real operator does.
     #
-    # Scoped to the workflow's paths, which cover web/** plus the gateway modules
-    # that serve the bundle. A change elsewhere in src/gateway that breaks a
-    # dashboard-served flow is not caught here (the main test suite covers the
-    # API); broadening the trigger to all of src/gateway/** is a possible
-    # follow-up if that gap starts to bite.
+    # Scoped to the workflow's paths, which cover web/** plus all of src/gateway,
+    # so a backend change that breaks a dashboard-served flow is caught here even
+    # when it lands nowhere near the modules that mount the bundle.
     #
     # This job also owns the dashboard-serving unit tests. They skip themselves
     # when no bundle is present (it is built, not committed), so the main test
