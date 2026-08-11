@@ -93,4 +93,24 @@ echo "Testing /health/readiness endpoint..."
 curl -sf http://localhost:8000/health/readiness
 echo ""
 
+# The dashboard bundle is not committed: the Dockerfile's web stage builds it and
+# the runtime stage copies it in. A bundle that never reached the image is not an
+# error at boot, it silently degrades to the get-started tutorial at "/", so
+# assert on the page the browser would actually get.
+# Captured rather than piped into grep: with pipefail, grep -q closing the pipe
+# early can surface curl's SIGPIPE as a failure of the check itself.
+echo "Testing the built dashboard is served at /..."
+ROOT_PAGE="$(curl -sf http://localhost:8000/ || true)"
+if ! grep -q "<title>Otari Dashboard</title>" <<< "$ROOT_PAGE"; then
+    echo "The root path did not serve the admin dashboard."
+    echo "The image builds the bundle in its web stage, so check that stage and the"
+    echo "COPY --from=web in the runtime stage. Serving the get-started tutorial"
+    echo "instead means the bundle never reached the image."
+    echo "=== Page served at / ==="
+    head -40 <<< "$ROOT_PAGE"
+    echo "=== Gateway logs ==="
+    docker logs "$OTARI_CONTAINER"
+    exit 1
+fi
+
 echo "All liveness checks passed!"
