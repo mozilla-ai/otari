@@ -90,12 +90,18 @@ where = ["src"]
 include = ["gateway*"]
 
 [tool.setuptools.package-data]
+# The static/dashboard/* bundle is built, not committed (see .gitignore), so run
+# `make dashboard` before building a wheel. A pattern that matches nothing is
+# skipped silently, so a wheel built without it installs cleanly and the gateway
+# degrades to the tutorial page (gateway/dashboard.py). Patterns stay glob-only:
+# Vite decides the filenames, and pwa/ holds the manifest and icons that
+# index.html links (main.py mounts them at /pwa).
 gateway = [
     "templates/*.html",
     "templates/*.svg",
-    "static/dashboard/index.html",
-    "static/dashboard/favicon.svg",
+    "static/dashboard/*",
     "static/dashboard/assets/*",
+    "static/dashboard/pwa/*",
 ]
 
 [tool.ruff]

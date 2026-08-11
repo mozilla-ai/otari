@@ -7,8 +7,8 @@
 #   - ffmpeg on PATH                     (webm -> gif)
 #   - gifsicle on PATH                   (lossy GIF optimisation)
 #   - web deps installed: (cd web && npm ci)
-#   - a committed dashboard bundle in src/gateway/static/dashboard
-#     (rebuild with: npm --prefix web run build)
+#   - a built dashboard bundle in src/gateway/static/dashboard, which is
+#     gitignored, so a fresh clone has none (build with: make dashboard)
 #
 # Usage: bash scripts/demo_gif/record.sh [--keep-server]
 set -euo pipefail

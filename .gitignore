@@ -32,3 +32,10 @@ otari-smoke.db
 
 # Stray node_modules from running npx at the repo root (web has its own)
 node_modules/
+
+# Built dashboard bundle (`make dashboard`). Deliberately not committed: Vite
+# content-hashes every asset filename, so any change under web/src renamed the
+# whole directory and rewrote index.html, which made rebases and merges conflict
+# by construction. The Docker image builds it in a Node stage instead; a source
+# checkout that has not built it degrades to the tutorial page.
+/src/gateway/static/dashboard/

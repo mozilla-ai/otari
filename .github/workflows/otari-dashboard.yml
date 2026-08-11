@@ -5,18 +5,16 @@ on:
     branches: [ main, develop ]
     paths:
       - 'web/**'
-      - 'src/gateway/static/dashboard/**'
       # The dashboard bundles this guide (web/src/pages/DocsPage.tsx), so a change
-      # to it makes the committed bundle stale until web is rebuilt; run the check.
+      # to it changes the built app; build and test it.
       - 'docs/dashboard.md'
       - '.github/workflows/otari-dashboard.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'web/**'
-      - 'src/gateway/static/dashboard/**'
       # The dashboard bundles this guide (web/src/pages/DocsPage.tsx), so a change
-      # to it makes the committed bundle stale until web is rebuilt; run the check.
+      # to it changes the built app; build and test it.
       - 'docs/dashboard.md'
       - '.github/workflows/otari-dashboard.yml'
   workflow_dispatch:
@@ -50,29 +48,24 @@ jobs:
     - name: Test
       run: npm test
 
+    # The bundle is not committed (the Docker image builds it in a web stage), so
+    # there is nothing to compare against; this proves the build still succeeds.
     - name: Build
       run: npm run build
-
-    - name: Verify committed bundle is up to date
-      run: |
-        # --porcelain catches untracked files too, so a new hashed asset that the
-        # build added but nobody committed still fails the check (git diff would miss it).
-        if [ -n "$(git status --porcelain -- ../src/gateway/static/dashboard)" ]; then
-          echo "::error::The committed dashboard bundle in src/gateway/static/dashboard is stale."
-          echo "Run 'npm --prefix web run build' and commit the result."
-          git --no-pager status --porcelain -- ../src/gateway/static/dashboard
-          exit 1
-        fi
 
   e2e:
     # Browser end-to-end smoke: boot the gateway serving the freshly built bundle
     # (Playwright's webServer, see web/playwright.config.ts) and walk the core
     # multi-page flows a real operator does.
     #
-    # Scoped to the workflow's web/** + committed-bundle paths: a src/gateway
-    # backend change that breaks a dashboard-served flow is not caught here (the
-    # main test suite covers the API). Broadening the trigger to src/gateway/**
-    # is a possible follow-up if that gap starts to bite.
+    # Scoped to the workflow's web/** paths: a src/gateway backend change that
+    # breaks a dashboard-served flow is not caught here (the main test suite
+    # covers the API). Broadening the trigger to src/gateway/** is a possible
+    # follow-up if that gap starts to bite.
+    #
+    # This job also owns the dashboard-serving unit tests. They skip themselves
+    # when no bundle is present (it is built, not committed), so the main test
+    # suite in otari-tests.yml no longer exercises them; here a bundle exists.
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -103,8 +96,18 @@ jobs:
       working-directory: web
       run: npx playwright install --with-deps chromium
 
-    # `npm run e2e` builds the bundle first (see web/package.json), so a local run
-    # and CI serve the same freshly built dashboard.
+    # Built here rather than via `npm run e2e` (which builds then runs Playwright)
+    # so the pytest step below and Playwright share one build instead of two.
+    - name: Build dashboard
+      working-directory: web
+      run: npm run build
+
+    # These are skipped by the main suite, which has no bundle. They cover what
+    # Playwright cannot see from the browser: the /pwa mount, cache headers, and
+    # the /dashboard-build.json id.
+    - name: Test the gateway serves the built bundle
+      run: uv run pytest -v tests/unit/test_gateway_root_page.py tests/unit/test_dashboard_build.py
+
     - name: Run end-to-end tests
       working-directory: web
-      run: npm run e2e
+      run: npx playwright test

@@ -52,7 +52,7 @@ def test_favicon_is_served(tmp_path: Path) -> None:
     assert response.headers["cache-control"] == "public, max-age=86400"
 
 
-@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built (run: npm --prefix web run build)")
+@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built (run: make dashboard)")
 def test_dashboard_is_served_at_root(tmp_path: Path) -> None:
     app = create_app(_config(tmp_path, "gateway-dashboard-test.db"))
 
@@ -65,7 +65,7 @@ def test_dashboard_is_served_at_root(tmp_path: Path) -> None:
     assert "Otari Dashboard" in response.text
 
 
-@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built (run: npm --prefix web run build)")
+@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built (run: make dashboard)")
 def test_dashboard_assets_are_mounted_and_cacheable(tmp_path: Path) -> None:
     app = create_app(_config(tmp_path, "gateway-dashboard-assets-test.db"))
 
@@ -80,7 +80,7 @@ def test_dashboard_assets_are_mounted_and_cacheable(tmp_path: Path) -> None:
     assert "no-store" not in asset_response.headers.get("cache-control", "")
 
 
-@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built (run: npm --prefix web run build)")
+@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built (run: make dashboard)")
 def test_pwa_manifest_and_icons_are_served(tmp_path: Path) -> None:
     """Installing the dashboard to a phone home screen needs these to be reachable."""
     app = create_app(_config(tmp_path, "gateway-pwa-test.db"))

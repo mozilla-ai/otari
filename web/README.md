@@ -49,11 +49,22 @@ npm run build
 ```
 
 `npm run build` writes the production bundle to `../src/gateway/static/dashboard`
-(configured in `vite.config.ts`). That directory is committed to the repository
-so the Python package and Docker image ship the dashboard without a Node build
-step. After changing anything under `web/src`, rebuild and commit the updated
-bundle. CI (`.github/workflows/otari-dashboard.yml`) fails if the committed
-bundle is stale.
+(configured in `vite.config.ts`). That directory is gitignored, not committed:
+Vite content-hashes every asset filename, so a committed bundle made any two
+branches touching `web/src` conflict on every file. There is nothing to commit
+after a rebuild.
+
+Who builds it instead:
+
+- The Docker image builds it in a `node:22-slim` stage (see `Dockerfile`), so a
+  container ships the dashboard with no action from you.
+- From a source checkout, run `make dashboard` (repo root) once. Without a built
+  bundle the gateway serves the get-started tutorial at `/` instead.
+- A wheel ships the dashboard only if the bundle was built before
+  `uv build`; `make dashboard` first if you need one that does.
+
+CI (`.github/workflows/otari-dashboard.yml`) type-checks, tests, and builds on
+every change under `web/`.
 
 ## How it is served
 

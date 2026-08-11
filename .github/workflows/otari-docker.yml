@@ -7,6 +7,11 @@ on:
     paths:
       - 'src/gateway/**'
       - 'alembic/**'
+      # The image builds the dashboard bundle in its web stage rather than
+      # shipping a committed one, so these are image inputs too. docs/dashboard.md
+      # is bundled into the app (web/src/pages/DocsPage.tsx).
+      - 'web/**'
+      - 'docs/dashboard.md'
       - 'Dockerfile'
       - 'docker-compose*.yml'
       - 'config.example.yml'

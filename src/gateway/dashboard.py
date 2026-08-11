@@ -1,10 +1,12 @@
 """Locate the built admin dashboard bundle.
 
 The dashboard is a React + HeroUI single-page app that lives in ``web/`` and is
-built (``npm --prefix web run build``) into ``gateway/static/dashboard`` so it
-ships inside the Python package. The gateway serves it at ``/`` in standalone
-mode; if the bundle is missing (e.g. a source checkout that has not run the
-build) the caller falls back to the root tutorial page.
+built (``make dashboard``) into ``gateway/static/dashboard`` so it ships inside
+the Python package. The built bundle is gitignored rather than committed, so a
+missing one is expected, not a defect: the Docker image builds it in a Node
+stage, while a source checkout or a wheel built without that step has none. The
+gateway serves it at ``/`` in standalone mode and falls back to the root tutorial
+page when it is absent.
 """
 
 import hashlib
