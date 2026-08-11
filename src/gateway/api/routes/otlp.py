@@ -440,6 +440,11 @@ async def receive_logs(
     parsed = _parse(body, content_type, ExportLogsServiceRequest())
     assert isinstance(parsed, ExportLogsServiceRequest)
 
+    capture_telemetry = (
+        api_key.capture_agent_telemetry
+        if api_key.capture_agent_telemetry is not None
+        else config.capture_agent_telemetry
+    )
     pairs: list[tuple[str, ExternalUsageEvent]] = []
     telemetry: list[TelemetryRecord] = []
     for resource_logs in parsed.resource_logs:
@@ -455,7 +460,7 @@ async def receive_logs(
                 )
                 if mapped is not None:
                     pairs.append(mapped)
-                if timestamp is not None:
+                if timestamp is not None and capture_telemetry:
                     behavioral = map_behavioral_event(
                         str(attrs.get("event.name", "")),
                         attrs,

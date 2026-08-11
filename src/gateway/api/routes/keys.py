@@ -47,6 +47,13 @@ class CreateKeyRequest(BaseModel):
         "null (default) inherits it, true always rejects a request naming a different 'user', "
         "false always accepts it. Spend binds to this key's own user either way.",
     )
+    capture_agent_telemetry: bool | None = Field(
+        default=None,
+        description="Per-key override of the deployment-wide capture_agent_telemetry setting: "
+        "null (default) inherits it, true always stores behavioral events (tool_result, "
+        "tool_decision, user_prompt, api_error) from POST /v1/logs, false always discards them. "
+        "Usage capture and billing are unaffected either way.",
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
 
@@ -66,6 +73,7 @@ class CreateKeyResponse(BaseModel):
     allowed_models: list[str] | None
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
+    capture_agent_telemetry: bool | None
     metadata: dict[str, Any]
 
 
@@ -85,6 +93,7 @@ class KeyInfo(BaseModel):
     allowed_models: list[str] | None
     exclude_from_budget: bool
     reject_user_mismatch: bool | None
+    capture_agent_telemetry: bool | None
     metadata: dict[str, Any]
 
     @classmethod
@@ -101,6 +110,9 @@ class KeyInfo(BaseModel):
             allowed_models=list(key.allowed_models) if key.allowed_models is not None else None,
             exclude_from_budget=bool(key.exclude_from_budget),
             reject_user_mismatch=None if key.reject_user_mismatch is None else bool(key.reject_user_mismatch),
+            capture_agent_telemetry=(
+                None if key.capture_agent_telemetry is None else bool(key.capture_agent_telemetry)
+            ),
             metadata=dict(key.metadata_) if key.metadata_ else {},
         )
 
@@ -116,6 +128,10 @@ class UpdateKeyRequest(BaseModel):
     # unchanged, null = clear to inheriting the deployment setting, true/false =
     # pin this key strict/lenient.
     reject_user_mismatch: bool | None = None
+    # Tri-state via model_fields_set, same idiom: absent = unchanged, null =
+    # clear to inheriting the deployment setting, true/false = pin this key's
+    # behavioral-capture on/off.
+    capture_agent_telemetry: bool | None = None
     # Tri-state via model_fields_set: absent = unchanged, null = clear to
     # unrestricted, [] = deny all, list = restrict. A plain default cannot tell
     # "absent" from "explicit null", so the handler checks model_fields_set.
@@ -184,6 +200,7 @@ async def create_key(
         allowed_models=allowed_models,
         exclude_from_budget=request.exclude_from_budget,
         reject_user_mismatch=request.reject_user_mismatch,
+        capture_agent_telemetry=request.capture_agent_telemetry,
         metadata_=request.metadata,
     )
 
@@ -272,6 +289,8 @@ async def update_key(
         key.exclude_from_budget = request.exclude_from_budget
     if "reject_user_mismatch" in request.model_fields_set:
         key.reject_user_mismatch = request.reject_user_mismatch
+    if "capture_agent_telemetry" in request.model_fields_set:
+        key.capture_agent_telemetry = request.capture_agent_telemetry
     # Tri-state: only touch the allow-list when the field was supplied. A supplied
     # null clears to unrestricted; [] denies all; a list restricts.
     if "allowed_models" in request.model_fields_set:

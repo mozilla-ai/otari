@@ -441,6 +441,16 @@ class GatewayConfig(BaseSettings):
             "master key may always bill an arbitrary user regardless of this setting."
         ),
     )
+    capture_agent_telemetry: bool = Field(
+        default=True,
+        description=(
+            "When True (default), a behavioral log event (tool_result, tool_decision, user_prompt, "
+            "api_error) received at POST /v1/logs is stored as an agent_telemetry row. When False, "
+            "those events are discarded before storage; usage capture and billing are unaffected "
+            "either way. This is the deployment-wide default: an individual key can override it in "
+            "either direction with its own capture_agent_telemetry (null inherits this setting)."
+        ),
+    )
     budget_estimate_default_output_tokens: int = Field(
         default=1024,
         ge=0,

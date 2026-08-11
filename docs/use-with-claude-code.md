@@ -124,6 +124,19 @@ per model call carrying token counts, the model, and a request id, but no prompt
 response content. Otari accepts those directly at `POST /v1/logs`, so no separate
 collector is required.
 
+The same logs export also carries behavioral events (`tool_result`,
+`tool_decision`, `user_prompt`, `api_error`), and Otari stores a content-free
+projection of each as an `agent_telemetry` row: tool name, decision
+(accept/reject), success, duration, HTTP status code, and prompt length (a
+count, not the prompt text itself); no prompt, tool input/output, or response
+content is ever persisted. This capture is on by default and can be turned off
+per key or for the whole deployment (`capture_agent_telemetry` on
+`POST /v1/keys` / `PATCH /v1/keys/{id}`, and the deployment-wide
+`capture_agent_telemetry` config setting); usage capture and billing are
+unaffected either way. Previously captured rows can be removed with
+`DELETE /v1/agent-telemetry` (master-key only, by explicit `ids` or a
+`user_id`/`name`/date-range filter).
+
 > **Route or export, not both.** Telemetry import is for sessions that do NOT proxy
 > through Otari. If a session sets `ANTHROPIC_BASE_URL` to Otari and also exports
 > telemetry to it, every call lands twice: once as `source = gateway` (enforced,
