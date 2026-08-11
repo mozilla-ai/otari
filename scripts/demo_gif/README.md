@@ -21,8 +21,9 @@ result to `assets/otari-demo.gif`.
 - Web deps installed: `(cd web && npm ci)` (Playwright resolves from
   `web/node_modules`).
 - A built dashboard bundle in `src/gateway/static/dashboard` (gitignored, so a
-  fresh clone has none): `make dashboard`. Rebuild after any `web/src` change,
-  otherwise the recording shows the previous build.
+  fresh clone has none): `make dashboard`. Rebuild after any change under
+  `web/src` or to `docs/dashboard.md` (bundled into the app), otherwise the
+  recording shows the previous build.
 - On arm64 Linux, `record.sh` sets the Playwright platform override automatically; on x86_64 it leaves Playwright's native detection and host checks in place.
 
 ## Files
