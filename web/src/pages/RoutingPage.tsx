@@ -105,10 +105,11 @@ function isEditableInForm(spec: PolicySpec): boolean {
     // controls would silently rewrite it as a backend the operator did not choose.
     if (entry.router !== undefined) {
       if ((entry.candidates?.length ?? 0) === 0) return false;
-      if (entry.router === KNN_BACKEND) return true;
+      const backend = normalizedBackend(entry.router);
+      if (backend === KNN_BACKEND) return true;
       // A weighted entry without weights cannot be saved back (the API refuses it),
       // so the form would have to invent a split. Read-only says so instead.
-      return entry.router === WEIGHTED_BACKEND && Object.keys(entry.weights ?? {}).length > 0;
+      return backend === WEIGHTED_BACKEND && Object.keys(entry.weights ?? {}).length > 0;
     }
     const when = entry.when;
     if (when === undefined || entry.target === undefined) return false;
@@ -147,9 +148,19 @@ function initialSafeIndex(spec: PolicySpec): number {
   return index === -1 ? 0 : index;
 }
 
+/** A backend name as the server reads it.
+ *
+ *  The resolver matches on `name.strip().lower()`, so `" KNN "` selects the learned
+ *  router. Comparing the raw string here would show a policy the gateway routes
+ *  perfectly well as an unrecognized backend, read-only and mislabelled.
+ */
+function normalizedBackend(name: string | undefined): string | undefined {
+  return name?.trim().toLowerCase();
+}
+
 /** The router backend a policy names, or undefined for a policy with no router. */
 function routerBackendOf(spec: PolicySpec): string | undefined {
-  return spec.select.find((entry) => entry.router !== undefined)?.router;
+  return normalizedBackend(spec.select.find((entry) => entry.router !== undefined)?.router);
 }
 
 /** What to call the backend that decides, for a chip or a one-line summary.
@@ -358,14 +369,22 @@ function PolicyForm({
     existing && routerBackendOf(existing.spec) === WEIGHTED_BACKEND ? WEIGHTED_BACKEND : KNN_BACKEND,
   );
   // Parallel to `candidates`, so a weight follows its model when one is removed.
-  const [weights, setWeights] = useState<number[]>(() => {
+  // Held as the text the operator typed rather than as a number: re-rendering a
+  // parsed number swallows a half-typed decimal ("7." parses to 7 and renders back
+  // as "7") and turns a cleared field into a silent 0. Parsed once, below.
+  const [weights, setWeights] = useState<string[]>(() => {
     if (existing === null) return [];
     const declared = weightsOf(existing.spec);
-    return initialPool(existing.spec).map((selector) => declared[selector] ?? 0);
+    return initialPool(existing.spec).map((selector) => String(declared[selector] ?? 0));
   });
   const routed = candidates.length > 0;
   const weighted = routed && backend === WEIGHTED_BACKEND;
-  const shares = sharesOf(weights);
+  // An empty field parses to NaN rather than 0, so a share the operator cleared is
+  // unfinished rather than a drain they did not ask for. "Infinity" and a negative
+  // are rejected here too, matching what the API refuses.
+  const weightValues = weights.map((text) => (text.trim() === "" ? Number.NaN : Number(text)));
+  const weightsWellFormed = weightValues.every((value) => Number.isFinite(value) && value >= 0);
+  const shares = sharesOf(weightValues.map((value) => (Number.isFinite(value) ? Math.max(0, value) : 0)));
   // With a router, the fallthrough is the marked model; without one it is the single
   // "Serves" field.
   const effectiveTarget = routed ? (candidates[safeIndex] ?? "") : target;
@@ -389,7 +408,8 @@ function PolicyForm({
       effectiveTarget.trim() !== "");
   // An all-zero split would select nothing and the policy would always serve its
   // default, so the API refuses it. Caught here so the form cannot author it.
-  const splitReady = !weighted || weights.some((weight) => weight > 0);
+  const splitReady =
+    !weighted || (weightsWellFormed && weightValues.some((value) => value > 0));
   // The server caps the compiled plan at MAX_CANDIDATES, counting the routed pool
   // plus the failure chain. Enforced here too so the form cannot author a policy it
   // then fails to save: a rule the UI knows about should not arrive as a 400.
@@ -431,7 +451,10 @@ function PolicyForm({
                 ...(weighted
                   ? {
                       weights: Object.fromEntries(
-                        candidates.map((entry, index) => [entry.trim(), weights[index] ?? 0]),
+                        candidates.map((entry, index) => {
+                          const value = weightValues[index] ?? 0;
+                          return [entry.trim(), Number.isFinite(value) ? Math.max(0, value) : 0];
+                        }),
                       ),
                     }
                   : {}),
@@ -443,7 +466,7 @@ function PolicyForm({
       ...(chain.length > 0 ? { on_failure: chain.map((entry) => entry.trim()) } : {}),
       ...(guardrails.length > 0 ? { guardrails } : {}),
     }),
-    [conditions, candidates, routed, backend, weighted, weights, effectiveTarget, chain, guardrails],
+    [conditions, candidates, routed, backend, weighted, weightValues, effectiveTarget, chain, guardrails],
   );
 
   // An alias has exactly one target, so growing one a chain, a condition, or a
@@ -622,21 +645,20 @@ function PolicyForm({
                     <div className="flex items-end gap-2">
                       <Field
                         label="Share"
-                        value={String(weights[index] ?? 0)}
+                        value={weights[index] ?? ""}
                         onChange={(value) =>
-                          setWeights((prev) =>
-                            prev.map((weight, i) =>
-                              i === index ? Math.max(0, Number(value) || 0) : weight,
-                            ),
-                          )
+                          setWeights((prev) => prev.map((weight, i) => (i === index ? value : weight)))
                         }
                         // The percentage, not the number they typed: relative weights
                         // are easy to write and hard to read, and this is the line
                         // that says a zero-weight model is drained rather than gone.
                         description={
-                          (weights[index] ?? 0) > 0
-                            ? `${Math.round(shares[index] ?? 0)}% of requests`
-                            : "No traffic; still tried if another fails"
+                          !Number.isFinite(weightValues[index] ?? Number.NaN) ||
+                          (weightValues[index] ?? 0) < 0
+                            ? "A number, zero or more"
+                            : (weightValues[index] ?? 0) > 0
+                              ? `${Math.round(shares[index] ?? 0)}% of requests`
+                              : "No weighted traffic; still tried if another fails"
                         }
                       />
                     </div>
@@ -694,7 +716,11 @@ function PolicyForm({
                     : "A pool that repeats a model is refused."}
                 </p>
               ) : null}
-              {weighted && !splitReady ? (
+              {weighted && !weightsWellFormed ? (
+                <p className="text-xs text-red-700">
+                  Every share is a number of zero or more. Use 0 to drain a model without removing it.
+                </p>
+              ) : weighted && !splitReady ? (
                 <p className="text-xs text-red-700">
                   Give at least one model a share above zero, or this policy can never send traffic anywhere
                   but its marked model.
@@ -713,7 +739,7 @@ function PolicyForm({
                     setCandidates((prev) => [...prev, ""]);
                     // Zero, not an invented share: adding a provider must not move
                     // traffic onto it before the operator says how much.
-                    setWeights((prev) => [...prev, 0]);
+                    setWeights((prev) => [...prev, "0"]);
                   }}
                 >
                   + Another model
@@ -892,7 +918,7 @@ function PolicyForm({
                 onClick={() => {
                   setBackend(WEIGHTED_BACKEND);
                   setCandidates([target.trim() || "", ""]);
-                  setWeights([50, 50]);
+                  setWeights(["50", "50"]);
                   setSafeIndex(0);
                 }}
               >

@@ -49,7 +49,7 @@ from gateway.models.entities import RouterPreference, RoutingMemory
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.policy_store import effective_policies
 from gateway.services.provider_kwargs import resolve_provider_selector
-from gateway.services.routing import KNN_BACKEND, backend_learns, get_router_backend
+from gateway.services.routing import KNN_BACKEND, backend_pool_is_teachable, get_router_backend
 from gateway.services.routing.knn import KnnRoutingMemory
 
 router = APIRouter(prefix="/v1/routing", tags=["routing"])
@@ -256,7 +256,7 @@ def _validated_scores(config: GatewayConfig, user_id: str, examples: list[Scored
     """
     known: dict[str, str] = {}
     for spec in effective_policies(config, user_id).values():
-        if not backend_learns(spec.router_backend):
+        if not backend_pool_is_teachable(spec.router_backend):
             continue
         for selector in [*spec.router_candidates, spec.default_target]:
             canonical = _canonical(config, selector, user_id)
@@ -312,9 +312,8 @@ def _learned_policies(config: GatewayConfig, user_id: str | None) -> list[Learne
     policies: list[LearnedPolicy] = []
     for name, spec in effective_policies(config, user_id).items():
         backend = spec.router_backend
-        if not backend_learns(backend):
+        if not backend_pool_is_teachable(backend) or backend is None:
             continue
-        assert backend is not None  # backend_learns() is False for None
         policies.append(
             LearnedPolicy(
                 name=name,

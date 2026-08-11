@@ -21,6 +21,7 @@ import random
 from collections import Counter
 
 import pytest
+from fastapi import HTTPException
 from pydantic import ValidationError
 
 from gateway.core.config import GatewayConfig
@@ -29,7 +30,7 @@ from gateway.services.routing.backends import (
     WEIGHTED_BACKEND,
     RoutingContext,
     backend_is_weighted,
-    backend_learns,
+    backend_pool_is_teachable,
     backend_requires_pricing,
     get_router_backend,
 )
@@ -310,12 +311,43 @@ def test_a_weighted_policy_is_not_a_consumer_of_routing_memory() -> None:
             policies={"balanced": _spec({"openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30})}
         ),
     )
-    assert not backend_learns(WEIGHTED_BACKEND)
-    assert backend_learns(" KNN ")
+    assert not backend_pool_is_teachable(WEIGHTED_BACKEND)
+    assert not backend_pool_is_teachable(" Weighted ")
     assert _learned_policies(weighted_config, "alice") == []
     assert _validated_scores(
         weighted_config, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-5-mini": 1.0})]
     ) == {"openai:gpt-5-mini": "openai:gpt-5-mini"}
+
+
+def test_a_noop_placeholder_pool_is_still_teachable() -> None:
+    # `noop` exists to hold a policy's shape while its pool is being taught, so its
+    # candidates are the very ones an operator is seeding. Excluding it alongside
+    # `weighted` would drop the typo guard and hide the pool's warmth for exactly
+    # the workflow the backend was added for.
+    from gateway.api.routes.routing_memory import ScoredExample, _learned_policies, _validated_scores
+
+    placeholder = PolicySpec.model_validate(
+        {
+            "select": [
+                {"router": "noop", "candidates": ["openai:gpt-5", "openai:gpt-5-mini"]},
+                {"default": "openai:gpt-5"},
+            ]
+        }
+    )
+    cfg = GatewayConfig(
+        master_key="test-master-key",
+        model_discovery=False,
+        providers={"openai": {"api_key": "sk-openai"}},
+        routing=RoutingConfig(policies={"warming": placeholder}),
+    )
+    assert backend_pool_is_teachable("noop")
+    assert backend_pool_is_teachable("some-future-backend")
+    assert [policy.name for policy in _learned_policies(cfg, "alice")] == ["warming"]
+    assert _validated_scores(
+        cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-5-mini": 1.0})]
+    ) == {"openai:gpt-5-mini": "openai:gpt-5-mini"}
+    with pytest.raises(HTTPException, match="do not name a model"):
+        _validated_scores(cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-4o": 1.0})])
 
 
 def test_the_backend_is_registered_and_needs_no_pricing(config: GatewayConfig) -> None:

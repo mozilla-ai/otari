@@ -41,7 +41,7 @@ __all__ = [
     "RoutingContext",
     "RoutingDecision",
     "backend_is_weighted",
-    "backend_learns",
+    "backend_pool_is_teachable",
     "backend_requires_pricing",
     "clear_router_backend_cache",
     "get_router_backend",
@@ -168,15 +168,22 @@ def backend_is_weighted(name: str | None) -> bool:
     return name is not None and name.strip().lower() == WEIGHTED_BACKEND
 
 
-def backend_learns(name: str | None) -> bool:
-    """Whether this backend decides from taught examples, so routing memory applies.
+def backend_pool_is_teachable(name: str | None) -> bool:
+    """Whether this policy's candidates are a pool routing memory is taught about.
 
-    Only the kNN router does. The weighted router's split is written in the policy
-    document, so a weighted policy has nothing to teach and nothing to warm: it must
-    not be reported as a consumer of routing memory, and it must not gate which score
-    keys ``POST /v1/routing/preferences/rank`` accepts for a user.
+    True for ``knn``, which reads the examples, and deliberately also for ``noop``
+    and for a name this build does not know. ``noop`` exists to hold a policy's
+    shape *while its pool is being taught*, so its candidates are the very ones an
+    operator is seeding; an unknown name is most likely a backend from a newer
+    build, and treating its pool as teachable keeps the typo guard on rather than
+    silently widening what ``POST /v1/routing/preferences/rank`` accepts.
+
+    False only for ``weighted``, whose split is written in the policy document. It
+    reads no examples and has no warmth to report, so counting it would report a
+    pool it never consults and would let its candidates decide which score keys a
+    user may teach.
     """
-    return name is not None and name.strip().lower() == KNN_BACKEND
+    return name is not None and not backend_is_weighted(name)
 
 
 def backend_requires_pricing(name: str | None) -> bool:

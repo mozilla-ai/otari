@@ -152,11 +152,13 @@ without being deleted:
 ```yaml
           weights:
             openai:gpt-5: 100
-            anthropic:claude-sonnet-4-5: 0    # takes no traffic, still catches a failure
+            anthropic:claude-sonnet-4-5: 0    # no weighted traffic, still catches a failure
 ```
 
 A zero-weight candidate stays in the plan at its tail, so it backs up a failure
-while serving none of the traffic. Set both sides to zero and the policy is refused
+while receiving none of the weighted traffic. It is never drawn, which is not quite
+the same as never serving: if it is also the policy's `default` target, it still
+serves a caller who sends `Otari-Router: off`. Set both sides to zero and the policy is refused
 at startup: it could never select anything. An even split is written out
 (`{a: 1, b: 1}`) rather than implied by omitting the map, because omitting a
 *candidate* already means zero and one key cannot mean both.

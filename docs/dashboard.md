@@ -309,8 +309,9 @@ hand.
   by weight**: name the models and give each a **share**. Shares are relative, so 70
   and 30 mean the same as 7 and 3, and the form shows what each comes to as a
   percentage. A share of zero drains a provider without removing it: it takes no
-  traffic and still catches a failure. The marked model here is what serves a caller
-  who sends `Otari-Router: off`. Those rows are tagged `Weighted` and summarised by
+  weighted traffic and still catches a failure. The marked model here is what serves a
+  caller who sends `Otari-Router: off`, which is the one way a zero-share model still
+  serves. Those rows are tagged `Weighted` and summarised by
   their split. See [weighted routing](routing.md#load-balance-across-providers-weighted-routing).
 - **Examples**, on a learned policy's row: opens inline under that row and answers the
   question the table cannot. A router chooses nothing until it has scored examples, and
