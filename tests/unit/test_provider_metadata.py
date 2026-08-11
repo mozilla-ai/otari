@@ -4,7 +4,12 @@ These read only the bundled any-llm and genai-prices datasets, so they need no
 database or network.
 """
 
+import json
+import os
+import subprocess
 import sys
+import textwrap
+from pathlib import Path
 
 import pytest
 from any_llm import AnyLLM
@@ -112,11 +117,50 @@ def test_provider_summaries_import_no_provider_sdks(monkeypatch: pytest.MonkeyPa
 
 
 def test_provider_summaries_do_not_import_provider_submodules() -> None:
-    """The summary path leaves any-llm's per-provider submodules unimported."""
-    before = {m for m in sys.modules if m.startswith("any_llm.providers.") and m.count(".") == 2}
-    list_known_provider_summaries()
-    after = {m for m in sys.modules if m.startswith("any_llm.providers.") and m.count(".") == 2}
-    assert after == before
+    """The summary path leaves any-llm's per-provider submodules unimported.
+
+    Measured in a fresh interpreter rather than in this one. Imports are cached
+    process-wide, so an in-process check really asks "did some earlier test in this
+    pytest worker already trigger the registry import", and under ``-n auto`` that
+    is scheduling luck: the same assertion flaked on main at 4600ae4b while passing
+    on the commit before it. Warming the import first and re-measuring would be
+    worse than useless, since the second call cannot import anything and the
+    assertion would then hold no matter what the picker path started doing.
+
+    A subprocess also tests the case that actually matters. Picker latency is paid
+    on a cold gateway process, which is the only place these imports are timed.
+    """
+    program = textwrap.dedent(
+        """
+        import json
+        import sys
+
+        from gateway.services.provider_metadata_service import list_known_provider_summaries
+
+        offered = len(list_known_provider_summaries())
+        submodules = sorted(m for m in sys.modules if m.startswith("any_llm.providers.") and m.count(".") == 2)
+        print(json.dumps({"offered": offered, "submodules": submodules}))
+        """
+    )
+    src = Path(__file__).resolve().parents[2] / "src"
+    completed = subprocess.run(
+        [sys.executable, "-c", program],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "PYTHONPATH": str(src)},
+        timeout=120,
+    )
+    measured = json.loads(completed.stdout)
+
+    # any-llm's registry module imports its openai base class, which every
+    # openai-compatible provider subclasses, so those two are an unavoidable floor.
+    # Anything past them is a provider SDK the picker dragged in, which is the lag
+    # the lazy split removed.
+    assert set(measured["submodules"]) <= {"any_llm.providers.registry", "any_llm.providers.openai"}
+    # Stops the assertion above from passing trivially: the picker offers far more
+    # providers than it imports, which is the property that keeps it instant.
+    assert measured["offered"] > 20
 
 
 def test_provider_detail_openai() -> None:
