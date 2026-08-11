@@ -15,9 +15,12 @@ simplest correct design and not a placeholder for a smarter one:
   decision store that conversation stickiness would (see
   ``docs/routing-scaling.md``). The cost is that the ratio converges
   statistically: a ten-request burst is not necessarily seven and three.
-* **No pricing needed.** Unlike the kNN router, nothing here scores cost, so a
-  candidate with no pricing row still takes its share. Weight is the operator's
-  statement about capacity, not a number the gateway derives.
+* **No pricing needed by the router.** Unlike the kNN router, nothing here scores
+  cost, so an unpriced candidate is neither refused at policy-write time nor a
+  reason to decline the draw. Weight is the operator's statement about capacity,
+  not a number the gateway derives. The gateway's own ``require_pricing`` billing
+  gate is separate and unchanged: it still 402s a metered caller drawn onto an
+  unpriced candidate, exactly as it would for that model named directly.
 * **The whole ordering is the plan.** The draw continues without replacement over
   the candidates that were not picked, so a provider that fails before it has
   responded hands the request to another weighted provider (itself chosen by

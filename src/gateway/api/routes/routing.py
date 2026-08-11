@@ -157,9 +157,11 @@ class ExplainResponse(BaseModel):
         default_factory=dict,
         description=(
             "For a weighted policy, the percentage of traffic each candidate receives, normalized over "
-            "the candidates this caller may use. Empty for every other policy. A weighted split needs no "
-            "request state, so unlike a learned router's ranking it is knowable here: the plan above is "
-            "the real ordering by share, not the decline path."
+            "the candidates this caller may use. Empty for every other policy, and for a weighted policy "
+            "whose whole split this caller may not use: a split over no candidate is not a split, and each "
+            "filtered candidate is named in `dropped` instead. A weighted split needs no request state, so "
+            "unlike a learned router's ranking it is knowable here: the plan above is the real ordering by "
+            "share, not the decline path."
         ),
     )
 

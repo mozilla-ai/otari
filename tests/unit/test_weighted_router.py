@@ -439,6 +439,31 @@ def test_explain_keeps_a_filtered_candidate_in_the_dropped_list(config: GatewayC
     assert [(item.selector, item.reason) for item in plan.dropped] == [("openai:gpt-5", "not_allowed")]
 
 
+def test_explain_names_every_candidate_when_the_whole_split_is_filtered_out(
+    config: GatewayConfig,
+) -> None:
+    # The case an operator most needs explain for. With the split gone and only the
+    # failure chain usable, the plan is the chain, and the split has to appear in
+    # `dropped` rather than vanish: reporting the chain alone reads as a policy that
+    # never had a split.
+    spec = _spec(
+        {"openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30},
+        on_failure=["mistral:mistral-large-latest"],
+    )
+    allowlist = ["mistral:*"]
+    ordering, shares = explain_router_ordering(config, spec, allowlist=allowlist)
+    assert shares == []
+    assert ordering is not None
+    plan = compile_policy(config, "balanced", spec, allowlist=allowlist, router_ordering=ordering)
+    assert [f"{attempt.instance}:{attempt.model}" for attempt in plan.attempts] == [
+        "mistral:mistral-large-latest"
+    ]
+    assert [(item.selector, item.reason) for item in plan.dropped] == [
+        ("openai:gpt-5", "not_allowed"),
+        ("anthropic:claude-sonnet-4-5", "not_allowed"),
+    ]
+
+
 def test_explain_declines_for_a_router_that_needs_a_request(config: GatewayConfig) -> None:
     knn = PolicySpec.model_validate(
         {

@@ -139,7 +139,7 @@ providers:
 #   select      where the plan starts. Entries are tried in order and the first
 #               whose `when` matches wins; `default` is the fallthrough and must
 #               come last.
-#   on_failure  what is tried next after a retryable failure, in order.
+#   on_failure  what is tried next after a provider failure, in order.
 #
 # `when` conditions (all must match): budget_used_pct, budget_remaining_usd,
 # user_id, key_id. Comparisons are {gte|gt|lte|lt: <number>}. A budget condition

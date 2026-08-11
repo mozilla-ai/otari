@@ -140,8 +140,11 @@ a config change and never a client change.
 Weights are **normalized, not percentages**: `{70, 30}` and `{7, 3}` are the same
 split, so a ratio can be written as a ratio. What they express is capacity you are
 choosing to use, not anything the gateway derives, which is why (unlike the
-[learned router](#let-a-router-choose-learned-routing)) a weighted candidate needs
-no [pricing](configuration.md) row.
+[learned router](#let-a-router-choose-learned-routing)) the split itself reads no
+[pricing](configuration.md) row: an unpriced candidate is not refused at write
+time and does not make the router decline. The gateway's own billing gate is
+separate and still applies, so with `require_pricing` on (the default) a metered
+caller drawn onto an unpriced candidate gets a 402 like any other unpriced model.
 
 **A candidate left out of `weights` gets zero**, which is how a provider is drained
 without being deleted:
@@ -216,8 +219,10 @@ The `on_failure` entry is filtered by the same allow-list, so this caller has no
 fallback left either: a split that reads as three providers deep is one provider
 deep for them, which is the kind of thing this command exists to surface.
 
-`POST /v1/routing/policies/explain` returns the same numbers as `router_weights`,
-which is what the dashboard's Routing page renders.
+`POST /v1/routing/policies/explain` returns the same numbers as `router_weights`.
+The dashboard's Routing page shows a split too, but it is the declared one, read
+from the policy and not narrowed by any caller's allow-list, so this command is
+where a per-caller answer comes from.
 
 Standalone only, like every policy. The candidate cap counts the whole pool plus
 `on_failure`, so a three-provider split leaves room for two failover entries.
@@ -533,10 +538,10 @@ wire. See the [API reference](api-reference.md#routing-policies).
 
 ## Rules and limits
 
-- **Candidate cap: 5** (the selected candidate plus `on_failure`; for a learned
-  policy, the whole routed pool plus `on_failure`, because the walker cascades
-  through the ranking). A policy over the cap is refused rather than silently
-  truncated.
+- **Candidate cap: 5** (the selected candidate plus `on_failure`; for any policy
+  naming a router, learned or weighted, the whole routed pool plus `on_failure`,
+  because the walker cascades through the ordering). A policy over the cap is
+  refused rather than silently truncated.
 - **No chaining.** A target must name a real `instance:model` or
   `provider:model`, never another policy or alias.
 - **Names are checked at startup.** A policy name may not contain `:` or `/`, may

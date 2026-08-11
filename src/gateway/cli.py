@@ -283,6 +283,7 @@ def routing_explain(
     """
     from gateway.models.routing import PolicySpec
     from gateway.services.routing import BudgetState, NoEligibleCandidatesError, compile_policy
+    from gateway.services.routing.backends import backend_is_weighted
     from gateway.services.routing.decide import explain_router_ordering
 
     cfg = load_config(config)
@@ -348,11 +349,18 @@ def routing_explain(
         )
     for dropped in plan.dropped:
         click.echo(f"  x  {dropped.selector}    dropped: {dropped.detail}")
-    if weighted_shares:
+    # Keyed on the backend rather than on the shares: a weighted policy whose whole
+    # split is filtered out for this caller has no shares to print, and the decline
+    # text below is the learned router's vocabulary, which would misdescribe it.
+    if backend_is_weighted(spec.router_backend):
         click.echo(
             "  weighted: one candidate is drawn per request in proportion to its share, and a candidate "
             "that fails before responding falls to the next draw before on_failure. Shares are normalized "
             "over the candidates this caller may use, so they reflect the filtering above."
+            if weighted_shares
+            else "  weighted: no candidate in the split is usable by this caller, so the plan above is "
+            "whatever the failure chain leaves. Every candidate in the split is listed as dropped, with "
+            "the reason it went."
         )
     elif spec.router_backend is not None:
         # The plan above is the *decline* path, because a router needs a live

@@ -227,16 +227,18 @@ def explain_router_ordering(
     :attr:`CompiledPlan.dropped` with their reason, and that list is most of the
     point of ``explain``: a balanced policy that compiles down to one provider for
     this caller is exactly what an operator needs to find before an outage does.
+
+    That holds when *nothing* in the pool survives, which is the case the operator
+    most needs to see. The shares are empty, because a split over no candidate is
+    not a split, but the ordering still carries the declared pool so every filtered
+    candidate is named in ``dropped``. Returning nothing here instead would compile
+    the policy down to its ``on_failure`` chain with the whole split silently
+    missing from both lists.
     """
     if not backend_is_weighted(spec.router_backend):
         return None, []
     declared = spec.router_candidates
     usable = usable_candidates(config, declared, user_id=user_id, allowlist=allowlist)
-    if not usable:
-        # Nothing survived filtering. The compiler raises NoEligibleCandidatesError
-        # for that, with the per-candidate reasons, which is the better answer.
-        return None, []
-
     weights = spec.router_weights
     shares = declared_shares(weights, usable)
     displayed: list[WeightedShare] = []
@@ -255,7 +257,11 @@ def explain_router_ordering(
     ordering = RouterOrdering(
         selectors=explain_ordering(declared, weights),
         confidence=(displayed[0].share_pct / 100.0) if displayed else 0.0,
-        rationale=f"weighted split ({describe_split(usable, weights)})",
+        rationale=(
+            f"weighted split ({describe_split(usable, weights)})"
+            if usable
+            else "no candidate in the split is usable by this caller"
+        ),
     )
     return ordering, displayed
 
