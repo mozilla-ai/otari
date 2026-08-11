@@ -19,3 +19,14 @@ class ResizeObserverStub {
 if (!globalThis.ResizeObserver) {
   globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
 }
+
+// jsdom has no canvas 2D context, no toBlob, no object URLs, no ClipboardItem and
+// no document.fonts, so nothing in lib/shareImage.ts can run for real here. These
+// stubs let the share panel mount and its wiring be asserted; the claim that the
+// PNG itself is correct is only provable in Playwright (see web/e2e).
+if (typeof URL.createObjectURL !== "function") {
+  URL.createObjectURL = () => "blob:stub";
+}
+if (typeof URL.revokeObjectURL !== "function") {
+  URL.revokeObjectURL = () => undefined;
+}

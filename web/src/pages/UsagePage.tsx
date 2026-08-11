@@ -14,6 +14,7 @@ import type {
   UsageSummary,
 } from "@/api/types";
 import { ChartLegend, Sparkline, TrendChart, type SeriesDef, type StackedPoint } from "@/components/charts";
+import { ShareDialog } from "@/components/ShareDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { FilterChips, type FilterChip } from "@/components/FilterChips";
 import {
@@ -26,7 +27,8 @@ import {
   RefreshButton,
   StatCard,
 } from "@/components/ui";
-import { deltaFraction, formatPct, formatTokens, formatUsd } from "@/lib/format";
+import { deltaFraction, formatNumber, formatPct, formatTokens, formatUsd } from "@/lib/format";
+import { billedTokenTotal, cacheSums, formatLatency } from "@/lib/usageTotals";
 import {
   bucketForWindow,
   findPreset,
@@ -44,16 +46,6 @@ import {
 // (formatPct) and the period-over-period helpers (deltaFraction / DeltaHint) are
 // shared with the overview page from @/lib/format and @/components/ui. Only the
 // two formatters specific to this page stay local.
-function formatCount(value: number): string {
-  return value.toLocaleString();
-}
-
-function formatLatency(ms: number | null): string {
-  if (ms === null) return "—";
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  return `${(ms / 1000).toFixed(2)} s`;
-}
-
 function formatBucketLabel(iso: string, bucket: UsageBucket): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -129,7 +121,7 @@ const CAT_COLORS = [
 const OTHER_COLOR = "var(--otari-cat-other)";
 
 function metricFormatter(metric: ChartMetric): (value: number) => string {
-  return metric === "cost" ? formatUsd : metric === "tokens" ? formatTokens : formatCount;
+  return metric === "cost" ? formatUsd : metric === "tokens" ? formatTokens : formatNumber;
 }
 
 // ---------- breakdown table (tabbed by dimension) ----------
@@ -198,7 +190,7 @@ function BreakdownTable({
         );
       },
     },
-    { id: "requests", header: "Requests", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatCount(row.requests)}</span> },
+    { id: "requests", header: "Requests", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatNumber(row.requests)}</span> },
     { id: "tokens", header: "Tokens", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatTokens(row.tokens)}</span> },
     { id: "spend", header: "Spend", align: "end", cell: (row) => <span className="text-[var(--otari-ink)]">{formatUsd(row.cost)}</span> },
   ];
@@ -268,16 +260,16 @@ function ToolBreakdownTable({
         );
       },
     },
-    { id: "calls", header: "Calls", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatCount(row.calls)}</span> },
+    { id: "calls", header: "Calls", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatNumber(row.calls)}</span> },
     {
       id: "failed",
       header: "Failed",
       align: "end",
       cell: (row) => (
-        <span className={row.errors ? "text-red-700" : "text-[var(--otari-muted)]"}>{formatCount(row.errors)}</span>
+        <span className={row.errors ? "text-red-700" : "text-[var(--otari-muted)]"}>{formatNumber(row.errors)}</span>
       ),
     },
-    { id: "requests", header: "Requests", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatCount(row.requests)}</span> },
+    { id: "requests", header: "Requests", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatNumber(row.requests)}</span> },
     { id: "spend", header: "Spend", align: "end", cell: (row) => <span className="text-[var(--otari-ink)]">{formatUsd(row.cost)}</span> },
   ];
   return (
@@ -338,6 +330,10 @@ interface BreakdownDimensionDef {
 
 export function UsagePage() {
   const navigate = useNavigate();
+
+  // The share panel curates presentation only; the data it renders is whatever
+  // the filter row above it currently selects, so there is no scope state here.
+  const [shareOpen, setShareOpen] = useState(false);
 
   const [preset, setPreset] = useState<RangePreset>(DEFAULT_PRESET);
   // Anchored start of the rolling preset window, snapshotted so a re-render does
@@ -449,6 +445,16 @@ export function UsagePage() {
   const anyFilter =
     modelFilters.length > 0 || userFilters.length > 0 || apiKeyFilters.length > 0 || timeFiltered;
 
+  // Named on the share card's face. A card whose numbers came from a filtered
+  // window has to say so, or a reader takes the figure for the whole gateway.
+  const shareScopeSuffix = [
+    userFilters.length > 0 ? `${userFilters.length} user${userFilters.length > 1 ? "s" : ""}` : null,
+    apiKeyFilters.length > 0 ? `${apiKeyFilters.length} key${apiKeyFilters.length > 1 ? "s" : ""}` : null,
+    modelFilters.length > 0 ? `${modelFilters.length} model${modelFilters.length > 1 ? "s" : ""}` : null,
+  ]
+    .filter((part) => part !== null)
+    .join(", ");
+
   // Active entity filters as removable chips, one per picked value (time is driven
   // by the presets and the chart selection, so it is not a chip). The chip row is
   // also where a value is removed: it stays visible when the pickers are collapsed.
@@ -558,34 +564,12 @@ export function UsagePage() {
   // Billed token view: input (incl. cache) + output, with the raw provider total
   // as the fallback when the composition fields are absent (an older gateway
   // behind `vite dev`). Cache hit rate = reads / billed input.
-  const billedInput = totals?.billed_input_tokens;
-  const billedTotal =
-    totals === undefined
-      ? null
-      : billedInput !== undefined
-        ? billedInput + (totals.billed_output_tokens ?? totals.completion_tokens)
-        : totals.total_tokens;
-  const prevBilledTotal =
-    prevTotals === undefined
-      ? null
-      : prevTotals.billed_input_tokens !== undefined
-        ? prevTotals.billed_input_tokens + (prevTotals.billed_output_tokens ?? prevTotals.completion_tokens)
-        : prevTotals.total_tokens;
+  const billedTotal = billedTokenTotal(totals);
+  const prevBilledTotal = billedTokenTotal(prevTotals);
   // Cache sums from the series composition rather than the raw totals columns:
   // the raw sums follow each provider's reporting convention, while the series
   // is meter-normalized, and the tile's own sparkline reads the series. One
   // source keeps the headline, its trendline, and the hint in agreement.
-  const cacheSums = (points: UsageSeriesPoint[]) => {
-    let input = 0;
-    let read = 0;
-    let write = 0;
-    for (const p of points) {
-      input += p.input_tokens ?? 0;
-      read += p.cache_read_tokens ?? 0;
-      write += p.cache_write_tokens ?? 0;
-    }
-    return { input, read, write };
-  };
   const cache = cacheSums(series);
   const cacheHitRate = cache.input > 0 ? cache.read / cache.input : null;
   const prevCache = cacheSums(previousFilters !== null ? (previous.data?.series ?? []) : []);
@@ -833,7 +817,7 @@ export function UsagePage() {
                   <span className="text-[var(--otari-muted)]">
                     <DeltaHint fraction={costDelta} />
                     {totals.unpriced_requests
-                      ? `${costDelta !== null ? " · " : ""}${formatCount(totals.unpriced_requests)} unpriced`
+                      ? `${costDelta !== null ? " · " : ""}${formatNumber(totals.unpriced_requests)} unpriced`
                       : null}
                   </span>
                 ) : null
@@ -842,7 +826,7 @@ export function UsagePage() {
             />
             <StatCard
               label="Requests"
-              value={totals ? formatCount(totals.request_count) : "—"}
+              value={totals ? formatNumber(totals.request_count) : "—"}
               hint={
                 totals ? (
                   <span className="text-[var(--otari-muted)]">
@@ -903,7 +887,7 @@ export function UsagePage() {
                 ) : undefined
               }
             />
-            <StatCard label="Avg latency" value={totals ? formatLatency(totals.avg_latency_ms) : "—"} />
+            <StatCard label="Avg latency" value={(totals ? formatLatency(totals.avg_latency_ms) : null) ?? "—"} />
           </div>
 
           {/* The analytics chart: metric × group-by, brushable. */}
@@ -968,13 +952,57 @@ export function UsagePage() {
                   showTotal
                   onSelectRange={onChartSelect}
                 />
-                <figcaption className="text-xs text-[var(--otari-muted)]">
-                  {formatValue(peak)} peak · {chart.data.length} {bucket === "hour" ? "hours" : "days"} (times in UTC) ·
-                  drag across the chart to zoom
+                {/* Share sits in the chart's own bottom-right corner rather than
+                    among the page's global controls: it publishes this chart's
+                    window and filters, so it belongs on the artifact. In the
+                    caption row and not floating over the plot, because the plot
+                    area is TrendChart's drag-to-zoom target and a button there
+                    would swallow the drag. Only rendered inside this branch, so a
+                    range with no data offers no share affordance at all. */}
+                <figcaption className="flex items-start justify-between gap-3 text-xs text-[var(--otari-muted)]">
+                  <span>
+                    {formatValue(peak)} peak · {chart.data.length} {bucket === "hour" ? "hours" : "days"} (times in UTC)
+                    · drag across the chart to zoom
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    isIconOnly
+                    onPress={() => setShareOpen((open) => !open)}
+                    aria-label="Share usage as an image"
+                    aria-expanded={shareOpen}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="h-4 w-4"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M12 15V3" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M8 7l4-4 4 4" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </Button>
                 </figcaption>
               </figure>
             )}
           </div>
+
+          {shareOpen ? (
+            <ShareDialog
+              totals={totals}
+              series={series}
+              modelRows={data?.by_model ?? []}
+              windowLabel={formatWindowLabel(effectiveStart, effectiveEnd)}
+              scopeSuffix={shareScopeSuffix === "" ? "" : ` · ${shareScopeSuffix}`}
+              startIso={effectiveStart ?? ""}
+              endIso={effectiveEnd ?? ""}
+              isStale={summary.isFetching || summary.isPlaceholderData}
+              onClose={() => setShareOpen(false)}
+            />
+          ) : null}
 
           {/* Breakdowns: the answer to "where is my money going?". The primary
               table splits spend by who/what is billed (model, user); the

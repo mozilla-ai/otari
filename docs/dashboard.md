@@ -243,6 +243,20 @@ gateway.
   week" has an answer that is not one request at a time. MCP tools are excluded
   from that table: their names come from your own server, so they appear per
   request instead.
+  The share icon in the chart's bottom-right corner turns the view into an image
+  to post. It shares whatever the page is filtered to, so change the window or the
+  filters to change what the card says, and the card names its own scope so a
+  filtered figure cannot be read as the whole gateway. The dialog controls only how
+  it looks: which stat leads, a title, square or wide, dark or light, how many
+  model rows, and whether dollar amounts appear at all. Those choices are
+  remembered; the data scope is always taken fresh from the page. Model names are
+  shortened to the model itself, so a routed selector like
+  `otari.ai:fireworks/accounts/deepseek-v4-flash` reads as `deepseek-v4-flash`. A
+  spend figure is marked with an asterisk whenever the window holds requests with
+  no configured price, and a stat the window has no value for is left off rather
+  than published as a dash. Copy the image straight to the clipboard, or download
+  it; copying needs a secure (https) origin, so on a plain-HTTP LAN address only
+  the download is offered.
 
 ### Copying ids
 

@@ -149,4 +149,111 @@ test.describe("dashboard core flows", () => {
     await expect(chained).toBeVisible();
     await expect(chained).toContainText(/\+1 on failure/);
   });
+
+  // The share card is the one flow whose output cannot be checked in jsdom: it
+  // ends in a PNG, and jsdom has no canvas, no toBlob and no object URLs, so the
+  // unit tests can only assert the wiring around a mocked rasterizer. Two bugs got
+  // through that way, both fatal and both invisible to a green unit suite: drawing
+  // an SVG from a blob: URL taints the canvas so toBlob() refuses outright, and a
+  // long model list overflowed the fixed card frame so flex-shrink collapsed the
+  // title to zero height. This test exists to catch that class of failure.
+  test("shares the usage view as a real PNG", async ({ page }) => {
+    // This suite starts on an empty database (serve.sh wipes it), and no earlier
+    // flow creates usage, so the card would otherwise render its empty state.
+    // /v1/usage/external-events writes usage rows with no provider call.
+    const auth = { Authorization: `Bearer ${MASTER_KEY}`, "Content-Type": "application/json" };
+
+    // Ingestion rejects usage for a user that does not exist, and this test owns
+    // its own rather than depending on an earlier one in the serial order.
+    const owner = "share-e2e@example.com";
+    const created = await page.request.post("/v1/users", { headers: auth, data: { user_id: owner } });
+    // A re-run against a warm DB is fine; only a genuine failure should fail here.
+    expect([200, 201, 400, 409]).toContain(created.status());
+
+    const seeded = await page.request.post("/v1/usage/external-events", {
+      headers: auth,
+      data: {
+        source: "e2e-seed",
+        user_id: owner,
+        events: Array.from({ length: 12 }, (_, i) => ({
+          source_event_id: `share-seed-${i}`,
+          timestamp: new Date(Date.now() - (i + 1) * 3_600_000).toISOString(),
+          provider: i % 2 === 0 ? "openai" : "groq",
+          // A fully-qualified selector, so the card's name collapsing is exercised
+          // on the shape that motivated it.
+          model: i % 2 === 0 ? "gpt-4o" : "fireworks/accounts/llama-3.3-70b",
+          input_tokens: 1000 + i * 50,
+          output_tokens: 200 + i * 10,
+          duration_ms: 400 + i,
+        })),
+      },
+    });
+    expect(seeded.ok(), await seeded.text()).toBe(true);
+
+    await login(page);
+    await nav(page).getByRole("link", { name: "Usage" }).click();
+
+    // The affordance lives in the chart's own caption row and only exists when the
+    // range has data to share.
+    const share = page.getByRole("button", { name: "Share usage as an image" });
+    await expect(share).toBeVisible();
+    await share.click();
+
+    const dialog = page.getByRole("alertdialog");
+    await expect(dialog).toBeVisible();
+
+    // The preview is the PNG itself, so asserting it decoded is asserting the
+    // rasterizer produced a real image. naturalWidth stays 0 on a failed decode,
+    // which is exactly what the tainted-canvas bug produced.
+    const preview = dialog.getByAltText("Preview of the usage card that will be shared");
+    await expect(preview).toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => preview.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 20_000 })
+      .toBeGreaterThan(0);
+
+    // The card node itself, not the dialog: it is rendered off-screen as a sibling
+    // of the dialog's own section so it can be rasterized at full size.
+    const card = page.locator('[data-testid="share-card"]');
+    // The seeded selector is `fireworks/accounts/llama-3.3-70b`; the card prints
+    // only the final model type.
+    await expect(card).toContainText("llama-3.3-70b");
+    await expect(card).not.toContainText("fireworks/accounts");
+    // Hardcoded, never derived from the gateway's own host.
+    await expect(card).toContainText("otari.ai");
+
+    // Every row count must render in both shapes: the frame is fixed, so the rows
+    // divide a height budget, and a band collapsing to zero is the regression.
+    for (const shape of ["Square", "Wide"]) {
+      await dialog.getByRole("button", { name: shape }).click();
+      for (const rows of ["1", "9"]) {
+        await dialog.getByRole("button", { name: rows, exact: true }).click();
+        const bands = await page.evaluate(() => {
+          const card = document.querySelector('[data-testid="share-card"]') as HTMLElement;
+          return {
+            heights: Array.from(card.children).map((c) => Math.round(c.getBoundingClientRect().height)),
+            overflows: card.scrollHeight > Math.round(card.getBoundingClientRect().height),
+          };
+        });
+        expect(bands.heights.filter((h) => h === 0), `${shape}/${rows} collapsed a band`).toEqual([]);
+        expect(bands.overflows, `${shape}/${rows} overflowed the frame`).toBe(false);
+      }
+    }
+
+    // Download is the only terminal action that can be asserted: Playwright cannot
+    // read an image off the clipboard, so "Copy image" is deliberately untested.
+    await dialog.getByRole("button", { name: "Square" }).click();
+    const download = page.waitForEvent("download");
+    await dialog.getByRole("button", { name: "Download PNG" }).click();
+    const file = await download;
+    expect(file.suggestedFilename()).toMatch(/^otari-usage-\d{4}-\d{2}-\d{2}.*\.png$/);
+
+    const path = await file.path();
+    const { readFileSync } = await import("node:fs");
+    const bytes = readFileSync(path);
+    // PNG magic number, then the IHDR width/height, which prove the card was
+    // rasterized at its declared size rather than as an empty or clipped canvas.
+    expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    expect(bytes.readUInt32BE(16)).toBe(2160);
+    expect(bytes.readUInt32BE(20)).toBe(2160);
+  });
 });
