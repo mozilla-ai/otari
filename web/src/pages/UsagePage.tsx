@@ -266,7 +266,7 @@ function ToolBreakdownTable({
       header: "Failed",
       align: "end",
       cell: (row) => (
-        <span className={row.errors ? "text-red-700" : "text-[var(--otari-muted)]"}>{formatNumber(row.errors)}</span>
+        <span className={row.errors ? "text-[var(--otari-danger)]" : "text-[var(--otari-muted)]"}>{formatNumber(row.errors)}</span>
       ),
     },
     { id: "requests", header: "Requests", align: "end", cell: (row) => <span className="text-[var(--otari-muted)]">{formatNumber(row.requests)}</span> },
