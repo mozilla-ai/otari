@@ -177,7 +177,10 @@ async def run_passthrough(
         enforce_require_pricing: When True and ``config.require_pricing`` is
             set, reject unpriced models with 402. The check runs after the
             reservation (so its 404/403 rejections take precedence) and the
-            reservation is refunded before raising.
+            reservation is refunded before raising. Honored only on the
+            resolve-first path: a ``reserve_before_resolve`` route resolves
+            pricing after its reservation and skips this gate, so setting both
+            silently serves an unpriced model. No route sets both today.
         usage_tokens: Maps the provider result to ``(prompt, completion,
             total)`` token counts for the usage log. Defaults to ``(0, 0, 0)``.
         compute_cost: Maps the result and pricing to the final USD cost, or
@@ -318,6 +321,12 @@ async def run_passthrough(
                     db, resolved.instance, resolved.model, use_defaults=pricing_use_defaults
                 )
             except Exception:
+                # The realistic failure is a DB error, which leaves the session
+                # needing a rollback: without one the refund's own UPDATE raises
+                # PendingRollbackError, masking this exception and leaking the
+                # hold this block exists to release. ``reserve_budget`` already
+                # committed, so the rollback discards nothing of its own.
+                await db.rollback()
                 await refund_reservation(db, reservation)
                 raise
     else:
