@@ -1473,6 +1473,39 @@ describe("ActivityPage in-flight rows", () => {
     expect(within(row).getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("leaves an expanded row alone while it polls for in-flight requests", async () => {
+    // Regression: the poll runs every 2s and its result re-derived the live
+    // rows, so the table got a rebuilt rows array on a timer. DataTable rebuilt
+    // its detail host to match, which remounted the panel: an operator who
+    // expanded a row while a request was running watched it flash and slide
+    // open again every couple of seconds.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const { calls } = mockApi({
+        rows: [entry({ id: "settled-1" })],
+        inFlight: { requests: [inFlightRequest()], total: 1 },
+      });
+      renderPage(<ActivityPage />, "/activity?range=24h");
+
+      const row = (await screen.findByText("gpt-4o")).closest("tr")!;
+      await user.click(row);
+      const panel = screen.getByText("Request detail").closest(".otari-detail-row");
+      expect(panel).not.toBeNull();
+
+      const polls = () => calls.filter((c) => c.url.includes("/v1/usage/in-flight")).length;
+      const before = polls();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waitFor(() => expect(polls()).toBeGreaterThan(before + 1));
+
+      // Same node, still open: the panel was never torn down and rebuilt.
+      expect(screen.getByText("Request detail").closest(".otari-detail-row")).toBe(panel);
+      expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("adds no row while the gateway is idle", async () => {
     mockApi({ rows: [entry()], inFlight: { requests: [], total: 0 } });
     renderPage(<ActivityPage />, "/activity?range=24h");

@@ -180,27 +180,47 @@ export function DataTable<Row extends object>({
     [detailKey, renderDetail, rows, getRowKey],
   );
 
-  // Host <tr> management: find the target row by its data-key and insert the
+  // The portal host, built once per table and reused. Identity has to survive
+  // the effect below re-running, which it does on every row change: a fresh
+  // element each time re-points the portal, and React answers that by
+  // unmounting the panel and mounting it again into the new node. That replays
+  // the reveal animation and throws away whatever state the panel held. The
+  // activity page hands this component a rebuilt rows array every two seconds
+  // while it polls for in-flight requests, so an expanded row sat there
+  // flashing and re-opening on a timer for as long as a request was running.
+  const hostRef = useRef<{ row: HTMLTableRowElement; cell: HTMLTableCellElement } | null>(null);
+  const ensureHost = () => {
+    if (!hostRef.current) {
+      const row = document.createElement("tr");
+      row.className = "otari-detail-row";
+      // Out of the grid semantics: without this the host is an implicit ARIA row
+      // with the detail text as its name, confusing row counts and name lookups.
+      // Its content stays in the accessibility tree as ordinary elements.
+      row.setAttribute("role", "presentation");
+      const cell = document.createElement("td");
+      row.appendChild(cell);
+      hostRef.current = { row, cell };
+    }
+    return hostRef.current;
+  };
+
+  // Host <tr> management: find the target row by its data-key and position the
   // host right after it. react-aria commits its real rows in a second render
   // pass, so the target may not exist yet when this effect first runs (e.g.
   // mounting with a detailKey already set); the MutationObserver finishes the
-  // insertion as soon as the row appears. The deps re-run it (re-inserting at
-  // the right spot) whenever the row set, order, or target changes, and
-  // cleanup always removes the host, so a vanished target (filtered out, page
-  // flipped) leaves nothing behind.
+  // insertion as soon as the row appears. The deps re-run it (re-positioning
+  // the host) whenever the row set, order, or target changes, and the host is
+  // detached as soon as there is no target to sit under, so a vanished target
+  // (filtered out, page flipped) leaves nothing behind.
   useLayoutEffect(() => {
-    setDetailHost(null);
     const root = rootRef.current;
-    if (!root || detailKey == null || !detailRow) return;
-    const hostRow = document.createElement("tr");
-    hostRow.className = "otari-detail-row";
-    // Out of the grid semantics: without this the host is an implicit ARIA row
-    // with the detail text as its name, confusing row counts and name lookups.
-    // Its content stays in the accessibility tree as ordinary elements.
-    hostRow.setAttribute("role", "presentation");
-    const hostCell = document.createElement("td");
+    if (!root || detailKey == null || !detailRow) {
+      hostRef.current?.row.remove();
+      setDetailHost(null);
+      return;
+    }
+    const { row: hostRow, cell: hostCell } = ensureHost();
     hostCell.colSpan = columnCount;
-    hostRow.appendChild(hostCell);
 
     const tryInsert = (): boolean => {
       const target = root.querySelector(`tbody tr[data-key="${CSS.escape(detailKey)}"]`);
@@ -208,7 +228,10 @@ export function DataTable<Row extends object>({
       // The optimistic "opening" highlight has served its purpose once the
       // panel actually lands.
       for (const el of root.querySelectorAll(".otari-detail-opening")) el.classList.remove("otari-detail-opening");
-      target.after(hostRow);
+      // Only move it when it is not already there. Re-inserting an attached
+      // node detaches and re-attaches its subtree, which cancels and restarts
+      // the reveal animation running inside it.
+      if (target.nextSibling !== hostRow) target.after(hostRow);
       setDetailHost(hostCell);
       return true;
     };
@@ -223,11 +246,13 @@ export function DataTable<Row extends object>({
       });
       observer.observe(root, { childList: true, subtree: true });
     }
-    return () => {
-      observer?.disconnect();
-      hostRow.remove();
-    };
+    return () => observer?.disconnect();
   }, [detailKey, detailRow, columnCount, rows, sortDescriptor]);
+
+  // Detach on unmount. Deliberately not part of the effect above, whose cleanup
+  // runs on every dependency change: removing the host there is what made a
+  // re-render remount the panel.
+  useEffect(() => () => hostRef.current?.row.remove(), []);
 
   // Row activation with instant acknowledgment: the detail panel can only land
   // after react-aria's O(rows) interaction render (~1.6 ms/row), so the clicked

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Selection, SortDescriptor } from "react-aria-components";
 import { describe, expect, it, vi } from "vitest";
 
@@ -291,6 +291,33 @@ describe("DataTable", () => {
     rerender(<DataTable {...base({ detailKey: "b", renderDetail })} />);
     await waitFor(() => expect(detailFor("Bravo")).toContain("detail for Bravo"));
     expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(1);
+  });
+
+  it("keeps the open detail panel mounted when the rows array is rebuilt unchanged", async () => {
+    // Regression (activity pane): the in-flight poll rebuilds the rows array
+    // every 2s with the same row objects in it. Re-inserting the host on that
+    // re-render remounted the panel, replaying its open animation and resetting
+    // any state inside it, so an expanded row flashed and re-opened on a timer
+    // for as long as the operator watched a request run.
+    let mounts = 0;
+    function Panel({ row }: { row: Row }) {
+      useEffect(() => {
+        mounts += 1;
+      }, []);
+      return <div>{`detail for ${row.name}`}</div>;
+    }
+    const renderDetail = (r: Row) => <Panel row={r} />;
+
+    const { rerender } = render(<DataTable {...base({ detailKey: "b", renderDetail })} />);
+    await waitFor(() => expect(screen.getByText("detail for Bravo")).toBeInTheDocument());
+    const host = document.querySelector(".otari-detail-row");
+    expect(mounts).toBe(1);
+
+    // Same rows, new array: what a poll that changed nothing produces.
+    rerender(<DataTable {...base({ rows: [...ROWS], detailKey: "b", renderDetail })} />);
+    await waitFor(() => expect(screen.getByText("detail for Bravo")).toBeInTheDocument());
+    expect(document.querySelector(".otari-detail-row")).toBe(host);
+    expect(mounts).toBe(1);
   });
 
   it("still fires onRowAction on a row click while a selection is active", async () => {
