@@ -28,7 +28,7 @@ describe("ShareCard", () => {
   });
 
   it("shows an explicit empty state instead of a hole when there is no hero", () => {
-    renderCard({ hero: null });
+    renderCard({ hero: undefined });
     expect(screen.getByText("No usage in this range")).toBeInTheDocument();
   });
 
@@ -74,19 +74,19 @@ describe("ShareCard", () => {
 
   it("renders both ratios at their exact pixel sizes", () => {
     const { rerender } = renderCard();
-    expect(screen.getByTestId("share-card")).toHaveStyle({ width: `${CARD_SIZES.square.width}px` });
+    expect(screen.getByRole("img", { name: /Usage card/ })).toHaveStyle({ width: `${CARD_SIZES.square.width}px` });
     rerender(
       <ShareCard
         ratio="landscape"
         theme="light"
         title="t"
         scope="s"
-        hero={null}
+        hero={undefined}
         models={[]}
         stats={[]}
       />,
     );
-    expect(screen.getByTestId("share-card")).toHaveStyle({ height: `${CARD_SIZES.landscape.height}px` });
+    expect(screen.getByRole("img", { name: /Usage card/ })).toHaveStyle({ height: `${CARD_SIZES.landscape.height}px` });
   });
 
   it("never renders type below the feed-legibility floor", () => {
@@ -119,13 +119,13 @@ describe("ShareCard height budget", () => {
   // to zero height. Rows divide a budget instead.
   it.each([1, 3, 5, 9])("keeps rows legible and the hero present at %i rows", (n) => {
     const { container } = renderCard({ models: models(n), stats: [{ id: "requests", label: "Requests", value: "7" }] });
-    const rows = container.querySelectorAll<HTMLElement>('[style*="height"]');
-    const heights = Array.from(rows)
-      .map((el) => Number.parseFloat(el.style.height))
-      .filter((h) => !Number.isNaN(h) && h > 30);
-    // Every row keeps at least the 28px name plus breathing room.
-    for (const h of heights) {
-      expect(h).toBeGreaterThanOrEqual(34);
+    // Assert the count first. An earlier version filtered heights to `> 30`
+    // before asserting, which discarded exactly the collapsed row it was meant to
+    // catch and passed over an empty list.
+    const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-share-row]"));
+    expect(rows).toHaveLength(n);
+    for (const row of rows) {
+      expect(Number.parseFloat(row.style.height)).toBeGreaterThanOrEqual(34);
     }
     expect(screen.getByText("1,204")).toBeInTheDocument();
   });

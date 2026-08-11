@@ -15,6 +15,8 @@
 //     document, so a token reference renders as nothing. ShareCard is built to
 //     this constraint deliberately.
 
+const LOAD_TIMEOUT_MS = 15_000;
+
 export interface RasterizeOptions {
   width: number;
   height: number;
@@ -70,8 +72,18 @@ export async function rasterize(node: HTMLElement, options: RasterizeOptions): P
   image.width = width;
   image.height = height;
   await new Promise<void>((resolve, reject) => {
-    image.onload = () => resolve();
-    image.onerror = () => reject(new Error("The share card could not be rendered to an image."));
+    // Bounded: the promise otherwise settles only on load or error, and a decode
+    // that fires neither would leave the dialog busy with both actions disabled
+    // and nothing said. A timeout turns that into the normal error path.
+    const timer = setTimeout(() => reject(new Error("Rendering the share card timed out.")), LOAD_TIMEOUT_MS);
+    image.onload = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    image.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("The share card could not be rendered to an image."));
+    };
     image.src = svgUrl;
   });
 
@@ -103,9 +115,16 @@ export async function rasterize(node: HTMLElement, options: RasterizeOptions): P
  * every multi-day range, which is most of them.
  */
 export function shareFilename(startIso: string, endIso: string): string {
-  const day = (iso: string) => iso.slice(0, 10);
+  // The window can be absent before the first summary resolves, and an unguarded
+  // slice produced "otari-usage-.png". The date is dropped rather than
+  // substituted: stamping today onto a card covering some other window would
+  // mislabel the file, which is worse than not labelling it.
+  const day = (iso: string) => (iso.length >= 10 ? iso.slice(0, 10) : undefined);
   const from = day(startIso);
   const to = day(endIso);
+  if (from === undefined || to === undefined) {
+    return "otari-usage.png";
+  }
   return from === to ? `otari-usage-${from}.png` : `otari-usage-${from}--${to}.png`;
 }
 
@@ -118,8 +137,8 @@ export function downloadBlob(blob: Blob, filename: string): void {
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  // Revoked on the next tick: revoking synchronously can race the download in
-  // some browsers, which then saves a zero-byte file.
+  // Revoked well after the click, not synchronously: an immediate revoke can race
+  // the download in some browsers, which then saves a zero-byte file.
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 

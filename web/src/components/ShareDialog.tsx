@@ -1,4 +1,6 @@
 import { AlertDialog, Button } from "@heroui/react";
+
+import { ErrorBanner, InfoBanner } from "./ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/api/types";
@@ -87,11 +89,14 @@ export interface ShareDialogProps {
 export function ShareDialog(props: ShareDialogProps) {
   const { totals, series, modelRows, windowLabel, scopeSuffix, startIso, endIso, isStale, onClose } = props;
   const [presentation, setPresentation] = useState<Presentation>(loadPresentation);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<Error | undefined>(undefined);
+  const [notice, setNotice] = useState<string | undefined>(undefined);
   const cardRef = useRef<HTMLDivElement>(null);
+  // Cleared on unmount: closing the dialog inside the 2s window otherwise fired a
+  // state update against an unmounted component.
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const set = <K extends keyof Presentation>(key: K, value: Presentation[K]) =>
     setPresentation((prev) => ({ ...prev, [key]: value }));
@@ -122,7 +127,7 @@ export function ShareDialog(props: ShareDialogProps) {
   // control or typing a title does not re-encode a 1080px PNG per keystroke.
   useEffect(() => {
     let cancelled = false;
-    let url: string | null = null;
+    let url: string | undefined;
     const timer = setTimeout(() => {
       const node = cardRef.current;
       if (node === null) {
@@ -136,16 +141,16 @@ export function ShareDialog(props: ShareDialogProps) {
           }
           url = URL.createObjectURL(blob);
           setPreview((previous) => {
-            if (previous !== null) {
+            if (previous !== undefined) {
               URL.revokeObjectURL(previous);
             }
             return url;
           });
-          setError(null);
+          setError(undefined);
         })
         .catch((cause: unknown) => {
           if (!cancelled) {
-            setError(cause instanceof Error ? cause.message : "The share card could not be rendered.");
+            setError(cause instanceof Error ? cause : new Error("The share card could not be rendered."));
           }
         });
     }, 300);
@@ -159,10 +164,10 @@ export function ShareDialog(props: ShareDialogProps) {
   useEffect(
     () => () => {
       setPreview((previous) => {
-        if (previous !== null) {
+        if (previous !== undefined) {
           URL.revokeObjectURL(previous);
         }
-        return null;
+        return undefined;
       });
     },
     [],
@@ -177,15 +182,16 @@ export function ShareDialog(props: ShareDialogProps) {
       return;
     }
     setBusy(true);
-    setError(null);
+    setError(undefined);
     try {
       const { width, height } = CARD_SIZES[presentation.ratio];
       const blob = await rasterize(node, { width, height });
       await action(blob);
       setNotice(label);
-      setTimeout(() => setNotice(null), 2000);
+      clearTimeout(noticeTimer.current);
+      noticeTimer.current = setTimeout(() => setNotice(undefined), 2000);
     } catch (cause: unknown) {
-      setError(cause instanceof Error ? cause.message : "That did not work.");
+      setError(cause instanceof Error ? cause : new Error("That did not work."));
     } finally {
       setBusy(false);
     }
@@ -204,21 +210,15 @@ export function ShareDialog(props: ShareDialogProps) {
         The card shows the window and filters currently applied above. Change them on the page to change what it says.
       </p>
 
-      {error !== null ? (
-        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">{error}</div>
-      ) : null}
+      <ErrorBanner error={error} />
 
-      {isStale ? (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Waiting for the current numbers before this can be shared.
-        </div>
-      ) : null}
+      {isStale ? <InfoBanner tone="warning">Waiting for the current numbers before this can be shared.</InfoBanner> : null}
 
       <div className="flex flex-col gap-4 sm:flex-row">
         {/* The preview is the PNG itself at feed width, not a styled DOM stand-in:
             what is approved here is byte-for-byte what gets posted. */}
         <div className="w-full sm:w-[340px] sm:shrink-0">
-          {preview !== null ? (
+          {preview !== undefined ? (
             <img
               src={preview}
               alt="Preview of the usage card that will be shared"
@@ -239,6 +239,7 @@ export function ShareDialog(props: ShareDialogProps) {
                   key={stat.id}
                   size="sm"
                   variant={hero?.id === stat.id ? "primary" : "outline"}
+                  aria-pressed={hero?.id === stat.id}
                   onPress={() => set("hero", stat.id)}
                 >
                   {stat.label}
@@ -265,6 +266,7 @@ export function ShareDialog(props: ShareDialogProps) {
                     key={ratio}
                     size="sm"
                     variant={presentation.ratio === ratio ? "primary" : "outline"}
+                    aria-pressed={presentation.ratio === ratio}
                     onPress={() => set("ratio", ratio)}
                   >
                     {ratio === "square" ? "Square" : "Wide"}
@@ -279,6 +281,7 @@ export function ShareDialog(props: ShareDialogProps) {
                     key={theme}
                     size="sm"
                     variant={presentation.theme === theme ? "primary" : "outline"}
+                    aria-pressed={presentation.theme === theme}
                     onPress={() => set("theme", theme)}
                   >
                     {theme === "dark" ? "Dark" : "Light"}
@@ -293,6 +296,7 @@ export function ShareDialog(props: ShareDialogProps) {
                     key={rows}
                     size="sm"
                     variant={presentation.rows === rows ? "primary" : "outline"}
+                    aria-pressed={presentation.rows === rows}
                     onPress={() => set("rows", rows)}
                   >
                     {rows}
@@ -318,7 +322,7 @@ export function ShareDialog(props: ShareDialogProps) {
 
             </AlertDialog.Body>
             <AlertDialog.Footer className="flex flex-wrap items-center gap-2">
-              {notice !== null ? <span className="mr-auto text-xs text-[var(--otari-brand)]">{notice}</span> : null}
+              {notice !== undefined ? <span className="mr-auto text-xs text-[var(--otari-brand)]">{notice}</span> : null}
               <Button variant="ghost" onPress={onClose}>
                 Close
               </Button>

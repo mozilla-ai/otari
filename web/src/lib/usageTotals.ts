@@ -8,9 +8,9 @@ import type { UsageSeriesPoint, UsageTotals } from "@/api/types";
 // Billed token view: input (incl. both cache buckets) + output, falling back to
 // the raw provider total when the composition fields are absent (an older
 // gateway behind `vite dev`). Null when there are no totals at all.
-export function billedTokenTotal(totals: UsageTotals | undefined): number | null {
+export function billedTokenTotal(totals: UsageTotals | undefined): number | undefined {
   if (totals === undefined) {
-    return null;
+    return undefined;
   }
   const billedInput = totals.billed_input_tokens;
   if (billedInput === undefined) {
@@ -35,18 +35,18 @@ export function cacheSums(points: UsageSeriesPoint[]): { input: number; read: nu
   return { input, read, write };
 }
 
-export function cacheHitRate(points: UsageSeriesPoint[]): number | null {
+export function cacheHitRate(points: UsageSeriesPoint[]): number | undefined {
   const { input, read } = cacheSums(points);
-  return input > 0 ? read / input : null;
+  return input > 0 ? read / input : undefined;
 }
 
 // Latency is nullable on the wire (null when no row recorded one). The page
 // renders the em-dash placeholder to keep table cells aligned; the card drops the
-// stat instead, so this returns null rather than a placeholder and each surface
-// decides how to show "no value".
-export function formatLatency(ms: number | null): string | null {
+// stat instead, so this returns undefined rather than a placeholder and each
+// surface decides how to show "no value".
+export function formatLatency(ms: number | null): string | undefined {
   if (ms === null) {
-    return null;
+    return undefined;
   }
   if (ms < 1000) {
     return `${Math.round(ms)} ms`;

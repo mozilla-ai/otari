@@ -848,10 +848,10 @@ export function UsagePage() {
             />
             <StatCard
               label="Tokens (billed)"
-              value={billedTotal !== null ? formatTokens(billedTotal) : "—"}
+              value={billedTotal !== undefined ? formatTokens(billedTotal) : "—"}
               hint={
-                billedTotal !== null ? (
-                  <DeltaHint fraction={deltaFraction(billedTotal, prevBilledTotal ?? undefined)} />
+                billedTotal !== undefined ? (
+                  <DeltaHint fraction={deltaFraction(billedTotal, prevBilledTotal)} />
                 ) : null
               }
               chart={

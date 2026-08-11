@@ -65,7 +65,7 @@ export interface ShareCardProps {
   title: string;
   /** Names the window and any active filters, so the denominator is never ambiguous. */
   scope: string;
-  hero: CardStat | null;
+  hero: CardStat | undefined;
   /** Up to three, already token-ranked. */
   models: CardModel[];
   /** Up to three, excluding whichever one is the hero. */
@@ -132,20 +132,26 @@ export function ShareCard(props: ShareCardProps) {
   // become a band.
   const rowHeight = Math.max(34, Math.min(isLandscape ? 40 : 56, Math.floor((rowsBudget - rowGap * (rowCount - 1)) / rowCount)));
   // A long list needs the hero to give up some height; nothing else can yield.
+  // The 34px floor deliberately wins over rowsBudget: at nine rows the list needs
+  // 9*34 + 8*8 = 370px against a 340 budget, and the surplus comes out of the
+  // flexible middle block rather than shrinking a row below its own text. The e2e
+  // asserts no band collapses, which is what keeps that trade honest if heroSize
+  // or the padding ever moves.
   const heroSize = rowCount > 5 ? 150 : 200;
   // Only when a caveated stat is actually on the card, so the legend never
   // explains a mark the viewer cannot see.
   const showsCaveat = (hero?.caveated ?? false) || stats.some((stat) => stat.caveated);
-  const caveatLegend =
+  const caveatLegend: string | undefined =
     showsCaveat && unpricedRequests !== undefined && unpricedRequests > 0
       ? `* ${formatNumber(unpricedRequests)} requests unpriced`
       : showsCaveat
         ? "* some requests unpriced"
-        : null;
+        : undefined;
 
   return (
     <div
-      data-testid="share-card"
+      role="img"
+      aria-label={`Usage card: ${title}`}
       style={{
         width,
         height,
@@ -179,7 +185,7 @@ export function ShareCard(props: ShareCardProps) {
           alignItems: isLandscape ? "center" : "flex-start",
         }}
       >
-        {hero !== null ? (
+        {hero !== undefined ? (
           <div style={{ flex: isLandscape ? "1 1 0" : "0 0 auto" }}>
             <div style={{ fontSize: heroSize, fontWeight: 700, lineHeight: 0.82 }}>{hero.value}</div>
             <div style={{ fontSize: 44, fontWeight: 500, lineHeight: 1.1, color: palette.muted, marginTop: 8 }}>
@@ -195,7 +201,11 @@ export function ShareCard(props: ShareCardProps) {
           {models.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: rowGap, width: "100%" }}>
               {models.map((model) => (
-                <div key={model.key ?? "other"} style={{ display: "flex", alignItems: "center", gap: 20, height: rowHeight }}>
+                <div
+                  key={model.key ?? "__other__"}
+                  data-share-row
+                  style={{ display: "flex", alignItems: "center", gap: 20, height: rowHeight }}
+                >
                   <span style={{ fontSize: FLOOR_PX, width: 360, whiteSpace: "nowrap" }}>
                     {truncateModel(model.label)}
                   </span>
@@ -249,7 +259,7 @@ export function ShareCard(props: ShareCardProps) {
       >
         <span>
           {scope}
-          {caveatLegend !== null ? ` · ${caveatLegend}` : ""}
+          {caveatLegend !== undefined ? ` · ${caveatLegend}` : ""}
         </span>
         {/* Hardcoded, never derived from `location`: a self-hosted gateway would
             otherwise publish its own internal hostname onto a public image. */}

@@ -8,8 +8,8 @@ import { billedTokenTotal, cacheHitRate, costNeedsCaveat, formatLatency } from "
 // but the claims the image makes are all decided in this file.
 
 export interface CardModel {
-  /** The model name, or null for the server's folded "other" row. */
-  key: string | null;
+  /** The model name, or undefined for the server's folded "other" row. */
+  key: string | undefined;
   label: string;
   tokens: number;
   cost: number;
@@ -44,7 +44,7 @@ export function collapseModelName(name: string): string {
 export function cardModels(rows: UsageGroupRow[]): CardModel[] {
   return rows
     .map((row) => ({
-      key: row.is_other ? null : row.key,
+      key: row.is_other ? undefined : (row.key ?? undefined),
       label: row.is_other ? "other models" : row.key === null ? "(unknown)" : collapseModelName(row.key),
       tokens: row.tokens,
       cost: row.cost,
@@ -93,15 +93,15 @@ export function availableStats(inputs: StatInputs): CardStat[] {
     stats.push({ id: "requests", label: "Requests", value: formatNumber(totals.request_count) });
   }
   const billed = billedTokenTotal(totals);
-  if (billed !== null && billed > 0) {
+  if (billed !== undefined && billed > 0) {
     stats.push({ id: "tokens", label: "Tokens", value: formatTokens(billed) });
   }
   const hitRate = cacheHitRate(series);
-  if (hitRate !== null) {
+  if (hitRate !== undefined) {
     stats.push({ id: "cacheHitRate", label: "Cache hits", value: formatPct(hitRate) });
   }
   const latency = formatLatency(totals.avg_latency_ms);
-  if (latency !== null) {
+  if (latency !== undefined) {
     stats.push({ id: "latency", label: "Avg latency", value: latency });
   }
   return stats;
@@ -122,10 +122,10 @@ export function heroCandidates(stats: CardStat[]): CardStat[] {
  *
  * The hero can never be empty: if the preferred stat is unavailable (dollars
  * hidden while cost was the hero, or a metric the window has no value for) the
- * next available stat is promoted, so the card never renders a hole. Null only
- * when there is nothing at all to show, which is the empty state.
+ * next available stat is promoted, so the card never renders a hole.
+ * Undefined only when there is nothing at all to show, which is the empty state.
  */
-export function resolveHero(stats: CardStat[], preferred: StatId): CardStat | null {
+export function resolveHero(stats: CardStat[], preferred: StatId): CardStat | undefined {
   const candidates = heroCandidates(stats);
-  return candidates.find((stat) => stat.id === preferred) ?? candidates[0] ?? null;
+  return candidates.find((stat) => stat.id === preferred) ?? candidates[0];
 }

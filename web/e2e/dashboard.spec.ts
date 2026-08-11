@@ -222,7 +222,9 @@ test.describe("dashboard core flows", () => {
 
     // The card node itself, not the dialog: it is rendered off-screen as a sibling
     // of the dialog's own section so it can be rasterized at full size.
-    const card = page.locator('[data-testid="share-card"]');
+    // Located by attribute, not by role: the off-screen copy is aria-hidden on
+    // purpose, so it is deliberately absent from the accessibility tree.
+    const card = page.locator('[aria-label^="Usage card"]');
     // The seeded selector is `fireworks/accounts/llama-3.3-70b`; the card prints
     // only the final model type.
     await expect(card).toContainText("llama-3.3-70b");
@@ -237,12 +239,20 @@ test.describe("dashboard core flows", () => {
       for (const rows of ["1", "9"]) {
         await dialog.getByRole("button", { name: rows, exact: true }).click();
         const bands = await page.evaluate(() => {
-          const card = document.querySelector('[data-testid="share-card"]') as HTMLElement;
+          const node = document.querySelector<HTMLElement>('[role="img"][aria-label^="Usage card"]');
+          // Explicit, so an unmounted card reports itself rather than throwing a
+          // TypeError that points at the evaluate call.
+          if (node === null) {
+            return { heights: [] as number[], overflows: false, missing: true };
+          }
           return {
-            heights: Array.from(card.children).map((c) => Math.round(c.getBoundingClientRect().height)),
-            overflows: card.scrollHeight > Math.round(card.getBoundingClientRect().height),
+            heights: Array.from(node.children).map((c) => Math.round(c.getBoundingClientRect().height)),
+            overflows: node.scrollHeight > Math.round(node.getBoundingClientRect().height),
+            missing: false,
           };
         });
+        expect(bands.missing, `${shape}/${rows} rendered no card`).toBe(false);
+        expect(bands.heights.length, `${shape}/${rows} rendered no bands`).toBeGreaterThan(0);
         expect(bands.heights.filter((h) => h === 0), `${shape}/${rows} collapsed a band`).toEqual([]);
         expect(bands.overflows, `${shape}/${rows} overflowed the frame`).toBe(false);
       }

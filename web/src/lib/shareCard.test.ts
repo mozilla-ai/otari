@@ -118,8 +118,8 @@ describe("resolveHero", () => {
     expect(resolveHero(stats, "cost")?.id).toBe("requests");
   });
 
-  it("returns null only when there is nothing at all to show", () => {
-    expect(resolveHero([], "requests")).toBeNull();
+  it("returns undefined only when there is nothing at all to show", () => {
+    expect(resolveHero([], "requests")).toBeUndefined();
   });
 
   it("never falls back to a stat that cannot lead", () => {
@@ -129,6 +129,6 @@ describe("resolveHero", () => {
       hideDollars: false,
     });
     expect(stats.map((s) => s.id)).toEqual(["cacheHitRate"]);
-    expect(resolveHero(stats, "cost")).toBeNull();
+    expect(resolveHero(stats, "cost")).toBeUndefined();
   });
 });

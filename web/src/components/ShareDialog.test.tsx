@@ -7,6 +7,19 @@ import type { UsageGroupRow, UsageTotals } from "@/api/types";
 
 import { ShareDialog } from "./ShareDialog";
 
+// jsdom has no canvas, so the rasterizer cannot run for real here; mocked so the
+// dialog's wiring around it is exercisable. The claim that the PNG itself is
+// correct lives in the Playwright suite.
+vi.mock("@/lib/shareImage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/shareImage")>();
+  return {
+    ...actual,
+    rasterize: vi.fn(async () => new Blob(["png"], { type: "image/png" })),
+    canCopyImages: vi.fn(() => true),
+    copyBlobAsImage: vi.fn(async () => true),
+  };
+});
+
 const totals: UsageTotals = {
   cost: 3.44,
   prompt_tokens: 1_800_000,
@@ -57,6 +70,18 @@ describe("ShareDialog", () => {
     expect(screen.getByRole("button", { name: "Download PNG" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Post on X" })).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Suggested post text")).not.toBeInTheDocument();
+  });
+
+  it("re-leads the card when the lead stat changes", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    const card = document.querySelector('[aria-label^="Usage card"]') as HTMLElement;
+    // Requests is the default lead for this fixture.
+    expect(within(card).getByText("771")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Tokens" }));
+    expect(within(card).getByText("2.3M")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Tokens" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("does not explain the clipboard's origin rules", () => {
@@ -117,10 +142,8 @@ describe("ShareDialog", () => {
   it("does not claim a copy that failed", async () => {
     const user = userEvent.setup();
     const shareImage = await import("@/lib/shareImage");
-    vi.spyOn(shareImage, "rasterize").mockResolvedValue(new Blob(["x"], { type: "image/png" }));
-    vi.spyOn(shareImage, "canCopyImages").mockReturnValue(true);
     // The clipboard write is refused (denied permission, insecure origin, ...).
-    vi.spyOn(shareImage, "copyBlobAsImage").mockResolvedValue(false);
+    vi.mocked(shareImage.copyBlobAsImage).mockResolvedValue(false);
     renderDialog();
     await user.click(screen.getByRole("button", { name: "Copy image" }));
     expect(await screen.findByText(/could not be copied/i)).toBeInTheDocument();
