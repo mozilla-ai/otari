@@ -1,5 +1,6 @@
 """Tests for the POST /v1/audio/transcriptions and POST /v1/audio/speech endpoints."""
 
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -7,7 +8,11 @@ import pytest
 from any_llm.types.audio import Transcription
 from fastapi.testclient import TestClient
 
-from gateway.services.pricing_service import configure_default_pricing, reset_price_cache
+from gateway.services.pricing_service import (
+    configure_default_pricing,
+    default_model_pricing,
+    reset_price_cache,
+)
 
 
 def _mock_transcription_response() -> Transcription:
@@ -514,6 +519,9 @@ def test_transcription_ignores_genai_prices_defaults(
     configure_default_pricing(True)
     reset_price_cache()
     try:
+        # Pin the premise: without a dataset entry to ignore, the assertions below
+        # would pass for the wrong reason and stop guarding anything.
+        assert default_model_pricing("openai", "gpt-4o-transcribe", datetime.now(UTC)) is not None
         with patch(
             "gateway.api.routes.audio.atranscription",
             new_callable=AsyncMock,

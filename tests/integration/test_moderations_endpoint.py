@@ -1,13 +1,18 @@
 """Tests for the POST /v1/moderations endpoint."""
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.services.pricing_service import configure_default_pricing, reset_price_cache
+from gateway.services.pricing_service import (
+    configure_default_pricing,
+    default_model_pricing,
+    reset_price_cache,
+)
 from gateway.types.moderation import ModerationResponse, ModerationResult
 
 
@@ -463,6 +468,9 @@ def test_moderations_ignores_genai_prices_defaults(
     configure_default_pricing(True)
     reset_price_cache()
     try:
+        # Pin the premise: without a dataset entry to ignore, the assertions below
+        # would pass for the wrong reason and stop guarding anything.
+        assert default_model_pricing("openai", "gpt-4o", datetime.now(UTC)) is not None
         with patch("gateway.api.routes.moderations.amoderation", new_callable=AsyncMock, return_value=resp_obj):
             resp = client.post(
                 "/v1/moderations",
