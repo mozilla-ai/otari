@@ -1,5 +1,10 @@
 # The admin dashboard bundle is not committed (see .gitignore), so build it here.
-FROM node:22-slim AS web
+#
+# Pinned to BUILDPLATFORM: otari-docker.yml publishes linux/amd64 and linux/arm64,
+# so without this the whole npm ci + vite build runs a second time under QEMU for
+# the non-native arch on every publish. The output is JavaScript, CSS, and PNGs,
+# which are architecture-independent, so one native build serves both images.
+FROM --platform=$BUILDPLATFORM node:22-slim AS web
 
 WORKDIR /app/web
 
