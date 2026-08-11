@@ -1042,6 +1042,29 @@ describe("ActivityPage", () => {
     );
   });
 
+  it("frames the active preset when the two initial windows are read a millisecond apart", async () => {
+    // `win` and `extentWin` each derive a rolling start from their own clock read,
+    // and `extentWin` is initialised second, so its start is the later of the two
+    // whenever the render straddles a millisecond. That is not a drill-down, and
+    // must not be read as one: doing so framed the window instead of the preset,
+    // dropping the preset highlight and bucketing a 24h extent by day. A monotonic
+    // clock makes the tick certain instead of leaving it to machine load, which is
+    // what made the assertion above flake on CI while passing locally.
+    let now = Date.parse("2026-08-11T12:00:00.000Z");
+    vi.spyOn(Date, "now").mockImplementation(() => ++now);
+
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />); // default 24h
+    await screen.findByText("gpt-4o");
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.includes("/v1/usage/summary") && c.url.includes("bucket=hour"))).toBe(true),
+    );
+    // The visible half of the same bug: the preset row still highlights 24h rather
+    // than falling back to the custom sentinel, which highlights nothing.
+    expect(screen.getByRole("button", { name: "24h" }).className).toContain("button--primary");
+  });
+
   it("names the model that served an absorbed attempt, from the rows already on the page", async () => {
     // The question a failed-over row raises is "so what served it". The serving
     // attempt is a sibling row sharing the request group, and it is normally on the

@@ -281,7 +281,16 @@ const URL_DEFAULTS = {
 // Resolve the query window. Explicit start_date/end_date bounds (a custom range,
 // or a drill-down from the Usage page) take precedence; otherwise a preset anchors
 // `start` to "now minus N", and "all" (or an empty custom range) leaves it open.
-function resolveWindow(range: string, start: string, end: string): { start?: string; end?: string } {
+// `now` is a parameter, not a call inside, so a caller deriving more than one
+// window can hand both the same clock reading. Read independently they land
+// milliseconds apart, and `winOutsideExtent` below compares two of them for
+// strict inequality, so drift of a single millisecond changes what the page does.
+function resolveWindow(
+  range: string,
+  start: string,
+  end: string,
+  now: number = Date.now(),
+): { start?: string; end?: string } {
   if (start || end) {
     return { start: start || undefined, end: end || undefined };
   }
@@ -290,7 +299,7 @@ function resolveWindow(range: string, start: string, end: string): { start?: str
   }
   const preset = findPreset(ACTIVITY_PRESETS, range) ?? findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY);
   const seconds = preset?.seconds ?? null;
-  return { start: seconds == null ? undefined : isoAgo(seconds), end: undefined };
+  return { start: seconds == null ? undefined : isoAgo(seconds, now), end: undefined };
 }
 
 // The histogram extent (what the bars span), which is *not* always the list
@@ -301,11 +310,11 @@ function resolveWindow(range: string, start: string, end: string): { start?: str
 // silently show a rolling month while the caption reads "All time". The explicit
 // start gives a deterministic, draggable span (the axis shows exactly what it
 // covers) while the list stays all-time.
-function resolveExtentWindow(range: string): { start?: string; end?: string } {
-  const win = resolveWindow(range, "", "");
+function resolveExtentWindow(range: string, now: number = Date.now()): { start?: string; end?: string } {
+  const win = resolveWindow(range, "", "", now);
   if (win.start) return win;
   const preset = findPreset(ACTIVITY_PRESETS, range);
-  if (preset?.seconds == null) return { start: isoAgo(YEAR_SPAN_S) };
+  if (preset?.seconds == null) return { start: isoAgo(YEAR_SPAN_S, now) };
   return win;
 }
 
@@ -902,25 +911,37 @@ export function ActivityPage() {
   // the milliseconds since, which changes `filters`, which trips the page reset
   // below: a bookmarked or shared `?page=3` URL would silently open on page 1.
   const selectionKey = `${range}|${startParam}|${endParam}`;
-  const [win, setWin] = useState(() => resolveWindow(range, startParam, endParam));
-  const prevSelectionKey = useRef(selectionKey);
-  useEffect(() => {
-    if (prevSelectionKey.current === selectionKey) return;
-    prevSelectionKey.current = selectionKey;
-    setWin(resolveWindow(range, startParam, endParam));
-  }, [selectionKey, range, startParam, endParam]);
-
+  // One clock reading shared by both initial windows. Taken separately they differ
+  // by the milliseconds between the two lines, and since `extentWin` is read second
+  // its rolling start is the later one, which made the strict `<` in
+  // `winOutsideExtent` true on an ordinary load: the page then framed the window
+  // rather than the preset, so no preset was highlighted and a 24h extent bucketed
+  // by day instead of by hour. Whether that happened came down to machine load.
+  const [mountClock] = useState(Date.now);
+  const [win, setWin] = useState(() => resolveWindow(range, startParam, endParam, mountClock));
   // The preset extent (ignoring any brushed bounds) that the timeline histogram
   // spans. Snapshotted like `win`, re-anchored when the preset changes: a brushed
   // sub-window must leave the extent alone, or zooming in would drag the frame
   // (and refetch the histogram) along with it.
-  const [extentWin, setExtentWin] = useState(() => resolveExtentWindow(range));
+  const [extentWin, setExtentWin] = useState(() => resolveExtentWindow(range, mountClock));
+  // Both re-anchors share one effect so they also share one clock reading. As two
+  // effects they ran in declaration order on a range change, leaving the list
+  // window a millisecond behind the extent containing it, which is the same drift
+  // described above. The guards are per-window and unchanged: `win` re-anchors for
+  // any selection change, `extentWin` only when the preset itself moves.
+  const prevSelectionKey = useRef(selectionKey);
   const prevRange = useRef(range);
   useEffect(() => {
-    if (prevRange.current === range) return;
-    prevRange.current = range;
-    setExtentWin(resolveExtentWindow(range));
-  }, [range]);
+    const clock = Date.now();
+    if (prevSelectionKey.current !== selectionKey) {
+      prevSelectionKey.current = selectionKey;
+      setWin(resolveWindow(range, startParam, endParam, clock));
+    }
+    if (prevRange.current !== range) {
+      prevRange.current = range;
+      setExtentWin(resolveExtentWindow(range, clock));
+    }
+  }, [selectionKey, range, startParam, endParam]);
 
   const priced = pricedFilter === "true" ? true : pricedFilter === "false" ? false : undefined;
 
@@ -1476,8 +1497,11 @@ export function ActivityPage() {
     // off an explicit range, changes the URL and that effect handles it, so
     // re-anchoring here as well would fire a second query for the same view.)
     if (preset.key === range && !startParam && !endParam) {
-      setWin(resolveWindow(preset.key, "", ""));
-      setExtentWin(resolveExtentWindow(preset.key));
+      // Both windows off one reading, for the same reason as at mount: two reads
+      // would leave the list window a millisecond behind the extent it sits in.
+      const clock = Date.now();
+      setWin(resolveWindow(preset.key, "", "", clock));
+      setExtentWin(resolveExtentWindow(preset.key, clock));
       return;
     }
     url.patch({ range: preset.key, start_date: "", end_date: "" });
