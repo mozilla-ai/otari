@@ -90,10 +90,14 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # provider call. Declared here so it survives ``model_dump`` and rides
     # any-llm's ``**kwargs`` passthrough into the provider request. Left as a
     # free-form string rather than an enum: the tier vocabulary is
-    # provider-specific ("flex"/"priority"/"scale" on OpenAI,
-    # "standard_only"/"priority" on Anthropic) and grows independently of this
+    # provider-specific ("auto"/"default"/"flex"/"scale"/"priority" on OpenAI,
+    # "auto"/"standard_only" on Anthropic) and grows independently of this
     # gateway, so the provider is the right place to reject an unknown value.
     # ``ResponsesParams`` already declares it, so /v1/responses never had the gap.
+    #
+    # Stopgap: remove this declaration once ``CompletionParams`` models the param
+    # and the SDK pin is bumped (mozilla-ai/any-llm#1269, tracked in #565). Until
+    # then it also shadows whatever annotation any-llm picks for it.
     service_tier: str | None = None
 
     @field_validator("messages")
