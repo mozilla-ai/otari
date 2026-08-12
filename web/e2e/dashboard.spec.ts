@@ -151,6 +151,14 @@ test.describe("dashboard core flows", () => {
   });
 
   test("renames a policy in place", async ({ page }) => {
+    // The rename target has to be free for the 409 not to fire. serve.sh wipes the
+    // database, so it is on a first run; a re-run against a warm one still carries
+    // the `renamed` this test left behind, and would fail on its own leftovers.
+    const dropped = await page.request.delete("/v1/routing/policies/renamed", {
+      headers: { Authorization: `Bearer ${MASTER_KEY}` },
+    });
+    expect([204, 404]).toContain(dropped.status());
+
     await login(page);
     await nav(page).getByRole("link", { name: "Routing" }).click();
 

@@ -20,7 +20,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_master_key
@@ -69,8 +69,10 @@ class PolicyRequest(BaseModel):
         default=None,
         description=(
             "Current name of the policy to rename, in the same scope. The stored row keeps its id and "
-            "created_at and takes `name` and `spec`. Omit to create or update the policy named `name`. "
-            "Renaming changes what callers must send as `model`; usage already recorded keeps the old name."
+            "created_at and takes `name` and `spec`. Sending it asserts that policy exists, so a name with "
+            "no stored row is a 404 rather than a create, even when it equals `name`. Omit to create or "
+            "update the policy named `name`. Renaming changes what callers must send as `model`; usage "
+            "already recorded keeps the old name."
         ),
     )
 
@@ -316,6 +318,10 @@ async def _name_is_taken(db: AsyncSession, name: str, user_id: str | None) -> bo
     return existing is not None
 
 
+def _name_taken_detail(name: str) -> str:
+    return f"Routing policy '{name}' already exists in this scope. Delete it first, or pick another name."
+
+
 async def _refresh_quietly(db: AsyncSession, name: str) -> None:
     """Refresh this worker's cache after a committed write.
 
@@ -381,7 +387,8 @@ async def set_policy(
     this write rather than an endpoint of its own so that an edit which both renames
     a policy and re-targets it cannot land half-applied, leaving the old name serving
     the new spec. The new name is validated exactly as a fresh one is, because a
-    rename can walk a policy into every collision a create can.
+    rename can walk a policy into every collision a create can. Sending the field
+    asserts the named policy is stored, so it never falls back to creating one.
     """
     if request.user_id is not None:
         await _require_user(db, request.user_id)
@@ -402,23 +409,22 @@ async def set_policy(
             )
         )
     ).scalar_one_or_none()
-    if renaming:
+    # The 404 keys on ``rename_from`` being sent at all rather than on the name having
+    # changed: the field asserts that row exists, so naming a policy that is not
+    # stored is answered instead of being quietly turned into a create. That holds for
+    # an unchanged name too, where the alternative is a create dressed up as an edit.
+    if request.rename_from is not None:
         if policy is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=_missing_policy_detail(config, lookup_name, request.user_id, "renamed"),
             )
-        # Without this the rename would be an upsert onto the target name, silently
-        # destroying whatever policy already answered to it.
-        if await _name_is_taken(db, request.name, request.user_id):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"Routing policy '{request.name}' already exists in this scope. Delete it first, or "
-                    "pick another name."
-                ),
-            )
-        policy.name = request.name
+        if renaming:
+            # Without this the rename would be an upsert onto the target name, silently
+            # destroying whatever policy already answered to it.
+            if await _name_is_taken(db, request.name, request.user_id):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_name_taken_detail(request.name))
+            policy.name = request.name
     # Round-tripped through the model so the stored document is normalized (defaults
     # filled, key order stable) rather than whatever shape the client happened to
     # send. Otherwise two equivalent writes would produce different rows.
@@ -431,6 +437,20 @@ async def set_policy(
 
     try:
         await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        # The name check above and this commit are not one atomic step, so another
+        # writer can claim the name in between and the unique constraint is what
+        # catches it. Re-read rather than assuming: the same constraint class also
+        # covers the user foreign key, and reporting a deleted user as a name clash
+        # would send the operator after the wrong thing.
+        if await _name_is_taken(db, request.name, request.user_id):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=_name_taken_detail(request.name)
+            ) from None
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from None
     except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(

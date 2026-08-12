@@ -3511,7 +3511,7 @@
                 "type": "null"
               }
             ],
-            "description": "Current name of the policy to rename, in the same scope. The stored row keeps its id and created_at and takes `name` and `spec`. Omit to create or update the policy named `name`. Renaming changes what callers must send as `model`; usage already recorded keeps the old name.",
+            "description": "Current name of the policy to rename, in the same scope. The stored row keeps its id and created_at and takes `name` and `spec`. Sending it asserts that policy exists, so a name with no stored row is a 404 rather than a create, even when it equals `name`. Omit to create or update the policy named `name`. Renaming changes what callers must send as `model`; usage already recorded keeps the old name.",
             "title": "Rename From"
           },
           "spec": {
@@ -10833,7 +10833,7 @@
         ]
       },
       "post": {
-        "description": "Create or update a stored policy, global or scoped to one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).\n\n``rename_from`` renames the row instead of keying on ``name``. It is part of\nthis write rather than an endpoint of its own so that an edit which both renames\na policy and re-targets it cannot land half-applied, leaving the old name serving\nthe new spec. The new name is validated exactly as a fresh one is, because a\nrename can walk a policy into every collision a create can.",
+        "description": "Create or update a stored policy, global or scoped to one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).\n\n``rename_from`` renames the row instead of keying on ``name``. It is part of\nthis write rather than an endpoint of its own so that an edit which both renames\na policy and re-targets it cannot land half-applied, leaving the old name serving\nthe new spec. The new name is validated exactly as a fresh one is, because a\nrename can walk a policy into every collision a create can. Sending the field\nasserts the named policy is stored, so it never falls back to creating one.",
         "operationId": "set_policy_v1_routing_policies_post",
         "requestBody": {
           "content": {

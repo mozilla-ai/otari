@@ -542,6 +542,30 @@ def test_a_price_aimed_at_a_stored_policy_is_refused_too(client: TestClient) -> 
     assert "routing policy" in resp.json()["detail"]
 
 
+def test_a_price_aimed_at_a_user_scoped_policy_is_refused_without_naming_candidates(client: TestClient) -> None:
+    """The refusal is scope-blind, but the explanation cannot be: nothing resolves this
+    name globally, so the candidates are not knowable from here and the message says
+    only what it can stand behind.
+    """
+    _create_user(client)
+    created = client.post(
+        "/v1/routing/policies",
+        json={"name": "only-alice", "spec": _spec("openai:gpt-5-mini"), "user_id": "test-user"},
+        headers=HEADERS,
+    )
+    assert created.status_code == 200, created.text
+
+    resp = client.post(
+        "/v1/pricing",
+        json={"model_key": "only-alice", "input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 400, resp.text
+    detail = resp.json()["detail"]
+    assert "routing policy" in detail
+    assert "openai:gpt-5-mini" not in detail
+
+
 # ---------------------------------------------------------------------------
 # Reach on the other model-taking endpoints
 # ---------------------------------------------------------------------------
@@ -813,6 +837,43 @@ def test_rename_from_the_same_name_is_a_plain_update(client: TestClient) -> None
     resp = _rename(client, "quick", "quick", _spec("anthropic:claude-haiku-4-5"))
     assert resp.status_code == 200, resp.text
     assert resp.json()["spec"]["select"] == [{"default": "anthropic:claude-haiku-4-5"}]
+
+
+def test_rename_from_never_falls_back_to_creating_the_policy(client: TestClient) -> None:
+    """Sending the field asserts the row exists, so an unchanged name whose policy is
+    gone is a 404 rather than a create. An edit form whose row was deleted underneath
+    it would otherwise resurrect the policy instead of saying it is gone.
+    """
+    resp = _rename(client, "ghost", "ghost", _spec("openai:gpt-5-mini"))
+    assert resp.status_code == 404, resp.text
+    assert "ghost" in resp.json()["detail"]
+
+    names = [item["name"] for item in client.get("/v1/routing/policies", headers=HEADERS).json()]
+    assert "ghost" not in names
+
+
+def test_a_rename_that_loses_a_race_still_reports_the_clash(client: TestClient) -> None:
+    """The name check and the commit are not one atomic step, so another writer can
+    take the name in between. The unique constraint catches it, and the answer has to
+    stay the 409 the pre-check would have given rather than a bare 500.
+    """
+    client.post("/v1/routing/policies", json={"name": "quick", "spec": _spec("openai:gpt-5-mini")}, headers=HEADERS)
+    client.post(
+        "/v1/routing/policies", json={"name": "taken", "spec": _spec("anthropic:claude-haiku-4-5")}, headers=HEADERS
+    )
+
+    # False once, so the pre-check waves the rename through as the racing writer's
+    # commit would have; True afterwards, which is what the constraint then reflects.
+    racing = AsyncMock(side_effect=[False, True])
+    with patch("gateway.api.routes.routing._name_is_taken", new=racing):
+        clash = _rename(client, "quick", "taken", _spec("openai:gpt-5-mini"))
+    assert clash.status_code == 409, clash.text
+    assert "taken" in clash.json()["detail"]
+
+    # And the loser is still there under its own name, unwritten.
+    by_name = {item["name"]: item for item in client.get("/v1/routing/policies", headers=HEADERS).json()}
+    assert by_name["quick"]["spec"]["select"] == [{"default": "openai:gpt-5-mini"}]
+    assert by_name["taken"]["spec"]["select"] == [{"default": "anthropic:claude-haiku-4-5"}]
 
 
 def test_a_global_stored_policy_may_not_shadow_a_config_one(client: TestClient) -> None:
