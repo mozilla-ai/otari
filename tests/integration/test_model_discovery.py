@@ -413,6 +413,59 @@ def test_list_models_discovery_error_graceful(
     assert resp.json()["object"] == "list"
 
 
+def test_list_models_tolerates_a_provider_without_created(
+    discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """A provider reporting no ``created`` must not fail the whole listing.
+
+    ``Model.created`` is typed ``int`` but the OpenAI SDK builds response models
+    without validation, so an OpenAI-compatible provider answering ``null`` gets
+    that far. Constructing the ModelObject used to raise and 500 the endpoint.
+    """
+    from any_llm.types.model import Model
+
+    fake_models = [
+        Model.construct(id="local-model", object="model", created=None, owned_by="openai"),
+        Model(**_make_openai_model("gpt-4o")),
+    ]
+
+    with (
+        patch(
+            "gateway.services.model_discovery_service._supports_list_models",
+            return_value=True,
+        ),
+        patch(
+            "gateway.services.model_discovery_service.alist_models",
+            new_callable=AsyncMock,
+            return_value=fake_models,
+        ),
+    ):
+        resp = discovery_client.get("/v1/models", headers=discovery_master_header)
+
+    assert resp.status_code == 200
+    by_id = {m["id"]: m for m in resp.json()["data"]}
+    assert by_id["openai:local-model"]["created"] == 0
+    assert by_id["openai:gpt-4o"]["created"] == 1700000000
+
+
+def test_get_model_tolerates_a_provider_without_created(
+    discovery_client: TestClient,
+    discovery_master_header: dict[str, str],
+) -> None:
+    """The same missing ``created`` must not fail GET /v1/models/{id}."""
+    from any_llm.types.model import Model
+
+    get_model_cache().set(
+        "openai",
+        [Model.construct(id="local-model", object="model", created=None, owned_by="openai")],
+    )
+
+    resp = discovery_client.get("/v1/models/openai:local-model", headers=discovery_master_header)
+    assert resp.status_code == 200
+    assert resp.json()["created"] == 0
+
+
 def test_get_model_from_discovery_cache(
     discovery_client: TestClient,
     discovery_master_header: dict[str, str],

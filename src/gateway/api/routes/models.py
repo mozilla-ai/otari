@@ -2,7 +2,7 @@
 
 import calendar
 from collections.abc import Sequence
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -37,6 +37,9 @@ from gateway.services.pricing_service import (
     normalize_effective_at,
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
+
+if TYPE_CHECKING:
+    from any_llm.types.model import Model
 
 router = APIRouter(prefix="/v1", tags=["models"])
 
@@ -85,6 +88,21 @@ def _owner_from_key(model_key: str) -> str:
     """The provider a ``provider:model`` key names, or "unknown" for a bare name."""
     provider, separator, _ = model_key.partition(":")
     return provider if separator else "unknown"
+
+
+def _created_timestamp(model: "Model") -> int:
+    """A discovered model's creation timestamp, or 0 when the provider omits one.
+
+    ``Model.created`` is typed ``int`` but the OpenAI SDK builds response models
+    without validation, so an OpenAI-compatible provider that reports ``null``
+    (or a non-numeric value) reaches us as-is. Falling back to 0 matches what the
+    other catalog phases publish for models with no known creation time; raising
+    here would fail the whole listing over one provider's payload.
+    """
+    try:
+        return int(model.created)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _context_window_for_key(model_key: str) -> int | None:
@@ -462,7 +480,7 @@ async def list_models(
             pricing = pricing_map.pop(model_key, None)
             merged[model_key] = ModelObject(
                 id=model_key,
-                created=model.created,
+                created=_created_timestamp(model),
                 owned_by=provider_name,
                 pricing=ModelPricingInfo(
                     input_price_per_million=pricing.input_price_per_million,
@@ -714,7 +732,7 @@ async def get_model(
         model_key = f"{discovered_provider}:{discovered_model.id}"
         obj = ModelObject(
             id=model_key,
-            created=discovered_model.created,
+            created=_created_timestamp(discovered_model),
             owned_by=discovered_provider,
             pricing=ModelPricingInfo(
                 input_price_per_million=pricing.input_price_per_million,
