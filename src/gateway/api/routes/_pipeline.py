@@ -1019,8 +1019,11 @@ async def resolve_request_context(
         # mode sends the caller's selector straight upstream (config aliases are
         # already inert here for the same reason), so a policy name would reach
         # the platform as an unknown model and come back as a confusing upstream
-        # 404. Routing policies are standalone-only until the platform protocol
-        # carries them.
+        # 404. What is standalone-only is this gateway's own policies, the ones
+        # under `routing.policies` in config.yml. Hybrid mode still routes: the
+        # platform owns the decision there, and its resolve response carries the
+        # outcome as an ordered ``attempts`` list plus ``fallback_enabled`` for
+        # ``run_platform_attempts`` to walk.
         if model in config.policy_names():
             raise adapter.error(400, policy_in_hybrid_mode_detail(model), ErrorKind.INVALID_REQUEST)
         user_token = _extract_platform_user_token(raw_request)
