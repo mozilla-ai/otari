@@ -5,9 +5,10 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vitest/config";
 
 // The dashboard is served by the gateway at "/", so we build straight into the
-// Python package (src/gateway/static/dashboard) and commit the output. That
-// keeps `pip install otari` and the Docker image self-contained without a Node
-// build stage. See AGENTS.md ("Web dashboard").
+// Python package (src/gateway/static/dashboard). The output is gitignored, not
+// committed: Vite content-hashes every asset filename, so a committed bundle made
+// any two branches touching web/src conflict by construction. The Docker image
+// builds it in a Node stage instead. See AGENTS.md ("Web dashboard").
 const outDir = fileURLToPath(new URL("../src/gateway/static/dashboard", import.meta.url));
 
 // The dashboard bundles the operator user guide (docs/dashboard.md) so the

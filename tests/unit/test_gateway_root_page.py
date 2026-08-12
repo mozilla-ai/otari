@@ -1,12 +1,14 @@
+import logging
 import re
 from pathlib import Path
 
 import pytest
+from _dashboard_bundle_support import requires_dashboard_bundle
 from fastapi.testclient import TestClient
 
 import gateway.main as gateway_main
 from gateway.core.config import GatewayConfig
-from gateway.dashboard import get_dashboard_dir
+from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 from gateway.services.secret_box import SecretBoxUnavailableError, generate_secret_key
 
@@ -52,7 +54,7 @@ def test_favicon_is_served(tmp_path: Path) -> None:
     assert response.headers["cache-control"] == "public, max-age=86400"
 
 
-@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built (run: npm --prefix web run build)")
+@requires_dashboard_bundle
 def test_dashboard_is_served_at_root(tmp_path: Path) -> None:
     app = create_app(_config(tmp_path, "gateway-dashboard-test.db"))
 
@@ -65,7 +67,7 @@ def test_dashboard_is_served_at_root(tmp_path: Path) -> None:
     assert "Otari Dashboard" in response.text
 
 
-@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built (run: npm --prefix web run build)")
+@requires_dashboard_bundle
 def test_dashboard_assets_are_mounted_and_cacheable(tmp_path: Path) -> None:
     app = create_app(_config(tmp_path, "gateway-dashboard-assets-test.db"))
 
@@ -80,7 +82,7 @@ def test_dashboard_assets_are_mounted_and_cacheable(tmp_path: Path) -> None:
     assert "no-store" not in asset_response.headers.get("cache-control", "")
 
 
-@pytest.mark.skipif(get_dashboard_dir() is None, reason="dashboard bundle not built (run: npm --prefix web run build)")
+@requires_dashboard_bundle
 def test_pwa_manifest_and_icons_are_served(tmp_path: Path) -> None:
     """Installing the dashboard to a phone home screen needs these to be reachable."""
     app = create_app(_config(tmp_path, "gateway-pwa-test.db"))
@@ -186,3 +188,56 @@ def test_root_falls_back_to_tutorial_without_dashboard(tmp_path: Path, monkeypat
 
     assert response.status_code == 200
     assert "Otari Quickstart" in response.text
+
+
+def _capture_gateway_logs(caplog: pytest.LogCaptureFixture) -> None:
+    """Route the ``gateway`` logger (which does not propagate) into caplog."""
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+
+
+def test_missing_dashboard_is_explained_at_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The bundle is built rather than committed, so an unbuilt checkout is ordinary.
+
+    Serving the tutorial at "/" then looks like a broken dashboard unless startup
+    says which build step was not run.
+    """
+    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: None)
+    _capture_gateway_logs(caplog)
+    try:
+        create_app(_config(tmp_path, "gateway-no-dashboard-log-test.db"))
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert "make dashboard" in caplog.text
+    assert "static/dashboard" in caplog.text
+
+
+def test_hybrid_mode_does_not_report_a_missing_dashboard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Hybrid mode has no local management API, so the tutorial is the intended root.
+
+    Telling that operator to run `make dashboard` would send them after a bundle
+    this mode does not serve, so the notice is standalone-only.
+    """
+    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: None)
+    # The platform token alone selects hybrid, which is how a hybrid deployment is
+    # configured (see deploy/render/render.hybrid.yaml). It is resolved once at
+    # config-load time, so it has to be set before the config is built.
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw-test-token")
+    config = GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'gateway-hybrid-log-test.db'}",
+        platform={"base_url": "http://platform.test"},
+    )
+    assert config.is_hybrid_mode
+
+    _capture_gateway_logs(caplog)
+    try:
+        create_app(config)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert "make dashboard" not in caplog.text

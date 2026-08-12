@@ -35,13 +35,10 @@ def test_retryable_status_codes_fall_through(status: int) -> None:
     assert error_class == f"http_{status}"
 
 
-@pytest.mark.parametrize("status", [400, 422, 413, 414, 431])
-def test_malformed_request_status_codes_are_terminal(status: int) -> None:
-    # 400/422 are explicitly terminal; other "bad request" shapes (413/414/431)
-    # are request-level problems that every provider would reject, so they must
-    # not waste fallback attempts.
+@pytest.mark.parametrize("status", [400, 413, 414, 422, 431])
+def test_provider_status_codes_fall_through(status: int) -> None:
     retryable, error_class = _classify_upstream_error(_http_error(status))
-    assert retryable is False
+    assert retryable is True
     assert error_class == f"http_{status}"
 
 
@@ -59,9 +56,9 @@ def test_network_and_timeout_errors_are_retryable(exc: BaseException, expected_c
     assert error_class == expected_class
 
 
-def test_error_without_status_is_unknown_and_terminal() -> None:
+def test_error_without_status_is_unknown_and_falls_through() -> None:
     retryable, error_class = _classify_upstream_error(ValueError("no status here"))
-    assert retryable is False
+    assert retryable is True
     assert error_class == "unknown"
 
 
@@ -140,7 +137,7 @@ def test_unwraps_original_exception_for_unified_any_llm_errors(sdk_error: type, 
     timeout/connection error arrives wrapped in a generic ``AnyLLMError``
     subclass rather than the SDK type directly. The classifier must still
     recognize it by unwrapping ``original_exception``, or this regresses back
-    to the exact "unknown"/non-retryable bug this module fixes.
+    to the exact "unknown" classification that this module handles.
     """
     request = httpx.Request("POST", "http://upstream")
     wrapped = _WrappedByAnyLLM(sdk_error(request=request))
@@ -153,20 +150,20 @@ def test_unwraps_original_exception_for_unified_any_llm_errors(sdk_error: type, 
 def test_unwrap_terminates_on_self_referential_original_exception() -> None:
     """Defensive: a (pathological, shouldn't-happen-in-practice) exception
     whose ``original_exception`` points back to itself must not loop forever;
-    it should fall through to the same terminal ``unknown`` classification as
-    any other unrecognized exception.
+    it should fall through to the same ``unknown`` classification as any other
+    unrecognized exception.
     """
     exc = _WrappedByAnyLLM(ValueError("placeholder"))
     exc.original_exception = exc  # self-reference, must not loop
 
     retryable, error_class = _classify_upstream_error(exc)
-    assert retryable is False
+    assert retryable is True
     assert error_class == "unknown"
 
 
 @pytest.mark.parametrize("sdk_error", [AnthropicAPIStatusError, OpenAIAPIStatusError])
-@pytest.mark.parametrize("status, retryable", [(404, True), (410, True), (400, False), (422, False)])
-def test_classifies_provider_sdk_status_errors(sdk_error: type, status: int, retryable: bool) -> None:
+@pytest.mark.parametrize("status", [400, 404, 410, 422])
+def test_classifies_provider_sdk_status_errors(sdk_error: type, status: int) -> None:
     # any_llm propagates the provider SDK's own ``APIStatusError`` (it does not
     # wrap upstream failures), and that exception exposes ``status_code``
     # directly on itself. The other tests here use ``httpx.HTTPStatusError``,
@@ -179,7 +176,7 @@ def test_classifies_provider_sdk_status_errors(sdk_error: type, status: int, ret
     assert getattr(exc, "status_code", None) == status  # guards the production exception shape
 
     classified_retryable, error_class = _classify_upstream_error(exc)
-    assert classified_retryable is retryable
+    assert classified_retryable is True
     assert error_class == f"http_{status}"
 
 
@@ -228,12 +225,10 @@ def test_billing_exhaustion_detected_through_original_exception() -> None:
     assert error_class == "http_400_billing"
 
 
-def test_malformed_400_is_still_terminal_after_the_billing_probe() -> None:
-    """The billing probe must not sweep up a genuinely malformed request: an
-    unrecognized 400 message stays terminal so it does not waste an attempt
-    against every provider in the route."""
+def test_unrecognized_400_falls_through_without_billing_classification() -> None:
+    """An unrecognized 400 remains an ordinary HTTP error, not a billing error."""
     exc = _MessageStatusError(400, "messages.3: tool_use ids were found without tool_result blocks")
-    assert _classify_upstream_error(exc) == (False, "http_400")
+    assert _classify_upstream_error(exc) == (True, "http_400")
 
 
 def test_billing_probe_does_not_reinterpret_other_statuses() -> None:
@@ -244,17 +239,13 @@ def test_billing_probe_does_not_reinterpret_other_statuses() -> None:
     assert _classify_upstream_error(_MessageStatusError(429, "insufficient_quota")) == (True, "http_429")
 
 
-def test_payment_required_phrase_only_counts_on_a_402() -> None:
-    """The words "payment required" are the 402 reason phrase, which httpx puts in
-    every stringified 402, so they are a status signal rather than a provider
-    phrase. On a 400/422 the same words are far more likely to be a
-    caller-supplied value the provider echoed back, which must stay a terminal
-    malformed request."""
-    request = httpx.Request("POST", "https://api.example.com/v1/chat/completions")
-    response = httpx.Response(402, request=request, json={"error": {"message": "out of funds"}})
-    with pytest.raises(httpx.HTTPStatusError) as raised:
-        response.raise_for_status()
-    assert _classify_upstream_error(raised.value) == (True, "http_402_billing")
+def test_bare_402_is_billing_even_when_the_provider_message_is_lost() -> None:
+    """A provider SDK can retain the status while discarding the response body.
+
+    HTTP 402 still means payment required, so a fallback must not depend on a
+    provider-specific phrase surviving that conversion.
+    """
+    assert _classify_upstream_error(_MessageStatusError(402, "provider error")) == (True, "http_402_billing")
 
     echoed = _MessageStatusError(400, "Invalid value: 'payment required'. Supported values are: 'none', 'auto'.")
-    assert _classify_upstream_error(echoed) == (False, "http_400")
+    assert _classify_upstream_error(echoed) == (True, "http_400")

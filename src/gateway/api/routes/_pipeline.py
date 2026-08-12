@@ -75,8 +75,10 @@ from gateway.api.routes._platform import (
     _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
     is_provider_billing_error,
+    redact_upstream_message,
     run_platform_attempts,
     upstream_error_message,
+    upstream_exception_chain,
     upstream_exception_shape,
 )
 from gateway.api.routes._platform import (
@@ -93,6 +95,7 @@ from gateway.api.routes._tools import (
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
 from gateway.core.usage import cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
+from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt, record_cost, record_tokens
 from gateway.model_labeling import relabel_model
@@ -173,14 +176,13 @@ MCP_SERVER_IDS_HYBRID_ONLY_DETAIL = "mcp_server_ids is only available in hybrid 
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
-# Specific-but-safe provider-failure details. Each is a fixed string that never
-# embeds the raw upstream message, so classifying an error cannot leak provider
-# internals (see classify_provider_error and test_error_detail_leakage).
+# Fixed details for the provider failures that are the gateway's fault rather
+# than the caller's. These never embed the upstream message: a rejected
+# credential or an exhausted account is where provider internals concentrate,
+# and it is not the caller's problem to debug (see classify_provider_error and
+# test_error_detail_leakage). The two caller-fault details below are fallbacks,
+# used only when the provider gave us no message to pass on.
 PROVIDER_BAD_REQUEST_DETAIL = "The provider rejected the request as invalid (check the model name and parameters)"
-PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL = (
-    "The provider does not support function tools together with a non-'none' reasoning_effort for this model. "
-    "Retry with reasoning_effort set to 'none', or use the responses endpoint."
-)
 PROVIDER_MODEL_NOT_FOUND_DETAIL = "The requested model was not found on the provider"
 PROVIDER_CREDENTIALS_DETAIL = "The provider rejected the gateway's credentials"
 PROVIDER_BILLING_DETAIL = (
@@ -252,53 +254,55 @@ class _PendingUsageReport(NamedTuple):
     is_final_attempt: bool
 
 
-def _upstream_error_param(exc: BaseException) -> str | None:
-    """Pull the offending request field off an upstream exception, if it names one.
+def _is_unsupported_feature_error(exc: BaseException) -> bool:
+    """True when any-llm refused a request feature its backend cannot express.
 
-    OpenAI-style provider errors carry the rejected field on ``exc.param`` (from
-    the error body). any-llm currently surfaces the raw SDK error, so the
-    attribute is read directly; it also survives on ``original_exception`` once
-    any-llm's unified-exception layer becomes the default, so unwrap that too.
+    Unwraps ``original_exception`` as well: once
+    ``ANY_LLM_UNIFIED_EXCEPTIONS=1`` becomes the default, the raw
+    ``NotImplementedError`` arrives wrapped in a generic ``ProviderError`` and a
+    check against ``exc`` alone would stop matching.
     """
-    for candidate in (exc, getattr(exc, "original_exception", None)):
-        param = getattr(candidate, "param", None)
-        if isinstance(param, str):
-            return param
-    return None
+    return any(isinstance(candidate, NotImplementedError) for candidate in upstream_exception_chain(exc))
 
 
-def _is_reasoning_effort_tools_conflict(exc: BaseException) -> bool:
-    """True when a 400/422 is the 'function tools + reasoning_effort' rejection.
+def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
+    """The detail for a rejection that is the caller's request to fix.
 
-    Some OpenAI reasoning models reject a request that combines function tools
-    with a non-'none' ``reasoning_effort`` on the chat-completions endpoint. The
-    provider flags the offending field as ``param == "reasoning_effort"`` and
-    names "function tools" in the message. Match narrowly on both so an
-    unrelated ``reasoning_effort`` rejection still falls through to the generic
-    bad-request detail. Note the gateway's own tool loop can inject function
-    tools (MCP / sandbox / web_search) even when the caller sent no ``tools``,
-    so this can surface without an explicit ``tools`` array.
+    Returns the provider's own message, redacted and length-capped, because the
+    provider is the only party that knows what it objected to.
 
-    The "function tools" probe is best-effort against OpenAI's current phrasing:
-    if the provider rewords the message this falls back to the generic detail
-    (safe degradation), never a misclassification. ``param`` stays the primary,
-    authoritative signal.
+    Falls back to ``fallback`` when what is left says nothing. Some SDKs
+    stringify a failure as bare punctuation or the status code itself, and
+    "404" is not an explanation the caller did not already have from the
+    status. Requiring one letter is a low bar deliberately: it rejects the
+    empty cases without second-guessing a provider that wrote a real sentence.
+    A message made entirely of redaction placeholders is empty for this
+    purpose, too.
     """
-    if _upstream_error_param(exc) != "reasoning_effort":
-        return False
-    return "function tools" in upstream_error_message(exc).lower()
+    redacted = redact_upstream_message(upstream_error_message(exc))
+    explanatory = redacted.replace("[redacted]", "")
+    if not any(char.isalpha() for char in explanatory):
+        return fallback
+    return redacted
 
 
 def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     """Map an upstream provider exception to a safe, specific (status, detail).
 
     Returns ``None`` when the failure carries no signal we can safely act on, so
-    the caller falls back to its existing generic provider-error response. Every
-    detail returned here is a fixed string: the raw provider message is never
-    included, preserving the no-leak guarantee. The mapping is intentionally
-    conservative, classifying only the cases a caller can act on and leaving
-    everything else (including provider 5xx and connection errors) to the
-    generic 502.
+    the caller falls back to its existing generic provider-error response. The
+    mapping is intentionally conservative, classifying only the cases a caller
+    can act on and leaving everything else (including provider 5xx and
+    connection errors) to the generic 502.
+
+    Detail text splits on whose fault the failure is. When the provider rejected
+    the caller's request (400/422/404), the provider's own message is passed
+    through, redacted and length-capped, because it is the only description of
+    what was actually wrong and no fixed string we write can substitute for it.
+    When the failure is the gateway's own (a rejected credential, an exhausted
+    provider account, a 5xx), the detail stays a fixed string: those carry no
+    remedy the caller could apply, and are where a raw message is most likely to
+    name the operator's credentials or topology.
 
     Timeout detection (including the OpenAI/Anthropic SDKs' own
     ``APITimeoutError``, and a duck-typed fallback for other provider SDKs) is
@@ -308,6 +312,16 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
+    # any-llm raises NotImplementedError when a request asks a provider for
+    # something its backend cannot express: context_management/betas against a
+    # provider with no native Anthropic Messages API is the case that surfaced
+    # this (#530). It carries no HTTP status, so it would otherwise fall through
+    # to the generic 502/500 and tell the caller a guaranteed-permanent failure
+    # was a transient one. The exception type is the whole signal here, so this
+    # needs no probe into any-llm's wording, and the message it carries already
+    # names the unsupported feature.
+    if _is_unsupported_feature_error(exc):
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL))
     if status_code is None:
         return None
     # Account billing exhaustion, which several providers report as a 400/422
@@ -321,14 +335,11 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     if is_provider_billing_error(exc):
         return ProviderErrorMapping(status.HTTP_502_BAD_GATEWAY, PROVIDER_BILLING_DETAIL)
     if status_code in (400, 422):
-        # Preserve the actionable remedy for the one 400/422 a caller can fix by
-        # retrying: function tools combined with a non-'none' reasoning_effort.
-        # Everything else stays the generic bad-request detail.
-        if _is_reasoning_effort_tools_conflict(exc):
-            return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, PROVIDER_REASONING_TOOLS_UNSUPPORTED_DETAIL)
-        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, PROVIDER_BAD_REQUEST_DETAIL)
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL))
     if status_code == 404:
-        return ProviderErrorMapping(status.HTTP_404_NOT_FOUND, PROVIDER_MODEL_NOT_FOUND_DETAIL)
+        return ProviderErrorMapping(
+            status.HTTP_404_NOT_FOUND, _caller_fault_detail(exc, PROVIDER_MODEL_NOT_FOUND_DETAIL)
+        )
     # A provider rejecting the gateway's credentials is a gateway-config fault,
     # not the caller's: surface it as a 502, never as a client-facing 401/403.
     if status_code in (401, 403):
@@ -1182,7 +1193,8 @@ async def resolve_request_context(
                 db,
                 user_id,
                 estimate,
-                model=model,
+                model=gate_model,
+                pricing_provider=gate_instance,
                 strategy=config.budget_strategy,
                 counts_toward_budget=not budget_exempt,
             )
@@ -1289,6 +1301,29 @@ async def resolve_request_context(
                     "Failed to process request attachments",
                     ErrorKind.API,
                 ) from exc
+
+    # The request is authorized and about to be dispatched, so from here until the
+    # response has been fully sent it is genuinely in flight and the activity log
+    # can show it as such. Registered after the budget, access and model-resolution
+    # gates rather than at the top of the preamble: a request refused by one of
+    # those was never in progress, and it already leaves a usage row of its own. The
+    # caller-facing checks that run after this (`prepare_gateway_tools`: input
+    # guardrails, MCP id resolution, tool opt-ins) do list the request while they
+    # run, which is honest, since each of them can make a network call of its own.
+    # `model` and `provider` are the pair the
+    # usage row will carry (the resolved target, not the caller's selector and not
+    # the display alias), so a request does not appear to change model at the moment
+    # it settles. The raw selector is the fallback for the cases that resolve
+    # nothing locally: hybrid mode, and a selector the gate could not parse.
+    track_request(
+        raw_request,
+        endpoint=adapter.endpoint,
+        model=resolved_provider.model if resolved_provider else model,
+        provider=resolved_provider.instance if resolved_provider else None,
+        user_id=user_id,
+        api_key_id=api_key_id,
+        policy_name=plan.policy_name if plan else None,
+    )
 
     return RequestContext(
         config=config,
@@ -2971,11 +3006,9 @@ def raise_all_streaming_attempts_failed(
 
     Gateway-side backend failures (sandbox / web_search eager-open) get a 502
     with a backend-specific detail so operators don't chase a fake provider
-    outage. Provider failures are classified when there is a single attempt,
-    or when the failure is a non-retryable invalid request (400/422): that
-    short-circuits the fallback and is definitive regardless of attempt count,
-    matching the non-streaming path. Otherwise the multi-attempt aggregate
-    surfaces (504 when the last failure was a timeout, else 502).
+    outage. A single attempt preserves its classified provider error. Once a
+    multi-attempt route is exhausted, it surfaces the aggregate result: 504
+    when the last failure was a timeout, otherwise 502.
     """
     if isinstance(exc, SandboxNotReachableError):
         logger.error("Sandbox unreachable request_id=%s: %s", route.request_id, exc)
@@ -2984,9 +3017,7 @@ def raise_all_streaming_attempts_failed(
         logger.error("Web search backend unreachable request_id=%s: %s", route.request_id, exc)
         raise adapter.error(502, WEB_SEARCH_UNREACHABLE_DETAIL, ErrorKind.API) from exc
     logger.error("All streaming attempts failed request_id=%s: %s", route.request_id, exc)
-    mapping = classify_provider_error(exc)
-    invalid_request = mapping is not None and mapping.status_code == status.HTTP_400_BAD_REQUEST
-    if invalid_request or len(route.attempts) <= 1:
+    if len(route.attempts) <= 1:
         raise adapter.provider_error(exc) from exc
     kind, _ = upstream_exception_shape(exc)
     if kind == "timeout":

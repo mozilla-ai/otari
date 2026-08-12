@@ -181,9 +181,12 @@ class KnnRoutingMemory:
         """Persist one routing-memory record for this example.
 
         ``scores`` maps each candidate model to its quality in ``[0.0, 1.0]``
-        (1.0 = great, 0.0 = bad). One example is one record, the prompt embedding
-        plus the per-model scores, so the kNN later votes over distinct prompts.
-        Returns the number of records written (1, or 0 for an empty submission).
+        (1.0 = great, 0.0 = bad), keyed on canonical ``instance:model``; the caller
+        canonicalizes, and :meth:`_score` canonicalizes what it reads, so a
+        candidate's spelling never decides whether it matches. One example is one
+        record, the prompt embedding plus the per-model scores, so the kNN later
+        votes over distinct prompts. Returns the number of records written (1, or 0
+        for an empty submission).
         """
         if not prompt.strip() or not scores:
             return 0
@@ -222,9 +225,20 @@ class KnnRoutingMemory:
         def norm_cost(model: str) -> float:
             return 0.0 if span == 0 else (prices[model] - lo) / span
 
+        # Candidates and stored scores are matched on canonical `instance:model`, not
+        # on the spelling either side happens to use. `openai/gpt-4o`,
+        # `openai:gpt-4o`, and an alias pointing at it name one model, so a candidate
+        # whose policy spells it differently from the example that taught it must
+        # still match: a miss is silent, and leaves the cheap candidate scoreless
+        # while the pool reports warm.
+        cache: dict[str, str] = {}
+        key_of = {model: self._canonical(model, ctx.user_id, cache) for model in pool}
+        recorded = [self._canonical_qualities(record.qualities, ctx.user_id, cache) for _, record in neighbors]
+
         scores: dict[str, float] = {}
         for model in pool:
-            qualities = [record.qualities[model] for _, record in neighbors if model in record.qualities]
+            key = key_of[model]
+            qualities = [record[key] for record in recorded if key in record]
             if not qualities:
                 continue
             scores[model] = sum(qualities) / len(qualities) - self.alpha * norm_cost(model)
@@ -242,10 +256,10 @@ class KnnRoutingMemory:
         # only pool candidates count: a neighbor's favorite that this policy cannot
         # dispatch is irrelevant.
         def neighbor_best(qualities: dict[str, float]) -> str | None:
-            among = {model: qualities[model] for model in pool if model in qualities}
+            among = {model: qualities[key_of[model]] for model in pool if key_of[model] in qualities}
             return max(among, key=lambda model: among[model]) if among else None
 
-        agree = sum(1 for _, record in neighbors if neighbor_best(record.qualities) == best)
+        agree = sum(1 for qualities in recorded if neighbor_best(qualities) == best)
         confidence = agree / len(neighbors)
 
         if confidence < self.confidence_floor:
@@ -264,6 +278,45 @@ class KnnRoutingMemory:
             confidence=confidence,
             rationale=f"kNN cost-biased argmax (alpha={self.alpha:g}, k={self.k})",
         )
+
+    # -- model identity ------------------------------------------------------
+
+    def _canonical(self, selector: str, user_id: str | None, cache: dict[str, str]) -> str:
+        """``instance:model`` for a selector, or the selector unchanged if it resolves to nothing.
+
+        An unresolvable selector keeps its own spelling rather than dropping out, so
+        it can still match a stored key spelled the same way; scoring is not the
+        place to decide a candidate is invalid.
+
+        ``cache`` is per decision: the pool and the neighbors' stored keys repeat the
+        same handful of selectors, and each resolution walks the alias and
+        static-policy tables.
+        """
+        canonical = cache.get(selector)
+        if canonical is None:
+            try:
+                resolved = resolve_provider_selector(self.config, selector, user_id)
+                canonical = f"{resolved.instance}:{resolved.model}"
+            except (ValueError, AnyLLMError):
+                canonical = selector
+            cache[selector] = canonical
+        return canonical
+
+    def _canonical_qualities(
+        self, qualities: dict[str, float], user_id: str | None, cache: dict[str, str]
+    ) -> dict[str, float]:
+        """One record's scores, rekeyed on canonical model identity.
+
+        The write path canonicalizes too, so this matters for records written before
+        it did: they hold whatever spelling was sent, and rekeying on read is what
+        makes them usable instead of stranding them behind a schema migration.
+        Two spellings of one model in one record (which ``/rank`` refuses) keep the
+        first, so the collision resolves the same way on every request.
+        """
+        canonical: dict[str, float] = {}
+        for model, quality in qualities.items():
+            canonical.setdefault(self._canonical(model, user_id, cache), quality)
+        return canonical
 
     # -- candidate pool / ordering ------------------------------------------
 

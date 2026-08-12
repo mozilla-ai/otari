@@ -58,8 +58,12 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   enforces a conventional title. Visibility rules live in `RELEASE.md`
   ("Changelog visibility"). Do not hand-edit `CHANGELOG.md`; the release
   workflows regenerate it.
-- Editing anything under `web/src` **or** `docs/dashboard.md` makes the committed dashboard
-  bundle (`src/gateway/static/dashboard/`) stale; rebuild and commit it. See
+- The dashboard bundle (`src/gateway/static/dashboard/`) is **not** committed; it is
+  gitignored and built on demand (`make dashboard`), and the Docker image builds it in
+  its own Node stage. Vite content-hashes every asset filename, so committing it made
+  any two branches touching `web/src` conflict by construction. Nothing to rebuild or
+  commit after a `web/src` or `docs/dashboard.md` change; run `make dashboard` only when
+  you need to *see* the dashboard locally or to build a wheel that ships it. See
   [web/AGENTS.md](web/AGENTS.md).
 
 ## Repository Conventions

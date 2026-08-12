@@ -2,6 +2,8 @@
 
 import asyncio
 import time
+from collections.abc import Callable
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,14 +15,20 @@ from any_llm.types.model import Model
 from gateway.core.config import GatewayConfig
 from gateway.services.model_discovery_service import (
     _ERROR_MAX_CHARS,
+    _MIN_REFRESH_INTERVAL_SECONDS,
     ModelCache,
     ProviderDiscovery,
+    _CacheEntry,
     _is_missing_models_endpoint,
+    _refresh_interval,
     _short_error,
     _supports_list_models,
+    background_discovery_enabled,
     discover_all_models,
     discover_models_with_status,
     discover_provider_models,
+    refresh_discovery_cache,
+    run_discovery_refresher,
 )
 from gateway.services.model_discovery_service import (
     test_provider_credentials as run_credentials_test,  # aliased so pytest does not collect it
@@ -987,3 +995,280 @@ class TestMissingModelsEndpoint:
         assert _is_missing_models_endpoint(self._status_error(501)) is True
         assert _is_missing_models_endpoint(self._status_error(500)) is False
         assert _is_missing_models_endpoint(ValueError("no status here")) is False
+
+
+# ---------------------------------------------------------------------------
+# Background refresh: reads serve the cache, the refresher owns the dialing
+# ---------------------------------------------------------------------------
+
+
+class TestBackgroundDiscovery:
+    """Discovery must not be dialed on the request path.
+
+    ``model_discovery_timeout_seconds`` (10s per unreachable provider) used to be
+    paid by whoever's read happened to arrive after the TTL lapsed, which put it
+    on a dashboard page load. These pin the read/refresh split that removed that.
+    """
+
+    @staticmethod
+    def _config(ttl: int = 300) -> GatewayConfig:
+        return GatewayConfig(providers={"openai": {"api_key": "sk-test"}}, model_cache_ttl_seconds=ttl)
+
+    @pytest.mark.asyncio
+    async def test_stale_entry_is_served_without_dialing(self) -> None:
+        """The regression: an expired entry is served, not re-dialed, on a read."""
+        config = self._config()
+        cache = ModelCache()
+        cache.set("openai", [_make_model("gpt-4o")])
+        # Age the entry well past the 300s TTL, which is what used to force the
+        # next reader to pay the provider timeout.
+        cache._store["openai"].cached_at = time.monotonic() - 10_000
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service.alist_models") as mock_alist,
+        ):
+            result = await discover_all_models(config, serve_stale=True)
+
+        assert [model.id for _, model in result] == ["gpt-4o"]
+        mock_alist.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_serve_stale_still_dials_a_provider_never_checked(self) -> None:
+        """A cold worker must dial rather than claim the provider has no models."""
+        config = self._config()
+        cache = ModelCache()
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                new=AsyncMock(return_value=[_make_model("gpt-4o")]),
+            ) as mock_alist,
+        ):
+            result = await discover_all_models(config, serve_stale=True)
+
+        assert [model.id for _, model in result] == ["gpt-4o"]
+        assert mock_alist.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_stale_read_does_not_hide_a_cached_failure(self) -> None:
+        """A negatively cached provider stays failed; it must not look healthy."""
+        config = self._config()
+        cache = ModelCache()
+        cache._store["openai"] = _CacheEntry(
+            result=ProviderDiscovery(provider="openai", models=[], error="bad key"),
+            cached_at=time.monotonic() - 10_000,
+            checked_at=datetime.now(UTC),
+        )
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service.alist_models") as mock_alist,
+        ):
+            discovery = await discover_provider_models(config, "openai", serve_stale=True)
+
+        assert discovery.error == "bad key"
+        mock_alist.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_force_redials_a_fresh_entry(self) -> None:
+        """The refresher's own read ignores freshness, or the cache never moves."""
+        config = self._config()
+        cache = ModelCache()
+        cache.set("openai", [_make_model("stale-model")])
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                new=AsyncMock(return_value=[_make_model("fresh-model")]),
+            ) as mock_alist,
+        ):
+            discoveries = await discover_models_with_status(config, force=True)
+
+        assert mock_alist.await_count == 1
+        assert [model.id for model in discoveries[0].models] == ["fresh-model"]
+        # And the refreshed result is what a later stale read serves.
+        assert [model.id for model in (cache.stale("openai") or ProviderDiscovery("openai", [])).models] == [
+            "fresh-model"
+        ]
+
+    @staticmethod
+    async def _run_refresher_until(
+        config: GatewayConfig,
+        on_call: "Callable[[int], None]",
+        rounds: int,
+    ) -> int:
+        """Drive the refresher until ``rounds`` calls land, then cancel it.
+
+        Waits on an event rather than a wall-clock sleep: the failure path logs a
+        full traceback, and rendering that can outlast any fixed window, which
+        would make a timing-based assertion flaky under load.
+        """
+        seen = 0
+        reached = asyncio.Event()
+
+        async def refresh(cfg: GatewayConfig) -> None:
+            nonlocal seen
+            seen += 1
+            on_call(seen)
+            if seen >= rounds:
+                reached.set()
+
+        with patch("gateway.services.model_discovery_service.refresh_discovery_cache", side_effect=refresh):
+            task = asyncio.create_task(run_discovery_refresher(config, interval=0.001))
+            try:
+                await asyncio.wait_for(reached.wait(), timeout=5)
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+        return seen
+
+    @pytest.mark.asyncio
+    async def test_refresher_primes_immediately_then_ticks(self) -> None:
+        """Priming is the first thing the refresher does, before any sleep."""
+        first_call_delay: list[float] = []
+        started = time.monotonic()
+
+        def record(_: int) -> None:
+            first_call_delay.append(time.monotonic() - started)
+
+        seen = await self._run_refresher_until(self._config(), record, rounds=2)
+
+        assert seen == 2
+        # The prime lands before the first sleep, so the catalog is warm without
+        # waiting out an interval after boot.
+        assert first_call_delay[0] < 1.0
+
+    @pytest.mark.asyncio
+    async def test_refresher_survives_a_failing_round(self) -> None:
+        """One bad round must not kill the refresher and freeze the catalog."""
+
+        def blow_up_once(call: int) -> None:
+            if call == 1:
+                raise RuntimeError("provider fanout blew up")
+
+        seen = await self._run_refresher_until(self._config(), blow_up_once, rounds=2)
+
+        assert seen == 2
+
+    def test_zero_ttl_keeps_dialing_on_every_read(self) -> None:
+        """`model_cache_ttl_seconds = 0` documents "no caching"; honor it."""
+        assert background_discovery_enabled(self._config(ttl=0)) is False
+        assert background_discovery_enabled(self._config(ttl=300)) is True
+
+    def test_refresh_interval_has_a_floor(self) -> None:
+        """A tiny TTL must not become a re-dial storm against every provider."""
+        assert _refresh_interval(self._config(ttl=1)) == _MIN_REFRESH_INTERVAL_SECONDS
+        assert _refresh_interval(self._config(ttl=600)) == 600.0
+
+    @pytest.mark.asyncio
+    async def test_refresher_skips_dialing_while_caching_is_off_but_keeps_ticking(self) -> None:
+        """The setting is read per tick, not once at startup.
+
+        ``model_cache_ttl_seconds`` is runtime-settable from the Settings page, and
+        raising it from 0 flips every read onto the serve-from-cache path at once.
+        A refresher that had been skipped at startup would leave that cache filled
+        once and never refreshed for the life of the worker. So the loop always
+        runs and decides per tick: no dial while caching is off (the reads dial for
+        themselves then, and a second dialer would be pure duplication), and it
+        picks straight back up when the setting changes.
+        """
+        config = self._config(ttl=0)
+        rounds = 0
+        reached = asyncio.Event()
+
+        async def refresh(_cfg: GatewayConfig) -> None:
+            nonlocal rounds
+            rounds += 1
+            reached.set()
+
+        with patch("gateway.services.model_discovery_service.refresh_discovery_cache", side_effect=refresh):
+            task = asyncio.create_task(run_discovery_refresher(config, interval=0.001))
+            try:
+                # Several ticks' worth of time, with caching off the whole way.
+                await asyncio.sleep(0.05)
+                assert rounds == 0, "refresher dialed while model_cache_ttl_seconds was 0"
+
+                # An operator turns caching on; the running loop must notice.
+                config.model_cache_ttl_seconds = 300
+                await asyncio.wait_for(reached.wait(), timeout=5)
+                assert rounds >= 1
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+
+class TestRefresherCadence:
+    """A failed provider must not stay failed for a whole success interval.
+
+    Reads serve a cached failure at any age, so the refresh interval is what
+    decides how quickly a recovered provider reappears. Before the refresher
+    existed, ``model_discovery_negative_ttl_seconds`` bounded that at 30s via the
+    next read's re-dial; the refresher has to keep that promise.
+    """
+
+    @staticmethod
+    def _config(ttl: int = 300, negative_ttl: float = 30.0, discovery: bool = True) -> GatewayConfig:
+        return GatewayConfig(
+            providers={"openai": {"api_key": "sk-test"}},
+            model_cache_ttl_seconds=ttl,
+            model_discovery_negative_ttl_seconds=negative_ttl,
+            model_discovery=discovery,
+        )
+
+    def test_a_failed_round_comes_back_on_the_negative_ttl(self) -> None:
+        config = self._config(ttl=300, negative_ttl=30.0)
+        assert _refresh_interval(config, had_failure=False) == 300.0
+        assert _refresh_interval(config, had_failure=True) == 30.0
+
+    def test_the_floor_still_applies_to_a_failed_round(self) -> None:
+        """A tiny negative TTL must not become a re-dial storm."""
+        config = self._config(ttl=300, negative_ttl=1.0)
+        assert _refresh_interval(config, had_failure=True) == _MIN_REFRESH_INTERVAL_SECONDS
+
+    def test_a_failure_never_lengthens_the_interval(self) -> None:
+        """A negative TTL above the success TTL must not slow recovery down."""
+        config = self._config(ttl=600, negative_ttl=3600.0)
+        assert _refresh_interval(config, had_failure=True) == 600.0
+
+    @pytest.mark.asyncio
+    async def test_refresh_reports_whether_a_provider_failed(self) -> None:
+        config = self._config()
+        cache = ModelCache()
+
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                new=AsyncMock(side_effect=RuntimeError("provider down")),
+            ),
+        ):
+            assert await refresh_discovery_cache(config) is True
+
+        cache.clear()
+        with (
+            patch("gateway.services.model_discovery_service.get_model_cache", return_value=cache),
+            patch("gateway.services.model_discovery_service._supports_list_models", return_value=True),
+            patch(
+                "gateway.services.model_discovery_service.alist_models",
+                new=AsyncMock(return_value=[_make_model("gpt-4o")]),
+            ),
+        ):
+            assert await refresh_discovery_cache(config) is False
+
+    def test_discovery_disabled_stops_the_background_dialing_too(self) -> None:
+        """`model_discovery: false` means "do not dial providers", unattended included.
+
+        A refresher fanning out every interval for the life of the process is new
+        unrequested traffic against a provider that may meter list_models, on a
+        deployment that explicitly opted out.
+        """
+        assert background_discovery_enabled(self._config(discovery=False)) is False
+        assert background_discovery_enabled(self._config(discovery=True)) is True

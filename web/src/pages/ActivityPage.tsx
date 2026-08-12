@@ -4,16 +4,22 @@ import type { ReactNode } from "react";
 
 import {
   useDeleteUsage,
-  useKeys,
+  useInFlightRequests,
   useSetPricing,
   useSetUsagePrice,
   useRequestGroups,
   useUsageCount,
   useUsageLogs,
   useUsageSummary,
-  useUsers,
 } from "@/api/hooks";
-import type { SummaryDimension, UsageEntry, UsageFilters, UsageMutationSelection } from "@/api/types";
+import type {
+  InFlightRequest,
+  SummaryDimension,
+  UsageEntry,
+  UsageFilters,
+  UsageGroupRow,
+  UsageMutationSelection,
+} from "@/api/types";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -106,17 +112,92 @@ function timeAgo(iso: string): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+// ---------- requests in flight ----------
+//
+// A usage row is written when a request settles, so the log alone can only
+// describe the past: on a slow backend a 30-second call is invisible for its whole
+// duration. A tracked request is therefore rendered as a row in this same table,
+// pinned above the settled rows and carrying the status below, so that when it
+// lands the row resolves in place into the success or error row it became. The
+// synthetic row is shaped as a `UsageEntry` so the table's columns, widths,
+// selection, and detail machinery need no separate code path: the outcome fields
+// are null, which the shared formatters already render as their own placeholder.
+const IN_FLIGHT_STATUS = "in progress";
+
+// Browser-local timestamp the wait counts up from, present only on a synthetic
+// row. Derived from the poll's `dataUpdatedAt` minus the server's own `elapsed_ms`,
+// so the wait never depends on the browser clock agreeing with the gateway's.
+type ActivityRow = UsageEntry & { inFlightStartedAtMs?: number };
+
+const isInFlightRow = (row: ActivityRow): boolean => row.status === IN_FLIGHT_STATUS;
+
+function inFlightRow(request: InFlightRequest, startedAtMs: number): ActivityRow {
+  return {
+    inFlightStartedAtMs: startedAtMs,
+    id: request.id,
+    user_id: request.user_id,
+    api_key_id: request.api_key_id,
+    timestamp: request.started_at,
+    model: request.model,
+    provider: request.provider,
+    endpoint: request.endpoint,
+    prompt_tokens: null,
+    completion_tokens: null,
+    total_tokens: null,
+    cache_read_tokens: null,
+    cache_write_tokens: null,
+    cost: null,
+    status: IN_FLIGHT_STATUS,
+    error_message: null,
+    status_code: null,
+    policy_name: request.policy_name,
+    latency_ms: null,
+    source: "gateway",
+    source_label: null,
+    // Never selectable: bulk delete and reprice target logged rows, and this one
+    // does not exist in the table yet. `true` is what the page's existing
+    // disabled-key rule keys on, so no extra case is needed there.
+    counts_toward_budget: true,
+  };
+}
+
+// Coarser than the settled Total time column: this is a wall-clock wait an
+// operator is watching rather than a measurement, so sub-second precision is
+// noise. Minutes appear because a stuck local model is the case this exists for.
+function formatElapsed(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+// The wait, ticking between the 2s polls: on the one row whose whole point is that
+// it has not finished, a number that only moved when a response landed would read
+// as stalled. Each live row owns its interval so the `columns` array stays
+// referentially stable and DataTable's per-row cache is not rebuilt every second
+// (see the DataTable docstring).
+function InFlightWait({ startedAtMs }: { startedAtMs: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  // Never negative: a poll can resolve between the tick and the paint.
+  return <span className="tabular-nums">{formatElapsed(Math.max(0, now - startedAtMs))}</span>;
+}
+
 // Stable row-key getter and row class so DataTable's per-row cache holds
 // across re-renders (see the DataTable docstring); an inline arrow here would
 // rebuild every row on each selection click.
-const getActivityRowKey = (e: UsageEntry): string => e.id;
+const getActivityRowKey = (e: ActivityRow): string => e.id;
 
 // An absorbed attempt is a failure a routing policy recovered from, so the
 // request it belongs to succeeded. Styling it like an error would make a working
 // fallback chain read as an outage, which is the same reason the server keeps it
 // out of error_count. Amber says "something happened here" without saying "this
 // request failed".
-const activityRowClassName = (e: UsageEntry): string | undefined => {
+const activityRowClassName = (e: ActivityRow): string | undefined => {
+  if (isInFlightRow(e)) return "bg-[var(--otari-brand-tint)]";
   if (e.status === "error") return "bg-red-50";
   if (e.status === "absorbed") return "bg-amber-50";
   return undefined;
@@ -160,11 +241,22 @@ const TOOL_BREAKDOWN: SummaryDimension[] = ["tool"];
 
 const DEFAULT_PAGE_SIZE = 50;
 
+// Floor on how often a settled in-flight request may pull the log again. Matches
+// the log's own `staleTime` in `useUsageLogs`, so this never delays a refresh the
+// query would have served from cache anyway.
+const SETTLED_REFETCH_MIN_MS = 10_000;
+
 // The only breakdown this page reads: the in-window models behind the typeahead.
 // The typeahead reads `by_model`; the source picker's option list piggybacks on
 // the same query's `by_source` while no source is picked (see the source
 // suggestion note below), so both breakdowns ride one request.
 const MODEL_AND_SOURCE_BREAKDOWNS: SummaryDimension[] = ["model", "source"];
+
+// The user and key pickers read these two. by_user and by_api_key carry each
+// entity's display name, resolved server-side in the same GROUP BY, so naming an
+// option costs nothing beyond the breakdown itself. The alternative, and what
+// this replaced, was paging the whole users and api_keys tables on every visit.
+const ENTITY_BREAKDOWNS: SummaryDimension[] = ["user", "api_key"];
 const SOURCE_BREAKDOWN: SummaryDimension[] = ["source"];
 
 // All filter + pagination state, with defaults, kept in the URL.
@@ -189,7 +281,16 @@ const URL_DEFAULTS = {
 // Resolve the query window. Explicit start_date/end_date bounds (a custom range,
 // or a drill-down from the Usage page) take precedence; otherwise a preset anchors
 // `start` to "now minus N", and "all" (or an empty custom range) leaves it open.
-function resolveWindow(range: string, start: string, end: string): { start?: string; end?: string } {
+// `now` is a parameter, not a call inside, so a caller deriving more than one
+// window can hand both the same clock reading. Read independently they land
+// milliseconds apart, and `winOutsideExtent` below compares two of them for
+// strict inequality, so drift of a single millisecond changes what the page does.
+function resolveWindow(
+  range: string,
+  start: string,
+  end: string,
+  now: number = Date.now(),
+): { start?: string; end?: string } {
   if (start || end) {
     return { start: start || undefined, end: end || undefined };
   }
@@ -198,7 +299,7 @@ function resolveWindow(range: string, start: string, end: string): { start?: str
   }
   const preset = findPreset(ACTIVITY_PRESETS, range) ?? findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY);
   const seconds = preset?.seconds ?? null;
-  return { start: seconds == null ? undefined : isoAgo(seconds), end: undefined };
+  return { start: seconds == null ? undefined : isoAgo(seconds, now), end: undefined };
 }
 
 // The histogram extent (what the bars span), which is *not* always the list
@@ -209,11 +310,11 @@ function resolveWindow(range: string, start: string, end: string): { start?: str
 // silently show a rolling month while the caption reads "All time". The explicit
 // start gives a deterministic, draggable span (the axis shows exactly what it
 // covers) while the list stays all-time.
-function resolveExtentWindow(range: string): { start?: string; end?: string } {
-  const win = resolveWindow(range, "", "");
+function resolveExtentWindow(range: string, now: number = Date.now()): { start?: string; end?: string } {
+  const win = resolveWindow(range, "", "", now);
   if (win.start) return win;
   const preset = findPreset(ACTIVITY_PRESETS, range);
-  if (preset?.seconds == null) return { start: isoAgo(YEAR_SPAN_S) };
+  if (preset?.seconds == null) return { start: isoAgo(YEAR_SPAN_S, now) };
   return win;
 }
 
@@ -229,7 +330,17 @@ function StatusPill({ status }: { status: string }) {
         ? "border-amber-200 bg-amber-50 text-amber-700"
         : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]";
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
+      {/* The pulse is decorative: "in progress" beside it carries the same meaning
+          in text, so nothing here is encoded in motion alone. That is also why it
+          can stop outright under `prefers-reduced-motion`: this is the one element
+          on the page that would otherwise animate indefinitely. */}
+      {status === IN_FLIGHT_STATUS ? (
+        <span
+          className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--otari-brand-dark)] motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+      ) : null}
       {status}
     </span>
   );
@@ -756,14 +867,6 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
 // ---------- page ----------
 
 export function ActivityPage() {
-  const users = useUsers();
-  const keys = useKeys();
-  const keyLabels = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const k of keys.data ?? []) map.set(k.id, k.key_name ?? `${k.id.slice(0, 8)}…`);
-    return map;
-  }, [keys.data]);
-
   // Filter + pagination state lives in the URL, so a filtered view is shareable
   // and survives the back button. `patch` batches related changes into one entry.
   const url = useUrlState(URL_DEFAULTS);
@@ -808,25 +911,37 @@ export function ActivityPage() {
   // the milliseconds since, which changes `filters`, which trips the page reset
   // below: a bookmarked or shared `?page=3` URL would silently open on page 1.
   const selectionKey = `${range}|${startParam}|${endParam}`;
-  const [win, setWin] = useState(() => resolveWindow(range, startParam, endParam));
-  const prevSelectionKey = useRef(selectionKey);
-  useEffect(() => {
-    if (prevSelectionKey.current === selectionKey) return;
-    prevSelectionKey.current = selectionKey;
-    setWin(resolveWindow(range, startParam, endParam));
-  }, [selectionKey, range, startParam, endParam]);
-
+  // One clock reading shared by both initial windows. Taken separately they differ
+  // by the milliseconds between the two lines, and since `extentWin` is read second
+  // its rolling start is the later one, which made the strict `<` in
+  // `winOutsideExtent` true on an ordinary load: the page then framed the window
+  // rather than the preset, so no preset was highlighted and a 24h extent bucketed
+  // by day instead of by hour. Whether that happened came down to machine load.
+  const [mountClock] = useState(Date.now);
+  const [win, setWin] = useState(() => resolveWindow(range, startParam, endParam, mountClock));
   // The preset extent (ignoring any brushed bounds) that the timeline histogram
   // spans. Snapshotted like `win`, re-anchored when the preset changes: a brushed
   // sub-window must leave the extent alone, or zooming in would drag the frame
   // (and refetch the histogram) along with it.
-  const [extentWin, setExtentWin] = useState(() => resolveExtentWindow(range));
+  const [extentWin, setExtentWin] = useState(() => resolveExtentWindow(range, mountClock));
+  // Both re-anchors share one effect so they also share one clock reading. As two
+  // effects they ran in declaration order on a range change, leaving the list
+  // window a millisecond behind the extent containing it, which is the same drift
+  // described above. The guards are per-window and unchanged: `win` re-anchors for
+  // any selection change, `extentWin` only when the preset itself moves.
+  const prevSelectionKey = useRef(selectionKey);
   const prevRange = useRef(range);
   useEffect(() => {
-    if (prevRange.current === range) return;
-    prevRange.current = range;
-    setExtentWin(resolveExtentWindow(range));
-  }, [range]);
+    const clock = Date.now();
+    if (prevSelectionKey.current !== selectionKey) {
+      prevSelectionKey.current = selectionKey;
+      setWin(resolveWindow(range, startParam, endParam, clock));
+    }
+    if (prevRange.current !== range) {
+      prevRange.current = range;
+      setExtentWin(resolveExtentWindow(range, clock));
+    }
+  }, [selectionKey, range, startParam, endParam]);
 
   const priced = pricedFilter === "true" ? true : pricedFilter === "false" ? false : undefined;
 
@@ -877,6 +992,55 @@ export function ActivityPage() {
   const usage = useUsageLogs(filters, page, pageSize);
   const count = useUsageCount(filters);
 
+  // Requests in progress, read unfiltered: the endpoint has no filters, because a
+  // request that has not finished has no outcome, cost, or token count to filter
+  // on. Which of them belong in the current view is decided below.
+  const inFlight = useInFlightRequests();
+
+  // A tracked request that has left the in-flight list just settled, so its row
+  // exists in the log now. Pull it in, so the operator watches the live row turn
+  // into its settled one rather than vanish until they press refresh. Keyed on
+  // ids, not on the count: one request finishing while another starts leaves the
+  // count unchanged.
+  //
+  // Rate-limited, because the registry is per-process: a deployment running
+  // several otari processes behind a load balancer answers consecutive polls from
+  // different processes, so a request that is still running reads as settled on
+  // every poll. Unthrottled that refetches the log and its `COUNT(*)` every two
+  // seconds for as long as the gateway has any traffic at all. The ceiling matches
+  // the log's own `staleTime`, so a genuine settle still refreshes promptly and
+  // the flapping case costs one extra pair of reads per interval instead of one
+  // per poll.
+  //
+  // Deferred rather than dropped when the throttle bites: a settle is remembered
+  // on `settlePending` and served by the first poll past the window. Discarding it
+  // instead lost the row entirely, because the id is gone from the next poll and
+  // nothing re-detects it: two requests landing inside one 10-second window left
+  // the second one's row missing from the log until an unrelated later settle or a
+  // manual refresh. The flapping case is unchanged (it re-flags every poll either
+  // way, and still costs one refetch per interval).
+  //
+  // Keyed on `dataUpdatedAt` as well as the payload, so a deferred settle is
+  // reconsidered on the next poll: an idle registry answers every poll with the
+  // same `{requests: [], total: 0}`, which structural sharing hands back as the
+  // same object, so `data` alone stops changing the moment the last request lands.
+  const seenInFlightIds = useRef<Set<string>>(new Set());
+  const lastSettledRefetch = useRef(0);
+  const settlePending = useRef(false);
+  useEffect(() => {
+    if (!inFlight.data) return;
+    const live = new Set((inFlight.data.requests ?? []).map((request) => request.id));
+    if ([...seenInFlightIds.current].some((id) => !live.has(id))) settlePending.current = true;
+    seenInFlightIds.current = live;
+    if (!settlePending.current) return;
+    const now = Date.now();
+    if (now - lastSettledRefetch.current < SETTLED_REFETCH_MIN_MS) return;
+    settlePending.current = false;
+    lastSettledRefetch.current = now;
+    void usage.refetch();
+    void count.refetch();
+  }, [inFlight.data, inFlight.dataUpdatedAt, usage.refetch, count.refetch]);
+
   // Model suggestions: models with usage in the window (other filters applied, the
   // model filter omitted so the full list stays offered).
   const modelSuggestFilters: UsageFilters = useMemo(
@@ -904,12 +1068,27 @@ export function ActivityPage() {
       toolFilter,
     ],
   );
-  // Only `by_model` and `by_source` are read (typeahead + source picker), so
-  // only those breakdowns are requested: no use for the other five GROUP BYs.
+  // Two breakdowns are read here (model typeahead, source picker); the rest are
+  // not requested.
   const modelSummary = useUsageSummary(modelSuggestFilters, "day", MODEL_AND_SOURCE_BREAKDOWNS);
-  const modelOptions =
-    modelSummary.data?.by_model?.filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string) ?? [];
-  const keyOptions = (keys.data ?? []).map((k) => ({ value: k.id, label: k.key_name ?? `${k.id.slice(0, 8)}…` }));
+  const realGroups = (rows: UsageGroupRow[] | undefined) =>
+    (rows ?? []).filter((r) => !r.is_other && r.key !== null);
+  const modelOptions = realGroups(modelSummary.data?.by_model).map((r) => r.key as string);
+
+  // The user and key pickers need their own window: each must keep offering the
+  // *other* values of its own dimension, so both entity filters come off. That
+  // cannot share the model/source query above, which has to keep them applied,
+  // or filtering Activity to one user would make the typeahead suggest only the
+  // models other users called and picking one would return an empty table.
+  const entitySuggestFilters: UsageFilters = useMemo(
+    () => ({ ...filters, user_id: undefined, api_key_id: undefined }),
+    [filters],
+  );
+  const entitySummary = useUsageSummary(entitySuggestFilters, "day", ENTITY_BREAKDOWNS);
+  const keyOptions = realGroups(entitySummary.data?.by_api_key).map((r) => ({
+    value: r.key as string,
+    label: r.label ?? `${(r.key as string).slice(0, 8)}…`,
+  }));
 
   // Source options: the sources with usage in the window. Like the model
   // suggestions, this must ignore the source filter itself, or picking Claude Code
@@ -1008,6 +1187,67 @@ export function ActivityPage() {
 
   const rows = usage.data ?? [];
 
+  // The live rows to pin above this page, and how many the endpoint left out.
+  //
+  // Kept separate from `rows` throughout: `rows` is what the paginator counts and
+  // what the bulk actions target, and a request that has not been logged belongs
+  // in neither. Newest-first like the rest of the table, so the row an operator
+  // just triggered appears at the top and stays there as it resolves (the endpoint
+  // serves the longest-running first, which is the order the cap applies in).
+  //
+  // Suppressed rather than shown wherever the current view cannot honestly include
+  // them: page 2 onward (they are not part of any page's slice), a window that ends
+  // in the past, and any filter on something a request has not got yet (outcome,
+  // price, tools, provenance). The identity filters can be applied, so they are.
+  const { inFlightRows, inFlightHidden } = useMemo(() => {
+    const none = { inFlightRows: [] as ActivityRow[], inFlightHidden: 0 };
+    // A failed poll leaves the list unknown, not unchanged. TanStack keeps the last
+    // successful payload, so without the `isError` arm the rows would stay on
+    // screen with their waits still climbing against a frozen anchor, asserting
+    // that work is running which may have landed minutes ago. That is the state
+    // `useInFlightRequests` already refuses to cache across mounts, so it must not
+    // be reached by a different route either. The failure reaches the operator
+    // through the page's error banner rather than as rows quietly disappearing.
+    if (!inFlight.data || inFlight.isError || page > 0) return none;
+    if (filters.end_date || statusFilter || pricedFilter || toolFilter || sourceFilter || sessionFilter) return none;
+    const matching = inFlight.data.requests.filter(
+      (request) =>
+        (modelFilters.length === 0 || modelFilters.includes(request.model)) &&
+        (userFilters.length === 0 || (request.user_id !== null && userFilters.includes(request.user_id))) &&
+        (apiKeyFilters.length === 0 || (request.api_key_id !== null && apiKeyFilters.includes(request.api_key_id))) &&
+        (!endpointFilter || request.endpoint === endpointFilter) &&
+        (!providerFilter || request.provider === providerFilter),
+    );
+    return {
+      inFlightRows: matching
+        .map((request) => inFlightRow(request, inFlight.dataUpdatedAt - request.elapsed_ms))
+        .reverse(),
+      // Only meaningful when nothing was filtered out locally; a filtered view
+      // cannot say how many of the requests the endpoint dropped would have matched.
+      inFlightHidden: matching.length === inFlight.data.requests.length ? inFlight.data.total - matching.length : 0,
+    };
+  }, [
+    inFlight.data,
+    inFlight.dataUpdatedAt,
+    inFlight.isError,
+    page,
+    filters.end_date,
+    statusFilter,
+    pricedFilter,
+    toolFilter,
+    sourceFilter,
+    sessionFilter,
+    modelFilters,
+    userFilters,
+    apiKeyFilters,
+    endpointFilter,
+    providerFilter,
+  ]);
+
+  // What the table renders: live rows pinned above the logged page.
+  const tableRows = useMemo<ActivityRow[]>(() => [...inFlightRows, ...rows], [inFlightRows, rows]);
+  const inFlightIds = useMemo(() => new Set(inFlightRows.map((row) => row.id)), [inFlightRows]);
+
   // What served each routed request on this page. Built from the page itself where
   // possible (a group's attempts are written milliseconds apart, so they are
   // usually adjacent in a newest-first list), and looked up for the groups whose
@@ -1058,9 +1298,9 @@ export function ActivityPage() {
   // it is not a chip). Values show the human label where one exists.
   const labelFrom = (options: { value: string; label: string }[], value: string) =>
     options.find((o) => o.value === value)?.label ?? value;
-  const userOptionsList = (users.data ?? []).map((u) => ({
-    value: u.user_id,
-    label: u.alias ? `${u.alias} (${u.user_id})` : u.user_id,
+  const userOptionsList = realGroups(entitySummary.data?.by_user).map((r) => ({
+    value: r.key as string,
+    label: r.label ? `${r.label} (${r.key})` : (r.key as string),
   }));
   const clearEntityFilters = () =>
     url.patch({
@@ -1105,9 +1345,10 @@ export function ActivityPage() {
   ];
 
   // Selection targets imported rows only; enforced gateway rows are disabled so
-  // bulk delete / set-price can never reach them.
+  // bulk delete / set-price can never reach them. Over `tableRows`, so a live row
+  // is disabled too: it carries `counts_toward_budget` true for exactly that.
   const selectableKeys = useMemo(() => rows.filter((r) => !r.counts_toward_budget).map((r) => r.id), [rows]);
-  const disabledKeys = useMemo(() => rows.filter((r) => r.counts_toward_budget).map((r) => r.id), [rows]);
+  const disabledKeys = useMemo(() => tableRows.filter((r) => r.counts_toward_budget).map((r) => r.id), [tableRows]);
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
   const pageSelectedCount = selectedIds.length;
   const hasSelection = selection.allMatching || pageSelectedCount > 0;
@@ -1235,8 +1476,10 @@ export function ActivityPage() {
   const refresh = () => {
     void usage.refetch();
     void count.refetch();
+    void inFlight.refetch();
     void contextSummary.refetch();
     void modelSummary.refetch();
+    void entitySummary.refetch();
     // Guarded because refetch() ignores `enabled`: without a picked source the
     // query is disabled by design and refetching it would fire a pointless
     // extra summary request.
@@ -1254,8 +1497,11 @@ export function ActivityPage() {
     // off an explicit range, changes the URL and that effect handles it, so
     // re-anchoring here as well would fire a second query for the same view.)
     if (preset.key === range && !startParam && !endParam) {
-      setWin(resolveWindow(preset.key, "", ""));
-      setExtentWin(resolveExtentWindow(preset.key));
+      // Both windows off one reading, for the same reason as at mount: two reads
+      // would leave the list window a millisecond behind the extent it sits in.
+      const clock = Date.now();
+      setWin(resolveWindow(preset.key, "", "", clock));
+      setExtentWin(resolveExtentWindow(preset.key, clock));
       return;
     }
     url.patch({ range: preset.key, start_date: "", end_date: "" });
@@ -1265,9 +1511,9 @@ export function ActivityPage() {
   // Memoized on its per-render inputs (the key labels and the routing outcomes,
   // both themselves memoized) so DataTable's per-row cache holds: a fresh array
   // every render would rebuild all rows per click.
-  const columns = useMemo<DataTableColumn<UsageEntry>[]>(() => {
-    const apiKeyLabel = (id: string | null): string =>
-      id === null ? "—" : (keyLabels.get(id) ?? `${id.slice(0, 8)}…`);
+  const columns = useMemo<DataTableColumn<ActivityRow>[]>(() => {
+    const apiKeyLabel = (entry: UsageEntry): string =>
+      entry.api_key_id === null ? "—" : (entry.api_key_name ?? `${entry.api_key_id.slice(0, 8)}…`);
     return [
       {
         id: "time",
@@ -1315,13 +1561,25 @@ export function ActivityPage() {
         // additive: together they answer "what did I ask for, and what served it".
         cell: (e) => <RoutingCell entry={e} outcome={groupOutcomes.get(e.request_group_id ?? "") ?? null} />,
       },
-      { id: "api_key", header: "API key", cell: (e) => <span className="text-[var(--otari-muted)]">{apiKeyLabel(e.api_key_id)}</span> },
+      { id: "api_key", header: "API key", cell: (e) => <span className="text-[var(--otari-muted)]">{apiKeyLabel(e)}</span> },
       { id: "tokens", header: "Tokens", align: "end", cell: (e) => <TokenBar entry={e} /> },
       { id: "cost", header: "Cost", align: "end", cell: (e) => formatUSD(e.cost) },
-      { id: "latency", header: "Total time", align: "end", cell: (e) => formatLatency(e.latency_ms) },
+      {
+        id: "latency",
+        header: "Total time",
+        align: "end",
+        // A live row has no total yet, so the column carries the wait so far. Same
+        // column deliberately: it is the number an operator is already reading down.
+        cell: (e) =>
+          e.inFlightStartedAtMs === undefined ? (
+            formatLatency(e.latency_ms)
+          ) : (
+            <InFlightWait startedAtMs={e.inFlightStartedAtMs} />
+          ),
+      },
       { id: "status", header: "Status", cell: (e) => <StatusPill status={e.status} /> },
     ];
-  }, [keyLabels, groupOutcomes]);
+  }, [groupOutcomes]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -1332,7 +1590,11 @@ export function ActivityPage() {
 
       {/* The timeline's summary error is included so a failed series request
           reads as a failure, not as an empty "No activity in this range" strip. */}
-      <ErrorBanner error={usage.error ?? count.error ?? contextSummary.error} />
+      {/* The in-flight error is last: a failure to read the log itself is the more
+          important thing to say. It is here at all so a live view that has gone
+          quiet is distinguishable from a gateway that has, since the rows are
+          dropped on failure rather than left to go stale. */}
+      <ErrorBanner error={usage.error ?? count.error ?? contextSummary.error ?? inFlight.error} />
 
       <div className="flex flex-col gap-3">
         <ActivityTimeline
@@ -1390,10 +1652,16 @@ export function ActivityPage() {
               ))}
             </FilterSelect>
           ) : null}
+          {/* allowsCustom on all three: the options are the in-window top spenders
+              (a breakdown capped at 100), so an entity that exists but ranks below
+              that, or has no traffic in the window, is not offered. Enter commits a
+              pasted id anyway, the way the Model box already accepts a name the
+              suggestions do not cover. */}
           <FilterMultiComboBox
             label="API key"
             values={apiKeyFilters}
             onChange={(values) => url.patch({ api_key_id: values })}
+            allowsCustom
             placeholder="All keys"
             options={keyOptions}
           />
@@ -1401,6 +1669,7 @@ export function ActivityPage() {
             label="User"
             values={userFilters}
             onChange={(values) => url.patch({ user_id: values })}
+            allowsCustom
             placeholder="All users"
             options={userOptionsList}
           />
@@ -1436,7 +1705,7 @@ export function ActivityPage() {
       <DataTable
         ariaLabel="Activity log"
         columns={columns}
-        rows={rows}
+        rows={tableRows}
         getRowKey={getActivityRowKey}
         isLoading={usage.isLoading}
         emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
@@ -1444,11 +1713,26 @@ export function ActivityPage() {
         selectedKeys={selection.selectedKeys}
         onSelectionChange={selection.onSelectionChange}
         disabledKeys={disabledKeys}
-        onRowAction={(key) => setExpandedId((current) => (current === key ? null : key))}
+        // A live row has no detail to open: every field the panel reads (tokens,
+        // cost, the pricing breakdown, the attempt plan) is written when the
+        // request settles. Clicking it does nothing until it does.
+        onRowAction={(key) => {
+          if (inFlightIds.has(key)) return;
+          setExpandedId((current) => (current === key ? null : key));
+        }}
         rowClassName={activityRowClassName}
         detailKey={expandedId}
         renderDetail={renderDetail}
       />
+
+      {/* Only when the endpoint's cap actually bit, which takes more concurrency
+          than a live view can usefully list anyway. */}
+      {inFlightHidden > 0 ? (
+        <p className="text-xs text-[var(--otari-muted)]">
+          {inFlightHidden.toLocaleString()} further {inFlightHidden === 1 ? "request is" : "requests are"} in flight
+          beyond the {inFlightRows.length.toLocaleString()} listed; the longest-running are shown.
+        </p>
+      ) : null}
 
       <TablePagination
         page={page}

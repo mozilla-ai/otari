@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from typing import Any, Callable
 
 from fastapi import FastAPI, Request, Response
@@ -14,7 +14,9 @@ from gateway.api.deps import set_config
 from gateway.api.main import register_routers
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
-from gateway.dashboard import get_dashboard_build_id, get_dashboard_dir
+from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
+from gateway.inflight import InFlightMiddleware, InFlightRegistry
+from gateway.log_config import logger
 from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
@@ -23,6 +25,14 @@ from gateway.services.dashboard_session_service import revoke_sessions_on_master
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
 from gateway.services.master_key_service import ensure_master_key
+from gateway.services.model_catalog_service import (
+    clear_catalog_cache,
+    run_catalog_refresher,
+)
+from gateway.services.model_discovery_service import (
+    reset_discovery_cache,
+    run_discovery_refresher,
+)
 from gateway.services.policy_store import (
     load_policies_at_startup,
     reset_policy_cache,
@@ -111,6 +121,72 @@ def _validate_platform_config(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+# How long shutdown waits for refreshers to acknowledge cancellation.
+#
+# Cancelling a task is a request, not a guarantee. The CancelledError is
+# delivered at whatever the task is awaiting, and a nested cancel scope there can
+# absorb it: httpx and the provider SDKs implement their own timeouts as anyio
+# cancel scopes, which call ``Task.uncancel`` when they decide the cancellation
+# was theirs. The refresher loop then resumes, falls through to its ``sleep``,
+# and naps for a whole interval (a day, for the models.dev catalog). An
+# unbounded ``await task`` never returns, so the lifespan never finishes and
+# uvicorn's shutdown hangs behind a background refresh. Bounding the wait and
+# moving on is the right trade: the event loop is torn down immediately after,
+# and no refresher owns state that a late tick could corrupt.
+_REFRESHER_STOP_TIMEOUT_SECONDS = 5.0
+
+
+def _log_abandoned_refresher(name: str) -> None:
+    logger.warning(
+        "%s refresher did not stop within %.0fs; abandoning it so shutdown can finish",
+        name,
+        _REFRESHER_STOP_TIMEOUT_SECONDS,
+    )
+
+
+def _log_refresher_stop(task: asyncio.Task[None], name: str) -> None:
+    if not task.cancelled() and (error := task.exception()) is not None:
+        logger.warning("%s refresher stopped with an unexpected error", name, exc_info=error)
+
+
+async def _wait_for_refresher_stop(task: asyncio.Task[None], name: str) -> None:
+    """Wait for a cancelled lifespan refresher, but never indefinitely.
+
+    ``asyncio.wait`` rather than ``await task``: it takes a timeout, and it
+    reports the outcome instead of re-raising it, so a refresher that died on an
+    unexpected error is logged here rather than aborting the rest of shutdown
+    (the log writer and the pooled search client still need closing).
+    """
+    done, _pending = await asyncio.wait({task}, timeout=_REFRESHER_STOP_TIMEOUT_SECONDS)
+    if not done:
+        _log_abandoned_refresher(name)
+        return
+    _log_refresher_stop(task, name)
+
+
+async def _stop_refresher(task: asyncio.Task[None], name: str) -> None:
+    """Cancel one lifespan refresher and wait for it, but never indefinitely."""
+    task.cancel()
+    await _wait_for_refresher_stop(task, name)
+
+
+async def _stop_refreshers(refreshers: list[tuple[asyncio.Task[None], str]]) -> None:
+    """Cancel all refreshers, then give the group one shared shutdown bound."""
+    if not refreshers:
+        return
+    for task, _name in refreshers:
+        task.cancel()
+    done, pending = await asyncio.wait(
+        {task for task, _name in refreshers},
+        timeout=_REFRESHER_STOP_TIMEOUT_SECONDS,
+    )
+    for task, name in refreshers:
+        if task in pending:
+            _log_abandoned_refresher(name)
+        elif task in done:
+            _log_refresher_stop(task, name)
+
+
 def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -120,6 +196,8 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         policy_refresher: asyncio.Task[None] | None = None
         provider_refresher: asyncio.Task[None] | None = None
         price_refresher: asyncio.Task[None] | None = None
+        discovery_refresher: asyncio.Task[None] | None = None
+        catalog_refresher: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
@@ -171,6 +249,26 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # served the confirm; reload it on a TTL so sibling workers and replicas
             # converge, the same way aliases and provider credentials do.
             price_refresher = asyncio.create_task(run_price_snapshot_refresher())
+            # Discovery is the one cache that used to be filled on the request
+            # path, which put model_discovery_timeout_seconds (10s per
+            # unreachable provider) on a dashboard page load and held that
+            # request's database session open for the whole dial. The refresher
+            # owns the dialing now and reads answer from the cache. Not awaited:
+            # priming runs on its first tick so a slow provider cannot delay boot.
+            #
+            # Started unconditionally, and each loop re-checks whether caching is
+            # on. Gating task creation on the setting here would strand the
+            # gateway in the one state that combination must never reach:
+            # model_cache_ttl_seconds and models_dev_cache_ttl_seconds are both
+            # runtime-settable from the dashboard's Settings page, and raising
+            # either from 0 flips every read onto the serve-from-cache path
+            # immediately. With no refresher running, that cache is then filled
+            # once per provider and never refreshed again for the life of the
+            # worker, which is the "cache nothing refreshes" mode these knobs
+            # deliberately do not offer.
+            discovery_refresher = asyncio.create_task(run_discovery_refresher(config))
+            # Same shape for the models.dev catalog, whose fetch is bounded at 15s.
+            catalog_refresher = asyncio.create_task(run_catalog_refresher(config))
 
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
@@ -181,25 +279,25 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             app.state.log_writer = log_writer
             yield
         finally:
+            refreshers = [
+                (alias_refresher, "alias"),
+                (policy_refresher, "policy"),
+                (provider_refresher, "provider"),
+                (price_refresher, "price snapshot"),
+                (discovery_refresher, "model discovery"),
+                (catalog_refresher, "models.dev catalog"),
+            ]
+            await _stop_refreshers([(task, name) for task, name in refreshers if task is not None])
             if alias_refresher is not None:
-                alias_refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await alias_refresher
                 reset_alias_cache()
             if policy_refresher is not None:
-                policy_refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await policy_refresher
                 reset_policy_cache()
             if provider_refresher is not None:
-                provider_refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await provider_refresher
                 reset_provider_cache()
-            if price_refresher is not None:
-                price_refresher.cancel()
-                with suppress(asyncio.CancelledError):
-                    await price_refresher
+            if discovery_refresher is not None:
+                reset_discovery_cache()
+            if catalog_refresher is not None:
+                clear_catalog_cache()
             # Only stop a writer that actually started; if start() raised there is
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
@@ -318,6 +416,18 @@ def create_app(config: GatewayConfig) -> FastAPI:
         async def dashboard_build() -> dict[str, str]:
             return {"build": get_dashboard_build_id(dashboard_dir), "version": __version__}
     else:
+        # Hybrid mode has no local management API, so the tutorial is the intended
+        # root there and there is nothing to report. In standalone mode a missing
+        # bundle means nobody built it, which is the ordinary state of a source
+        # checkout now that the bundle is gitignored rather than committed. Say so
+        # once at startup, so "/" serving the tutorial reads as a build step not
+        # taken rather than as a broken dashboard.
+        if not config.is_hybrid_mode:
+            logger.info(
+                'No dashboard bundle found at gateway/%s, so "/" serves the get-started tutorial '
+                "(the API is unaffected). Run `make dashboard` to build it; the Docker image builds it for you.",
+                DASHBOARD_PACKAGE_PATH,
+            )
 
         @app.get("/", response_class=HTMLResponse, include_in_schema=False)
         async def root_index() -> str:
@@ -339,6 +449,13 @@ def create_app(config: GatewayConfig) -> FastAPI:
                 X_API_KEY_HEADER,
             ],
         )
+
+    # Tracks what the gateway is serving right now, so the activity log can show
+    # requests in progress and not only settled ones. Unconditional: the entry is
+    # a dict insert and delete per request, and the middleware is what guarantees
+    # an entry never outlives its response (see gateway.inflight).
+    app.state.inflight = InFlightRegistry()
+    app.add_middleware(InFlightMiddleware, registry=app.state.inflight)
 
     if config.enable_metrics:
         from gateway.metrics import MetricsMiddleware

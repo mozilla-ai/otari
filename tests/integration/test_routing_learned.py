@@ -141,6 +141,18 @@ def learned_config(postgres_url: str) -> GatewayConfig:
                         ],
                         "on_failure": [OTHER],
                     },
+                    # The same pool, spelled `provider/model`. Two learned policies
+                    # for one user that disagree about spelling is the case a single
+                    # stored spelling can only ever satisfy one of.
+                    "smart-slash": {
+                        "select": [
+                            {
+                                "router": "knn",
+                                "candidates": [CHEAP.replace(":", "/"), STRONG.replace(":", "/")],
+                            },
+                            {"default": STRONG.replace(":", "/")},
+                        ]
+                    },
                     # A router this build does not have: must serve the default.
                     "unknown-router": {
                         "select": [
@@ -298,6 +310,27 @@ def test_a_score_key_in_another_spelling_still_routes(client: TestClient) -> Non
     resp, calls = _chat(client, "smart", "what is the capital of France")
 
     assert resp.status_code == 200, resp.text
+    assert calls == [CHEAP]
+
+
+def test_a_second_policy_spelling_the_pool_differently_shares_the_same_memory(
+    client: TestClient,
+) -> None:
+    """Routing memory is per user, so both of a user's learned policies read it.
+
+    `smart` names its candidates `instance:model` and `smart-slash` names the same
+    two models `provider/model`. Records are keyed on model identity rather than on
+    either spelling, so examples taught through one policy are visible to the other.
+    Keyed on a spelling instead, the second policy scores nothing, serves the strong
+    model at confidence 1.0, and reports the pool warm the whole time.
+    """
+    _teach(client)
+
+    resp, calls = _chat(client, "smart-slash", "what is the capital of France")
+
+    assert resp.status_code == 200, resp.text
+    # The dispatched selector is canonical whichever spelling the policy used, so
+    # this asserts the cheap candidate served, not how `smart-slash` names it.
     assert calls == [CHEAP]
 
 

@@ -1815,13 +1815,11 @@ def test_hybrid_mode_streaming_single_attempt_classifies_provider_error(
     assert response.json() == {"detail": "The requested model was not found on the provider"}
 
 
-def test_hybrid_mode_streaming_multi_attempt_classifies_non_retryable_invalid_request(
+def test_hybrid_mode_streaming_falls_through_on_provider_400(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A non-retryable invalid request (400) short-circuits the streaming
-    fallback and is surfaced as a classified 400 even with multiple attempts,
-    matching the non-streaming path rather than the aggregate 502."""
+    """A provider 400 advances through every streaming candidate before aggregate failure."""
     usage_reports: list[dict[str, Any]] = []
 
     async def fake_post_platform(
@@ -1880,14 +1878,13 @@ def test_hybrid_mode_streaming_multi_attempt_classifies_non_retryable_invalid_re
         headers={"Authorization": "Bearer user_test_token"},
     )
 
-    assert response.status_code == 400
-    assert response.json() == {
-        "detail": "The provider rejected the request as invalid (check the model name and parameters)"
-    }
-    # Non-retryable: the fallback must short-circuit after the first attempt.
-    assert len(calls) == 1
-    assert len(usage_reports) == 1
-    assert usage_reports[0]["is_final_attempt"] is True
+    assert response.status_code == 502
+    assert response.json() == {"detail": "All upstream providers failed"}
+    assert len(calls) == 2
+    assert sorted((r["correlation_id"], r["is_final_attempt"], r.get("error_class")) for r in usage_reports) == [
+        ("att-a", False, "http_400"),
+        ("att-b", True, "http_400"),
+    ]
 
 
 class _FakeSandboxBackend:

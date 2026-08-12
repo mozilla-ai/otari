@@ -208,6 +208,40 @@ async def test_hard_region_routes_to_strong() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_record_keyed_in_another_spelling_still_scores_its_candidate() -> None:
+    """Candidates and stored scores match on model identity, not on spelling.
+
+    `openai/gpt-3.5-turbo` and `openai:gpt-3.5-turbo` name one model, and a record
+    can hold either: written before keys were canonicalized, or taught through a
+    second learned policy that spells the pool the other way. A miss is the silent
+    failure, the cheap candidate scores nothing and the strong model wins unopposed
+    at confidence 1.0, on a pool that reports warm.
+    """
+    backend = _backend(router_alpha=0.3)
+    colon = {CHEAP.replace("/", ":"): 1.0, STRONG.replace("/", ":"): 1.0}
+    _wire(backend, [_mem(colon), _mem(colon)], prices=PRICES)
+
+    decision = await backend.rank(_ctx())
+
+    assert decision.ordered_models[0] == CHEAP
+    assert decision.confidence == pytest.approx(1.0)
+
+
+@pytest.mark.asyncio
+async def test_one_record_holding_both_spellings_of_a_model_keeps_the_first() -> None:
+    # `/rank` refuses this, so it can only reach the store from before it did. The
+    # two scores cannot both apply, so the rule is simply deterministic: the same
+    # score wins on every request rather than by dict ordering luck.
+    backend = _backend(router_alpha=0.3)
+    both = {CHEAP: 1.0, CHEAP.replace("/", ":"): 0.0, STRONG: 1.0}
+    _wire(backend, [_mem(both), _mem(both)], prices=PRICES)
+
+    decision = await backend.rank(_ctx())
+
+    assert decision.ordered_models[0] == CHEAP
+
+
+@pytest.mark.asyncio
 async def test_higher_alpha_pushes_toward_cheap() -> None:
     # A large enough cost dial overrides a modest quality gap, proving the dial
     # actually moves the operating point.

@@ -30,10 +30,12 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
       { key: null, cost: 110.5, tokens: 1_400_000, requests: 14_000, is_other: true },
     ],
     by_user: [
-      { key: "alice", cost: 900.5, tokens: 8_000_000, requests: 50_000, is_other: false },
-      { key: "bob", cost: 340, tokens: 4_400_000, requests: 34_000, is_other: false },
+      { key: "alice", label: "Alice", cost: 900.5, tokens: 8_000_000, requests: 50_000, is_other: false },
+      { key: "bob", label: "Bob", cost: 340, tokens: 4_400_000, requests: 34_000, is_other: false },
     ],
-    by_api_key: [],
+    // `label` is the server-resolved key name; the picker reads it from here
+    // rather than from a full /v1/keys listing.
+    by_api_key: [{ key: "key-1", label: "ci-bot", cost: 500, tokens: 5_000_000, requests: 30_000, is_other: false }],
     by_source: [
       { key: "gateway", cost: 1_000, tokens: 9_000_000, requests: 60_100, is_other: false },
       { key: "claude_code", cost: 240.5, tokens: 3_400_000, requests: 23_900, is_other: false },
@@ -163,6 +165,44 @@ describe("UsagePage", () => {
 
     await screen.findByText("$1,240.50");
     expect(screen.queryByRole("button", { name: "Export CSV" })).not.toBeInTheDocument();
+  });
+
+  it("puts share in the chart's own caption row, as an icon with no visible label", async () => {
+    mockApi(summary());
+    renderPage(<UsagePage />);
+
+    await screen.findByText("$1,240.50");
+    const share = screen.getByRole("button", { name: "Share usage as an image" });
+    // On the artifact it publishes, not among the page's global controls.
+    expect(share.closest("figure")).not.toBeNull();
+    expect(share.closest("figcaption")).not.toBeNull();
+    // Icon-only. The accessible name comes from aria-label, so there is no text.
+    expect(share).toHaveTextContent("");
+    expect(share.querySelector("svg")).not.toBeNull();
+  });
+
+  it("offers no share affordance when the range has no data to share", async () => {
+    mockApi(summary({ series: [] }));
+    renderPage(<UsagePage />);
+
+    await screen.findByText("No data in this range.");
+    expect(screen.queryByRole("button", { name: "Share usage as an image" })).not.toBeInTheDocument();
+  });
+
+  it("shares whatever the page is filtered to, with no separate share query", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockApi(summary());
+    renderPage(<UsagePage />);
+    await screen.findByText("$1,240.50");
+
+    await user.click(screen.getByRole("button", { name: "Share usage as an image" }));
+    await screen.findByText("Share this view as an image");
+
+    // The panel reads the page's own summary. If it ever grows a query of its
+    // own, opening it would add a /v1/usage/summary call with a different
+    // dimension set, and the card could then disagree with the page above it.
+    const shareCalls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("provider_model"));
+    expect(shareCalls).toHaveLength(0);
   });
 
   it("re-queries with an hourly bucket when a sub-day preset is chosen from the timeline", async () => {

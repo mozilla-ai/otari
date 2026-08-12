@@ -33,8 +33,9 @@ Running and managing a gateway.
 - [Admin dashboard](dashboard.md): the operator dashboard, covering the two-key model, a first-run walkthrough, and a page-by-page reference.
 - [Access control](access-control.md): users, API keys, and budgets, with the management endpoints that drive them.
 - [Supported models](models.md): providers, model format, aliases, and capabilities.
-- [Routing policies](routing.md): failover, budget-based tier-down, a learned router that
-  sends easy prompts to cheaper models, and enforced guardrails, all behind one model name.
+- [Routing policies](routing.md): failover, budget-based tier-down, a weighted split that
+  load balances across providers, a learned router that sends easy prompts to cheaper
+  models, and enforced guardrails, all behind one model name.
 - [OpenAI provider guide](providers/openai.md): configure OpenAI and route your first request through Otari.
 
 ### For integrators
@@ -56,6 +57,7 @@ Calling the gateway from your own code.
 ### For platform builders
 
 - [Hybrid-mode protocol](hybrid-mode-protocol.md): the Otari/platform wire contract, for building a platform that Otari connects to.
+- [Code-execution protocol](code-execution-protocol.md): the Otari/sandbox contract, for building a code-execution backend that Otari dispatches to.
 
 ### For contributors
 

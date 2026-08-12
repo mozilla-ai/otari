@@ -501,9 +501,13 @@ class GatewayConfig(BaseSettings):
         default=30.0,
         ge=0,
         description=(
-            "How long a failed model-discovery result is remembered before the provider "
+            "How long a failed model-discovery result is remembered before that provider "
             "is dialed again, in seconds. Stops an unreachable provider from being re-tried "
-            "on every request (0 disables negative caching, restoring retry-every-time)."
+            "on every request (0 disables negative caching, restoring retry-every-time). "
+            "Applies to a read that dials: a provider never dialed before, or any read "
+            "while model_cache_ttl_seconds is 0. Otherwise the background refresher owns "
+            "the dialing and model_cache_ttl_seconds bounds how soon a recovered provider "
+            "is seen again."
         ),
     )
     models_dev_metadata: bool = Field(
@@ -518,7 +522,12 @@ class GatewayConfig(BaseSettings):
     models_dev_cache_ttl_seconds: int = Field(
         default=86400,
         ge=0,
-        description="TTL in seconds for the cached models.dev catalog (0 disables caching).",
+        description=(
+            "TTL in seconds for the cached models.dev catalog, and the interval at which a "
+            "background task refetches it (floored at 5 minutes). Above 0, GET /v1/models/metadata "
+            "answers from the cache instead of waiting on the fetch; a failed fetch is held for one "
+            "minute rather than the refresh interval. 0 disables caching, so every read fetches."
+        ),
     )
     files_enabled: bool = Field(
         default=True,

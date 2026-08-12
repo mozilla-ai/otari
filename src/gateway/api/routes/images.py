@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._passthrough import run_passthrough
+from gateway.api.routes._passthrough import BillingMeters, run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -63,6 +63,13 @@ async def create_image(
         n_images = len(result.data) if result.data else requested_images
         return per_image_cost(n_images, pricing)
 
+    def compute_meters(result: ImagesResponse, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
+        if pricing is None:
+            return None
+        n_images = len(result.data) if result.data else requested_images
+        breakdown = [{"meter": "images", "units": n_images, "unit_rate": pricing.input_price_per_million, "cost": cost}]
+        return {"images": n_images}, breakdown
+
     async def call_provider(resolved: ResolvedProvider) -> ImagesResponse:
         # Forward every field the schema accepts (it is derived from
         # ImageGenerationParams), so a new any-llm param is passed through without
@@ -78,6 +85,12 @@ async def create_image(
         }
         return await aimage_generation(**image_kwargs)
 
+    # Only an explicitly configured rate counts (pricing_use_defaults=False), for
+    # the same unit mismatch audio, moderations, and search avoid: images bill per
+    # image (per_image_cost reads input_price_per_million as raw USD per image)
+    # while genai-prices quotes USD per million tokens. gpt-image-1 is in that
+    # dataset at 5.0, which would bill $5.00 for one image and, because this route
+    # reserves its estimate, hold that $5.00 against the budget before the call.
     outcome = await run_passthrough(
         endpoint="/v1/images/generations",
         raw_request=raw_request,
@@ -89,9 +102,11 @@ async def create_image(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
+        pricing_use_defaults=False,
         estimate=estimate,
         enforce_require_pricing=True,
         compute_cost=compute_cost,
+        compute_meters=compute_meters,
         relabel=False,
     )
     return outcome.result.model_dump()

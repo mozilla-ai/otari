@@ -88,12 +88,12 @@ pricing:
 | `stream_missing_usage_policy` | string | `"estimate"` | How to bill a streamed response that completes with no provider usage data: `"estimate"` (charge the up-front estimate), `"fail"` (charge estimate and mark errored), or `"allow_free"` (don't bill). |
 | `budget_estimate_default_output_tokens` | int | `1024` | Output-token count assumed when reserving budget for a request with no declared max output; reconciled to actual usage on completion. |
 | `streaming_keepalive_interval_ms` | int | `15000` | Idle interval after which a streaming response emits a transport keepalive while it waits on the provider: a `ping` event on `/v1/messages`, an SSE comment line (`: keepalive`) on `/v1/chat/completions` and `/v1/responses`. Keeps an intermediary with a read timeout (Cloudflare's default Proxy Read Timeout is 125s) from severing a connection during a long time-to-first-token. Keepalives start once the provider stream is open and never touch usage accounting or extend a first-chunk/failover deadline. `0` disables. |
-| `model_discovery` | bool | `true` | Auto-discover models for `GET /v1/models` from the configured providers: the `providers` block plus anything added at runtime on the Providers page. A provider that is callable through its credential environment variable alone is not discovered until it has an entry. |
-| `model_cache_ttl_seconds` | int | `300` | TTL for the in-memory model-discovery cache (`0` disables caching). |
+| `model_discovery` | bool | `true` | Auto-discover models for `GET /v1/models` from the configured providers: the `providers` block plus anything added at runtime on the Providers page. A provider that is callable through its credential environment variable alone is not discovered until it has an entry. Setting this to `false` also stops the background refresher, so the gateway makes no unattended `list_models` calls; the operator-facing `/v1/models/discoverable` and `/v1/providers/health` still dial when asked. |
+| `model_cache_ttl_seconds` | int | `300` | TTL for the in-memory model-discovery cache, and the interval at which a background task re-dials every configured provider to refill it (floored at 30s; a round that saw a failure comes back on `model_discovery_negative_ttl_seconds` instead). While it is above `0`, `GET /v1/models`, `/v1/models/discoverable` and `/v1/providers/health` answer from that cache rather than dialing on the request path, and so does `GET /v1/models/{model_id}`, which never dials at all. The one read that still dials is the first one to ask about a provider that has never been dialed (a freshly started worker whose background refresh has not landed yet), so a cold worker reports what a provider actually serves instead of claiming it has no models. Setting this to `0` disables caching: reads then dial for themselves, and no background refresher runs. Force a live re-dial with `?refresh=true` on `/v1/models/discoverable` or `/v1/providers/health`; a health check within a few seconds of the last dial reuses it rather than starting another. |
 | `model_discovery_timeout_seconds` | float | `10.0` | Per-provider timeout for a live model-discovery (`list_models`) call. Bounds how long an unreachable or slow provider can stall discovery before it is treated as failed. |
-| `model_discovery_negative_ttl_seconds` | float | `30.0` | How long a failed model-discovery result is remembered before the provider is dialed again, so an unreachable provider is not re-tried on every request (`0` disables negative caching). |
+| `model_discovery_negative_ttl_seconds` | float | `30.0` | How long a failed model-discovery result is remembered before that provider is dialed again (`0` disables negative caching). This governs a read that dials: a cold provider, or any read while `model_cache_ttl_seconds` is `0`. Once the background refresher owns the dialing, how quickly a recovered provider reappears is bounded by `model_cache_ttl_seconds` (the refresh interval) rather than by this. |
 | `models_dev_metadata` | bool | `true` | Enrich the dashboard's model detail with metadata (modalities, capabilities, knowledge cutoff) fetched from the public models.dev catalog. Set `false` to disable the outbound call; the gateway then falls back to the bundled genai-prices data. |
-| `models_dev_cache_ttl_seconds` | int | `86400` | TTL in seconds for the cached models.dev catalog (`0` disables caching). |
+| `models_dev_cache_ttl_seconds` | int | `86400` | TTL for the cached models.dev catalog, and the interval at which a background task refetches it (floored at 5 minutes). While it is above `0`, `GET /v1/models/metadata` answers from that cache rather than waiting on the fetch. A failed fetch is held for one minute, not for the refresh interval, so a transient models.dev outage costs a minute of enrichment rather than a day. `0` disables caching, which means every read fetches instead. |
 | `files_enabled` | bool | `true` | Enable the `/v1/files` upload/storage endpoints (standalone mode). |
 | `files_backend` | string | `"local"` | Blob backend for uploaded file bytes (`"local"` filesystem for now). |
 | `files_local_dir` | string | `"./otari-files"` | Directory the `local` files backend writes uploaded bytes to. |
@@ -398,6 +398,47 @@ pricing:
 
 At `min_input_tokens` and above, an entry replaces only the rates it lists for the entire request. Omitted rates inherit the base price. The dashboard's model detail editor exposes the same controls, and each usage row records the resulting billable meters and rate breakdown for auditability.
 
+#### Per-request pricing (audio and moderations)
+
+Audio (`/v1/audio/transcriptions`, `/v1/audio/speech`) and moderations report no token usage, so they bill a flat rate per request instead. `ModelPricing` only has per-million-token columns, so these routes reuse `input_price_per_million` with a different unit: **USD per million requests**. Divide by a million to read it as a per-request charge, so `6000.0` charges $0.006 per request.
+
+```yaml
+pricing:
+  openai:whisper-1:
+    input_price_per_million: 6000.0   # $0.006 per transcription
+  openai:tts-1:
+    input_price_per_million: 15000.0  # $0.015 per speech request
+  openai:omni-moderation-latest:
+    input_price_per_million: 0.0      # free (same effect as leaving it unset)
+```
+
+The key is the resolved `provider:model`, the same key every other route uses. [Search tools](#search-tools) follow the same convention under `<provider>:<tool>`.
+
+Two behaviors are worth knowing before you rely on this:
+
+- **Leaving the rate unset is free by design.** These endpoints are exempt from `require_pricing`, so an unpriced model is served, the usage row records a $0 cost, and no charge line is written. That is deliberate: a $0 charge line would render in Activity as a billed meter explaining a charge that never happened. Set a nonzero rate to get the charge line; a rate of `0.0` is treated the same as no rate at all.
+- **[Default pricing](#default-pricing) never applies here.** The genai-prices dataset quotes rates in USD per million *tokens*, and some audio models are in it (`openai:gpt-4o-transcribe`, `openai:gpt-4o-mini-tts`). Honoring one would charge a token rate as a request rate, so per-request routes resolve their rate from what you configured and nothing else, whether or not `default_pricing` is on. Search works the same way.
+
+One dashboard consequence of recording a $0 cost rather than no cost: these rows read as priced, so they do not appear under Activity's `Priced?` filter or in the Usage page's "unpriced requests" count. That count is for rows whose cost is unknown; an audio row with no rate configured is knowingly free, not unknown.
+
+Audio differs from moderations and search in one respect: it reserves $0 against the budget before the call rather than reserving the configured rate. The per-user gate still applies (an unknown, blocked, or already-over-budget user is refused), but the cost lands on the budget at reconciliation instead of being held up front, so concurrent audio requests cannot see each other's holds. That makes the cap soft for audio: requests already in flight can settle past `max_budget`, by at most the configured rate times the number of concurrent audio requests. Spend stays truthful either way, and the next request is refused. A duration-based meter that would give audio a real pre-call estimate is tracked in [#376](https://github.com/mozilla-ai/otari/issues/376).
+
+#### Per-image pricing (image generation)
+
+Image generation (`/v1/images/generations`) bills per generated image, and it overloads `input_price_per_million` with a *third* unit: **raw USD per image**, unscaled. Unlike the per-request rate above, there is no division by a million.
+
+```yaml
+pricing:
+  openai:dall-e-3:
+    input_price_per_million: 0.04   # $0.04 per image
+  openai:gpt-image-1:
+    input_price_per_million: 0.19   # $0.19 per image
+```
+
+The cost is the rate times the number of images returned (falling back to the requested `n` when a provider omits the count), and each usage row records an `images` meter with the matching charge line.
+
+Unlike audio and moderations, image generation is **not** exempt from `require_pricing`: an unpriced image model is rejected with HTTP 402 under the default `require_pricing: true`. It also reserves its estimate before the call, so the rate is held against the budget for the requested image count and reconciled to the delivered count. [Default pricing](#default-pricing) is not consulted here either, for the same unit reason: the dataset carries `openai:gpt-image-1` at 5.0 USD per million tokens, which read as a per-image rate would bill $5.00 for one image.
+
 ### Default pricing
 
 Default pricing is **off by default**. When you enable it (`default_pricing: true` in `config.yml`, or
@@ -429,6 +470,14 @@ Limitations when enabled:
   the `huggingface:<model>:<backend>` selector (see the model reference in `models.md`). Auto routing and
   the policy suffixes (`:cheapest`, `:fastest`, ...) cannot be priced from the id alone and fall through to
   `require_pricing`.
+- **Routes that do not bill by the token are excluded.** Audio, moderations, and search bill a flat rate per
+  request; image generation bills per image. Every dataset rate is per million tokens, so defaults are not
+  consulted for any of them: honoring one would charge a token rate under a unit that is not a token. For
+  audio, moderations, and search that means an unpriced model stays free (they are exempt from
+  `require_pricing`); for images it means an image model priced only in the dataset now falls through to
+  `require_pricing` and is rejected with 402 rather than billed at roughly a million times its real rate. See
+  [per-request pricing](#per-request-pricing-audio-and-moderations) and
+  [per-image pricing](#per-image-pricing-image-generation).
 
 > **Fail-closed by default.** With `require_pricing: true` (the default), a request for a model
 > that has no pricing entry is rejected with HTTP 402 rather than served free and unmetered; an

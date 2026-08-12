@@ -6,6 +6,7 @@ Mocks the HTTP layer with `respx` so the suite needs no sandbox container.
 from __future__ import annotations
 
 import json
+import traceback
 from typing import Any
 
 import httpx
@@ -448,3 +449,348 @@ async def test_call_tool_span_error_status_on_tool_error_result(monkeypatch: pyt
     assert len(spans) == 1
     assert spans[0].status.status_code == StatusCode.ERROR
 
+
+# ----- contract conformance (docs/code-execution-protocol.md) -----
+
+
+def _exec_handlers(result_block: Any, monkeypatch: pytest.MonkeyPatch) -> _MockTransport:
+    return _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(201, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json={"result_block": result_block}),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+
+@pytest.mark.asyncio
+async def test_unknown_result_block_type_still_renders(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tool kind added to the contract later must not break an older gateway.
+
+    The extension policy allows new result-block types additively, so `type` is
+    read as an opaque string rather than validated against a closed set.
+    """
+    _exec_handlers(
+        {
+            "type": "future_code_execution_tool_result",
+            "tool_use_id": "t1",
+            "content": {"type": "code_execution_result", "stdout": "42\n", "return_code": 0},
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(42)"})
+
+    assert result == "stdout:\n42\n"
+
+
+@pytest.mark.asyncio
+async def test_unrecognised_fields_are_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Backends may return fields this gateway does not know; they are dropped."""
+    _exec_handlers(
+        {
+            "type": "code_execution_tool_result",
+            "tool_use_id": "t1",
+            "cpu_milliseconds": 12,
+            "content": {
+                "type": "code_execution_result",
+                "stdout": "ok",
+                "return_code": 0,
+                "sandbox_node": "pod-7",
+            },
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+
+    assert result == "stdout:\nok"
+
+
+@pytest.mark.asyncio
+async def test_file_refs_are_listed(monkeypatch: pytest.MonkeyPatch) -> None:
+    _exec_handlers(
+        {
+            "type": "code_execution_tool_result",
+            "tool_use_id": "t1",
+            "content": {
+                "type": "code_execution_result",
+                "stdout": "done",
+                "return_code": 0,
+                "content": [
+                    {"type": "code_execution_output", "file_id": "f1", "filename": "chart.png"},
+                    {"type": "code_execution_output", "file_id": "f2"},
+                ],
+            },
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "savefig()"})
+
+    assert "files: chart.png, ?" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({}, id="result_block-absent"),
+        pytest.param({"result_block": "not-an-object"}, id="result_block-not-an-object"),
+        pytest.param({"result_block": {"type": "code_execution_tool_result"}}, id="content-absent"),
+        pytest.param(
+            {"result_block": {"type": "code_execution_tool_result", "content": ["a", "b"]}},
+            id="content-is-a-list",
+        ),
+    ],
+)
+async def test_malformed_exec_response_raises(body: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    """A response that violates the contract yields no usable result, so it raises.
+
+    `content` as a list is called out explicitly: it is the shape a consumer
+    reaches for when it mistakes the payload for Anthropic's mixed content-block
+    list, and a backend that emits it is not conforming.
+    """
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(201, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(200, json=body),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        with pytest.raises(SandboxNotReachableError, match="sandbox exec failed"):
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+
+
+@pytest.mark.asyncio
+async def test_enter_raises_when_session_handle_lacks_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched_async_client(
+        {("POST", "/sessions"): httpx.Response(201, json={"created_at": 1.0})},
+        monkeypatch,
+    )
+
+    with pytest.raises(SandboxNotReachableError, match="failed to create"):
+        async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_documented_exec_response_shape_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The full response documented in docs/code-execution-protocol.md.
+
+    Pinned verbatim against the spec's example, envelope included, so the
+    published contract and this client cannot drift apart silently.
+    """
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(201, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200,
+                json={
+                    "tool_use_id": "srvtoolu_abc",
+                    "execution_time_ms": 84,
+                    "result_block": {
+                        "type": "code_execution_tool_result",
+                        "tool_use_id": "srvtoolu_abc",
+                        "content": {
+                            "type": "code_execution_result",
+                            "stdout": "3.14\n",
+                            "stderr": "",
+                            "return_code": 0,
+                            "content": [
+                                {
+                                    "type": "code_execution_output",
+                                    "file_id": "file_1",
+                                    "filename": "chart.png",
+                                }
+                            ],
+                        },
+                    },
+                },
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "print(3.14)"})
+
+    assert result == "stdout:\n3.14\n\nfiles: chart.png"
+
+
+@pytest.mark.asyncio
+async def test_schema_violation_message_omits_the_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A contract violation must not carry program output into logs or spans.
+
+    `stdout` here holds the kind of thing sandboxed code can emit (a credential
+    it was handed). The error names the offending field, never its value.
+    """
+    secret = "sk-live-do-not-log-this"
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(201, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200,
+                json={
+                    "result_block": {
+                        "type": "code_execution_tool_result",
+                        # `content` must be an object; a list violates the contract.
+                        "content": [{"stdout": secret}],
+                    }
+                },
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        with pytest.raises(SandboxNotReachableError) as excinfo:
+            await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+
+    rendered = "".join(traceback.format_exception(excinfo.value))
+    assert secret not in rendered
+    assert "result_block.content" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_session_handle_violation_message_omits_the_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    secret = "sk-live-do-not-log-this"
+    _patched_async_client(
+        {("POST", "/sessions"): httpx.Response(201, json={"session_id": {"nested": secret}})},
+        monkeypatch,
+    )
+
+    with pytest.raises(SandboxNotReachableError) as excinfo:
+        async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+            pass
+
+    rendered = "".join(traceback.format_exception(excinfo.value))
+    assert secret not in rendered
+    assert "session_id" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        pytest.param(
+            {"stdout": "42\n", "stderr": None, "return_code": 0},
+            "stdout:\n42\n",
+            id="stderr-null",
+        ),
+        pytest.param(
+            {"stdout": None, "stderr": "boom", "return_code": 1},
+            "[tool error] stderr:\nboom\nreturn_code: 1",
+            id="stdout-null",
+        ),
+        pytest.param(
+            {"stdout": "done", "return_code": 0, "content": None},
+            "stdout:\ndone",
+            id="file-refs-null",
+        ),
+        pytest.param(
+            {"stdout": "file body", "return_code": 0, "content": "inline text"},
+            "stdout:\nfile body",
+            id="file-refs-not-a-list",
+        ),
+        pytest.param(
+            {"stdout": "ok", "return_code": 0, "content": [{"filename": None}, "bare-id"]},
+            "stdout:\nok\nfiles: ?",
+            id="file-ref-unnameable",
+        ),
+    ],
+)
+async def test_renderable_fields_absorb_unusable_values(
+    content: dict[str, Any], expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A payload carrying usable output must not be discarded over a cosmetic field.
+
+    Each case is one the pre-typing renderer absorbed (`... or ""`, an
+    `isinstance` guard, a per-entry filter). Rejecting them would turn a run
+    that produced real output into a failed tool call, and for the eager-open
+    path into a 502.
+    """
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(201, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200,
+                json={"result_block": {"type": "code_execution_tool_result", "content": content}},
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+
+    assert result == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        pytest.param(
+            {"stdout": "", "stderr": {"message": "boom"}, "return_code": 0},
+            "[tool error] stderr:\n{'message': 'boom'}",
+            id="stderr-only-is-an-object",
+        ),
+        pytest.param(
+            {"stdout": "ok", "stderr": {"message": "warn"}, "return_code": 0},
+            "stdout:\nok\nstderr:\n{'message': 'warn'}",
+            id="stderr-object-alongside-stdout",
+        ),
+        pytest.param(
+            {"stdout": ["a", "b"], "return_code": 0},
+            "stdout:\n['a', 'b']",
+            id="stdout-is-a-list",
+        ),
+        pytest.param(
+            {"stdout": "ok", "return_code": 0, "content": [{"filename": {"nested": 1}}]},
+            "stdout:\nok\nfiles: {'nested': 1}",
+            id="filename-is-an-object",
+        ),
+    ],
+)
+async def test_structured_values_in_render_only_fields_keep_the_signal(
+    content: dict[str, Any], expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A structure where text was expected is rendered, not dropped.
+
+    The first case is why stringifying beats discarding. Blanking a structured
+    `stderr` would leave a stderr-only run with nothing to render, so it would
+    come back `(no output)` with no `[tool error]` marker and bill as a
+    successful call, which is the failure the error-variant exclusion in
+    docs/code-execution-protocol.md exists to prevent.
+
+    The second case pins the surrounding semantics: stderr *alongside* stdout at
+    `return_code: 0` is not error-shaped either way, so only the stderr-only
+    shape distinguishes the two coercions.
+    """
+    _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(201, json={"session_id": "s1"}),
+            ("POST", "/sessions/s1/exec"): httpx.Response(
+                200,
+                json={"result_block": {"type": "code_execution_tool_result", "content": content}},
+            ),
+            ("DELETE", "/sessions/s1"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080") as backend:
+        result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+
+    assert result == expected

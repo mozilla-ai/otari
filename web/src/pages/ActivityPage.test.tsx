@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { UsageEntry } from "@/api/types";
+import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/api/types";
 import { ActivityPage } from "@/pages/ActivityPage";
 
 function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
@@ -49,9 +49,18 @@ interface FetchCall {
 
 // Mock fetch for the usage list/count/summary reads plus the delete and
 // set-price mutations. Records every call so tests can assert URLs and bodies.
-function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageEntry[] } = {}) {
+function mockApi(
+  opts: {
+    rows?: UsageEntry[];
+    total?: number;
+    groupRows?: UsageEntry[];
+    users?: string[];
+    inFlight?: InFlightResponse;
+  } = {},
+) {
   const rows = opts.rows ?? [];
   const total = opts.total ?? rows.length;
+  const inFlight = opts.inFlight ?? { requests: [], total: 0 };
   const calls: FetchCall[] = [];
 
   const mock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -67,6 +76,11 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageE
     }
     if (url.includes("/v1/usage/count")) {
       return jsonResponse({ total });
+    }
+    // Ahead of the bare /v1/usage arm below, which would otherwise answer this
+    // with the row array and hand the in-flight panel the wrong shape.
+    if (url.includes("/v1/usage/in-flight")) {
+      return jsonResponse(inFlight);
     }
     if (url.includes("/v1/usage/summary")) {
       const models = Array.from(new Set(rows.map((r) => r.model)));
@@ -86,7 +100,16 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageE
           avg_latency_ms: null,
         },
         by_model: models.map((m) => ({ key: m, cost: 0, tokens: 0, requests: 0, is_other: false })),
-        by_user: [],
+        // The user and key pickers read these breakdowns, not a full /v1/users
+        // or /v1/keys listing. Label-free so an option's name and a chip's label
+        // are the bare id, which keeps the filter assertions readable.
+        by_user: (opts.users ?? ["alice", "bob"]).map((u) => ({
+          key: u,
+          cost: 0,
+          tokens: 0,
+          requests: 0,
+          is_other: false,
+        })),
         by_api_key: [],
         by_source: Array.from(new Set(rows.map((r) => r.source))).map((s) => ({
           key: s,
@@ -109,17 +132,8 @@ function mockApi(opts: { rows?: UsageEntry[]; total?: number; groupRows?: UsageE
       }
       return jsonResponse(rows);
     }
-    if (url.includes("/v1/users")) {
-      // Alias-free so an option's name and a chip's label are the bare user id,
-      // which keeps the filter assertions readable.
-      return jsonResponse([
-        { user_id: "alice", alias: null },
-        { user_id: "bob", alias: null },
-      ]);
-    }
-    if (url.includes("/v1/keys")) {
-      return jsonResponse([]);
-    }
+    // The page no longer reads /v1/users or /v1/keys; both fall through to the
+    // empty default below, and a test asserting that is at the end of this file.
     return jsonResponse([]);
   });
 
@@ -135,8 +149,8 @@ function renderPage(ui: ReactElement, route = "/activity") {
   );
 }
 
-// Only the list requests (not /count, /summary, or mutations) carry the
-// pagination + filter params.
+// Only the list requests (not /count, /summary, /in-flight, or mutations) carry
+// the pagination + filter params.
 function listCalls(calls: FetchCall[]): string[] {
   return calls
     .filter(
@@ -145,6 +159,7 @@ function listCalls(calls: FetchCall[]): string[] {
         c.url.includes("/v1/usage") &&
         !c.url.includes("/count") &&
         !c.url.includes("/summary") &&
+        !c.url.includes("/in-flight") &&
         !c.url.includes("/set-price"),
     )
     .map((c) => c.url);
@@ -383,6 +398,7 @@ describe("ActivityPage", () => {
         return jsonResponse({ detail: "summary exploded" }, 500);
       }
       if (url.includes("/v1/usage/count")) return jsonResponse({ total: 1 });
+      if (url.includes("/v1/usage/in-flight")) return jsonResponse({ requests: [], total: 0 });
       if (url.includes("/v1/usage")) return jsonResponse([entry()]);
       return jsonResponse([]);
     });
@@ -531,12 +547,18 @@ describe("ActivityPage", () => {
     expect(await screen.findByText("101–150 of 500")).toBeInTheDocument();
 
     const before = listCalls(calls).length;
+    const entitySummaryBefore = calls.filter((call) => call.url.includes("/v1/usage/summary") && call.url.includes("dimensions=user")).length;
     const button = screen.getByRole("button", { name: "Refresh" });
     await waitFor(() => expect(button).toBeEnabled());
     await user.click(button);
 
     // The list is refetched, and every fetch stays on the third page's offset.
     await waitFor(() => expect(listCalls(calls).length).toBeGreaterThan(before));
+    await waitFor(() =>
+      expect(calls.filter((call) => call.url.includes("/v1/usage/summary") && call.url.includes("dimensions=user")).length).toBeGreaterThan(
+        entitySummaryBefore,
+      ),
+    );
     expect(listCalls(calls).every((url) => url.includes("skip=100"))).toBe(true);
     expect(screen.getByText("101–150 of 500")).toBeInTheDocument();
   });
@@ -586,6 +608,9 @@ describe("ActivityPage", () => {
       }
       if (url.includes("/v1/usage/summary")) {
         return jsonResponse({ by_model: [], by_user: [], by_api_key: [], series: [] });
+      }
+      if (url.includes("/v1/usage/in-flight")) {
+        return jsonResponse({ requests: [], total: 0 });
       }
       if (url.includes("/v1/usage")) {
         return jsonResponse(Array.from({ length: 50 }, (_, i) => entry({ id: `r${i}` })));
@@ -1017,6 +1042,29 @@ describe("ActivityPage", () => {
     );
   });
 
+  it("frames the active preset when the two initial windows are read a millisecond apart", async () => {
+    // `win` and `extentWin` each derive a rolling start from their own clock read,
+    // and `extentWin` is initialised second, so its start is the later of the two
+    // whenever the render straddles a millisecond. That is not a drill-down, and
+    // must not be read as one: doing so framed the window instead of the preset,
+    // dropping the preset highlight and bucketing a 24h extent by day. A monotonic
+    // clock makes the tick certain instead of leaving it to machine load, which is
+    // what made the assertion above flake on CI while passing locally.
+    let now = Date.parse("2026-08-11T12:00:00.000Z");
+    vi.spyOn(Date, "now").mockImplementation(() => ++now);
+
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />); // default 24h
+    await screen.findByText("gpt-4o");
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.url.includes("/v1/usage/summary") && c.url.includes("bucket=hour"))).toBe(true),
+    );
+    // The visible half of the same bug: the preset row still highlights 24h rather
+    // than falling back to the custom sentinel, which highlights nothing.
+    expect(screen.getByRole("button", { name: "24h" }).className).toContain("button--primary");
+  });
+
   it("names the model that served an absorbed attempt, from the rows already on the page", async () => {
     // The question a failed-over row raises is "so what served it". The serving
     // attempt is a sibling row sharing the request group, and it is normally on the
@@ -1308,4 +1356,395 @@ describe("ActivityPage filter serialization", () => {
       expect(hit, `${path} dropped the tool filter`).toContain("tool=web_search");
     }
   });
+});
+
+describe("ActivityPage table-scan avoidance", () => {
+  it("never reads the whole users or api_keys table", async () => {
+    // Both listings are fetched by paging every row (see fetchAllUsers /
+    // fetchAllKeys), so a deployment with many users or keys paid a sequential
+    // multi-megabyte load on every visit here, just to name filter options and
+    // label a page of rows. Both now come off the summary breakdown and the
+    // usage row itself. This asserts the request is gone, not merely smaller.
+    const { calls } = mockApi({ rows: [entry({ api_key_id: "key-1", api_key_name: "ci-bot" })] });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    await screen.findByText("gpt-4o");
+    const requested = calls.map((c) => c.url);
+    expect(requested.some((url) => url.includes("/v1/users"))).toBe(false);
+    expect(requested.some((url) => url.includes("/v1/keys"))).toBe(false);
+  });
+
+  it("labels an API key column from the row, not a client-side lookup", async () => {
+    const { calls } = mockApi({ rows: [entry({ api_key_id: "key-1", api_key_name: "ci-bot" })] });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    expect(await screen.findByText("ci-bot")).toBeInTheDocument();
+    expect(calls.map((c) => c.url).some((url) => url.includes("/v1/keys"))).toBe(false);
+  });
+
+  it("falls back to a short id when the row carries no key name", async () => {
+    // The label is null whenever the key was deleted or never named, so the
+    // column must not render an empty cell for a row that does have a key.
+    mockApi({ rows: [entry({ api_key_id: "abcdef123456", api_key_name: null })] });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    expect(await screen.findByText("abcdef12…")).toBeInTheDocument();
+  });
+});
+
+describe("ActivityPage suggestion scoping", () => {
+  it("keeps the user filter on the model typeahead but not on the user picker", async () => {
+    // The two pickers want opposite windows. The model typeahead must stay
+    // narrowed by the active user, or it offers models that user never called
+    // and picking one returns an empty table. The user picker must drop it, or
+    // it can only ever offer the user already selected.
+    const { calls } = mockApi({ rows: [entry()] });
+    renderPage(<ActivityPage />, "/activity?model=gpt-4o&user_id=alice&range=24h");
+
+    await screen.findByText("gpt-4o");
+    const summaries = calls.map((c) => c.url).filter((url) => url.includes("/v1/usage/summary"));
+
+    const modelQuery = summaries.find((url) => url.includes("dimensions=model"));
+    expect(modelQuery, "model typeahead summary").toBeDefined();
+    expect(modelQuery).toContain("user_id=alice");
+
+    const entityQuery = summaries.find((url) => url.includes("dimensions=user"));
+    expect(entityQuery, "user/key picker summary").toBeDefined();
+    expect(entityQuery).not.toContain("user_id=alice");
+    expect(entityQuery).toContain("model=gpt-4o");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Requests in flight (issue #526)
+// ---------------------------------------------------------------------------
+
+function inFlightRequest(overrides: Partial<InFlightRequest> = {}): InFlightRequest {
+  return {
+    id: "live-1",
+    endpoint: "/v1/chat/completions",
+    model: "ollama:qwen3",
+    provider: "ollama",
+    user_id: "alice",
+    api_key_id: "key-1",
+    policy_name: null,
+    started_at: new Date().toISOString(),
+    elapsed_ms: 12_000,
+    ...overrides,
+  };
+}
+
+// The live row an operator reads: the request's own cells, an "in progress"
+// status, and the wait so far in the Total time column. Found through the status
+// pill rather than by row role and name, because react-aria names a row after its
+// row-header cell (the model), not after everything in it.
+function liveRow(): HTMLElement {
+  const row = screen.getByText("in progress").closest("tr");
+  if (row === null) throw new Error('the "in progress" pill is not inside a table row');
+  return row;
+}
+
+function noLiveRow(): boolean {
+  return screen.queryByText("in progress") === null;
+}
+
+describe("ActivityPage in-flight rows", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("shows a request that has not settled yet as a row in the log", async () => {
+    // The reason the feature exists: on a slow local backend the log stays empty
+    // for the whole call, so without this the page reads as "nothing is happening"
+    // while a request is mid-flight.
+    mockApi({ rows: [], inFlight: { requests: [inFlightRequest()], total: 1 } });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    await waitFor(() => expect(liveRow()).toBeInTheDocument());
+    const row = liveRow();
+    expect(within(row).getByText("ollama:qwen3")).toBeInTheDocument();
+    expect(within(row).getByText("alice")).toBeInTheDocument();
+    expect(within(row).getByText("in progress")).toBeInTheDocument();
+    // The wait so far, seeded from the server's own measurement so it does not
+    // depend on the browser clock agreeing with the gateway's.
+    expect(within(row).getByText(/^12s$/)).toBeInTheDocument();
+    // No outcome to report yet, so the outcome columns stay empty rather than
+    // inventing a zero cost or a zero token count.
+    expect(within(row).getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("leaves an expanded row alone while it polls for in-flight requests", async () => {
+    // Regression: the poll runs every 2s and its result re-derived the live
+    // rows, so the table got a rebuilt rows array on a timer. DataTable rebuilt
+    // its detail host to match, which remounted the panel: an operator who
+    // expanded a row while a request was running watched it flash and slide
+    // open again every couple of seconds.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const { calls } = mockApi({
+        rows: [entry({ id: "settled-1" })],
+        inFlight: { requests: [inFlightRequest()], total: 1 },
+      });
+      renderPage(<ActivityPage />, "/activity?range=24h");
+
+      const row = (await screen.findByText("gpt-4o")).closest("tr")!;
+      await user.click(row);
+      const panel = screen.getByText("Request detail").closest(".otari-detail-row");
+      expect(panel).not.toBeNull();
+
+      const polls = () => calls.filter((c) => c.url.includes("/v1/usage/in-flight")).length;
+      const before = polls();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await waitFor(() => expect(polls()).toBeGreaterThan(before + 1));
+
+      // Same node, still open: the panel was never torn down and rebuilt.
+      expect(screen.getByText("Request detail").closest(".otari-detail-row")).toBe(panel);
+      expect(document.querySelectorAll(".otari-detail-row")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("adds no row while the gateway is idle", async () => {
+    mockApi({ rows: [entry()], inFlight: { requests: [], total: 0 } });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    await screen.findByText("gpt-4o");
+    expect(noLiveRow()).toBe(true);
+  });
+
+  it("pins the live row above the settled ones", async () => {
+    // Newest-first like the rest of the table, so a request the operator just
+    // triggered appears at the top and stays put as it resolves.
+    mockApi({ rows: [entry({ id: "settled-1" })], inFlight: { requests: [inFlightRequest()], total: 1 } });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    await waitFor(() => expect(liveRow()).toBeInTheDocument());
+    const bodyRows = screen.getAllByRole("row").slice(1); // drop the header row
+    expect(within(bodyRows[0]).getByText("in progress")).toBeInTheDocument();
+    expect(within(bodyRows[1]).getByText("gpt-4o")).toBeInTheDocument();
+  });
+
+  it("names the policy and formats a long wait in minutes", async () => {
+    mockApi({
+      rows: [],
+      inFlight: {
+        requests: [inFlightRequest({ policy_name: "cheap-first", elapsed_ms: 95_000 })],
+        total: 1,
+      },
+    });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    await waitFor(() => expect(liveRow()).toBeInTheDocument());
+    expect(within(liveRow()).getByText("cheap-first")).toBeInTheDocument();
+    expect(within(liveRow()).getByText(/^1m 35s$/)).toBeInTheDocument();
+  });
+
+  it("leaves the paginator counting settled rows only", async () => {
+    // The live row is not part of any page's slice, so folding it into "N of M"
+    // would make the count disagree with the log the operator can page through.
+    mockApi({ rows: [entry()], total: 1, inFlight: { requests: [inFlightRequest()], total: 1 } });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    await waitFor(() => expect(liveRow()).toBeInTheDocument());
+    expect(screen.getByText(/1\s*[–-]\s*1 of 1/)).toBeInTheDocument();
+  });
+
+  it("says how many in-flight requests the response left out", async () => {
+    // The endpoint caps what it serializes, so the count and the list can differ;
+    // reading the list length as the total would under-report live traffic.
+    mockApi({ rows: [], inFlight: { requests: [inFlightRequest()], total: 7 } });
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    await waitFor(() => expect(liveRow()).toBeInTheDocument());
+    expect(screen.getByText(/6 further requests are in flight beyond the 1 listed/)).toBeInTheDocument();
+  });
+
+  it("drops live rows when a filter they cannot be judged against is set", async () => {
+    // A request in progress has no outcome, so it can neither match nor fail a
+    // status filter; showing it anyway would put a row in the table that
+    // contradicts the filter chip above it.
+    mockApi({ rows: [], inFlight: { requests: [inFlightRequest()], total: 1 } });
+    renderPage(<ActivityPage />, "/activity?range=24h&status=error");
+
+    await screen.findByText("No requests match these filters.");
+    expect(noLiveRow()).toBe(true);
+  });
+
+  it("applies the identity filters to live rows", async () => {
+    mockApi({ rows: [], inFlight: { requests: [inFlightRequest({ model: "ollama:qwen3" })], total: 1 } });
+    renderPage(<ActivityPage />, "/activity?range=24h&model=openai:gpt-4o");
+
+    await screen.findByText("No requests match these filters.");
+    expect(noLiveRow()).toBe(true);
+  });
+
+  it("does not send the activity filters to the in-flight endpoint", async () => {
+    // The endpoint takes no filters: a request in progress has no status, cost, or
+    // token count to filter on. Which live rows the current view may show is
+    // decided client-side (this URL's status filter suppresses them all), so the
+    // request itself must stay bare.
+    const { calls } = mockApi({ rows: [], inFlight: { requests: [inFlightRequest()], total: 1 } });
+    renderPage(<ActivityPage />, "/activity?range=7d&status=error&model=gpt-4o");
+
+    const requested = () => calls.map((c) => c.url).filter((url) => url.includes("/v1/usage/in-flight"));
+    await waitFor(() => expect(requested().length).toBeGreaterThan(0));
+    for (const url of requested()) {
+      expect(url).toBe("/v1/usage/in-flight");
+    }
+  });
+
+  it("re-reads the log once a tracked request settles", async () => {
+    // Otherwise the request vanishes from the panel and does not appear in the log
+    // until the operator presses refresh, which reads as a lost request.
+    let live: InFlightResponse = { requests: [inFlightRequest()], total: 1 };
+    const calls: FetchCall[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      calls.push({ url, method: "GET", body: undefined });
+      if (url.includes("/v1/usage/in-flight")) return jsonResponse(live);
+      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 0 });
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({
+          start_date: "",
+          end_date: "",
+          bucket: "day",
+          totals: {
+            cost: 0,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            request_count: 0,
+            error_count: 0,
+            avg_latency_ms: null,
+          },
+          by_model: [],
+          by_user: [],
+          by_api_key: [],
+          by_source: [],
+          series: [],
+        });
+      }
+      return jsonResponse([]);
+    });
+
+    renderPage(<ActivityPage />, "/activity?range=24h");
+    await waitFor(() => expect(liveRow()).toBeInTheDocument());
+    const before = listCalls(calls).length;
+
+    // The request settles: the next poll no longer carries it.
+    live = { requests: [], total: 0 };
+    await waitFor(() => expect(noLiveRow()).toBe(true), { timeout: 4000 });
+    await waitFor(() => {
+      expect(listCalls(calls).length).toBeGreaterThan(before);
+    });
+  });
+
+  it("does not re-read the log on every poll when replicas alternate", async () => {
+    // The registry is per-process, so a deployment running several otari processes
+    // behind a load balancer answers consecutive polls from different processes: a
+    // request that is still running is absent from the next poll and reads as
+    // settled. Unthrottled, that refetches the log and its COUNT(*) every two
+    // seconds for as long as the gateway has any traffic at all.
+    const calls: FetchCall[] = [];
+    let polls = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      calls.push({ url, method: "GET", body: undefined });
+      if (url.includes("/v1/usage/in-flight")) {
+        polls += 1;
+        // Both requests run for the whole test; only which process answered changes.
+        return jsonResponse({
+          requests: [inFlightRequest({ id: polls % 2 === 1 ? "process-a-1" : "process-b-1" })],
+          total: 1,
+        });
+      }
+      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 0 });
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({ by_model: [], by_user: [], by_api_key: [], by_source: [], series: [] });
+      }
+      return jsonResponse([]);
+    });
+
+    renderPage(<ActivityPage />, "/activity?range=24h");
+    await waitFor(() => expect(liveRow()).toBeInTheDocument());
+    const before = listCalls(calls).length;
+
+    // Two further polls, each of which looks like a settle to the id heuristic.
+    await waitFor(() => expect(polls).toBeGreaterThanOrEqual(3), { timeout: 8000 });
+
+    // One refetch, not one per poll: the first apparent settle is served and the
+    // rest fall inside the throttle window.
+    expect(listCalls(calls).length - before).toBeLessThanOrEqual(1);
+  }, 15_000);
+
+  it("drops the live rows when the in-flight poll starts failing", async () => {
+    // TanStack keeps the last successful payload after a failed refetch, so
+    // without an explicit error arm the rows would stay on screen with their waits
+    // climbing against a frozen anchor, claiming work is running that may have
+    // landed minutes ago. That is the state the hook already refuses to cache
+    // across mounts, so it must not be reachable this way either.
+    let failing = false;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/usage/in-flight")) {
+        return failing
+          ? jsonResponse({ detail: "gateway restarting" }, 503)
+          : jsonResponse({ requests: [inFlightRequest({ model: "vanishing-model" })], total: 1 });
+      }
+      if (url.includes("/v1/usage/count")) return jsonResponse({ total: 0 });
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({ by_model: [], by_user: [], by_api_key: [], by_source: [], series: [] });
+      }
+      return jsonResponse([]);
+    });
+
+    renderPage(<ActivityPage />, "/activity?range=24h");
+    await waitFor(() => expect(screen.getByText("vanishing-model")).toBeInTheDocument());
+
+    failing = true;
+    await waitFor(() => expect(screen.queryByText("vanishing-model")).not.toBeInTheDocument(), { timeout: 20000 });
+    expect(noLiveRow()).toBe(true);
+  }, 30_000);
+
+  it("still picks up a settle that the throttle deferred", async () => {
+    // Two requests landing inside one throttle window is the ordinary case on any
+    // gateway with traffic. The second settle must be deferred, not discarded: its
+    // id is gone from the next poll, so nothing re-detects it, and the row it
+    // became would stay missing from the log until an unrelated later settle.
+    let live: InFlightResponse = { requests: [inFlightRequest({ id: "A", model: "model-a" })], total: 1 };
+    let rows: UsageEntry[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/v1/usage/in-flight")) return jsonResponse(live);
+      if (url.includes("/v1/usage/count")) return jsonResponse({ total: rows.length });
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({ by_model: [], by_user: [], by_api_key: [], by_source: [], series: [] });
+      }
+      return jsonResponse(rows);
+    });
+
+    renderPage(<ActivityPage />, "/activity?range=24h");
+    await waitFor(() => expect(screen.getByText("model-a")).toBeInTheDocument());
+
+    // A settles, which arms the throttle.
+    live = { requests: [], total: 0 };
+    rows = [entry({ id: "row-a", model: "settled-a" })];
+    await waitFor(() => expect(screen.getByText("settled-a")).toBeInTheDocument(), { timeout: 8000 });
+
+    // B runs and settles well inside the window A's refetch opened.
+    live = { requests: [inFlightRequest({ id: "B", model: "model-b" })], total: 1 };
+    await waitFor(() => expect(screen.getByText("model-b")).toBeInTheDocument(), { timeout: 8000 });
+    live = { requests: [], total: 0 };
+    rows = [entry({ id: "row-b", model: "settled-b" }), entry({ id: "row-a", model: "settled-a" })];
+
+    await waitFor(() => expect(screen.getByText("settled-b")).toBeInTheDocument(), { timeout: 25000 });
+  }, 45_000);
 });

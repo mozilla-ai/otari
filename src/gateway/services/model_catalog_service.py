@@ -87,10 +87,25 @@ def clear_catalog_cache() -> None:
     _cache.at = 0.0
 
 
-def _read_cache(ttl: int) -> object:
-    """Return the cached data if still fresh, else the ``_MISS`` sentinel."""
+def _read_cache(ttl: int, *, serve_stale: bool = False, force: bool = False) -> object:
+    """Return the cached data if still fresh, else the ``_MISS`` sentinel.
+
+    ``serve_stale`` accepts a cached *successful* blob at any age, so a read
+    never pays the 15s fetch timeout; the background refresher is what keeps it
+    current. A failed fetch is deliberately excluded: it falls through to
+    ``_NEGATIVE_TTL_SECONDS`` below, because the refresh interval is the success
+    cadence (a day by default) and pinning a transient models.dev outage for that
+    long, with no read able to retry it and no ``refresh`` flag on
+    ``/v1/models/metadata``, would lose enrichment far longer than the failure.
+    ``force`` is the refresher's own read: it treats every entry as expired so
+    the fetch actually happens.
+    """
     if _cache.at == 0.0:
         return _MISS
+    if force:
+        return _MISS
+    if serve_stale and _cache.ok:
+        return _cache.data
     # A successful fetch honors the configured TTL (0 disables caching, so it is
     # never fresh); a failed one is held only briefly before retrying.
     if _cache.ok and ttl == 0:
@@ -126,23 +141,30 @@ async def _fetch() -> dict[str, Any] | None:
     return data
 
 
-async def load_models_dev_catalog(config: GatewayConfig) -> dict[str, Any] | None:
+async def load_models_dev_catalog(
+    config: GatewayConfig,
+    *,
+    serve_stale: bool = False,
+    force: bool = False,
+) -> dict[str, Any] | None:
     """Return the cached models.dev catalog, fetching it if stale.
 
     Returns ``None`` when metadata enrichment is disabled or the fetch failed.
+    ``serve_stale`` answers from the cache at any age so a dashboard read never
+    waits on models.dev; ``force`` is the background refresher's fetch.
     """
     if not config.models_dev_metadata:
         return None
 
     ttl = config.models_dev_cache_ttl_seconds
-    cached = _read_cache(ttl)
+    cached = _read_cache(ttl, serve_stale=serve_stale, force=force)
     if cached is not _MISS:
         return cached  # type: ignore[return-value]
 
     async with _lock:
         # Double-check under the lock so a burst of dashboard loads triggers one
         # fetch, not one per request.
-        cached = _read_cache(ttl)
+        cached = _read_cache(ttl, serve_stale=serve_stale, force=force)
         if cached is not _MISS:
             return cached  # type: ignore[return-value]
 
@@ -151,6 +173,52 @@ async def load_models_dev_catalog(config: GatewayConfig) -> dict[str, Any] | Non
         _cache.ok = data is not None
         _cache.at = time.monotonic()
         return data
+
+
+# Floor on the refresh cadence, for the same reason as the discovery refresher's:
+# a tiny configured TTL must not turn into a fetch storm against models.dev.
+_MIN_REFRESH_INTERVAL_SECONDS = 300.0
+
+
+def background_catalog_enabled(config: GatewayConfig) -> bool:
+    """Whether reads may answer from the cache because a refresher fills it.
+
+    ``models_dev_cache_ttl_seconds = 0`` is the documented way to disable
+    caching, so it keeps meaning "fetch on every read", and ``models_dev_metadata``
+    already disables enrichment outright.
+    """
+    return config.models_dev_metadata and config.models_dev_cache_ttl_seconds > 0
+
+
+def _catalog_refresh_interval(config: GatewayConfig) -> float:
+    return max(_MIN_REFRESH_INTERVAL_SECONDS, float(config.models_dev_cache_ttl_seconds))
+
+
+async def run_catalog_refresher(config: GatewayConfig, interval: float | None = None) -> None:
+    """Keep the models.dev catalog warm so no read waits on the 15s fetch.
+
+    Primes once immediately, then refetches on the interval. Errors are already
+    swallowed inside ``_fetch`` (a failure degrades to "no enrichment"), so the
+    guard here only covers an unexpected one taking the refresher down.
+
+    Re-checks ``background_catalog_enabled`` every tick rather than being started
+    only when it holds, for the same reason as the discovery refresher:
+    ``models_dev_metadata`` and ``models_dev_cache_ttl_seconds`` are both
+    runtime-settable, so the loop has to be able to start and stop refetching
+    without a restart.
+    """
+    while True:
+        try:
+            if background_catalog_enabled(config):
+                await load_models_dev_catalog(config, force=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("models.dev catalog refresh failed; retrying on the next tick", exc_info=True)
+        # Recomputed per tick, not captured once, so a TTL changed at runtime
+        # takes effect on the next round.
+        delay = interval if interval is not None else _catalog_refresh_interval(config)
+        await asyncio.sleep(delay)
 
 
 def _as_str(value: Any) -> str | None:

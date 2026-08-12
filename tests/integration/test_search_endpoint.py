@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from gateway.api.deps import reset_config
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
 from gateway.core.database import reset_db
+from gateway.inflight import InFlightRegistry
 from gateway.main import create_app
 from gateway.services.search_backend import SearchHit, SearchOutcome, SearchProviderError
 
@@ -474,3 +475,40 @@ def test_search_is_not_registered_in_hybrid_mode(monkeypatch: pytest.MonkeyPatch
     finally:
         reset_config()
         reset_db()
+
+
+def test_search_is_tracked_while_its_provider_call_runs(
+    client: TestClient, api_key_header: dict[str, str]
+) -> None:
+    """A search is registered in flight during its provider call and gone after.
+
+    A search provider can take as long as a local model, so the live view has to
+    cover it or the Activity panel silently misses one whole surface. Mirrors the
+    pass-through in-flight test: the registry is read from inside the stubbed
+    provider call, which is the window an operator would be watching.
+    """
+    registry: InFlightRegistry = client.app.state.inflight  # type: ignore[attr-defined]
+    seen: list[Any] = []
+
+    async def slow_run_search(*_args: Any, **_kwargs: Any) -> SearchOutcome:
+        seen.append(registry.snapshot())
+        return SearchOutcome(results=_HITS, cost_usd=0.007)
+
+    with patch("gateway.api.routes.search.run_search", slow_run_search):
+        resp = client.post(
+            "/v1/search",
+            json={**SEARCH_PAYLOAD, "search_tool_name": "exa-search"},
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200
+    assert len(seen) == 1
+    (entry,) = seen[0]
+    assert entry.endpoint == SEARCH_ENDPOINT
+    assert entry.model == "exa-search"
+    assert entry.provider == "exa"
+    assert entry.user_id == "default"
+    assert entry.api_key_id
+    assert entry.policy_name is None
+    # And it is gone afterwards, so the panel cannot accumulate a ghost.
+    assert len(registry) == 0

@@ -1,6 +1,7 @@
 """Tests for transaction safety: rollback on commit failure and narrowed exception handling."""
 
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -146,6 +147,18 @@ async def test_is_model_free_accepts_string_provider_from_any_llm(async_db: Asyn
         result = await _is_model_free(async_db, "registry-only:model")
 
     assert result is False
+
+
+@pytest.mark.asyncio
+async def test_is_model_free_uses_the_resolved_provider_instance(async_db: AsyncSession) -> None:
+    """Policies are named locally, while their selected targets may use instances."""
+    pricing = SimpleNamespace(input_price_per_million=0, output_price_per_million=0)
+    lookup = AsyncMock(return_value=pricing)
+    with patch("gateway.services.budget_service.find_model_pricing", lookup):
+        result = await _is_model_free(async_db, "Kimi-K3", pricing_provider="otari.ai")
+
+    assert result is True
+    lookup.assert_awaited_once_with(async_db, "otari.ai", "Kimi-K3")
 
 
 @pytest.mark.asyncio

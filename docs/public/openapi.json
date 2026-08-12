@@ -1670,6 +1670,18 @@
       "DiscoverableProvider": {
         "description": "One provider instance's discovery result.",
         "properties": {
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When this instance was last dialed, ISO 8601. Null when it has not been checked yet, which is what the first read after a restart sees while the background refresh runs.",
+            "title": "Checked At"
+          },
           "discovery_unsupported": {
             "default": false,
             "description": "True when discovery failed only because this backend serves no model-listing endpoint. The provider may still handle requests for models declared in config.",
@@ -1945,6 +1957,14 @@
             },
             "title": "Router Candidates",
             "type": "array"
+          },
+          "router_weights": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "For a weighted policy, the percentage of traffic each candidate receives, normalized over the candidates this caller may use. Empty for every other policy, and for a weighted policy whose whole split this caller may not use: a split over no candidate is not a split, and each filtered candidate is named in `dropped` instead. A weighted split needs no request state, so unlike a learned router's ranking it is knowable here: the plan above is the real ordering by share, not the decline path.",
+            "title": "Router Weights",
+            "type": "object"
           },
           "selection_reason": {
             "title": "Selection Reason",
@@ -2404,6 +2424,111 @@
         "title": "ImageGenerationRequest",
         "type": "object"
       },
+      "InFlightEntry": {
+        "description": "One request the gateway is serving right now.\n\nField names match their ``UsageEntry`` counterparts so a request reads the\nsame way in flight as it does once it has settled. ``id`` is the exception: it\nis an ephemeral tracking id, not the id of the usage row this will become.",
+        "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Id"
+          },
+          "elapsed_ms": {
+            "title": "Elapsed Ms",
+            "type": "integer"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "policy_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Name"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "id",
+          "endpoint",
+          "model",
+          "provider",
+          "user_id",
+          "api_key_id",
+          "policy_name",
+          "started_at",
+          "elapsed_ms"
+        ],
+        "title": "InFlightEntry",
+        "type": "object"
+      },
+      "InFlightResponse": {
+        "description": "The requests in flight on the answering worker.",
+        "properties": {
+          "requests": {
+            "items": {
+              "$ref": "#/components/schemas/InFlightEntry"
+            },
+            "title": "Requests",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requests",
+          "total"
+        ],
+        "title": "InFlightResponse",
+        "type": "object"
+      },
       "KeyInfo": {
         "description": "Response model for key information.",
         "properties": {
@@ -2617,7 +2742,7 @@
         "type": "object"
       },
       "LearnedPolicy": {
-        "description": "A policy whose selection depends on the router, for the status overview.",
+        "description": "A policy whose selection depends on routing memory, for the status overview.\n\nOnly a *learned* policy belongs here. A weighted policy names a router too, but\nits split is written in the policy document, so listing it under a warmth report\nwould tie it to a pool it never reads.",
         "properties": {
           "backend": {
             "title": "Backend",
@@ -6278,6 +6403,17 @@
             ],
             "title": "Api Key Id"
           },
+          "api_key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Name"
+          },
           "attempt_count": {
             "anyOf": [
               {
@@ -6532,6 +6668,17 @@
             ],
             "title": "Total Tokens"
           },
+          "user_alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Alias"
+          },
           "user_id": {
             "anyOf": [
               {
@@ -6633,6 +6780,17 @@
               }
             ],
             "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
           },
           "requests": {
             "title": "Requests",
@@ -9676,8 +9834,22 @@
     },
     "/v1/models/discoverable": {
       "get": {
-        "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\nmaster-key gated because a provider error message describes the gateway's own\nconfiguration.",
+        "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\nmaster-key gated because a provider error message describes the gateway's own\nconfiguration.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
         "operationId": "list_discoverable_models_v1_models_discoverable_get",
+        "parameters": [
+          {
+            "description": "Re-dial every provider instead of answering from the discovery cache.",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Re-dial every provider instead of answering from the discovery cache.",
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9688,6 +9860,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -9706,7 +9888,7 @@
     },
     "/v1/models/metadata": {
       "get": {
-        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nMaster-key gated: it describes the gateway's configured providers.",
+        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nMaster-key gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
         "operationId": "list_model_metadata_v1_models_metadata_get",
         "responses": {
           "200": {
@@ -11008,7 +11190,7 @@
     },
     "/v1/routing/preferences/rank": {
       "post": {
-        "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored in the spelling the policy uses (see\n:func:`_validated_scores`), because the router matches them against its\ncandidate selectors by exact string.",
+        "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
         "operationId": "rank_candidates_v1_routing_preferences_rank_post",
         "requestBody": {
           "content": {
@@ -12317,6 +12499,36 @@
           }
         ],
         "summary": "Ingest External Usage",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/v1/usage/in-flight": {
+      "get": {
+        "description": "Requests the gateway is currently serving, longest-running first.\n\nA usage row is written when a request settles, so the log alone cannot answer\n\"is anything happening right now\": on a slow backend, a 30-second local model\ncall is invisible until it finishes. This reports what is in progress.\n\nRead from an in-memory registry, so it describes the process that answers this\ncall and not the deployment: behind a load balancer, consecutive polls reach\ndifferent otari processes, and there is no deployment-wide total to ask for.\n``total`` is the true in-flight count for the answering process even when\n``requests`` is capped.",
+        "operationId": "list_in_flight_v1_usage_in_flight_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InFlightResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List In Flight",
         "tags": [
           "usage"
         ]

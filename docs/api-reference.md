@@ -4,6 +4,14 @@ All endpoints are under `http://localhost:8000` by default.
 
 For full request/response schemas, see the [OpenAPI spec](public/openapi.json) or the interactive docs at `/docs` when Otari is running.
 
+## Provider error details
+
+When an upstream provider fails, what the `detail` field contains depends on whose problem it is.
+
+If the provider returned 400, 422 or 404 because it rejected **your request**, Otari responds with 400 or 404 and a sanitized provider diagnostic that names the parameter, model or limit at fault. Credential-shaped tokens, URLs, account identifiers, and reflected request or response payloads are stripped, and the diagnostic is capped at 400 characters.
+
+If the failure is the **gateway's** (its provider credentials were rejected, the provider account is out of credit, the provider returned a 5xx, or the error could not be classified), the detail is a fixed string such as `The provider rejected the gateway's credentials`. There is no remedy you could apply, and the upstream text in those cases tends to name the operator's account rather than anything about your request. Operators should diagnose these with safe metadata (request ID, provider, model, and status) or a protected incident process, never by logging provider keys, internal URLs, prompts, responses, request bodies, or other user payloads.
+
 ## Endpoint availability
 
 | Endpoint group | Standalone | Connected to otari.ai |
@@ -180,12 +188,27 @@ and counted as failures rather than only in the caller's own logs.
 |--------|------|-------------|------|
 | `POST` | `/v1/images/generations` | Generate images from text prompts. | API key or master key |
 
+Image generation bills per generated image, not per token, so a usage row carries
+zero tokens and an `images` meter. Unlike audio and moderations it is subject to
+`require_pricing`, so an unpriced image model is rejected with 402 under the
+default configuration. See
+[per-image pricing](configuration.md#per-image-pricing-image-generation) for how
+to set the rate.
+
 ### Audio
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | `POST` | `/v1/audio/transcriptions` | Transcribe audio to text (multipart upload). | API key or master key |
 | `POST` | `/v1/audio/speech` | Generate speech from text (TTS). | API key or master key |
+
+Audio bills per request rather than per token, under the same convention as
+[moderations](#moderations) and search, so a usage row carries zero tokens and a
+cost taken from the flat rate configured for the model. Like moderations, audio
+is exempt from `require_pricing`: with no rate configured the request is served
+and logged at $0 with no charge line. See
+[per-request pricing](configuration.md#per-request-pricing-audio-and-moderations)
+for how to set the rate.
 
 ### Files
 
@@ -264,7 +287,7 @@ See [Routing policies](routing.md).
 |--------|------|-------------|------|
 | `GET` | `/v1/routing/policies` | List every policy in force, from `config.yml` and from storage, in every scope. | Master key |
 | `POST` | `/v1/routing/policies` | Create or update a stored policy. Body is `{name, spec, user_id?}`; `spec` is the same document a `routing.policies` entry takes. Omit `user_id` for a global one. | Master key |
-| `POST` | `/v1/routing/policies/explain` | Compile a policy and return the plan without dispatching anything. Takes a saved `name`, an unsaved draft `spec`, or both (the draft wins). Optional `user_id`, `key_id`, `allowed_models`, `budget_used_pct`, `budget_remaining_usd` simulate the request. Returns the ordered candidates **and** the ones that were dropped, with reasons. | Master key |
+| `POST` | `/v1/routing/policies/explain` | Compile a policy and return the plan without dispatching anything. Takes a saved `name`, an unsaved draft `spec`, or both (the draft wins). Optional `user_id`, `key_id`, `allowed_models`, `budget_used_pct`, `budget_remaining_usd` simulate the request. Returns the ordered candidates **and** the ones that were dropped, with reasons. For a weighted policy it also returns `router_weights`, the share each candidate takes once filtering is applied. | Master key |
 | `DELETE` | `/v1/routing/policies/{name}` | Delete a stored policy. `user_id` query param selects the scope. Policies from `config.yml` cannot be deleted here. | Master key |
 
 Master key on every verb, including `explain`: the response enumerates a policy's

@@ -33,7 +33,7 @@ async def test_healthy_provider_reports_model_count_and_checked_at() -> None:
     get_model_cache().clear()
     config = _config({"openai": {"api_key": "x"}})
 
-    async def discover(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
         get_model_cache().set(instance, [_model("gpt-4o"), _model("gpt-4o-mini")])
         return ProviderDiscovery(provider=instance, models=[_model("gpt-4o"), _model("gpt-4o-mini")])
 
@@ -52,7 +52,7 @@ async def test_unreachable_provider_is_unhealthy_and_keeps_error() -> None:
     get_model_cache().clear()
     config = _config({"anthropic": {"api_key": "x"}})
 
-    async def discover(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
         return ProviderDiscovery(provider=instance, models=[], error="authentication failed")
 
     with patch.object(phs, "discover_provider_models", side_effect=discover):
@@ -70,7 +70,7 @@ async def test_provider_without_a_models_endpoint_is_flagged_not_just_unhealthy(
     get_model_cache().clear()
     config = _config({"otari": {"api_key": "x"}})
 
-    async def discover(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
         return ProviderDiscovery(
             provider=instance,
             models=[],
@@ -99,7 +99,7 @@ def _spy_on_clear() -> Iterator[list[str | None]]:
         yield cleared
 
 
-async def _noop_discover(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+async def _noop_discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
     return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
 
 
@@ -159,7 +159,7 @@ async def test_check_all_fans_out_and_summarizes() -> None:
     get_model_cache().clear()
     config = _config({"openai": {"api_key": "x"}, "anthropic": {"api_key": "y"}})
 
-    async def discover(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
         if instance == "anthropic":
             return ProviderDiscovery(provider=instance, models=[], error="boom")
         return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
@@ -180,7 +180,7 @@ async def test_check_all_surfaces_a_stray_exception_without_sinking_others() -> 
     get_model_cache().clear()
     config = _config({"good": {"api_key": "x"}, "bad": {"api_key": "y"}})
 
-    async def discover(cfg: GatewayConfig, instance: str) -> ProviderDiscovery:
+    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
         if instance == "bad":
             raise RuntimeError("unexpected")
         return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
@@ -192,3 +192,43 @@ async def test_check_all_surfaces_a_stray_exception_without_sinking_others() -> 
     assert by_instance["good"].ok is True
     assert by_instance["bad"].ok is False
     assert by_instance["bad"].error is not None
+
+
+@pytest.mark.asyncio
+async def test_polled_health_serves_the_cache_instead_of_dialing() -> None:
+    """The hourly poll must not be what pays an unreachable provider's timeout.
+
+    Health fans out over every configured instance, so a dial here costs
+    ``model_discovery_timeout_seconds`` per unreachable provider and holds the
+    request open for it. The background discovery refresher owns the dialing.
+    """
+    get_model_cache().clear()
+    config = _config({"openai": {"api_key": "x"}})
+    seen: list[bool] = []
+
+    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
+        seen.append(serve_stale)
+        return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
+
+    with patch.object(phs, "discover_provider_models", side_effect=discover):
+        await phs.check_all_provider_health(config, serve_stale=True)
+
+    assert seen == [True]
+
+
+@pytest.mark.asyncio
+async def test_explicit_recheck_still_dials() -> None:
+    """An explicit "re-check now" is an operator asking for a fresh probe; honor it."""
+    get_model_cache().clear()
+    config = _config({"openai": {"api_key": "x"}})
+    seen: list[bool] = []
+
+    async def discover(cfg: GatewayConfig, instance: str, *, serve_stale: bool = False) -> ProviderDiscovery:
+        seen.append(serve_stale)
+        return ProviderDiscovery(provider=instance, models=[_model("gpt-4o")])
+
+    with patch.object(phs, "discover_provider_models", side_effect=discover):
+        await phs.check_all_provider_health(config, refresh=True, serve_stale=True)
+
+    # refresh wins over serve_stale, or the button would return the cached verdict.
+    assert seen == [False]

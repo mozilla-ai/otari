@@ -10,7 +10,7 @@ keys, and ~1600 usage rows.
 bash scripts/demo_gif/record.sh
 ```
 
-That seeds a throwaway SQLite gateway, boots it serving the committed dashboard
+That seeds a throwaway SQLite gateway, boots it serving the built dashboard
 bundle, drives every page with Playwright while recording, and encodes the
 result to `assets/otari-demo.gif`.
 
@@ -20,8 +20,10 @@ result to `assets/otari-demo.gif`.
 - `gifsicle` on `PATH` (lossy GIF optimisation).
 - Web deps installed: `(cd web && npm ci)` (Playwright resolves from
   `web/node_modules`).
-- A committed dashboard bundle in `src/gateway/static/dashboard`. Rebuild after
-  any `web/src` change: `npm --prefix web run build`.
+- A built dashboard bundle in `src/gateway/static/dashboard` (gitignored, so a
+  fresh clone has none): `make dashboard`. Rebuild after any change under
+  `web/src` or to `docs/dashboard.md` (bundled into the app), otherwise the
+  recording shows the previous build.
 - On arm64 Linux, `record.sh` sets the Playwright platform override automatically; on x86_64 it leaves Playwright's native detection and host checks in place.
 
 ## Files

@@ -36,6 +36,17 @@ const LEARNED: PolicySpec = {
   ],
 };
 
+const WEIGHTED: PolicySpec = {
+  select: [
+    {
+      router: "weighted",
+      candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
+      weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30 },
+    },
+    { default: "openai:gpt-5" },
+  ],
+};
+
 const POLICIES: RoutingPolicyResponse[] = [
   policy("fast", CHAIN),
   policy(
@@ -459,6 +470,245 @@ describe("RoutingPage", () => {
     expect(screen.getByText(/at least two models/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create policy" }));
     expect(calls.some((call) => call.method === "POST")).toBe(false);
+  });
+
+  it("summarises a weighted policy by its split, not by its pool size", async () => {
+    // Two provider:model strings do not fit the cell, and the shares are what tells
+    // one weighted policy from another at a glance.
+    mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("balanced")).closest("tr")!;
+    expect(within(row).getByText("Weighted")).toBeInTheDocument();
+    expect(within(row).getByText(/70% \/ 30% across 2 models/)).toBeInTheDocument();
+  });
+
+  it("creates a weighted policy from the split control", async () => {
+    const { calls } = mockApi([]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    await user.click(await screen.findByRole("button", { name: "New policy" }));
+    await user.type(screen.getByRole("textbox", { name: /policy name/i }), "balanced");
+    await user.type(screen.getByRole("combobox", { name: /^serves$/i }), "openai:gpt-5");
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /split traffic across providers/i }));
+
+    // Seeded as an even split of the policy's own target plus one empty row, so the
+    // operator names the second provider and skews the shares.
+    await user.type(
+      screen.getByRole("combobox", { name: /model 2/i }),
+      "anthropic:claude-sonnet-4-5",
+    );
+    await user.keyboard("{Escape}");
+    const shares = screen.getAllByRole("textbox", { name: /share/i });
+    await user.clear(shares[0]);
+    await user.type(shares[0], "70");
+    await user.clear(shares[1]);
+    await user.type(shares[1], "30");
+    // Relative weights are hard to read, so the form says what they come to.
+    expect(screen.getByText("70% of requests")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Create policy" }));
+
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("/v1/routing/policies"));
+    const spec = (post!.body as { spec: PolicySpec }).spec;
+    expect(spec.select[0]).toEqual({
+      router: "weighted",
+      candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
+      weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30 },
+    });
+    expect(spec.select[1]).toEqual({ default: "openai:gpt-5" });
+  });
+
+  it("edits a weighted policy without losing its split", async () => {
+    const { calls } = mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("balanced")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    const shares = screen.getAllByRole("textbox", { name: /share/i });
+    expect(shares[0]).toHaveValue("70");
+    expect(shares[1]).toHaveValue("30");
+    // Drain the second provider without deleting it, which is what a zero share is
+    // for. The form has to say the model is still there, or a zero reads as removal.
+    await user.clear(shares[1]);
+    await user.type(shares[1], "0");
+    expect(screen.getByText(/No weighted traffic; still tried if another fails/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("/v1/routing/policies"));
+    const spec = (post!.body as { spec: PolicySpec }).spec;
+    expect(spec.select[0]).toEqual({
+      router: "weighted",
+      candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
+      weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 0 },
+    });
+  });
+
+  it("keeps a fractional share typeable and refuses a non-numeric one", async () => {
+    // The field holds what was typed, so a decimal point survives the keystroke that
+    // follows it. "Infinity" and a negative parse but are refused, matching the API's
+    // finite, non-negative rule rather than being coerced to something else on save.
+    const { calls } = mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("balanced")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    const shares = screen.getAllByRole("textbox", { name: /share/i });
+    await user.clear(shares[0]);
+    await user.type(shares[0], "Infinity");
+    expect(screen.getByText(/Every share is a number of zero or more/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    await user.clear(shares[0]);
+    await user.type(shares[0], "-5");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    // The decimal has to survive the round trip, not only the keystroke: a field
+    // that renders "7.5" but posts 7 would be the same bug one layer down.
+    await user.clear(shares[0]);
+    await user.type(shares[0], "7.5");
+    expect(shares[0]).toHaveValue("7.5");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("/v1/routing/policies"));
+    const spec = (post!.body as { spec: PolicySpec }).spec;
+    expect(spec.select[0].weights).toEqual({ "openai:gpt-5": 7.5, "anthropic:claude-sonnet-4-5": 30 });
+  });
+
+  it("edits a weighted policy whose backend name is spelled loosely", async () => {
+    // The gateway resolves a backend on `name.strip().lower()`, so " Weighted " is a
+    // working policy. Reading it as an unknown backend would show it read-only and
+    // label it wrong on a page that otherwise offers to edit it.
+    const loose: PolicySpec = {
+      select: [
+        {
+          router: " Weighted ",
+          candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
+          weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30 },
+        },
+        { default: "openai:gpt-5" },
+      ],
+    };
+    const { calls } = mockApi([policy("balanced", loose, { is_dynamic: true })]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("balanced")).closest("tr")!;
+    expect(within(row).getByText("Weighted")).toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+
+    // Loading it as weighted is half the claim; saving it back unchanged is the
+    // other half. The spelling is normalized on the way out, which is what the
+    // gateway would have resolved it to anyway.
+    const shares = screen.getAllByRole("textbox", { name: /share/i });
+    expect(shares[0]).toHaveValue("70");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const post = calls.find((call) => call.method === "POST" && call.url.includes("/v1/routing/policies"));
+    const spec = (post!.body as { spec: PolicySpec }).spec;
+    expect(spec.select[0]).toEqual({
+      router: "weighted",
+      candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"],
+      weights: { "openai:gpt-5": 70, "anthropic:claude-sonnet-4-5": 30 },
+    });
+  });
+
+  it("will not save a split where every share is zero", async () => {
+    // It would select nothing and the policy would always serve its marked model,
+    // which is a load balancer that balances nothing. The API refuses it too.
+    const { calls } = mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("balanced")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    for (const share of screen.getAllByRole("textbox", { name: /share/i })) {
+      await user.clear(share);
+      await user.type(share, "0");
+    }
+
+    expect(screen.getByText(/at least one model a share above zero/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+  });
+
+  it("adds a model to a split with no traffic until a share is set", async () => {
+    // Adding a provider must not silently move traffic onto it.
+    mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("balanced")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    await user.click(screen.getByRole("button", { name: "+ Another model" }));
+
+    const shares = screen.getAllByRole("textbox", { name: /share/i });
+    expect(shares[2]).toHaveValue("0");
+  });
+
+  it("will not save a split that names the same model twice", async () => {
+    // Two rows collapse to one key in the weight map, so the split saved would not be
+    // the split shown (and the API refuses a repeated candidate regardless).
+    const { calls } = mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
+    const user = userEvent.setup();
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("balanced")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    const second = screen.getByRole("combobox", { name: /model 2/i });
+    await user.clear(second);
+    await user.type(second, "openai:gpt-5");
+    await user.keyboard("{Escape}");
+
+    expect(screen.getByText(/name each model once/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+  });
+
+  it("names a router backend it does not know without claiming it learns", async () => {
+    // Only "knn" learns. Labelling every other backend "Learned" would make the table
+    // lie about the first backend added after this line was written.
+    mockApi([
+      policy("future", {
+        select: [{ router: "cheapest", candidates: ["openai:gpt-5-nano", "openai:gpt-5"] }, { default: "openai:gpt-5" }],
+      }),
+    ]);
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("future")).closest("tr")!;
+    expect(within(row).getByText("Routed")).toBeInTheDocument();
+    expect(within(row).queryByText("Learned")).not.toBeInTheDocument();
+  });
+
+  it("does not offer the examples panel for a weighted policy, which learns nothing", async () => {
+    mockApi([policy("balanced", WEIGHTED, { is_dynamic: true })]);
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("balanced")).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "Examples" })).not.toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Edit" })).toBeInTheDocument();
+  });
+
+  it("does not offer Edit for a weighted policy with no split to show", async () => {
+    // The form would have to invent the shares, and the API refuses such a spec
+    // anyway, so this one is only reachable as an older or hand-written document.
+    mockApi([
+      policy("legacy", {
+        select: [
+          { router: "weighted", candidates: ["openai:gpt-5", "anthropic:claude-sonnet-4-5"] },
+          { default: "openai:gpt-5" },
+        ],
+      }),
+    ]);
+    renderPage(<RoutingPage />);
+
+    const row = (await screen.findByText("legacy")).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
   });
 
   it("does not offer Edit for a router backend the form cannot write", async () => {

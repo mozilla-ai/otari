@@ -10,6 +10,9 @@
 docs/
 *.md
 !README.md
+# The dashboard bundles the operator guide (web/src/pages/DocsPage.tsx imports it
+# with Vite's `?raw`), so the web build stage needs this one file from docs/.
+!docs/dashboard.md
 
 # Tests
 tests/
@@ -57,6 +60,22 @@ ENV/
 
 # Jupyter
 .ipynb_checkpoints
+
+# Node / web build. The web stage runs `npm ci` from the lockfile, so a host
+# node_modules would only bloat the context (240MB+, and it can hold
+# platform-specific binaries). A local dashboard build is rebuilt in the web
+# stage, and copying it in would leave orphaned hashed assets that index.html no
+# longer references.
+#
+# The `**/` prefixes are required, not decorative: Docker matches these patterns
+# against the whole context-relative path with Go filepath.Match semantics, where
+# `*` does not cross `/`. A bare `node_modules/` matches only a directory at the
+# context root, so it would not exclude web/node_modules.
+**/node_modules
+src/gateway/static/dashboard/
+web/test-results/
+web/playwright-report/
+**/*.tsbuildinfo
 
 # mypy
 .mypy_cache/

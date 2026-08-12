@@ -45,6 +45,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
+from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
 from gateway.models.entities import APIKey, ModelPricing, UsageLog
@@ -67,6 +68,11 @@ from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_
 ResultT = TypeVar("ResultT")
 
 PASSTHROUGH_PROVIDER_ERROR_DETAIL = "The request could not be completed by the provider"
+
+# A route's non-token charge lines: the meters dict and the auditable breakdown,
+# matching the shape ``calculate_metered_cost`` and ``price_tool_calls`` already
+# write for the chat and tool-charge paths.
+BillingMeters = tuple[dict[str, Any], list[dict[str, Any]]]
 
 
 def resolve_passthrough_user_id(
@@ -126,10 +132,12 @@ async def run_passthrough(
     user: str | None,
     call_provider: Callable[[ResolvedProvider], Awaitable[ResultT]],
     lookup_pricing: bool = True,
+    pricing_use_defaults: bool = True,
     estimate: Callable[[ModelPricing | None], float] | None = None,
     enforce_require_pricing: bool = False,
     usage_tokens: Callable[[ResultT], tuple[int | None, int | None, int | None]] | None = None,
     compute_cost: Callable[[ResultT, ModelPricing | None], float | None] | None = None,
+    compute_meters: Callable[[ResultT, ModelPricing | None, float], BillingMeters | None] | None = None,
     map_provider_error: Callable[[Exception], HTTPException | None] | None = None,
     reserve_before_resolve: bool = False,
     relabel: bool = True,
@@ -155,18 +163,34 @@ async def run_passthrough(
             ``HTTPException`` raised here (e.g. an upload size check) refunds
             the reservation and propagates unchanged.
         lookup_pricing: Whether to resolve :class:`ModelPricing` for the model.
-            Audio has no measurable cost unit yet and skips the lookup.
+            Audio resolves it for per-request charge lines but the reservation
+            estimate stays 0 (no measurable cost unit yet, so no pre-call spend).
+        pricing_use_defaults: Whether the pricing lookup may fall back to the
+            genai-prices dataset. A route whose billable unit is not a token
+            passes False for the reason :func:`find_model_pricing` documents:
+            those rates are USD per million *tokens*, so a per-request route
+            would charge them as USD per million *requests* and a per-image route
+            as USD per image, writing a charge line at the wrong unit for a rate
+            nobody configured.
         estimate: Maps the pricing row to the reservation estimate in USD.
             Defaults to 0.0, which still enforces per-user state (user exists,
             not blocked, not already over budget).
         enforce_require_pricing: When True and ``config.require_pricing`` is
             set, reject unpriced models with 402. The check runs after the
             reservation (so its 404/403 rejections take precedence) and the
-            reservation is refunded before raising.
+            reservation is refunded before raising. Honored only on the
+            resolve-first path: a ``reserve_before_resolve`` route resolves
+            pricing after its reservation and skips this gate, so setting both
+            silently serves an unpriced model. No route sets both today.
         usage_tokens: Maps the provider result to ``(prompt, completion,
             total)`` token counts for the usage log. Defaults to ``(0, 0, 0)``.
         compute_cost: Maps the result and pricing to the final USD cost, or
             ``None`` to leave the log's cost unset and reconcile at 0.0.
+        compute_meters: Maps the result, pricing, and the cost ``compute_cost``
+            just returned to this request's billing meters and charge lines, or
+            ``None`` to leave both unset. Only called when ``compute_cost``
+            returned a cost, so a route with no priced unit never needs to guard
+            against a missing cost itself.
         map_provider_error: Route-specific provider-exception mapping checked
             before the generic 502 (the error log and refund happen either way).
         reserve_before_resolve: Preserve the audio routes' historical ordering,
@@ -290,6 +314,22 @@ async def run_passthrough(
                 status_code=status.HTTP_400_BAD_REQUEST,
             )
             _raise_for_unresolvable_model(model, exc)
+        if lookup_pricing:
+            # Unlike the branch below, the reservation is already held here, so a
+            # failed lookup must refund before propagating or the estimate leaks.
+            try:
+                pricing = await find_model_pricing(
+                    db, resolved.instance, resolved.model, use_defaults=pricing_use_defaults
+                )
+            except Exception:
+                # The realistic failure is a DB error, which leaves the session
+                # needing a rollback: without one the refund's own UPDATE raises
+                # PendingRollbackError, masking this exception and leaking the
+                # hold this block exists to release. ``reserve_budget`` already
+                # committed, so the rollback discards nothing of its own.
+                await db.rollback()
+                await refund_reservation(db, reservation)
+                raise
     else:
         try:
             resolved = resolve_provider_selector(config, model, user_id)
@@ -303,7 +343,9 @@ async def run_passthrough(
             )
             _raise_for_unresolvable_model(model, exc)
         if lookup_pricing:
-            pricing = await find_model_pricing(db, resolved.instance, resolved.model)
+            pricing = await find_model_pricing(
+                db, resolved.instance, resolved.model, use_defaults=pricing_use_defaults
+            )
         # Reserve first so user/blocked/budget rejections (404/403) precede the
         # missing-pricing rejection (402); refund if we then reject for no pricing.
         reservation = await _reserve(
@@ -375,6 +417,23 @@ async def run_passthrough(
             **outcome,
         )
 
+    # Every gate has passed and the provider is about to be called, so the request
+    # is genuinely in flight from here until its response has been sent. Registered
+    # for the same reason as on the chat/messages/responses path, and it matters as
+    # much: an image generation routinely runs longer than a completion, and until
+    # it settles the activity log has nothing to show for it. The entry is dropped
+    # by InFlightMiddleware, not here.
+    track_request(
+        raw_request,
+        endpoint=endpoint,
+        # The same pair `_usage_row` stamps, so the row does not appear to change
+        # model when it settles.
+        model=resolved.model,
+        provider=resolved.instance,
+        user_id=user_id,
+        api_key_id=api_key_id,
+    )
+
     try:
         result = await call_provider(resolved)
 
@@ -389,6 +448,9 @@ async def run_passthrough(
         cost = compute_cost(result, pricing) if compute_cost else None
         if cost is not None:
             usage_log.cost = cost
+            billing = compute_meters(result, pricing, cost) if compute_meters else None
+            if billing is not None:
+                usage_log.billing_meters, usage_log.pricing_breakdown = billing
 
         await log_writer.put(usage_log)
         await reconcile_reservation(db, reservation, cost if cost is not None else 0.0)

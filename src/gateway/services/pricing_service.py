@@ -278,11 +278,17 @@ async def find_model_pricing(
     database always takes precedence over defaults. The default fallback is gated
     by ``GatewayConfig.default_pricing`` via :func:`configure_default_pricing`.
 
-    ``use_defaults=False`` skips that fallback for keys that are not models at
-    all. The genai-prices lookup falls back to a provider-agnostic match on the
-    bare name, so a search tool an operator happened to name after a real model
-    would otherwise pick up that model's per-million-token rate and be billed
-    under a per-request convention.
+    ``use_defaults=False`` skips that fallback for any caller whose billable unit
+    is not a token, because every dataset rate is quoted per million *tokens*.
+    Two kinds of caller need it. A key that is not a model at all (a search tool,
+    a gateway-run tool): the genai-prices lookup falls back to a provider-agnostic
+    match on the bare name, so a tool an operator happened to name after a real
+    model would pick up that model's rate. And a real model billed under a
+    non-token unit (audio and moderations per request, images per image):
+    ``gpt-4o-transcribe`` and ``gpt-image-1`` are both in the dataset, and their
+    per-million-token rates, read under :func:`flat_request_cost` or
+    :func:`per_image_cost`, become a per-request or per-image rate, writing a
+    charge line at the wrong unit for a rate nobody configured.
     """
 
     lookup_time = normalize_effective_at(as_of)
@@ -325,6 +331,30 @@ def flat_request_cost(pricing: ModelPricing | None) -> float:
     if pricing is None or not pricing.input_price_per_million:
         return 0.0
     return pricing.input_price_per_million / 1_000_000
+
+
+PerRequestMeters = tuple[dict[str, int], list[dict[str, float | int | str]]]
+
+
+def per_request_meters(cost: float) -> PerRequestMeters | None:
+    """This request's billing meters and charge line, priced per request.
+
+    One request is one billed meter, so the per-request rate is the cost itself.
+    Charge lines carry ``unit_rate`` rather than ``rate_per_million``, the same
+    shape :func:`price_tool_calls` writes, which is what tells a reader and the
+    dashboard which unit convention applies.
+
+    Returns ``None`` when the request is free, the common case on these routes
+    since they are exempt from ``require_pricing`` and an unset or ``0.0`` rate
+    both settle at $0: a zero charge line would render in Activity as a billed
+    meter explaining a charge that never happened. Shared by every route billing
+    per request (audio transcription, audio speech, moderations) so the shape
+    cannot drift between them, for the reason the unit conventions above are
+    named helpers rather than inline expressions.
+    """
+    if not cost:
+        return None
+    return {"requests": 1}, [{"meter": "request", "units": 1, "unit_rate": cost, "cost": cost}]
 
 
 GATEWAY_TOOL_PRICING_PROVIDER = "otari"

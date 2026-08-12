@@ -1,8 +1,9 @@
-.PHONY: help dev test test-unit test-integration lint check-architecture typecheck openapi-check postman postman-check changelog
+.PHONY: help dev dashboard test test-unit test-integration lint check-architecture typecheck openapi-check postman postman-check changelog
 
 help:
 	@printf "Available targets:\n"
 	@printf "  dev  Run Otari with uvicorn --reload using .env\n"
+	@printf "  dashboard Build the admin dashboard into src/gateway/static/dashboard\n"
 	@printf "  test Run full test suite (unit + integration)\n"
 	@printf "  test-unit Run unit tests\n"
 	@printf "  test-integration Run integration tests\n"
@@ -19,6 +20,22 @@ dev:
 	if [ -f .env ]; then . ./.env; fi; \
 	set +a; \
 	uv run --env-file .env uvicorn gateway.dev:create_dev_app --factory --app-dir src --reload --host "$${OTARI_HOST:-0.0.0.0}" --port "$${OTARI_PORT:-8000}" --reload-dir src
+
+# Build the dashboard bundle the gateway serves at "/". Not committed, so run
+# this to see the dashboard from a source checkout (without it the gateway
+# degrades to the tutorial page) and before building a wheel. The Docker image
+# builds it in its own web stage and needs no local Node.
+dashboard: web/node_modules/.package-lock.json
+	npm --prefix web run build
+
+# `npm ci` deletes and reinstalls node_modules, which is the wrong price to pay on
+# every rebuild now that the READMEs send developers to `make dashboard` to see the
+# dashboard locally. Gate it on npm's own install stamp, which it writes inside
+# node_modules: absent (or older than the lockfile) means the tree is missing or
+# stale, and otherwise the install is already the one the lockfile asks for. Kept
+# as `ci` rather than `install` so the lockfile is never rewritten as a side effect.
+web/node_modules/.package-lock.json: web/package-lock.json
+	npm --prefix web ci
 
 test:
 	uv run pytest -v tests/unit tests/integration

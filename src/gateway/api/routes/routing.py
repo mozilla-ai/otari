@@ -35,7 +35,13 @@ from gateway.services.policy_store import (
     refresh_policy_cache,
     resolve_effective_policy,
 )
-from gateway.services.routing import BudgetState, NoEligibleCandidatesError, compile_policy
+from gateway.services.routing import (
+    BudgetState,
+    NoEligibleCandidatesError,
+    backend_requires_pricing,
+    compile_policy,
+)
+from gateway.services.routing.decide import explain_router_ordering
 from gateway.services.routing.knn import unpriced_router_candidates
 
 router = APIRouter(prefix="/v1/routing/policies", tags=["routing"])
@@ -139,13 +145,25 @@ class ExplainResponse(BaseModel):
     candidates: list[CandidateResponse]
     dropped: list[DroppedResponse]
     guardrails: list[dict[str, Any]]
-    # Set when the policy hands its ordering to a router. The plan above is then
-    # the decline path: ranking needs a live request (a prompt to embed, stored
-    # examples to compare it against), and explain deliberately dispatches
-    # nothing. Surfaced so the dashboard can say so rather than showing a
-    # one-candidate plan that looks like the router was ignored.
+    # Set when the policy hands its ordering to a router. For a router that needs
+    # request state (kNN needs a prompt to embed and stored examples to compare it
+    # against) the plan above is the *decline* path, because explain deliberately
+    # dispatches nothing. Surfaced so the dashboard can say so rather than showing a
+    # one-candidate plan that looks like the router was ignored. A weighted policy
+    # is the exception: see `router_weights`.
     router_backend: str | None = None
     router_candidates: list[str] = Field(default_factory=list)
+    router_weights: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "For a weighted policy, the percentage of traffic each candidate receives, normalized over "
+            "the candidates this caller may use. Empty for every other policy, and for a weighted policy "
+            "whose whole split this caller may not use: a split over no candidate is not a split, and each "
+            "filtered candidate is named in `dropped` instead. A weighted split needs no request state, so "
+            "unlike a learned router's ranking it is knowable here: the plan above is the real ordering by "
+            "share, not the decline path."
+        ),
+    )
 
 
 def _validated_spec(name: str, spec: dict[str, Any]) -> PolicySpec:
@@ -228,15 +246,19 @@ def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id:
 async def _validate_router_pricing(config: GatewayConfig, db: AsyncSession, spec: PolicySpec) -> None:
     """Refuse a learned policy whose candidates are not all priced.
 
-    A router scores by cost, so one unpriced candidate makes it decline every
-    request and the policy silently serves its default target forever. That is
+    The *learned* router scores by cost, so one unpriced candidate makes it decline
+    every request and the policy silently serves its default target forever. That is
     indistinguishable from a broken router, and the fix (add pricing) is nothing
     the operator would think to look for. Startup only *warns* about the same
     problem in a config policy, because refusing there would take a running
     gateway down over an optimization; refusing a write costs one corrected
     request while the operator is looking at the policy.
+
+    Scoped to the backends that actually read a price: the weighted router balances
+    on operator-declared capacity, so requiring pricing there would refuse a policy
+    that works.
     """
-    if spec.router_backend is None:
+    if not backend_requires_pricing(spec.router_backend):
         return
     missing = await unpriced_router_candidates(config, db, spec.router_candidates)
     if missing:
@@ -453,6 +475,12 @@ async def explain_policy(
             )
         spec = resolved
 
+    # A weighted policy's ordering is computable here: it needs no prompt, no
+    # stored examples and no provider call, only the weights the policy declares.
+    # Passing it in makes explain show the split rather than the decline path.
+    weighted_ordering, weighted_shares = explain_router_ordering(
+        config, spec, user_id=request.user_id, allowlist=request.allowed_models
+    )
     try:
         plan = compile_policy(
             config,
@@ -464,6 +492,7 @@ async def explain_policy(
             budget=BudgetState(
                 used_pct=request.budget_used_pct, remaining_usd=request.budget_remaining_usd
             ),
+            router_ordering=weighted_ordering,
         )
     except NoEligibleCandidatesError as exc:
         return ExplainResponse(
@@ -486,6 +515,7 @@ async def explain_policy(
         is_dynamic=spec.is_dynamic,
         router_backend=spec.router_backend,
         router_candidates=spec.router_candidates,
+        router_weights={item.selector: round(item.share_pct, 2) for item in weighted_shares},
         candidates=[
             CandidateResponse(
                 position=attempt.position,

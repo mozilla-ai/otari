@@ -197,10 +197,11 @@ budgets), and toggle runtime settings. See the
 [Admin dashboard guide](docs/dashboard.md) for the two-key model, a first-run
 walkthrough, and a page-by-page reference.
 
-The dashboard is a React + HeroUI app that lives in `web/`; its built bundle is
-committed under `src/gateway/static/dashboard`, so the published package and
-Docker image serve it with no extra build step. See
-[`web/README.md`](web/README.md) to work on it.
+The dashboard is a React + HeroUI app that lives in `web/`. The Docker image
+builds and serves it with no extra step on your side. Running from a source
+checkout instead, build the bundle once with `make dashboard` (needs Node 22);
+without it the gateway serves the get-started tutorial at `/` and the API works
+as normal. See [`web/README.md`](web/README.md) to work on it.
 
 To build and run the container from your local code instead of pulling the published image, layer in the build file:
 

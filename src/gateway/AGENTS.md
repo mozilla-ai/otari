@@ -18,11 +18,27 @@ Read these together before changing request behavior, the flow spans several fil
 4. Dispatch: the provider/model is split with `AnyLLM.split_model_provider(...)` and the call is made via `acompletion(...)` from `any_llm`. Hybrid mode walks multiple resolved attempts with fallback (`src/gateway/api/routes/_platform.py`, streaming in `src/gateway/streaming.py`).
 5. Usage + budget reconciliation: standalone writes a `UsageLog` row via the log writer and reconciles spend; platform reports usage upstream.
 
+A usage row therefore only exists once a request has settled. What is *currently*
+running lives in `src/gateway/inflight.py`: an in-memory, per-process registry,
+populated once the budget, access and model-resolution gates have passed and the
+provider is about to be called (so a request refused by one of those never
+appears; a later guardrail or tool-declaration refusal does appear while that
+check runs) and emptied by `InFlightMiddleware`, read by
+`GET /v1/usage/in-flight` for the dashboard's Activity page. There are three
+registration points, one per dispatch scaffold: `resolve_request_context`
+(chat/messages/responses), `run_passthrough` (embeddings, images, audio, rerank,
+moderations), and `_dispatch_search`. A new provider-calling scaffold needs its
+own `track_request` call or it is invisible to the panel. Removal belongs to the
+middleware and not to any
+settlement path: a streaming response outlives its route handler, and the
+`finally` that wraps the whole ASGI call is the only place that runs exactly once
+per request (the same reason `gateway_active_requests` is instrumented there).
+
 ## Budget enforcement
 `src/gateway/services/budget_service.py` reserves an estimated cost before the call and reconciles/refunds after. Strategy is selectable (`for_update` row-lock, `cas` compare-and-swap, or `disabled`) via `OTARI_BUDGET_STRATEGY`. Per-period resets are driven by `next_budget_reset_at` on the user.
 
 ## Routing policies and router backends
-`services/routing/` is the decision half of routing; the API layer's attempt walker executes the plan. `compiler.py` is pure and synchronous: it turns a `PolicySpec` plus request facts into an ordered `CompiledPlan`. A policy whose `select` names a `router` gets its ordering from a backend in `backends.py` (`knn` lives in `knn.py`), which is asynchronous (an embedding call, a scan of stored examples), so it runs in `_pipeline._compile_request_plan` via `decide.py` and the result is passed into the compiler as a `RouterOrdering` value. Keep it that way: the compiler must stay callable from `explain` and the CLI with no DB and no I/O. A backend that declines returns an empty ordering, which compiles to the policy's default target; that is the safe path every uncertain case takes.
+`services/routing/` is the decision half of routing; the API layer's attempt walker executes the plan. `compiler.py` is pure and synchronous: it turns a `PolicySpec` plus request facts into an ordered `CompiledPlan`. A policy whose `select` names a `router` gets its ordering from a backend in `backends.py` (`knn` lives in `knn.py`, the weighted load balancer in `weighted.py`), which is asynchronous (an embedding call, a scan of stored examples), so it runs in `_pipeline._compile_request_plan` via `decide.py` and the result is passed into the compiler as a `RouterOrdering` value. Keep it that way: the compiler must stay callable from `explain` and the CLI with no DB and no I/O. A backend that declines returns an empty ordering, which compiles to the policy's default target; that is the safe path every uncertain case takes.
 
 ## Built-in tools vs pass-through
 Only `otari_*` tool types are run by the gateway; every other tool type is forwarded to the provider untouched (`src/gateway/api/routes/_tools.py`). `otari_code_execution` → `SandboxBackend` (`services/sandbox_backend.py`), `otari_web_search` → `WebSearchBackend` (`services/web_search_backend.py`). The agentic tool/MCP loop lives in `services/mcp_loop.py`. Request-level guardrails (`services/guardrails.py`) are a caller-opted, input-side check run before the provider; SSRF checks for outbound URLs live in `services/url_safety.py`.

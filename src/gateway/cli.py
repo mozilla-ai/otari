@@ -283,6 +283,8 @@ def routing_explain(
     """
     from gateway.models.routing import PolicySpec
     from gateway.services.routing import BudgetState, NoEligibleCandidatesError, compile_policy
+    from gateway.services.routing.backends import backend_is_weighted
+    from gateway.services.routing.decide import explain_router_ordering
 
     cfg = load_config(config)
     if not cfg.routing.policies:
@@ -313,6 +315,12 @@ def routing_explain(
         raise click.BadParameter(f"unknown policy {policy_name!r}. Configured policies: {known}")
 
     budget = BudgetState(used_pct=budget_used_pct, remaining_usd=budget_remaining_usd)
+    # A weighted policy's split is written in the policy, so it is knowable without
+    # a request and this command shows it. Every other router needs request state
+    # and gets None, which compiles to the decline path explained below.
+    weighted_ordering, weighted_shares = explain_router_ordering(
+        cfg, spec, user_id=user_id, allowlist=list(allowed_models) or None
+    )
     try:
         plan = compile_policy(
             cfg,
@@ -322,21 +330,39 @@ def routing_explain(
             key_id=key_id,
             allowlist=list(allowed_models) or None,
             budget=budget,
+            router_ordering=weighted_ordering,
         )
     except NoEligibleCandidatesError as exc:
         click.echo(f"{policy_name}: NO USABLE CANDIDATE")
         click.echo(f"  {exc.operator_detail}")
         raise SystemExit(1) from exc
 
+    shares = {item.canonical: item.share_pct for item in weighted_shares}
     click.echo(f"{policy_name}: {len(plan.attempts)} candidate(s), selected by {plan.selection_reason}")
     for attempt in plan.attempts:
+        canonical = f"{attempt.instance}:{attempt.model}"
+        label = (
+            f"weighted {shares[canonical]:.0f}%" if canonical in shares else attempt.selection_reason
+        )
         click.echo(
-            f"  {attempt.position}. {attempt.instance}:{attempt.model}"
-            f"    [{attempt.selection_reason}]  dispatches as {attempt.dispatch_model}"
+            f"  {attempt.position}. {canonical}    [{label}]  dispatches as {attempt.dispatch_model}"
         )
     for dropped in plan.dropped:
         click.echo(f"  x  {dropped.selector}    dropped: {dropped.detail}")
-    if spec.router_backend is not None:
+    # Keyed on the backend rather than on the shares: a weighted policy whose whole
+    # split is filtered out for this caller has no shares to print, and the decline
+    # text below is the learned router's vocabulary, which would misdescribe it.
+    if backend_is_weighted(spec.router_backend):
+        click.echo(
+            "  weighted: one candidate is drawn per request in proportion to its share, and a candidate "
+            "that fails before responding falls to the next draw before on_failure. Shares are normalized "
+            "over the candidates this caller may use, so they reflect the filtering above."
+            if weighted_shares
+            else "  weighted: no candidate in the split is usable by this caller, so the plan above is "
+            "whatever the failure chain leaves. Every candidate in the split is listed as dropped, with "
+            "the reason it went."
+        )
+    elif spec.router_backend is not None:
         # The plan above is the *decline* path, because a router needs a live
         # request (a prompt to embed, stored examples to compare it against) and
         # this command deliberately touches neither. Saying so beats printing a

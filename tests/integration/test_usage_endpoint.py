@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.models.entities import UsageLog, User
+from gateway.models.entities import APIKey, UsageLog, User
 
 USAGE_PATH = "/v1/usage"
 
@@ -331,7 +331,12 @@ def test_list_usage_response_shape(
     assert data[0] == {
         "id": log.id,
         "user_id": "shape-user",
+        # Resolved from the joined user row, so a client can label a page of rows
+        # without holding the users table. The helper sets alias == user_id.
+        "user_alias": "shape-user",
         "api_key_id": None,
+        # Null because this row has no key at all: the fall-back-to-the-id case.
+        "api_key_name": None,
         "timestamp": timestamp.isoformat(),
         "model": "gpt-4o",
         "provider": "openai",
@@ -538,3 +543,121 @@ def test_count_usage_empty_is_zero(
     response = client.get(f"{USAGE_PATH}/count", headers=master_key_header, params={"user_id": "nobody"})
     assert response.status_code == 200
     assert response.json() == {"total": 0}
+
+
+# ---------------------------------------------------------------------------
+# Row labels: naming a page of rows must not cost the whole users/keys table
+# ---------------------------------------------------------------------------
+
+
+def test_list_usage_labels_rows_from_the_joined_entities(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """A row carries its owner's alias and its key's name.
+
+    Without these the dashboard had to page the entire users and api_keys tables
+    on every visit to Usage and Activity just to turn ids into names, which grows
+    with the deployment rather than with the page.
+    """
+    db_session.add(User(user_id="labelled-user", alias="Ada Lovelace", spend=0.0, blocked=False))
+    db_session.flush()
+    key = APIKey(
+        id=str(uuid.uuid4()),
+        key_hash=f"hash-{uuid.uuid4()}",
+        key_prefix="sk-test",
+        key_name="CI pipeline",
+        user_id="labelled-user",
+    )
+    db_session.add(key)
+    db_session.flush()
+    _make_log(
+        db_session,
+        user_id="labelled-user",
+        timestamp=datetime(2025, 7, 2, 10, 0, tzinfo=UTC),
+        api_key_id=key.id,
+    )
+    db_session.commit()
+
+    response = client.get(USAGE_PATH, headers=master_key_header, params={"user_id": "labelled-user"})
+
+    assert response.status_code == 200
+    row = response.json()[0]
+    assert row["user_alias"] == "Ada Lovelace"
+    assert row["api_key_name"] == "CI pipeline"
+
+
+def test_list_usage_keeps_a_row_whose_entities_are_gone(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """The joins are outer: a row with no owner still comes back, unlabelled.
+
+    Both foreign keys are ON DELETE SET NULL, so historical usage outlives the
+    user and key it was billed to. An inner join would silently drop exactly the
+    rows an operator most wants to see.
+    """
+    _make_log(
+        db_session,
+        user_id="soon-deleted",
+        timestamp=datetime(2025, 7, 3, 10, 0, tzinfo=UTC),
+        api_key_id=None,
+    )
+    db_session.commit()
+    db_session.query(UsageLog).filter(UsageLog.user_id == "soon-deleted").update({"user_id": None})
+    db_session.commit()
+
+    response = client.get(USAGE_PATH, headers=master_key_header)
+
+    assert response.status_code == 200
+    orphans = [row for row in response.json() if row["user_id"] is None]
+    assert len(orphans) == 1
+    assert orphans[0]["user_alias"] is None
+    assert orphans[0]["api_key_name"] is None
+
+
+def test_summary_breakdowns_carry_labels_for_opaque_keys(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """by_user and by_api_key name themselves, so a filter needs no table dump.
+
+    This is what lets the dashboard's user and key pickers be built from the
+    breakdown (top N by spend, in-window) the way the model picker already is.
+    """
+    db_session.add(User(user_id="summary-user", alias="Grace Hopper", spend=0.0, blocked=False))
+    db_session.flush()
+    key = APIKey(
+        id=str(uuid.uuid4()),
+        key_hash=f"hash-{uuid.uuid4()}",
+        key_prefix="sk-test",
+        key_name="Nightly batch",
+        user_id="summary-user",
+    )
+    db_session.add(key)
+    db_session.flush()
+    _make_log(
+        db_session,
+        user_id="summary-user",
+        timestamp=datetime.now(UTC) - timedelta(hours=1),
+        api_key_id=key.id,
+    )
+    db_session.commit()
+
+    response = client.get(
+        f"{USAGE_PATH}/summary",
+        headers=master_key_header,
+        params={"user_id": "summary-user", "dimensions": ["user", "api_key", "model"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    user_row = next(r for r in body["by_user"] if r["key"] == "summary-user")
+    assert user_row["label"] == "Grace Hopper"
+    key_row = next(r for r in body["by_api_key"] if r["key"] == key.id)
+    assert key_row["label"] == "Nightly batch"
+    # A dimension whose key already reads as its own name carries no label.
+    assert all(row["label"] is None for row in body["by_model"])

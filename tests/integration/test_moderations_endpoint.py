@@ -1,11 +1,18 @@
 """Tests for the POST /v1/moderations endpoint."""
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
+from gateway.services.pricing_service import (
+    configure_default_pricing,
+    default_model_pricing,
+    reset_price_cache,
+)
 from gateway.types.moderation import ModerationResponse, ModerationResult
 
 
@@ -349,6 +356,75 @@ def test_moderations_cost_tracked_with_pricing(
     assert latest["cost"] > 0
 
 
+def test_moderations_billing_meters_tracked_with_pricing(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """POST /v1/moderations records auditable charge lines alongside cost."""
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:omni-moderation-latest",
+            "input_price_per_million": 2.0,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+
+    mock_resp = _mock_moderation_response()
+
+    with patch(
+        "gateway.api.routes.moderations.amoderation",
+        new_callable=AsyncMock,
+        return_value=mock_resp,
+    ):
+        resp = client.post(
+            "/v1/moderations",
+            json={"model": "openai:omni-moderation-latest", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+
+    usage_resp = client.get(
+        "/v1/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
+    )
+    logs = usage_resp.json()
+    assert len(logs) >= 1
+    latest = logs[0]
+    assert latest["billing_meters"] == {"requests": 1}
+    assert latest["pricing_breakdown"] == [
+        {"meter": "request", "units": 1, "unit_rate": pytest.approx(0.000002), "cost": pytest.approx(0.000002)}
+    ]
+
+
+def test_moderations_unpriced_records_no_charge_lines(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """An unpriced moderation is free by design, so it records no charge line."""
+    with patch(
+        "gateway.api.routes.moderations.amoderation",
+        new_callable=AsyncMock,
+        return_value=_mock_moderation_response(),
+    ):
+        resp = client.post(
+            "/v1/moderations",
+            json={"model": "openai:unpriced-moderation-model", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+
+    usage_resp = client.get(
+        "/v1/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
+    )
+    latest = usage_resp.json()[0]
+    assert latest["cost"] == 0.0
+    assert latest["billing_meters"] is None
+    assert latest["pricing_breakdown"] is None
+
+
 def test_moderations_no_warning_when_pricing_missing(
     client: TestClient,
     api_key_header: dict[str, str],
@@ -370,3 +446,47 @@ def test_moderations_no_warning_when_pricing_missing(
     assert resp.status_code == 200
     offending = [r for r in caplog.records if "No pricing configured" in r.getMessage()]
     assert offending == []
+
+
+def test_moderations_ignores_genai_prices_defaults(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """Default (genai-prices) rates never price moderations, even with default_pricing on.
+
+    Those rates are USD per million tokens, but moderation bills per request, so
+    honoring one would charge a token rate as a request rate. The dataset has no
+    moderation models, so the case that regresses is an operator pointing this
+    endpoint at a model name the dataset does carry.
+    """
+    resp_obj = ModerationResponse(
+        id="modr-test",
+        model="gpt-4o",
+        results=[ModerationResult(flagged=False, categories={}, category_scores={})],
+    )
+    configure_default_pricing(True)
+    reset_price_cache()
+    try:
+        # Pin the premise: without a dataset entry to ignore, the assertions below
+        # would pass for the wrong reason and stop guarding anything.
+        assert default_model_pricing("openai", "gpt-4o", datetime.now(UTC)) is not None
+        with patch("gateway.api.routes.moderations.amoderation", new_callable=AsyncMock, return_value=resp_obj):
+            resp = client.post(
+                "/v1/moderations",
+                json={"model": "openai:gpt-4o", "input": "hello"},
+                headers=api_key_header,
+            )
+        assert resp.status_code == 200
+    finally:
+        configure_default_pricing(False)
+        reset_price_cache()
+
+    usage_resp = client.get(
+        "/v1/usage", params={"endpoint": "/v1/moderations", "status": "success"}, headers=master_key_header
+    )
+    latest = usage_resp.json()[0]
+    assert latest["model"] == "gpt-4o"
+    assert latest["cost"] == 0.0
+    assert latest["billing_meters"] is None
+    assert latest["pricing_breakdown"] is None

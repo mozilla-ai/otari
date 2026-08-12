@@ -8,9 +8,10 @@ external systems that need to sync usage data (billing, analytics).
 import csv
 import io
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal, cast
+from time import monotonic
+from typing import Annotated, Any, Literal, NamedTuple, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import ColumnElement, and_, case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.core.sql import MAX_FILTER_VALUES, match_any
-from gateway.models.entities import APIKey, UsageLog
+from gateway.inflight import get_registry
+from gateway.models.entities import APIKey, UsageLog, User
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,
     ExternalIngestResult,
@@ -54,6 +56,11 @@ _BREAKDOWN_TOP_N = 100
 # are the place to read a longer tail.
 _SERIES_TOP_N = 8
 
+# How many in-flight requests are serialized. A live panel is read at a glance, so
+# a fixed cap beats a pagination knob; the response reports the true count next to
+# the capped list, and the longest-running are the ones kept.
+_MAX_IN_FLIGHT_ROWS = 50
+
 # Sessions (``source_label``) are an order of magnitude higher-cardinality than
 # models or users: one agent workload can open hundreds of them in a month, and
 # the interesting signal is a long-ish head ("which tasks burned the budget"),
@@ -78,14 +85,30 @@ ErrorClass = Literal["pricing", "rate_limit", "auth", "provider_error", "client_
 # Every breakdown ``/summary`` can compute, mapped to the column it groups by and
 # its top-N cap. A dimension name is the ``by_<name>`` response field it fills, so
 # a caller reads the selector and the payload with one vocabulary.
-_SUMMARY_DIMENSIONS: dict[str, tuple[Any, int]] = {
-    "model": (UsageLog.model, _BREAKDOWN_TOP_N),
-    "user": (UsageLog.user_id, _BREAKDOWN_TOP_N),
-    "api_key": (UsageLog.api_key_id, _BREAKDOWN_TOP_N),
-    "source": (UsageLog.source, _BREAKDOWN_TOP_N),
-    "source_label": (UsageLog.source_label, _SESSION_BREAKDOWN_TOP_N),
-    "endpoint": (UsageLog.endpoint, _BREAKDOWN_TOP_N),
-    "provider": (UsageLog.provider, _BREAKDOWN_TOP_N),
+class _LabelJoin(NamedTuple):
+    """How to resolve a breakdown key's display name in the same GROUP BY.
+
+    Only the two dimensions whose key is an opaque id need this: a model, source
+    or endpoint already reads as its own name. Resolving it here is what lets a
+    client offer a user or key filter without holding those whole tables.
+    """
+
+    entity: Any
+    on: Any
+    label: Any
+
+
+_USER_LABEL = _LabelJoin(entity=User, on=User.user_id == UsageLog.user_id, label=User.alias)
+_API_KEY_LABEL = _LabelJoin(entity=APIKey, on=APIKey.id == UsageLog.api_key_id, label=APIKey.key_name)
+
+_SUMMARY_DIMENSIONS: dict[str, tuple[Any, int, "_LabelJoin | None"]] = {
+    "model": (UsageLog.model, _BREAKDOWN_TOP_N, None),
+    "user": (UsageLog.user_id, _BREAKDOWN_TOP_N, _USER_LABEL),
+    "api_key": (UsageLog.api_key_id, _BREAKDOWN_TOP_N, _API_KEY_LABEL),
+    "source": (UsageLog.source, _BREAKDOWN_TOP_N, None),
+    "source_label": (UsageLog.source_label, _SESSION_BREAKDOWN_TOP_N, None),
+    "endpoint": (UsageLog.endpoint, _BREAKDOWN_TOP_N, None),
+    "provider": (UsageLog.provider, _BREAKDOWN_TOP_N, None),
 }
 
 # The failure taxonomy (``errors_by_status_code``) is a GROUP BY pass like the
@@ -130,7 +153,14 @@ class UsageEntry(BaseModel):
 
     id: str
     user_id: str | None
+    # Display labels resolved server-side, so a client rendering a page of rows
+    # does not have to hold the whole users/api_keys tables to name them. Null
+    # when the row has no owner, when the referenced row is gone (both foreign
+    # keys are ON DELETE SET NULL), or when the entity simply has no label set;
+    # a client falls back to the id in every one of those cases.
+    user_alias: str | None = None
     api_key_id: str | None
+    api_key_name: str | None = None
     timestamp: str
     model: str
     provider: str | None
@@ -162,11 +192,19 @@ class UsageEntry(BaseModel):
     request_group_id: str | None = None
 
     @classmethod
-    def from_model(cls, log: UsageLog) -> "UsageEntry":
+    def from_model(
+        cls,
+        log: UsageLog,
+        *,
+        user_alias: str | None = None,
+        api_key_name: str | None = None,
+    ) -> "UsageEntry":
         return cls(
             id=log.id,
             user_id=log.user_id,
+            user_alias=user_alias,
             api_key_id=log.api_key_id,
+            api_key_name=api_key_name,
             timestamp=_utc_iso(log.timestamp),
             model=log.model,
             provider=log.provider,
@@ -198,6 +236,32 @@ class UsageEntry(BaseModel):
 class UsageCount(BaseModel):
     """Total number of usage logs matching a set of filters."""
 
+    total: int
+
+
+class InFlightEntry(BaseModel):
+    """One request the gateway is serving right now.
+
+    Field names match their ``UsageEntry`` counterparts so a request reads the
+    same way in flight as it does once it has settled. ``id`` is the exception: it
+    is an ephemeral tracking id, not the id of the usage row this will become.
+    """
+
+    id: str
+    endpoint: str
+    model: str
+    provider: str | None
+    user_id: str | None
+    api_key_id: str | None
+    policy_name: str | None
+    started_at: datetime
+    elapsed_ms: int
+
+
+class InFlightResponse(BaseModel):
+    """The requests in flight on the answering worker."""
+
+    requests: list[InFlightEntry]
     total: int
 
 
@@ -392,10 +456,24 @@ async def list_usage(
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
     )
-    stmt = select(UsageLog).where(*conditions).order_by(UsageLog.timestamp.desc()).offset(skip).limit(limit)
+    # Outer-joined rather than looked up per row, and rather than left to the
+    # client: naming a page of rows must not cost a round trip each, nor oblige a
+    # dashboard to hold every user and every key in memory to label 100 rows.
+    # Outer so a row whose owner was deleted still comes back, with a null label.
+    stmt = (
+        select(UsageLog, User.alias, APIKey.key_name)
+        .outerjoin(User, User.user_id == UsageLog.user_id)
+        .outerjoin(APIKey, APIKey.id == UsageLog.api_key_id)
+        .where(*conditions)
+        .order_by(UsageLog.timestamp.desc())
+        .offset(skip)
+        .limit(limit)
+    )
     result = await db.execute(stmt)
-    logs = result.scalars().all()
-    return [UsageEntry.from_model(log) for log in logs]
+    return [
+        UsageEntry.from_model(log, user_alias=alias, api_key_name=key_name)
+        for log, alias, key_name in result.all()
+    ]
 
 
 @router.post("/external-events")
@@ -482,6 +560,46 @@ async def count_usage(
     return UsageCount(total=total)
 
 
+@router.get("/in-flight", dependencies=[Depends(verify_master_key)])
+async def list_in_flight(raw_request: Request) -> InFlightResponse:
+    """Requests the gateway is currently serving, longest-running first.
+
+    A usage row is written when a request settles, so the log alone cannot answer
+    "is anything happening right now": on a slow backend, a 30-second local model
+    call is invisible until it finishes. This reports what is in progress.
+
+    Read from an in-memory registry, so it describes the process that answers this
+    call and not the deployment: behind a load balancer, consecutive polls reach
+    different otari processes, and there is no deployment-wide total to ask for.
+    ``total`` is the true in-flight count for the answering process even when
+    ``requests`` is capped.
+    """
+    registry = get_registry(raw_request)
+    if registry is None:
+        return InFlightResponse(requests=[], total=0)
+    entries = registry.snapshot()
+    # One clock reading for the whole response, so two rows started together
+    # report the same elapsed time.
+    now = monotonic()
+    return InFlightResponse(
+        requests=[
+            InFlightEntry(
+                id=entry.id,
+                endpoint=entry.endpoint,
+                model=entry.model,
+                provider=entry.provider,
+                user_id=entry.user_id,
+                api_key_id=entry.api_key_id,
+                policy_name=entry.policy_name,
+                started_at=entry.started_at,
+                elapsed_ms=entry.elapsed_ms(now),
+            )
+            for entry in entries[:_MAX_IN_FLIGHT_ROWS]
+        ],
+        total=len(entries),
+    )
+
+
 @router.delete("", dependencies=[Depends(verify_master_key)])
 async def delete_usage_rows(
     request: UsageDeleteRequest,
@@ -563,6 +681,12 @@ class UsageGroupRow(BaseModel):
     """
 
     key: str | None
+    # Display name for an opaque key (a user's alias, an API key's name), resolved
+    # in the same GROUP BY. Only ever set for the ``user`` and ``api_key``
+    # dimensions, and null there too when the entity has no label or is gone; a
+    # client falls back to ``key``. Its purpose is to let a client build a user or
+    # key filter from this breakdown alone, rather than reading both whole tables.
+    label: str | None = None
     cost: float
     tokens: int
     requests: int
@@ -937,6 +1061,7 @@ async def _breakdown(
     *,
     limit: int | None,
     status_filter: str | None = None,
+    label_join: "_LabelJoin | None" = None,
 ) -> list[UsageGroupRow]:
     """Spend/tokens/requests grouped by ``column``, biggest spend first.
 
@@ -950,21 +1075,31 @@ async def _breakdown(
     truncate).
     """
     cost_sum = func.coalesce(func.sum(UsageLog.cost), 0.0)
-    stmt = (
-        select(
-            column,
-            cost_sum,
-            _billed_input_sum() + _billed_output_sum(),
-            _request_count_expr(status_filter),
-        )
-        .where(*conditions)
-        .group_by(column)
-        .order_by(cost_sum.desc())
+    # The label rides along in the same pass rather than costing a second query or
+    # a client-side table dump. Grouped by as well as selected: it is functionally
+    # dependent on the joined row's primary key, but only PostgreSQL infers that,
+    # and this has to run on SQLite too. Outer-joined so a group whose entity was
+    # deleted keeps its row (with a null label) instead of vanishing from a
+    # breakdown that must still reconcile against the totals.
+    label_column = label_join.label if label_join is not None else null()
+    stmt = select(
+        column,
+        label_column,
+        cost_sum,
+        _billed_input_sum() + _billed_output_sum(),
+        _request_count_expr(status_filter),
     )
+    if label_join is not None:
+        stmt = stmt.outerjoin(label_join.entity, label_join.on)
+    group_by = (column,) if label_join is None else (column, label_column)
+    stmt = stmt.where(*conditions).group_by(*group_by).order_by(cost_sum.desc())
     if limit is not None:
         stmt = stmt.limit(limit)
     rows = (await db.execute(stmt)).all()
-    result = [UsageGroupRow(key=row[0], cost=float(row[1]), tokens=int(row[2]), requests=int(row[3])) for row in rows]
+    result = [
+        UsageGroupRow(key=row[0], label=row[1], cost=float(row[2]), tokens=int(row[3]), requests=int(row[4]))
+        for row in rows
+    ]
     if limit is not None:
         seen_requests = sum(r.requests for r in result)
         # request_count is an exact integer, so a positive residual is the reliable
@@ -1246,8 +1381,8 @@ async def usage_summary(
     # an empty selection, and it never contributes a dimension of its own.
     requested: set[str] = _ALL_SUMMARY_DIMENSIONS if dimensions is None else {d for d in dimensions if d != "none"}
     breakdowns = {
-        name: await _breakdown(db, column, conditions, totals, limit=cap, status_filter=status)
-        for name, (column, cap) in _SUMMARY_DIMENSIONS.items()
+        name: await _breakdown(db, column, conditions, totals, limit=cap, status_filter=status, label_join=label)
+        for name, (column, cap, label) in _SUMMARY_DIMENSIONS.items()
         if name in requested
     }
     # The failure taxonomy is a GROUP BY pass like the others, so it answers to the
@@ -1311,11 +1446,11 @@ async def usage_summary(
     )
 
 
-_GROUP_COLUMNS: dict[str, Any] = {
-    "model": UsageLog.model,
-    "user_id": UsageLog.user_id,
-    "api_key_id": UsageLog.api_key_id,
-    "source": UsageLog.source,
+_GROUP_COLUMNS: dict[str, tuple[Any, "_LabelJoin | None"]] = {
+    "model": (UsageLog.model, None),
+    "user_id": (UsageLog.user_id, _USER_LABEL),
+    "api_key_id": (UsageLog.api_key_id, _API_KEY_LABEL),
+    "source": (UsageLog.source, None),
 }
 
 
@@ -1381,8 +1516,10 @@ async def usage_series(
             status_code=422,
             detail=f"window spans more than {_MAX_SERIES_POINTS} {bucket} buckets; use bucket=day or narrow the range",
         )
-    column = _GROUP_COLUMNS[group_by]
-    groups = await _breakdown(db, column, conditions, totals, limit=_SERIES_TOP_N, status_filter=status)
+    column, label_join = _GROUP_COLUMNS[group_by]
+    groups = await _breakdown(
+        db, column, conditions, totals, limit=_SERIES_TOP_N, status_filter=status, label_join=label_join
+    )
 
     # One grouped query for the whole grid: groups outside the top N collapse
     # into the fold in SQL rather than being fetched and folded here, so the row
@@ -1511,7 +1648,7 @@ async def usage_summary_csv(
             _CSV_DIMENSION_LABELS.get(name, name),
             await _breakdown(db, column, conditions, totals, limit=None, status_filter=status),
         )
-        for name, (column, _cap) in _SUMMARY_DIMENSIONS.items()
+        for name, (column, _cap, _label) in _SUMMARY_DIMENSIONS.items()
     ]
 
     buffer = io.StringIO()

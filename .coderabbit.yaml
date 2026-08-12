@@ -59,7 +59,7 @@ reviews:
 
   # Leave on so reviewer suggestions work as the maintainer team grows.
   suggested_reviewers: true
-  auto_assign_reviewers: true
+  auto_assign_reviewers: false
 
   in_progress_fortune: false
   poem: false

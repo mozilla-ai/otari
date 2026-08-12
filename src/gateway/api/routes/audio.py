@@ -9,12 +9,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, get_log_writer, verify_api_key_or_master_key
-from gateway.api.routes._passthrough import run_passthrough
+from gateway.api.routes._passthrough import BillingMeters, run_passthrough
 from gateway.api.routes._schema_derive import derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import APIKey
+from gateway.models.entities import APIKey, ModelPricing
 from gateway.services.log_writer import LogWriter
+from gateway.services.pricing_service import flat_request_cost, per_request_meters
 from gateway.services.provider_kwargs import ResolvedProvider
 
 router = APIRouter(prefix="/v1", tags=["audio"])
@@ -83,10 +84,23 @@ async def create_transcription(
 
         return await atranscription(**transcription_kwargs)
 
+    def compute_cost(result: Transcription, pricing: ModelPricing | None) -> float:
+        # Audio bills per request like moderations: ``input_price_per_million``
+        # stores the per-request rate scaled by 1e6 (see flat_request_cost), and
+        # an unpriced model is free by design.
+        return flat_request_cost(pricing)
+
+    def compute_meters(result: Transcription, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
+        return per_request_meters(cost)
+
     # Audio is exempt from require_pricing and has no measurable cost unit yet
-    # (tokens, seconds, etc.), so the reservation estimate is 0 and cost stays
-    # unset; the reservation still enforces existing per-user state (user
-    # exists, not blocked, not already over budget).
+    # (tokens, seconds, etc.), so the reservation estimate is 0; the reservation
+    # still enforces existing per-user state (user exists, not blocked, not
+    # already over budget). When pricing is configured, the cost is recorded as
+    # an auditable per-request charge line. Only an explicitly configured rate
+    # counts (pricing_use_defaults=False): genai-prices quotes audio models such
+    # as gpt-4o-transcribe per million tokens, which this per-request convention
+    # would misread as a per-million-request rate.
     outcome = await run_passthrough(
         endpoint="/v1/audio/transcriptions",
         raw_request=raw_request,
@@ -98,9 +112,12 @@ async def create_transcription(
         model=model,
         user=user,
         call_provider=call_provider,
-        lookup_pricing=False,
+        lookup_pricing=True,
+        pricing_use_defaults=False,
         reserve_before_resolve=True,
         relabel=False,
+        compute_cost=compute_cost,
+        compute_meters=compute_meters,
     )
     return outcome.result.model_dump()
 
@@ -169,9 +186,23 @@ async def create_speech(
         }
         return await aspeech(**speech_kwargs)
 
+    def compute_cost(result: bytes, pricing: ModelPricing | None) -> float:
+        # Speech bills per request like moderations: ``input_price_per_million``
+        # stores the per-request rate scaled by 1e6 (see flat_request_cost), and
+        # an unpriced model is free by design.
+        return flat_request_cost(pricing)
+
+    def compute_meters(result: bytes, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
+        return per_request_meters(cost)
+
     # Audio is exempt from require_pricing and has no measurable cost unit yet
-    # (tokens, seconds, characters, etc.), so the reservation estimate is 0 and
-    # cost stays unset; the reservation still enforces existing per-user state.
+    # (tokens, seconds, characters, etc.), so the reservation estimate is 0; the
+    # reservation still enforces existing per-user state. When pricing is
+    # configured, the cost is recorded as an auditable per-request charge line.
+    # Only an explicitly configured rate counts (pricing_use_defaults=False):
+    # genai-prices quotes speech models such as gpt-4o-mini-tts per million
+    # tokens, which this per-request convention would misread as a
+    # per-million-request rate.
     outcome = await run_passthrough(
         endpoint="/v1/audio/speech",
         raw_request=raw_request,
@@ -183,9 +214,12 @@ async def create_speech(
         model=request.model,
         user=request.user,
         call_provider=call_provider,
-        lookup_pricing=False,
+        lookup_pricing=True,
+        pricing_use_defaults=False,
         reserve_before_resolve=True,
         relabel=False,
+        compute_cost=compute_cost,
+        compute_meters=compute_meters,
     )
 
     content_type = _SPEECH_CONTENT_TYPES.get(request.response_format, "audio/mpeg")
