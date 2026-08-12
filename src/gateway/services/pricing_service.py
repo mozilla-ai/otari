@@ -41,7 +41,10 @@ def default_pricing_enabled() -> bool:
 
 # Process-wide resolver from a provider *instance* name to the any-llm
 # implementation backing it, set once at startup from
-# ``GatewayConfig.provider_instance_type`` (see ``configure_provider_types``).
+# ``GatewayConfig.provider_pricing_implementation`` (see
+# ``configure_provider_types``). That method, and not
+# ``provider_instance_type``, because a ``*-compatible`` provider_type names the
+# wire protocol an endpoint speaks rather than the vendor serving it.
 # It lives here for the same reason the toggle above does: pricing keys on the
 # instance name, and the lookups below run deep in request/budget/catalog code
 # that does not carry the config object. A callable rather than a snapshot map,

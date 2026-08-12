@@ -62,7 +62,7 @@ def test_catalog_prices_a_bedrock_model_under_a_custom_instance(default_pricing_
     the same (missing) rate.
     """
     config = GatewayConfig(providers={"aws-prod": {"provider_type": "bedrock"}})
-    configure_provider_types(config.provider_instance_type)
+    configure_provider_types(config.provider_pricing_implementation)
     obj = ModelObject(id="aws-prod:anthropic.claude-sonnet-5", created=0, owned_by="aws-prod")
 
     _apply_default_pricing(obj)

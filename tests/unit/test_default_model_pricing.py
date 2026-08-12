@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from genai_prices.types import Tier, TieredPrices
 
+from gateway.core.config import GatewayConfig
 from gateway.services import pricing_service
 from gateway.services.pricing_service import (
     configure_default_pricing,
@@ -149,6 +150,50 @@ def test_default_pricing_falls_back_to_the_backing_implementation() -> None:
     direct = default_model_pricing("bedrock", "anthropic.claude-sonnet-5", as_of)
     assert direct is not None
     assert pricing.input_price_per_million == direct.input_price_per_million
+
+
+def test_backing_implementation_beats_the_provider_agnostic_fallback() -> None:
+    """The serving provider's rate wins over the vendor's own listing.
+
+    ``claude-sonnet-5`` resolves under both ``aws`` and ``anthropic``, at different
+    rates, so the implementation attempt has to precede the provider-agnostic one:
+    otherwise a Bedrock instance the operator renamed bills at Anthropic's list
+    price. This is the one ordering in the ladder that changes an already-resolving
+    lookup rather than only rescuing a miss.
+    """
+    as_of = datetime.now(UTC)
+    configure_provider_types(lambda instance: "bedrock" if instance == "aws-prod" else instance)
+
+    pricing = default_model_pricing("aws-prod", "claude-sonnet-5", as_of)
+    bedrock = default_model_pricing("bedrock", "claude-sonnet-5", as_of)
+    vendor = default_model_pricing(None, "claude-sonnet-5", as_of)
+
+    assert pricing is not None
+    assert bedrock is not None
+    assert vendor is not None
+    # Guard the premise: without a real rate difference the assertion below is vacuous.
+    assert bedrock.input_price_per_million != vendor.input_price_per_million
+    assert pricing.input_price_per_million == bedrock.input_price_per_million
+
+
+def test_openai_compatible_instance_is_not_priced_as_openai() -> None:
+    """A self-hosted endpoint must not inherit OpenAI's rates from its protocol.
+
+    ``openai-compatible`` is how a vLLM, Ollama or LiteLLM endpoint is declared, and
+    such servers routinely expose OpenAI's model names verbatim so that OpenAI SDK
+    clients work unchanged. Resolving the alias for pricing would bill
+    ``text-embedding-3-small`` at OpenAI's rate on hardware the operator owns, so
+    the implementation attempt is skipped for these and the model stays unpriced
+    (``require_pricing`` and explicit config then decide, which is the point).
+    """
+    as_of = datetime.now(UTC)
+    config = GatewayConfig(providers={"local-vllm": {"provider_type": "openai-compatible"}})
+    configure_provider_types(config.provider_pricing_implementation)
+
+    assert default_model_pricing("local-vllm", "text-embedding-3-small", as_of) is None
+    # Guard the premise: the name is priced under OpenAI, so only the skipped
+    # implementation attempt keeps it from resolving here.
+    assert default_model_pricing("openai", "text-embedding-3-small", as_of) is not None
 
 
 def test_default_pricing_prefers_the_instance_over_the_implementation() -> None:

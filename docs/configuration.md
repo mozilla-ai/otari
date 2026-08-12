@@ -465,13 +465,17 @@ Limitations when enabled:
 - **Tiered pricing** is retained from the dataset and applied when a request crosses a configured context threshold.
 - Lookups key on the **provider instance name** first, then on the `provider_type` backing it, so an
   instance you named yourself (`aws-prod` over `provider_type: bedrock`) is priced at its real provider's
-  rates rather than falling through.
+  rates rather than falling through. A `provider_type` of `openai-compatible` or `anthropic-compatible` is
+  excluded here: it names the protocol an endpoint speaks, not who serves the request, so a self-hosted
+  backend is not billed at OpenAI's or Anthropic's rates for reusing their model names. Set an explicit
+  price for those.
 - A **provider-agnostic match** is attempted when the exact provider is not in the dataset; an ambiguous
   model *name* could resolve to a different provider's rate. Prefer configuring such models explicitly.
 - A **vendor-prefixed model id** (`anthropic.claude-sonnet-5`, `us.anthropic.claude-sonnet-5-v1:0`,
-  `openai.gpt-oss-120b`) is a last resort priced under the vendor named in the prefix when the serving
-  provider is not in the dataset. That is the vendor's own list price, not the reseller's, so configure it
-  explicitly where the difference matters.
+  `openai.gpt-oss-120b`) is a last resort, tried only once every lookup above it has missed, and is priced
+  under the vendor named in the prefix. That is the vendor's own list price, not the reseller's, and the gap
+  is not always small (Bedrock lists Sonnet about 10% above Anthropic, but a reseller's rate for an
+  open-weights model can differ by half again), so configure it explicitly where the difference matters.
 - **HuggingFace** is modeled per inference backend, so a model is priced only when you pin a backend with
   the `huggingface:<model>:<backend>` selector (see the model reference in `models.md`). Auto routing and
   the policy suffixes (`:cheapest`, `:fastest`, ...) cannot be priced from the id alone and fall through to

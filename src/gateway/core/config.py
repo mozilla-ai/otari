@@ -793,6 +793,27 @@ class GatewayConfig(BaseSettings):
                 return PROVIDER_TYPE_ALIASES.get(declared, declared)
         return instance
 
+    def provider_pricing_implementation(self, instance: str) -> str | None:
+        """The vendor backing an instance for pricing purposes, or ``None``.
+
+        Like :meth:`provider_instance_type`, except a ``*-compatible`` declaration
+        yields ``None`` instead of the implementation it normalizes to, and an
+        instance that declares no ``provider_type`` yields ``None`` rather than its
+        own name. Those aliases name a *wire protocol*, not who serves the request:
+        ``openai-compatible`` is how a self-hosted vLLM, Ollama or LiteLLM endpoint
+        is declared, and such servers commonly expose OpenAI's own model names
+        verbatim (``text-embedding-3-small``), so pricing them as OpenAI would
+        charge OpenAI's list rate for a model the operator hosts themselves.
+        Configure an explicit price for those instead.
+        """
+        entry = self.providers.get(instance)
+        if not isinstance(entry, dict):
+            return None
+        declared = entry.get("provider_type")
+        if not isinstance(declared, str) or not declared or declared in PROVIDER_TYPE_ALIASES:
+            return None
+        return declared
+
     def resolve_alias(self, name: str) -> str | None:
         """Return the target selector for a configured alias, or None.
 

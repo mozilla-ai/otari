@@ -193,8 +193,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         configure_default_pricing(config.default_pricing)
         # Bound method, not a snapshot: it reads config.providers on every call, so
         # a provider added or re-typed in the dashboard is priced under the
-        # implementation it actually dispatches to.
-        configure_provider_types(config.provider_instance_type)
+        # implementation it actually dispatches to. Deliberately not
+        # ``provider_instance_type``: that normalizes ``openai-compatible`` to
+        # ``openai``, which names a wire protocol rather than a vendor.
+        configure_provider_types(config.provider_pricing_implementation)
         log_writer: LogWriter
         alias_refresher: asyncio.Task[None] | None = None
         policy_refresher: asyncio.Task[None] | None = None

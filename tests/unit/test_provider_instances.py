@@ -57,6 +57,39 @@ def test_instance_type_unknown_instance_returns_input() -> None:
 
 
 # ---------------------------------------------------------------------------
+# config.provider_pricing_implementation
+# ---------------------------------------------------------------------------
+
+
+def test_pricing_implementation_uses_a_declared_provider_type() -> None:
+    config = GatewayConfig(providers={"aws-prod": {"provider_type": "bedrock"}})
+    assert config.provider_pricing_implementation("aws-prod") == "bedrock"
+
+
+@pytest.mark.parametrize(
+    "declared",
+    ["openai-compatible", "openai_compatible", "anthropic-compatible", "anthropic_compatible"],
+)
+def test_pricing_implementation_ignores_wire_protocol_aliases(declared: str) -> None:
+    """A ``*-compatible`` type says how to talk to an endpoint, not who runs it.
+
+    ``provider_instance_type`` normalizes it to a real implementation because that
+    is which SDK to dispatch with. Pricing must not follow: a self-hosted endpoint
+    declared ``openai-compatible`` would otherwise bill at OpenAI's list rate for
+    any OpenAI model name it happens to expose.
+    """
+    config = GatewayConfig(providers={"local": {"provider_type": declared}})
+    assert config.provider_pricing_implementation("local") is None
+
+
+def test_pricing_implementation_none_without_a_declared_type() -> None:
+    """No declared type means the instance name is all pricing has to go on."""
+    config = GatewayConfig(providers={"openai": {"api_key": "sk"}})
+    assert config.provider_pricing_implementation("openai") is None
+    assert GatewayConfig().provider_pricing_implementation("anthropic") is None
+
+
+# ---------------------------------------------------------------------------
 # config.validate_provider_instances
 # ---------------------------------------------------------------------------
 
