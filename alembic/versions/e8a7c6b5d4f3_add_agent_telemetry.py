@@ -25,12 +25,7 @@ def upgrade() -> None:
         sa.Column("api_key_id", sa.String(), nullable=True),
         sa.Column("user_id", sa.String(), nullable=True),
         sa.Column("timestamp", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("kind", sa.String(), nullable=False),
         sa.Column("name", sa.String(), nullable=False),
-        sa.Column("value", sa.Float(), nullable=True),
-        sa.Column("temporality", sa.String(), nullable=True),
-        sa.Column("series_start", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("series_key", sa.String(), nullable=True),
         sa.Column("tool_name", sa.String(), nullable=True),
         sa.Column("decision", sa.String(), nullable=True),
         sa.Column("success", sa.Boolean(), nullable=True),
@@ -51,9 +46,15 @@ def upgrade() -> None:
     op.create_index("ix_agent_telemetry_timestamp", "agent_telemetry", ["timestamp"])
     op.create_index("ix_agent_telemetry_source", "agent_telemetry", ["source"])
     op.create_index("ix_agent_telemetry_user_id_timestamp", "agent_telemetry", ["user_id", "timestamp"])
-    op.create_index("ix_agent_telemetry_series_timestamp", "agent_telemetry", ["series_key", "timestamp"])
+
+    # Deliberately nullable with no server_default: NULL is the "inherit the
+    # gateway setting" state, so existing rows land there on ADD COLUMN and keep
+    # behaving exactly as they do today.
+    op.add_column("api_keys", sa.Column("capture_agent_telemetry", sa.Boolean(), nullable=True))
 
 
 def downgrade() -> None:
     """Drop coding-agent telemetry storage."""
+    with op.batch_alter_table("api_keys") as batch_op:
+        batch_op.drop_column("capture_agent_telemetry")
     op.drop_table("agent_telemetry")
