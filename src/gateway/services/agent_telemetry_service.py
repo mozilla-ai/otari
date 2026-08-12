@@ -237,11 +237,23 @@ async def ingest(
     if not user_id or await get_active_user(db, user_id) is None:
         return IngestResult(rejected=len(records))
 
+    # Drop repeats inside this export before touching the database, the same guard
+    # external_usage_service applies with its seen_in_batch set. The stored projection
+    # is lossy by design, so two records can collapse onto one dedup key; letting that
+    # reach the insert fails the whole batch and drops it into the row-at-a-time
+    # fallback, turning one bulk insert into one commit per record.
     by_source: dict[str, list[TelemetryRecord]] = defaultdict(list)
+    seen: set[tuple[str, str]] = set()
+    duplicate = 0
     for record in records:
+        identity = (record.source, record.dedup_key)
+        if identity in seen:
+            duplicate += 1
+            continue
+        seen.add(identity)
         by_source[record.source].append(record)
 
-    accepted = duplicate = 0
+    accepted = 0
     try:
         for source, source_records in by_source.items():
             rows = [_build_row(api_key, user_id, record) for record in source_records]

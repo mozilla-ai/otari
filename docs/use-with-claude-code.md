@@ -134,8 +134,8 @@ per key or for the whole deployment (`capture_agent_telemetry` on
 `POST /v1/keys` / `PATCH /v1/keys/{id}`, and the deployment-wide
 `capture_agent_telemetry` config setting); usage capture and billing are
 unaffected either way. Previously captured rows can be removed with
-`DELETE /v1/agent-telemetry` (master-key only, by explicit `ids` or a
-`user_id`/`name`/date-range filter).
+`DELETE /v1/agent-telemetry` (master-key only, by explicit `ids` or, with
+`by_filter: true`, a `user_id`/`api_key_id`/`name`/date-range filter).
 
 > **Route or export, not both.** Telemetry import is for sessions that do NOT proxy
 > through Otari. If a session sets `ANTHROPIC_BASE_URL` to Otari and also exports

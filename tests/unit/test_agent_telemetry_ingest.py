@@ -124,3 +124,28 @@ async def test_ingest_falls_back_to_row_at_a_time_after_a_second_collision() -> 
     assert db.add_all.call_count == 2
     assert db.add.call_count == 2
     assert db.rollback.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_ingest_drops_in_export_repeats_before_the_insert() -> None:
+    """A record repeated inside one export never reaches the database.
+
+    Letting it through fails the whole bulk insert on the uniqueness constraint and
+    drops the batch into the row-at-a-time fallback, so a single repeated record
+    turns an N-row export into N commits.
+    """
+    db = AsyncMock()
+    db.add_all = MagicMock()
+    db.execute.return_value = _user_exists_result("alice")
+
+    api_key = APIKey(id="key-1", user_id="alice", key_hash="h")
+    records = [_record("dedup-0"), _record("dedup-1"), _record("dedup-0")]
+
+    result = await ingest(db, records, api_key=api_key)
+
+    assert result.accepted == 2
+    assert result.duplicate == 1
+    db.add_all.assert_called_once()
+    assert [row.dedup_key for row in db.add_all.call_args[0][0]] == ["dedup-0", "dedup-1"]
+    db.commit.assert_awaited_once()
+    db.rollback.assert_not_awaited()
