@@ -119,6 +119,8 @@ GET /v1/usage/series                            # not yet wrapped
 DELETE /v1/usage                                # not yet wrapped
 POST /v1/usage/external-events                  # not yet wrapped
 POST /v1/usage/set-price                        # not yet wrapped
+# Agent telemetry purge
+DELETE /v1/agent-telemetry                      # not yet wrapped
 # Routing policies
 GET /v1/routing/policies                        # not yet wrapped
 POST /v1/routing/policies                       # not yet wrapped

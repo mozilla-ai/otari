@@ -1,6 +1,116 @@
 {
   "components": {
     "schemas": {
+      "AgentTelemetryDeleteRequest": {
+        "description": "Selection of agent_telemetry rows to delete.",
+        "properties": {
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Id"
+          },
+          "by_filter": {
+            "default": false,
+            "title": "By Filter",
+            "type": "boolean"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ids"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "title": "AgentTelemetryDeleteRequest",
+        "type": "object"
+      },
+      "AgentTelemetryDeleteResult": {
+        "description": "How many rows the delete removed.",
+        "properties": {
+          "deleted": {
+            "default": 0,
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "title": "AgentTelemetryDeleteResult",
+        "type": "object"
+      },
       "AliasRequest": {
         "description": "Request to create or update an alias.",
         "properties": {
@@ -1171,6 +1281,18 @@
             "description": "Model allow-list: null = any model, [] = deny all, or canonical instance:model entries (with instance:* / instance:prefix* wildcards).",
             "title": "Allowed Models"
           },
+          "capture_agent_telemetry": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores behavioral events (tool_result, tool_decision, user_prompt, api_error) from POST /v1/logs, false always discards them. Usage capture and billing are unaffected either way.",
+            "title": "Capture Agent Telemetry"
+          },
           "exclude_from_budget": {
             "default": false,
             "description": "When true, requests on this key are logged with cost but never reserved, reconciled into the user's spend, or gated by budget.",
@@ -1252,6 +1374,17 @@
               }
             ],
             "title": "Allowed Models"
+          },
+          "capture_agent_telemetry": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Agent Telemetry"
           },
           "created_at": {
             "title": "Created At",
@@ -1346,6 +1479,7 @@
           "allowed_models",
           "exclude_from_budget",
           "reject_user_mismatch",
+          "capture_agent_telemetry",
           "metadata"
         ],
         "title": "CreateKeyResponse",
@@ -2287,6 +2421,17 @@
             ],
             "title": "Allowed Models"
           },
+          "capture_agent_telemetry": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Agent Telemetry"
+          },
           "created_at": {
             "title": "Created At",
             "type": "string"
@@ -2387,6 +2532,7 @@
           "allowed_models",
           "exclude_from_budget",
           "reject_user_mismatch",
+          "capture_agent_telemetry",
           "metadata"
         ],
         "title": "KeyInfo",
@@ -5397,6 +5543,17 @@
             ],
             "title": "Allowed Models"
           },
+          "capture_agent_telemetry": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Agent Telemetry"
+          },
           "exclude_from_budget": {
             "anyOf": [
               {
@@ -7502,6 +7659,56 @@
         "summary": "Health Readiness",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/v1/agent-telemetry": {
+      "delete": {
+        "description": "Delete agent_telemetry rows by explicit ids or by filter (standalone).\n\nTarget either an explicit selection (`ids`) or everything matching a filter\n(`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date\nrange). A selection matching zero rows succeeds with `deleted: 0`.\nMaster-key only.",
+        "operationId": "delete_agent_telemetry_rows_v1_agent_telemetry_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentTelemetryDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTelemetryDeleteResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Agent Telemetry Rows",
+        "tags": [
+          "agent-telemetry"
         ]
       }
     },
