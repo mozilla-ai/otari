@@ -1,4 +1,4 @@
-"""OTLP receiver for LLM usage telemetry (traces and logs).
+"""OTLP receiver for LLM usage telemetry (traces, logs, and metrics).
 
 Any application instrumented for GenAI telemetry can ship its usage to Otari over
 OTLP and have it recorded as imported usage: priced at Otari's own rates, budget
@@ -8,6 +8,10 @@ exempt, idempotent, and content-free. Two signal endpoints, one mapping:
   (OpenLLMetry, OpenLIT, native SDK OpenTelemetry).
 - ``POST /v1/logs`` accepts log events, the shape Claude Code emits (its
   ``api_request`` event rides the logs signal, not traces).
+
+A third endpoint, ``POST /v1/metrics``, receives the metrics signal. It carries no
+usage: it records the content-free outcome counters (lines changed, commits, pull
+requests, active time) that give recorded spend a denominator.
 
 Attribute mapping prefers the OpenTelemetry GenAI semantic conventions
 (``gen_ai.provider.name``, ``gen_ai.request.model``, ``gen_ai.usage.*``) with
@@ -46,17 +50,28 @@ from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import (
     ExportLogsServiceRequest,
     ExportLogsServiceResponse,
 )
+from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import (
+    ExportMetricsServiceRequest,
+    ExportMetricsServiceResponse,
+)
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
     ExportTraceServiceResponse,
 )
+from opentelemetry.proto.metrics.v1.metrics_pb2 import AggregationTemporality
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey
-from gateway.services.agent_telemetry_service import TelemetryRecord, map_behavioral_event
+from gateway.services.agent_telemetry_service import (
+    CUMULATIVE,
+    DELTA,
+    TelemetryRecord,
+    map_behavioral_event,
+    map_metric_point,
+)
 from gateway.services.agent_telemetry_service import ingest as ingest_telemetry
 from gateway.services.external_usage_service import (
     MAX_EVENTS_PER_BATCH,
@@ -80,6 +95,11 @@ _DEFAULT_SOURCE = "otel"
 # instead of retry-looping.
 _MAX_BODY_BYTES = 8 * 1024 * 1024
 _MAX_EVENTS_PER_EXPORT = 10 * MAX_EVENTS_PER_BATCH
+# The metrics endpoint's own bound, deliberately independent of the event cap
+# above. A metric's attribute cardinality is caller-controlled: one metric name
+# fans out into a data point per attribute combination, so the body-size cap
+# alone does not bound how many rows an export asks for.
+_MAX_METRIC_DATA_POINTS = 10 * MAX_EVENTS_PER_BATCH
 
 # Codex rides the logs signal (like Claude Code) but with its own attribute names.
 # Its per-request usage lands in one of two events depending on transport: the
@@ -344,6 +364,23 @@ def _require_import_key(api_key: APIKey | None) -> APIKey:
     return api_key
 
 
+def _capture_telemetry(api_key: APIKey, config: GatewayConfig) -> bool:
+    """Whether content-free agent telemetry is captured for this key.
+
+    One toggle governs one table: the per-key override wins, otherwise the
+    deployment setting. Both the behavioral events on the logs signal and the
+    outcome metrics on the metrics signal answer to it.
+    """
+    if api_key.capture_agent_telemetry is not None:
+        return api_key.capture_agent_telemetry
+    return config.capture_agent_telemetry
+
+
+def _point_value(point: Any) -> Any:
+    """Read an OTLP NumberDataPoint's value, whichever arm it arrived on."""
+    return point.as_double if point.WhichOneof("value") == "as_double" else point.as_int
+
+
 async def _ingest(
     pairs: list[tuple[str, ExternalUsageEvent]],
     *,
@@ -440,11 +477,7 @@ async def receive_logs(
     parsed = _parse(body, content_type, ExportLogsServiceRequest())
     assert isinstance(parsed, ExportLogsServiceRequest)
 
-    capture_telemetry = (
-        api_key.capture_agent_telemetry
-        if api_key.capture_agent_telemetry is not None
-        else config.capture_agent_telemetry
-    )
+    capture_telemetry = _capture_telemetry(api_key, config)
     pairs: list[tuple[str, ExternalUsageEvent]] = []
     telemetry: list[TelemetryRecord] = []
     for resource_logs in parsed.resource_logs:
@@ -485,4 +518,96 @@ async def receive_logs(
     if rejected:
         response.partial_success.rejected_log_records = rejected
         response.partial_success.error_message = f"{rejected} log record(s) rejected (see gateway logs)"
+    return _otlp_response(content_type, response)
+
+
+@router.post("/v1/metrics")
+async def receive_metrics(
+    request: Request,
+    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> Response:
+    """Ingest content-free coding-agent outcome metrics from OTLP metric points.
+
+    Records the outcome counters a coding agent reports on the metrics signal and
+    that Otari has no other source for: lines of code changed, commits, pull
+    requests, and active time. Points are stored exactly as reported, with their
+    OTLP series identity, so a cumulative counter is turned into an increment at
+    read time rather than re-counted on every export. Metrics that duplicate an
+    already-recorded signal (token/cost usage, already billed; edit decisions,
+    already captured as behavioral events) are skipped, as is any metric name this
+    gateway does not know, so a newer agent version never breaks reception.
+
+    Outcome metrics are never billable: they touch no budget and no spend. Capture
+    answers to the same ``capture_agent_telemetry`` toggle as behavioral events;
+    with it off, the export still succeeds and simply stores nothing.
+    """
+    api_key = _require_import_key(auth_result[0])
+    content_type = _content_type(request)
+    body = _decode_body(await request.body(), request.headers.get("content-encoding"))
+    parsed = _parse(body, content_type, ExportMetricsServiceRequest())
+    assert isinstance(parsed, ExportMetricsServiceRequest)
+
+    capture_telemetry = _capture_telemetry(api_key, config)
+    telemetry: list[TelemetryRecord] = []
+    seen_points = 0
+    for resource_metrics in parsed.resource_metrics:
+        for scope_metrics in resource_metrics.scope_metrics:
+            for metric in scope_metrics.metrics:
+                data = metric.WhichOneof("data")
+                if data == "sum":
+                    points = metric.sum.data_points
+                    # A gauge is a level, not a running total, so its points are
+                    # increments; an unspecified temporality is read the same way,
+                    # since summing it as cumulative would invent growth.
+                    temporality = (
+                        CUMULATIVE
+                        if metric.sum.aggregation_temporality
+                        == AggregationTemporality.AGGREGATION_TEMPORALITY_CUMULATIVE
+                        else DELTA
+                    )
+                elif data == "gauge":
+                    points = metric.gauge.data_points
+                    temporality = DELTA
+                else:
+                    continue  # histograms and summaries carry no outcome counter
+                seen_points += len(points)
+                if seen_points > _MAX_METRIC_DATA_POINTS:
+                    raise HTTPException(
+                        status.HTTP_413_CONTENT_TOO_LARGE, "Too many metric data points in one OTLP export"
+                    )
+                if not capture_telemetry:
+                    continue
+                for point in points:
+                    timestamp = _nanos_to_dt(point.time_unix_nano)
+                    if timestamp is None:
+                        continue  # a point with no time cannot be ordered or deduped
+                    mapped = map_metric_point(
+                        metric.name,
+                        _point_value(point),
+                        temporality,
+                        _nanos_to_dt(point.start_time_unix_nano),
+                        _attributes(point.attributes),
+                        timestamp=timestamp,
+                        source="claude_code",
+                        user_id=api_key.user_id,
+                    )
+                    if mapped is not None:
+                        telemetry.append(mapped)
+
+    response = ExportMetricsServiceResponse()
+    if telemetry:
+        result = await ingest_telemetry(db, telemetry, api_key=api_key)
+        logger.info(
+            "otlp metrics ingest: accepted=%d duplicate=%d rejected=%d",
+            result.accepted,
+            result.duplicate,
+            result.rejected,
+        )
+        if result.rejected:
+            response.partial_success.rejected_data_points = result.rejected
+            response.partial_success.error_message = (
+                f"{result.rejected} metric data point(s) rejected (see gateway logs)"
+            )
     return _otlp_response(content_type, response)

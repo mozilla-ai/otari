@@ -7,9 +7,10 @@ external systems that need to sync usage data (billing, analytics).
 
 import csv
 import io
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from time import monotonic
-from typing import Annotated, Any, Literal, NamedTuple, cast
+from typing import Annotated, Any, Literal, NamedTuple, TypeVar, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
@@ -845,20 +846,24 @@ def _resolve_window(start_date: datetime | None, end_date: datetime | None) -> t
     return start, end
 
 
-def _bucket_expr(dialect_name: str, bucket: Bucket) -> Any:
-    """A SQL expression that truncates ``timestamp`` to the bucket start, in UTC.
+def _bucket_expr(dialect_name: str, bucket: Bucket, column: Any = None) -> Any:
+    """A SQL expression that truncates ``column`` to the bucket start, in UTC.
 
-    PostgreSQL ``date_trunc`` honors the session ``TimeZone``, so we pin UTC with
-    ``AT TIME ZONE 'UTC'`` (``func.timezone``) rather than trusting engine config,
-    otherwise buckets would silently shift per deployment and break across DST.
-    SQLite ``strftime`` already normalizes any stored offset to UTC. ``bucket`` is
-    a validated ``Literal`` (never raw client text), so there is no injection surface.
+    Defaults to ``usage_logs.timestamp``; ``column`` lets another timestamped
+    table (``agent_telemetry``) bucket on the same grid, so a chart built from
+    both lines up. PostgreSQL ``date_trunc`` honors the session ``TimeZone``, so we
+    pin UTC with ``AT TIME ZONE 'UTC'`` (``func.timezone``) rather than trusting
+    engine config, otherwise buckets would silently shift per deployment and break
+    across DST. SQLite ``strftime`` already normalizes any stored offset to UTC.
+    ``bucket`` is a validated ``Literal`` (never raw client text), so there is no
+    injection surface.
     """
+    timestamp = UsageLog.timestamp if column is None else column
     if dialect_name == "sqlite":
         fmt = "%Y-%m-%dT%H:00:00Z" if bucket == "hour" else "%Y-%m-%dT00:00:00Z"
-        return func.strftime(fmt, UsageLog.timestamp)
+        return func.strftime(fmt, timestamp)
     # PostgreSQL (and anything else that speaks date_trunc).
-    return func.date_trunc(bucket, func.timezone("UTC", UsageLog.timestamp))
+    return func.date_trunc(bucket, func.timezone("UTC", timestamp))
 
 
 def _canonical_bucket(value: Any, bucket: Bucket) -> str:
@@ -1285,21 +1290,32 @@ async def _summary_context(
 # returns the sparse populated buckets instead.
 _MAX_SERIES_POINTS = 1000
 
+_PointT = TypeVar("_PointT")
+
+
+def _empty_usage_point(bucket_start: str) -> UsageSeriesPoint:
+    return UsageSeriesPoint(bucket_start=bucket_start, cost=0.0, tokens=0, requests=0)
+
 
 def _dense_series(
     start: datetime,
     end: datetime,
     bucket: Bucket,
-    populated: dict[str, UsageSeriesPoint],
-) -> list[UsageSeriesPoint]:
+    populated: dict[str, _PointT],
+    empty: Callable[[str], _PointT] | None = None,
+) -> list[_PointT]:
     """Fill every bucket in ``[floor(start), end)`` so the chart's x-axis is linear
     in time. ``GROUP BY`` omits empty buckets, so without this a sparse range (say
     usage on day 1 and day 20 of a month) would render as two adjacent bars and
     misread the trend. Falls back to the sparse buckets past ``_MAX_SERIES_POINTS``.
     An empty window (no rows at all) returns an empty series, not a wall of zeros.
+
+    ``empty`` builds the zero point for a gap; it is what lets another series type
+    (the agent-telemetry summary's) share this fill rather than restate it.
     """
     if not populated:
         return []
+    make_empty = cast("Callable[[str], _PointT]", empty or _empty_usage_point)
     step = timedelta(hours=1) if bucket == "hour" else timedelta(days=1)
     if bucket == "hour":
         cursor = start.replace(minute=0, second=0, microsecond=0)
@@ -1307,12 +1323,12 @@ def _dense_series(
     else:
         cursor = start.replace(hour=0, minute=0, second=0, microsecond=0)
         fmt = "%Y-%m-%dT00:00:00Z"
-    points: list[UsageSeriesPoint] = []
+    points: list[_PointT] = []
     while cursor < end:
         if len(points) >= _MAX_SERIES_POINTS:
             return [populated[key] for key in sorted(populated)]
         key = cursor.strftime(fmt)
-        points.append(populated.get(key) or UsageSeriesPoint(bucket_start=key, cost=0.0, tokens=0, requests=0))
+        points.append(populated.get(key) or make_empty(key))
         cursor += step
     return points
 

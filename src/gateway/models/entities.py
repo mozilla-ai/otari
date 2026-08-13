@@ -557,6 +557,8 @@ class AgentTelemetry(Base):
     __table_args__ = (
         UniqueConstraint("source", "dedup_key", name="uq_agent_telemetry_source_dedup"),
         Index("ix_agent_telemetry_user_id_timestamp", "user_id", "timestamp"),
+        # Read-time cumulative-to-delta derivation orders one series' points by time.
+        Index("ix_agent_telemetry_series_timestamp", "series_key", "timestamp"),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -574,6 +576,19 @@ class AgentTelemetry(Base):
     session_label: Mapped[str | None] = mapped_column()
     dedup_key: Mapped[str] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+    # Outcome-metric columns. Populated only on a metric row (``kind="metric"``),
+    # NULL on a behavioral one, which is the inverse of the allow-list columns
+    # above. ``value`` is stored exactly as OTLP reported it (a running total or
+    # an increment, per ``temporality``); the read endpoints do the delta
+    # arithmetic, so nothing is normalized at ingest. ``series_key`` is the pure
+    # OTLP series identity (name plus attributes), which is what makes a
+    # dimensioned metric two series rather than one.
+    kind: Mapped[str | None] = mapped_column()
+    value: Mapped[float | None] = mapped_column()
+    temporality: Mapped[str | None] = mapped_column()
+    series_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    series_key: Mapped[str | None] = mapped_column()
 
 
 class FileObject(Base):

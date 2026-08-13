@@ -54,6 +54,32 @@ def _make_row(
     return row
 
 
+def _make_metric_row(
+    db: Session,
+    *,
+    row_id: str,
+    user_id: str = "u",
+    name: str = "claude_code.commit.count",
+    timestamp: datetime = _TS,
+) -> AgentTelemetry:
+    _ensure_user(db, user_id)
+    row = AgentTelemetry(
+        id=row_id,
+        user_id=user_id,
+        timestamp=timestamp,
+        name=name,
+        source="claude_code",
+        dedup_key=row_id,
+        kind="metric",
+        value=3.0,
+        temporality="cumulative",
+        series_start=timestamp,
+        series_key=f"series-{row_id}",
+    )
+    db.add(row)
+    return row
+
+
 def _get(db: Session, row_id: str) -> AgentTelemetry | None:
     return db.query(AgentTelemetry).filter(AgentTelemetry.id == row_id).first()
 
@@ -157,3 +183,45 @@ def test_delete_user_removes_only_that_users_agent_telemetry_rows(
     db_session.expire_all()
     assert _get(db_session, "alice-row") is None
     assert _get(db_session, "bob-row") is not None
+
+
+def test_purge_by_filter_removes_metric_rows_alongside_behavioral_ones(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """One deletion mechanism covers both row kinds: the filter has no `kind`."""
+    _make_row(db_session, row_id="alice-behavioral", user_id="alice")
+    _make_metric_row(db_session, row_id="alice-metric", user_id="alice")
+    _make_row(db_session, row_id="bob-behavioral", user_id="bob")
+    db_session.commit()
+
+    resp = client.request(
+        "DELETE", DELETE_PATH, json={"by_filter": True, "user_id": "alice"}, headers=master_key_header
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 2}
+
+    db_session.expire_all()
+    assert _get(db_session, "alice-behavioral") is None
+    assert _get(db_session, "alice-metric") is None
+    assert _get(db_session, "bob-behavioral") is not None
+
+    count = client.get("/v1/agent-telemetry/count", params={"user_id": "alice"}, headers=master_key_header)
+    assert count.status_code == 200
+    assert count.json()["total"] == 0
+
+
+def test_delete_user_removes_that_users_metric_rows_too(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    _make_metric_row(db_session, row_id="alice-metric", user_id="alice")
+    _make_row(db_session, row_id="alice-behavioral", user_id="alice")
+    _make_metric_row(db_session, row_id="bob-metric", user_id="bob")
+    db_session.commit()
+
+    resp = client.delete("/v1/users/alice", headers=master_key_header)
+    assert resp.status_code == 204
+
+    db_session.expire_all()
+    assert _get(db_session, "alice-metric") is None
+    assert _get(db_session, "alice-behavioral") is None
+    assert _get(db_session, "bob-metric") is not None

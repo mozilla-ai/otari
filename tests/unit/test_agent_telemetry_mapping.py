@@ -1,9 +1,31 @@
 from datetime import UTC, datetime
 
-from gateway.models.entities import AgentTelemetry
-from gateway.services.agent_telemetry_service import TelemetryRecord, event_dedup_key, map_behavioral_event
+from gateway.services.agent_telemetry_service import (
+    TelemetryRecord,
+    event_dedup_key,
+    map_behavioral_event,
+    map_metric_point,
+    metric_dedup_key,
+    metric_series_key,
+)
 
-_METRIC_ONLY_FIELDS = ("kind", "value", "temporality", "series_start", "series_key")
+_POINT_TS = datetime(2026, 8, 12, 9, 0, tzinfo=UTC)
+_SERIES_START = datetime(2026, 8, 12, 8, 0, tzinfo=UTC)
+
+
+def _metric(
+    name: str, value: float = 3.0, temporality: str = "cumulative", **attrs: object
+) -> TelemetryRecord | None:
+    return map_metric_point(
+        name,
+        value,
+        temporality,
+        _SERIES_START,
+        attrs,
+        timestamp=_POINT_TS,
+        source="claude_code",
+        user_id="alice",
+    )
 
 
 def test_behavioral_mapping_keeps_only_allowlisted_attributes() -> None:
@@ -71,10 +93,75 @@ def test_dedup_key_falls_back_without_tool_use_id_or_sequence() -> None:
     assert event_a.dedup_key == event_b.dedup_key
 
 
-def test_no_metric_only_fields_on_telemetry_record_or_agent_telemetry() -> None:
-    """This feature's schema ships only what it populates (FR-007): the metric-only
-    columns pre-shaped for the not-yet-built metrics receiver are never added."""
-    for attribute in _METRIC_ONLY_FIELDS:
-        assert not hasattr(TelemetryRecord, attribute)
-        assert attribute not in TelemetryRecord.__dataclass_fields__
-        assert not hasattr(AgentTelemetry, attribute)
+def test_metric_mapping_records_each_outcome_counter() -> None:
+    """The four outcome counters map to content-free metric rows (FR-003)."""
+    for name, value in (
+        ("claude_code.commit.count", 2.0),
+        ("claude_code.pull_request.count", 1.0),
+        ("claude_code.active_time.total", 930.0),
+    ):
+        record = _metric(name, value, "cumulative", **{"session.id": "s-1"})
+        assert record is not None, name
+        assert record.kind == "metric"
+        assert record.name == name
+        assert record.value == value
+        assert record.temporality == "cumulative"
+        assert record.series_start == _SERIES_START
+        assert record.timestamp == _POINT_TS
+        assert record.series_key
+        assert record.session_label == "s-1"
+        assert record.dedup_key == metric_dedup_key(record, "alice")
+
+
+def test_metric_mapping_keeps_dimensioned_lines_of_code_points_apart() -> None:
+    """``type=added`` and ``type=removed`` are two series, never collapsed (FR-007/R5)."""
+    added = _metric("claude_code.lines_of_code.count", 12.0, "delta", type="added")
+    removed = _metric("claude_code.lines_of_code.count", 5.0, "delta", type="removed")
+    assert added is not None and removed is not None
+    assert added.kind == removed.kind == "metric"
+    assert added.value == 12.0
+    assert removed.value == 5.0
+    assert added.temporality == removed.temporality == "delta"
+    assert added.series_key != removed.series_key
+    assert added.dedup_key != removed.dedup_key
+
+
+def test_metric_mapping_drops_attributes_it_does_not_model() -> None:
+    """Only the allow-listed metric columns are populated (FR-005)."""
+    record = _metric("claude_code.commit.count", 1.0, "delta", **{"session.id": "s-1", "branch": "secret-branch"})
+    assert record is not None
+    assert "secret-branch" not in str(record.__dict__)
+    assert record.tool_name is None
+    assert record.decision is None
+    assert record.prompt_length is None
+
+
+def test_metric_mapping_skips_metrics_captured_elsewhere() -> None:
+    """Already-billed or already-behavioral signals are recognized and skipped (FR-004)."""
+    for name in (
+        "claude_code.token.usage",
+        "claude_code.cost.usage",
+        "claude_code.code_edit_tool.decision",
+    ):
+        assert _metric(name) is None, name
+
+
+def test_metric_mapping_skips_unrecognized_names() -> None:
+    """An unknown name (and the deferred session counter) is skipped, not an error (FR-009)."""
+    assert _metric("claude_code.session.count") is None
+    assert _metric("claude_code.something.brand_new") is None
+
+
+def test_metric_series_key_separates_dimensions_and_ignores_attribute_order() -> None:
+    added = metric_series_key("claude_code.lines_of_code.count", {"type": "added"})
+    removed = metric_series_key("claude_code.lines_of_code.count", {"type": "removed"})
+    assert added != removed
+    assert metric_series_key("m", {"a": "1", "b": "2"}) == metric_series_key("m", {"b": "2", "a": "1"})
+
+
+def test_metric_dedup_key_is_stable_and_user_scoped() -> None:
+    """Same point, same key; same point under another user, a different key (R6)."""
+    record = _metric("claude_code.commit.count", 4.0)
+    assert record is not None
+    assert metric_dedup_key(record, "alice") == metric_dedup_key(record, "alice")
+    assert metric_dedup_key(record, "alice") != metric_dedup_key(record, "bob")

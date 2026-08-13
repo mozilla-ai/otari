@@ -133,9 +133,28 @@ content is ever persisted. This capture is on by default and can be turned off
 per key or for the whole deployment (`capture_agent_telemetry` on
 `POST /v1/keys` / `PATCH /v1/keys/{id}`, and the deployment-wide
 `capture_agent_telemetry` config setting); usage capture and billing are
-unaffected either way. Previously captured rows can be removed with
-`DELETE /v1/agent-telemetry` (master-key only, by explicit `ids` or, with
-`by_filter: true`, a `user_id`/`api_key_id`/`name`/date-range filter).
+unaffected either way.
+
+The **metrics** export (a separate exporter setting, see below) carries the
+outcome counters, and Otari records four of them at `POST /v1/metrics`: lines of
+code changed, commits, pull requests, and active time. Each is stored as a value,
+its OTLP series identity, and its timestamps, and nothing else: no attribute bag,
+no file or branch names. Three metrics Claude Code also emits are deliberately
+**not** recorded: `claude_code.token.usage` and `claude_code.cost.usage`, because
+the `api_request` log event already bills the same tokens (storing them again would
+double count spend), and `claude_code.code_edit_tool.decision`, because the
+`tool_decision` behavioral event above already carries that accept/reject signal.
+Metric capture answers to the same `capture_agent_telemetry` toggle as behavioral
+events.
+
+Both kinds of row are read back through `GET /v1/agent-telemetry/summary`, which
+joins them against recorded spend to report cost per commit, cost per pull request,
+cost per line changed, spend per active hour, tool acceptance rate, turns per
+session, and error rate (plus `/count` and `/series`, mirroring the `/v1/usage`
+family). Previously captured rows can be removed with `DELETE /v1/agent-telemetry`
+(master-key only, by explicit `ids` or, with `by_filter: true`, a
+`user_id`/`api_key_id`/`name`/date-range filter); it covers metric and behavioral
+rows alike.
 
 > **Route or export, not both.** Telemetry import is for sessions that do NOT proxy
 > through Otari. If a session sets `ANTHROPIC_BASE_URL` to Otari and also exports
@@ -164,30 +183,35 @@ user) reserved solely for imports, and rotate it if it is exposed.
 
 ### 2. Point Claude Code's telemetry at Otari
 
-Enable telemetry and send the **logs** signal (which carries `api_request`) to
-Otari's base URL, authenticating with the exempt key. Claude Code appends `/v1/logs`
+Enable telemetry and send the **logs** signal (which carries `api_request`) and the
+**metrics** signal (which carries the outcome counters) to Otari's base URL,
+authenticating with the exempt key. Claude Code appends `/v1/logs` and `/v1/metrics`
 itself, so the endpoint is the Otari root, not `/v1`.
 
 ```bash
 export CLAUDE_CODE_ENABLE_TELEMETRY=1
 export OTEL_LOGS_EXPORTER=otlp
+export OTEL_METRICS_EXPORTER=otlp                     # outcome counters
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf      # http/json also works
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com"
 export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer gw-your-exempt-key"
 claude
 ```
 
-`OTEL_LOGS_EXPORTER` is the load-bearing one; a metrics-only exporter carries no
-per-request usage. Set an **http** protocol (`http/protobuf` or `http/json`); the
-default is gRPC, which Otari's HTTP receiver does not accept. The same settings work
-in the `env` block of `~/.claude/settings.json` so every session reports
-automatically:
+The two exporters are independent settings: `OTEL_LOGS_EXPORTER` is the load-bearing
+one for spend (all per-request usage rides the logs signal), and
+`OTEL_METRICS_EXPORTER` adds the outcome counters that give that spend a
+denominator. Enabling only the metrics exporter records no usage at all. Set an
+**http** protocol (`http/protobuf` or `http/json`); the default is gRPC, which
+Otari's HTTP receiver does not accept. The same settings work in the `env` block of
+`~/.claude/settings.json` so every session reports automatically:
 
 ```json
 {
   "env": {
     "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
     "OTEL_LOGS_EXPORTER": "otlp",
+    "OTEL_METRICS_EXPORTER": "otlp",
     "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
     "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otari.example.com",
     "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer gw-your-exempt-key"

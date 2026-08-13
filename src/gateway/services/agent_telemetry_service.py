@@ -20,6 +20,26 @@ _EVENTS = {"tool_result", "tool_decision", "user_prompt", "api_error"}
 # AgentTelemetry column (the dedup key that derives from them is what's stored).
 _DEDUP_ONLY_FIELDS = ("tool_use_id", "event_sequence")
 
+# The outcome counters a coding agent reports on the metrics signal that Otari has
+# no other source for. Each becomes a content-free, non-billable metric row.
+METRIC_LINES_OF_CODE = "claude_code.lines_of_code.count"
+METRIC_COMMITS = "claude_code.commit.count"
+METRIC_PULL_REQUESTS = "claude_code.pull_request.count"
+METRIC_ACTIVE_TIME = "claude_code.active_time.total"
+_METRICS = frozenset({METRIC_LINES_OF_CODE, METRIC_COMMITS, METRIC_PULL_REQUESTS, METRIC_ACTIVE_TIME})
+
+# Metrics that duplicate a signal Otari already holds. Named rather than left to
+# the generic unknown-name path so the intent is legible: token/cost usage is
+# already billed from the api_request usage event (recording it here would double
+# count spend), and code_edit_tool.decision is the same accept/reject signal the
+# tool_decision behavioral event already carries.
+_SKIPPED_METRICS = frozenset(
+    {"claude_code.token.usage", "claude_code.cost.usage", "claude_code.code_edit_tool.decision"}
+)
+
+CUMULATIVE = "cumulative"
+DELTA = "delta"
+
 
 @dataclass(frozen=True)
 class TelemetryRecord:
@@ -36,6 +56,12 @@ class TelemetryRecord:
     session_label: str | None = None
     tool_use_id: str | None = None
     event_sequence: int | None = None
+    # Metric-point fields; all None on a behavioral event. See AgentTelemetry.
+    kind: str | None = None
+    value: float | None = None
+    temporality: str | None = None
+    series_start: datetime | None = None
+    series_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -155,6 +181,108 @@ def map_behavioral_event(
         **fields,
     )
     return TelemetryRecord(**{**provisional.__dict__, "dedup_key": event_dedup_key(provisional, user_id)})
+
+
+def metric_series_key(name: str, attrs: dict[str, Any]) -> str:
+    """Return the OTLP series identity for a metric point.
+
+    The metric name plus its full attribute set, sorted so the hash does not
+    depend on attribute order. Deliberately carries no ``user_id``: this is pure
+    OTLP identity, and the read-time per-series diff groups on it. A dimensioned
+    metric (``lines_of_code.count`` split by ``type=added``/``removed``) is
+    therefore two series, never one.
+    """
+    return _hash(name, sorted((str(key), str(value)) for key, value in attrs.items()))
+
+
+def metric_dedup_key(record: TelemetryRecord, user_id: str | None = None) -> str:
+    """Return the natural idempotency key for one metric data point.
+
+    The metric-point sibling of ``event_dedup_key``, and folds ``user_id`` in for
+    the same reason: the uniqueness constraint is ``(source, dedup_key)`` across
+    the whole table, so two users reporting an identical series at the same
+    instant would otherwise collide and one point would read as the other's replay.
+    """
+    return _hash(
+        record.series_key or "",
+        user_id or "",
+        record.series_start.isoformat() if record.series_start else "",
+        record.timestamp.isoformat(),
+    )
+
+
+def map_metric_point(
+    name: str,
+    value: Any,
+    temporality: str,
+    start_timestamp: datetime | None,
+    attrs: dict[str, Any],
+    *,
+    timestamp: datetime,
+    source: str,
+    user_id: str | None,
+) -> TelemetryRecord | None:
+    """Map one OTLP metric data point onto a metric row, or None to skip it.
+
+    Only the four outcome counters are recorded. Everything else is skipped: the
+    metrics that duplicate an already-captured signal by name, and any other
+    metric generically, so a newer agent version emitting names this does not know
+    never breaks reception. The point is kept as reported (no delta conversion at
+    ingest) and content-free: its attributes are folded into ``series_key``, not
+    stored.
+    """
+    if name not in _METRICS:
+        return None
+    number = _bounded_number(value)
+    if number is None:
+        return None
+    provisional = TelemetryRecord(
+        name=name,
+        timestamp=_timestamp(timestamp),
+        source=source,
+        dedup_key="",
+        session_label=_session(attrs),
+        kind="metric",
+        value=number,
+        temporality=CUMULATIVE if temporality == CUMULATIVE else DELTA,
+        series_start=_timestamp(start_timestamp) if start_timestamp is not None else None,
+        series_key=metric_series_key(name, attrs),
+    )
+    return TelemetryRecord(**{**provisional.__dict__, "dedup_key": metric_dedup_key(provisional, user_id)})
+
+
+def series_point_increments(
+    points: list[tuple[datetime, float]], temporality: str
+) -> list[tuple[datetime, float]]:
+    """Each point's own contribution to its series generation, in time order.
+
+    The caller splits by generation first: pass the points of a single
+    ``(series_key, series_start)`` pair. A counter reset arrives as a new
+    ``series_start``, so diffing across one here would subtract the pre-reset
+    total and report a negative increment.
+
+    A ``delta`` series' points are already increments. A ``cumulative`` series
+    carries running totals, so the growth between two readings is attributed to
+    the later one, which is what makes a re-reported total add nothing and lets a
+    caller bucket the increments by time.
+    """
+    if not points:
+        return []
+    ordered = sorted(points, key=lambda point: point[0])
+    if temporality != CUMULATIVE:
+        return ordered
+    return [
+        (later_time, max(later - earlier, 0.0))
+        for (_earlier_time, earlier), (later_time, later) in zip(ordered, ordered[1:])
+    ]
+
+
+def compute_series_increment(points: list[tuple[datetime, float]], temporality: str) -> float:
+    """How much one series generation grew across the points given, in total."""
+    return float(sum(increment for _, increment in series_point_increments(points, temporality)))
+
+
+
 
 
 def _build_row(api_key: APIKey, user_id: str | None, record: TelemetryRecord) -> AgentTelemetry:

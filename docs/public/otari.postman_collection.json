@@ -92,6 +92,177 @@
               "raw": "{{baseUrl}}/v1/agent-telemetry"
             }
           }
+        },
+        {
+          "name": "Count Agent Telemetry",
+          "request": {
+            "description": "Total agent_telemetry rows matching the given filters (standalone).\n\nThe filter set mirrors the purge endpoint's, so this sizes exactly what a\n\"delete all N matching\" would remove. Behavioral and metric rows are counted\ntogether: neither this nor the purge distinguishes them. Master-key only.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "agent-telemetry",
+                "count"
+              ],
+              "query": [
+                {
+                  "description": "Return rows with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "start_date",
+                  "value": ""
+                },
+                {
+                  "description": "Return rows with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "end_date",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single event type or metric name (e.g. 'tool_result', 'claude_code.commit.count')",
+                  "disabled": true,
+                  "key": "name",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/agent-telemetry/count?start_date=&end_date=&user_id=&api_key_id=&name="
+            }
+          }
+        },
+        {
+          "name": "Agent Telemetry Series",
+          "request": {
+            "description": "Row volume over time, split by user or API key (standalone).\n\nMirrors `/v1/usage/series`: same window bounds and bucket-grid cap, the top\ngroups as their own series with the remainder folded into a reconciling\n``other``, and sparse points (populated cells only). Counts rows, not spend,\nso it charts telemetry volume rather than cost. Master-key only.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "agent-telemetry",
+                "series"
+              ],
+              "query": [
+                {
+                  "description": "Dimension to split the series by",
+                  "disabled": false,
+                  "key": "group_by",
+                  "value": ""
+                },
+                {
+                  "description": "Return rows with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "start_date",
+                  "value": ""
+                },
+                {
+                  "description": "Return rows with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "end_date",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single event type or metric name (e.g. 'tool_result', 'claude_code.commit.count')",
+                  "disabled": true,
+                  "key": "name",
+                  "value": ""
+                },
+                {
+                  "description": "Time-series granularity: 'hour' or 'day'",
+                  "disabled": true,
+                  "key": "bucket",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/agent-telemetry/series?group_by=&start_date=&end_date=&user_id=&api_key_id=&name=&bucket="
+            }
+          }
+        },
+        {
+          "name": "Agent Telemetry Summary",
+          "request": {
+            "description": "What the coding agent produced in a window, and what it cost (standalone).\n\nRange-bounded like `/v1/usage/summary` (default last 30 days, hard-capped),\nso the aggregates stay served by the timestamp index. Returns the outcome\ntotals (commits, pull requests, lines changed, active time), the behavioral\ncounts already captured from the logs signal (tool calls and their mix, tool\naccept/reject, turns, API errors), the recorded spend over the same scope,\nand the derived per-unit measures: cost per commit / pull request / line,\nspend per active hour, acceptance rate, turns per session, and error rate.\nEach measure is null rather than an error when its denominator is zero.\nFilterable by user, API key, and `session_label`, so cost per outcome can be\nread for one agent session as well as for a whole window.\n\nOutcome metrics are stored exactly as the agent reported them, so a\ncumulative counter is converted to a window increment here, at read time,\ndiffed per series generation: a re-exported total adds nothing, and a counter\nreset never reads as negative work. Master-key only.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "agent-telemetry",
+                "summary"
+              ],
+              "query": [
+                {
+                  "description": "Return rows with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "start_date",
+                  "value": ""
+                },
+                {
+                  "description": "Return rows with timestamp < end_date (ISO 8601 or Unix epoch seconds)",
+                  "disabled": true,
+                  "key": "end_date",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call.",
+                  "disabled": true,
+                  "key": "api_key_id",
+                  "value": ""
+                },
+                {
+                  "description": "Filter to a single agent session. Matches agent_telemetry.session_label and, on the usage side of the join, the usage_logs.source_label that /v1/usage/summary filters on",
+                  "disabled": true,
+                  "key": "session_label",
+                  "value": ""
+                },
+                {
+                  "description": "Time-series granularity: 'hour' or 'day'",
+                  "disabled": true,
+                  "key": "bucket",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/agent-telemetry/summary?start_date=&end_date=&user_id=&api_key_id=&session_label=&bucket="
+            }
+          }
         }
       ],
       "name": "agent-telemetry"
@@ -1156,6 +1327,24 @@
                 "logs"
               ],
               "raw": "{{baseUrl}}/v1/logs"
+            }
+          }
+        },
+        {
+          "name": "Receive Metrics",
+          "request": {
+            "description": "Ingest content-free coding-agent outcome metrics from OTLP metric points.\n\nRecords the outcome counters a coding agent reports on the metrics signal and\nthat Otari has no other source for: lines of code changed, commits, pull\nrequests, and active time. Points are stored exactly as reported, with their\nOTLP series identity, so a cumulative counter is turned into an increment at\nread time rather than re-counted on every export. Metrics that duplicate an\nalready-recorded signal (token/cost usage, already billed; edit decisions,\nalready captured as behavioral events) are skipped, as is any metric name this\ngateway does not know, so a newer agent version never breaks reception.\n\nOutcome metrics are never billable: they touch no budget and no spend. Capture\nanswers to the same ``capture_agent_telemetry`` toggle as behavioral events;\nwith it off, the export still succeeds and simply stores nothing.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "metrics"
+              ],
+              "raw": "{{baseUrl}}/v1/metrics"
             }
           }
         },

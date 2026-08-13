@@ -329,3 +329,17 @@ are budget-checked and logged. See
 | `POST` | `/v1/usage/external-events` | Import externally-observed usage (e.g. Claude Code) as source-tagged rows, priced at API rates, never counted toward budget. An API key (must be budget-exempt) attributes to its own user; the master key may name any user. Idempotent by `(source, source_event_id)`. See [Importing external usage](external-usage.md). | API key (budget-exempt) or master key |
 | `POST` | `/v1/traces` | OTLP receiver for GenAI usage **spans** (protobuf or JSON). Maps the OpenTelemetry GenAI conventions (`gen_ai.*`, `otari.*`) onto external usage ingestion. Any instrumented app can ship here. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |
 | `POST` | `/v1/logs` | OTLP receiver for GenAI usage **log events** (protobuf or JSON), including Claude Code's `api_request` and Codex's `codex.sse_event` / `codex.api_request`. Same mapping as `/v1/traces`. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |
+| `POST` | `/v1/metrics` | OTLP receiver for coding-agent outcome **metrics** (protobuf or JSON). Records the content-free counters Otari has no other source for (lines of code changed, commits, pull requests, active time); token/cost metrics are skipped as already billed, and edit decisions as already captured. Never billable. See [Use with Claude Code](use-with-claude-code.md). | API key (budget-exempt); master key refused |
+
+### Agent telemetry
+
+Content-free coding-agent telemetry: behavioral events from `POST /v1/logs` and
+outcome metrics from `POST /v1/metrics`, in one table. Never billable, and gated by
+the `capture_agent_telemetry` setting (per key, or deployment-wide).
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `GET` | `/v1/agent-telemetry/summary` | Outcomes (commits, pull requests, lines changed, active time), behavior (tool calls and their mix, accept/reject, turns, API errors), the recorded spend over the same scope, and the derived measures: cost per commit / pull request / line, spend per active hour, acceptance rate, turns per session, error rate. Each measure is `null` when its denominator is zero. Range-bounded like `/v1/usage/summary` (default last 30 days, capped at 366). Filters: `start_date`, `end_date`, `user_id`, `api_key_id` (the last two repeatable, up to 50 values each), `session_label` (scopes both the telemetry rows and the usage they are divided by), `bucket`. Cumulative counters are converted to window increments at read time, per series generation, so a re-exported total is never double counted and a counter reset never reads as negative. | Master key |
+| `GET` | `/v1/agent-telemetry/count` | Total rows matching the filters (`start_date`, `end_date`, `user_id`, `api_key_id`, `name`), mirroring `/v1/usage/count`. Same filter set as the purge below, so it sizes exactly what a "delete all N matching" would remove. | Master key |
+| `GET` | `/v1/agent-telemetry/series` | Row volume over time split by one dimension, for stacked charts. `group_by` is required (`user_id` or `api_key_id`). Top eight groups plus a reconciling `other` fold; sparse points; an `hour` bucket over more than 1000 buckets is rejected with a 422. | Master key |
+| `DELETE` | `/v1/agent-telemetry` | Purge rows by explicit `ids` or, with `by_filter: true`, by `user_id` / `api_key_id` / `name` / date range. Covers behavioral and metric rows alike. A selection matching zero rows succeeds with `deleted: 0`. | Master key |

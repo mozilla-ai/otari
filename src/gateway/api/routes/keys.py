@@ -50,9 +50,11 @@ class CreateKeyRequest(BaseModel):
     capture_agent_telemetry: bool | None = Field(
         default=None,
         description="Per-key override of the deployment-wide capture_agent_telemetry setting: "
-        "null (default) inherits it, true always stores behavioral events (tool_result, "
-        "tool_decision, user_prompt, api_error) from POST /v1/logs, false always discards them. "
-        "Usage capture and billing are unaffected either way.",
+        "null (default) inherits it, true always stores this key's coding-agent telemetry, false "
+        "always discards it. Covers both behavioral events (tool_result, tool_decision, "
+        "user_prompt, api_error) from POST /v1/logs and outcome-metric data points (lines of code, "
+        "commits, pull requests, active time) from POST /v1/metrics. Usage capture and billing are "
+        "unaffected either way.",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
