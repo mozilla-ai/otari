@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.core.sql import MAX_FILTER_VALUES, match_any
+from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.inflight import get_registry
 from gateway.models.entities import APIKey, UsageLog, User
 from gateway.services.external_usage_service import (
@@ -353,12 +353,17 @@ def _usage_filters(
 
     Keeping this in one place guarantees the paginator's total (``/count``)
     always matches the rows ``list_usage`` returns for the same filters.
+
+    Bounds are pinned to UTC here rather than only in ``_resolve_window``, which
+    the summary endpoints route through but the list and count endpoints do not:
+    an offset-less bound would otherwise resolve against the process's local
+    timezone, so the same query would size a different set of rows per deployment.
     """
     conditions: list[ColumnElement[bool]] = []
     if start_date is not None:
-        conditions.append(UsageLog.timestamp >= start_date)
+        conditions.append(UsageLog.timestamp >= utc_bound(start_date))
     if end_date is not None:
-        conditions.append(UsageLog.timestamp < end_date)
+        conditions.append(UsageLog.timestamp < utc_bound(end_date))
     if user_id is not None and user_id != []:
         conditions.append(match_any(UsageLog.user_id, user_id))
     if status is not None:
