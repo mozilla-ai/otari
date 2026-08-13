@@ -43,7 +43,10 @@ def test_release_free_heap_calls_into_libc(monkeypatch: pytest.MonkeyPatch) -> N
     assert calls == [0], "malloc_trim takes a pad of 0 to release everything it can"
 
 
-@pytest.mark.skipif(platform.system() != "Linux", reason="malloc_trim is a glibc extension")
-def test_malloc_trim_resolves_on_linux() -> None:
+@pytest.mark.skipif(
+    platform.system() != "Linux" or platform.libc_ver()[0] != "glibc",
+    reason="malloc_trim is a glibc extension; musl Linux is a deliberate no-op",
+)
+def test_malloc_trim_resolves_on_glibc() -> None:
     """The deployment target is glibc Linux; a silent no-op there would hide the fix."""
     assert heap.malloc_trim_available() is True
