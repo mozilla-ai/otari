@@ -1427,7 +1427,6 @@ describe("ActivityPage suggestion scoping", () => {
   });
 });
 
-
 // ---------------------------------------------------------------------------
 // Requests in flight, and the frozen log (issue #526)
 // ---------------------------------------------------------------------------
@@ -1720,6 +1719,30 @@ describe("ActivityPage live traffic", () => {
 
       expect(countCalls(calls).length).toBe(before);
       expect(screen.queryByRole("button", { name: /new/ })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops the badge when the operator pages past the rows it offers", async () => {
+    // `page` is not part of the live count's key, so paging forward disables the
+    // poll but leaves its last payload in the cache. Read unguarded, that keeps
+    // the badge on screen for pages where pressing it loads the current page and
+    // the newer rows stay at the top of page 1, out of sight.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      let serverTotal = 100;
+      mockApi({ rows: [entry()], total: () => serverTotal });
+      renderPage(<ActivityPage />, "/activity?range=24h");
+
+      await screen.findByText("gpt-4o");
+      serverTotal = 120;
+      await vi.advanceTimersByTimeAsync(16_000);
+      await screen.findByRole("button", { name: /20 new/ });
+
+      await user.click(screen.getByRole("button", { name: "Next page" }));
+      await waitFor(() => expect(screen.queryByRole("button", { name: /new/ })).not.toBeInTheDocument());
     } finally {
       vi.useRealTimers();
     }

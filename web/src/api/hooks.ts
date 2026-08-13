@@ -831,10 +831,9 @@ export function useUsageLogs(filters: UsageFilters, page: number, pageSize: numb
     // arrive faster than anyone can inspect them, so a page that refetched on its
     // own reshuffled the table out from under whoever was reading it. It refetches
     // only when asked: a mount, the refresh button, or a change of filters, window,
-    // or page (all of which are in the key). `refetchOnWindowFocus` is off for the
-    // same reason: returning to the tab is not a request for newer rows.
+    // or page (all of which are in the key). Nothing here opts back into the
+    // provider's refetch-on-focus default, which is already off (`provider.tsx`).
     // `useLiveUsageCount` is how the page still says that newer rows exist.
-    refetchOnWindowFocus: false,
     staleTime: 10_000,
   });
 }
@@ -851,7 +850,6 @@ export function useUsageCount(filters: UsageFilters, enabled = true) {
     queryFn: () => apiFetch<UsageCount>(`/v1/usage/count?${usageParams(filters).toString()}`),
     enabled,
     placeholderData: keepPreviousData,
-    refetchOnWindowFocus: false,
     staleTime: 10_000,
   });
 }

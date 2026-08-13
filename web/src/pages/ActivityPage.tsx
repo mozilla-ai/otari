@@ -1226,10 +1226,15 @@ export function ActivityPage() {
 
   // Rows that have landed since this page was drawn, as the gap between the polled
   // count and the pinned one. Clamped at zero because the gap can close from the
-  // other side: a bulk delete, or a rolling window whose start has moved past rows
-  // the pinned count still includes, both make the live figure the smaller one, and
-  // "-14 new" is not a thing to show an operator.
-  const newRows = total != null && liveCount.data ? Math.max(0, liveCount.data.total - total) : 0;
+  // other side: a bulk delete makes the live figure the smaller one, and "-14 new"
+  // is not a thing to show an operator.
+  //
+  // Gated on the same condition as the poll: `page` is not part of the live count's
+  // key, so disabling the query on page 2 stops it refetching but still hands back
+  // the payload it cached on page 1. Without this the badge would follow the
+  // operator forward and offer rows that pressing it cannot bring into view.
+  const newRows =
+    newRowsRelevant && total != null && liveCount.data ? Math.max(0, liveCount.data.total - total) : 0;
   // Neither the default preset nor the unbounded "All" is itself a filter: only an
   // explicit sub-window or a bounded non-default preset narrows the window, so a
   // brand-new gateway reads "never used" on both its 24h default and on "All",
