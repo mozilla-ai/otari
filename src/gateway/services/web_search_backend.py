@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -39,6 +40,7 @@ import httpx
 import trafilatura
 from opentelemetry import trace
 
+from gateway.heap import release_free_heap
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.url_safety import UnsafeURLError, validate_outbound_fetch_url
 
@@ -47,6 +49,35 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
+
+# trafilatura is not safe to call from several threads at once. Extracting
+# concurrently corrupts the allocator's bookkeeping and aborts the whole
+# process with a glibc "double free or corruption" / "free(): invalid pointer";
+# a 24-search loop over real pages died about one run in three, with and without
+# the heap release below.
+#
+# Serializing the parse is not free. lxml drops the GIL, so extraction really did
+# run in parallel: over five heavy pages a search went from roughly 520ms to
+# roughly 880ms in testing. That is the price of not aborting the process, which
+# would take every in-flight request with it. Only the parse is serialized; the
+# per-page fetches still overlap, and they dominate on a normal-sized page. The
+# lock is module-level rather than per backend instance because the unsafe state
+# is trafilatura's own module globals.
+_EXTRACT_LOCK = threading.Lock()
+
+
+def _extract_markdown(html: str) -> str | None:
+    """Extract Markdown from one page, serialized against every other caller."""
+    with _EXTRACT_LOCK:
+        result = trafilatura.extract(
+            html,
+            output_format="markdown",
+            include_comments=False,
+            include_tables=True,
+            favor_recall=True,
+        )
+    return str(result) if result else None
+
 
 WEB_SEARCH_TOOL_NAME = "web_search"
 
@@ -358,7 +389,14 @@ class WebSearchBackend:
             if content:
                 result["extracted_content"] = content
 
-        await asyncio.gather(*(one(r) for r in results), return_exceptions=False)
+        try:
+            await asyncio.gather(*(one(r) for r in results), return_exceptions=False)
+        finally:
+            # Parsing several pages of HTML strands tens of megabytes per search
+            # in glibc's arenas; without this the resident set plateaus at its
+            # high-water mark for the life of the process. Runs on the failure
+            # path too, which allocated just the same.
+            release_free_heap()
 
     async def _fetch_and_extract(self, url: str) -> str | None:
         assert self._client is not None
@@ -382,17 +420,10 @@ class WebSearchBackend:
             return None
 
         # trafilatura.extract is synchronous and CPU-bound on large inputs; run
-        # in a thread so the event loop stays responsive while many pages are
-        # extracted in parallel.
+        # in a thread so the event loop stays responsive while the other pages
+        # in this search are still being fetched.
         try:
-            extracted = await asyncio.to_thread(
-                trafilatura.extract,
-                html,
-                output_format="markdown",
-                include_comments=False,
-                include_tables=True,
-                favor_recall=True,
-            )
+            extracted = await asyncio.to_thread(_extract_markdown, html)
         except Exception as exc:  # noqa: BLE001 — trafilatura raises broad
             logger.debug("web_search: extract failed for %s: %s", url, exc)
             return None

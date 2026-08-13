@@ -3,6 +3,7 @@
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from prometheus_client import generate_latest
 
 from gateway.core.config import GatewayConfig
 from gateway.metrics import (
@@ -257,3 +258,11 @@ def test_rate_limiter_records_metric_on_429() -> None:
 
     assert exc_info.value.status_code == 429
     assert _sample("gateway_rate_limit_hits_total") - before == 1.0
+
+
+def test_metrics_expose_process_memory() -> None:
+    """Without this the only way to read the resident set is a shell in the container."""
+    body = generate_latest(REGISTRY).decode()
+
+    assert "process_resident_memory_bytes" in body
+    assert _sample("process_resident_memory_bytes") > 0

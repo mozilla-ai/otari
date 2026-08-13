@@ -10,6 +10,7 @@ from prometheus_client import (
     Counter,
     Gauge,
     Histogram,
+    ProcessCollector,
     generate_latest,
 )
 from starlette.responses import Response
@@ -19,6 +20,12 @@ if TYPE_CHECKING:
     from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 REGISTRY = CollectorRegistry()
+
+# process_resident_memory_bytes and friends. The gateway keeps its own registry
+# rather than prometheus_client's default one, which is where these live by
+# default, so without this /metrics reports no process memory at all and the
+# only way to see the resident set is a shell inside the container.
+PROCESS_COLLECTOR = ProcessCollector(registry=REGISTRY)
 
 REQUESTS = Counter(
     "gateway_requests",
