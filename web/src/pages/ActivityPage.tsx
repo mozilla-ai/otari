@@ -1235,6 +1235,14 @@ export function ActivityPage() {
   // operator forward and offer rows that pressing it cannot bring into view.
   const newRows =
     newRowsRelevant && total != null && liveCount.data ? Math.max(0, liveCount.data.total - total) : 0;
+
+  // Whether the page can still tell newer rows from none. The badge's absence
+  // otherwise reads as "nothing has landed", which on a table that no longer moves
+  // by itself makes a flooded gateway look identical to an idle one. Said in the
+  // control strip rather than the error banner: the count failing costs the
+  // operator a hint, not the log they came for, and `retry: false` means a single
+  // blip would otherwise raise a page-level alarm the next poll silently clears.
+  const newRowsUnknown = newRowsRelevant && liveCount.isError;
   // Neither the default preset nor the unbounded "All" is itself a filter: only an
   // explicit sub-window or a bounded non-default preset narrows the window, so a
   // brand-new gateway reads "never used" on both its 24h default and on "All",
@@ -1586,6 +1594,14 @@ export function ActivityPage() {
                   {newRows.toLocaleString()} new · load
                 </Button>
               ) : null}
+              {newRowsUnknown ? (
+                <span
+                  className="text-xs text-[var(--otari-muted)]"
+                  title="The row count could not be read, so this page cannot tell whether newer requests have landed. Refresh to load whatever is there."
+                >
+                  Newer rows unknown
+                </span>
+              ) : null}
               <RefreshButton onRefresh={refresh} isFetching={usage.isFetching} updatedAt={usage.dataUpdatedAt} />
             </span>
           }
@@ -1703,7 +1719,19 @@ export function ActivityPage() {
         pageSize={pageSize}
         total={total}
         rowsOnPage={rows.length}
-        onPageChange={(next) => url.patch({ page: next })}
+        // Paging re-reads the count as well as the rows. The total is a property of
+        // the filters, not of the page, so it is not in the count's key and a frozen
+        // page would carry whichever value it loaded with. That understates a table
+        // traffic has grown, and `TablePagination` derives `isLast` from the total
+        // whenever it has one, so the operator hits a wall short of the real end and
+        // the oldest rows sit past it, unreachable until a manual refresh. Paging is
+        // a deliberate act, so re-reading here keeps the total describing a set the
+        // operator can actually navigate, without putting a self-moving number under
+        // a table that deliberately holds still.
+        onPageChange={(next) => {
+          url.patch({ page: next });
+          void count.refetch();
+        }}
         onPageSizeChange={(size) => url.patch({ size, page: 0 })}
         isFetching={usage.isFetching}
         hasNextFallback={rows.length === pageSize}

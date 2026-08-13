@@ -192,7 +192,11 @@ gateway.
   **N new** appears once requests have landed since the page was drawn; press it to
   load them. It is a count only, so the table stays where you left it until you say
   otherwise. It is offered on the first page of a window that is still open, the
-  only place where loading newer rows would bring them into view.
+  only place where loading newer rows would bring them into view. If that count
+  cannot be read, the strip says **Newer rows unknown** rather than falling silent,
+  which would leave a busy gateway looking like an idle one. Paging re-reads the
+  row total along with the rows, so a log that has grown since you opened it does
+  not leave its oldest entries stranded past the end of the paginator.
   The **Routing** column names the policy a caller asked for, if any, plus where
   this row sits in that policy's plan and how it turned out: "served on attempt 2
   of 2 (a fallback candidate)", or, on an attempt a fallback recovered from,

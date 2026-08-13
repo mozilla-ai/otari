@@ -1705,6 +1705,62 @@ describe("ActivityPage live traffic", () => {
     }
   });
 
+  it("re-reads the total when the operator pages, so newer rows do not strand the old ones", async () => {
+    // The total is not in the count's key, so a frozen page would keep whichever
+    // value it loaded with. `TablePagination` derives `isLast` from the total
+    // whenever it has one, so an understated total disables Next short of the real
+    // end and leaves the oldest rows unreachable. On main the settle-refetch hid
+    // this by re-reading the count on any traffic; nothing does now except this.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      let serverTotal = 100;
+      mockApi({ rows: [entry()], total: () => serverTotal });
+      renderPage(<ActivityPage />, "/activity?range=24h&size=50");
+
+      await screen.findByText("gpt-4o");
+      await waitFor(() => expect(screen.getByText(/of 100/)).toBeInTheDocument());
+
+      // Twenty land, taking the log to three pages of fifty.
+      serverTotal = 120;
+      await user.click(screen.getByRole("button", { name: /next page/i }));
+
+      await waitFor(() => expect(screen.getByText(/of 120/)).toBeInTheDocument());
+      // The third page is reachable, so the oldest twenty are not stranded behind a
+      // boundary computed from a total that has moved on.
+      expect(screen.getByRole("button", { name: /next page/i })).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says so when it cannot tell whether newer rows exist", async () => {
+    // A badge that is simply absent reads as "nothing has landed". On a table that
+    // no longer moves by itself, that makes a flooded gateway look like an idle one.
+    let countAsks = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      // The pinned count and the polled one share a URL, so fail every count after
+      // the first: the page keeps a total and loses any way to tell if it is current.
+      if (url.includes("/v1/usage/count")) {
+        countAsks += 1;
+        return countAsks === 1 ? jsonResponse({ total: 1 }) : jsonResponse({ detail: "nope" }, 500);
+      }
+      if (url.includes("/v1/usage/in-flight")) return jsonResponse({ requests: [], total: 0 });
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse({ by_model: [], by_user: [], by_api_key: [], by_source: [], series: [] });
+      }
+      return jsonResponse([entry()]);
+    });
+
+    renderPage(<ActivityPage />, "/activity?range=24h");
+
+    await screen.findByText("gpt-4o");
+    await waitFor(() => expect(screen.getByText("Newer rows unknown")).toBeInTheDocument());
+    // Still no false badge, and the log itself is not reported as broken.
+    expect(screen.queryByRole("button", { name: /new · load/ })).not.toBeInTheDocument();
+  });
+
   it("does not poll for newer rows on a page that cannot show them", async () => {
     // Newer rows land at the top of page 1, so on page 3 a badge offering to load
     // them would be a promise the refresh does not keep.
