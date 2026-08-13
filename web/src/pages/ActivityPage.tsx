@@ -1,10 +1,11 @@
-import { Button } from "@heroui/react";
+import { Button, Popover } from "@heroui/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
   useDeleteUsage,
   useInFlightRequests,
+  useLiveUsageCount,
   useSetPricing,
   useSetUsagePrice,
   useRequestGroups,
@@ -13,7 +14,7 @@ import {
   useUsageSummary,
 } from "@/api/hooks";
 import type {
-  InFlightRequest,
+  InFlightResponse,
   SummaryDimension,
   UsageEntry,
   UsageFilters,
@@ -116,50 +117,20 @@ function timeAgo(iso: string): string {
 //
 // A usage row is written when a request settles, so the log alone can only
 // describe the past: on a slow backend a 30-second call is invisible for its whole
-// duration. A tracked request is therefore rendered as a row in this same table,
-// pinned above the settled rows and carrying the status below, so that when it
-// lands the row resolves in place into the success or error row it became. The
-// synthetic row is shaped as a `UsageEntry` so the table's columns, widths,
-// selection, and detail machinery need no separate code path: the outcome fields
-// are null, which the shared formatters already render as their own placeholder.
-const IN_FLIGHT_STATUS = "in progress";
-
-// Browser-local timestamp the wait counts up from, present only on a synthetic
-// row. Derived from the poll's `dataUpdatedAt` minus the server's own `elapsed_ms`,
-// so the wait never depends on the browser clock agreeing with the gateway's.
-type ActivityRow = UsageEntry & { inFlightStartedAtMs?: number };
-
-const isInFlightRow = (row: ActivityRow): boolean => row.status === IN_FLIGHT_STATUS;
-
-function inFlightRow(request: InFlightRequest, startedAtMs: number): ActivityRow {
-  return {
-    inFlightStartedAtMs: startedAtMs,
-    id: request.id,
-    user_id: request.user_id,
-    api_key_id: request.api_key_id,
-    timestamp: request.started_at,
-    model: request.model,
-    provider: request.provider,
-    endpoint: request.endpoint,
-    prompt_tokens: null,
-    completion_tokens: null,
-    total_tokens: null,
-    cache_read_tokens: null,
-    cache_write_tokens: null,
-    cost: null,
-    status: IN_FLIGHT_STATUS,
-    error_message: null,
-    status_code: null,
-    policy_name: request.policy_name,
-    latency_ms: null,
-    source: "gateway",
-    source_label: null,
-    // Never selectable: bulk delete and reprice target logged rows, and this one
-    // does not exist in the table yet. `true` is what the page's existing
-    // disabled-key rule keys on, so no extra case is needed there.
-    counts_toward_budget: true,
-  };
-}
+// duration. What is running right now is therefore reported beside the refresh
+// control, as a count that opens the list, rather than as rows pinned above the
+// log.
+//
+// Rows are what this replaced, and the reason is the same one that froze the log
+// (see `useUsageLogs`): the live rows re-derived themselves on a 2s poll, so on a
+// gateway with real traffic the top of the table reordered itself continuously
+// and an operator could not read a row before it moved. Off to one side, the same
+// information costs the table nothing, and an operator who wants the live view
+// opens it deliberately.
+//
+// The trade this makes: a request no longer resolves in place from live row into
+// settled row. It leaves the list when it lands and appears in the log at the
+// next refresh.
 
 // Coarser than the settled Total time column: this is a wall-clock wait an
 // operator is watching rather than a measurement, so sub-second precision is
@@ -171,11 +142,10 @@ function formatElapsed(ms: number): string {
   return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
-// The wait, ticking between the 2s polls: on the one row whose whole point is that
-// it has not finished, a number that only moved when a response landed would read
-// as stalled. Each live row owns its interval so the `columns` array stays
-// referentially stable and DataTable's per-row cache is not rebuilt every second
-// (see the DataTable docstring).
+// The wait, ticking between the 2s polls: on an entry whose whole point is that it
+// has not finished, a number that only moved when a response landed would read as
+// stalled. Rendered only inside the open live list, so nothing ticks on a page
+// whose operator has not asked to watch one.
 function InFlightWait({ startedAtMs }: { startedAtMs: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -186,18 +156,99 @@ function InFlightWait({ startedAtMs }: { startedAtMs: number }) {
   return <span className="tabular-nums">{formatElapsed(Math.max(0, now - startedAtMs))}</span>;
 }
 
+// The live count, and the list behind it. Reports the gateway as a whole and says
+// so: the endpoint takes no filters, so scoping the label to the current view
+// would claim a narrowing that was never applied.
+//
+// The list is rendered only while the popover is open, so the per-entry 1s ticks
+// exist only for as long as someone is reading them; closed, this is one number
+// that changes every couple of seconds well away from the table.
+//
+// The Button is a direct child of the popover root rather than wrapped in
+// `Popover.Trigger`, which renders its own `role="button"` div and would nest one
+// control inside another. HeroUI's Button is a react-aria Button, so the root
+// wires it up through context.
+//
+// Open state is held here, and the whole control renders only while there is
+// something to report *or* the list is open. An idle gateway therefore shows no
+// control at all, but a list an operator has opened is not torn out from under
+// them when the request they were watching lands: it stays, reading "0 in flight",
+// until they close it. That is also why the count is controlled rather than left
+// to `DialogTrigger`'s own state, which unmounting would discard.
+function InFlightControl({ data, updatedAt }: { data: InFlightResponse; updatedAt: number }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const shown = data.requests;
+  const hidden = Math.max(0, data.total - shown.length);
+  if (data.total === 0 && !isOpen) return null;
+  return (
+    <Popover isOpen={isOpen} onOpenChange={setIsOpen}>
+      <Button size="sm" variant="outline">
+        {/* Decorative: the count beside it carries the same meaning in text, so
+            nothing is encoded in motion alone. That is also why it can stop
+            outright under `prefers-reduced-motion`, being the one element on the
+            page that would otherwise animate indefinitely. Still at zero, where
+            a pulse would suggest activity that is not there. */}
+        <span
+          className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full motion-reduce:animate-none ${
+            data.total > 0 ? "animate-pulse bg-[var(--otari-brand-dark)]" : "bg-[var(--otari-muted)]"
+          }`}
+          aria-hidden="true"
+        />
+        {data.total.toLocaleString()} in flight
+      </Button>
+      <Popover.Content placement="bottom end">
+        <Popover.Dialog>
+          <div className="flex w-80 flex-col gap-2">
+            <Popover.Heading className="text-sm font-medium">In flight</Popover.Heading>
+            <p className="text-xs text-[var(--otari-muted)]">
+              Running right now, across the whole gateway; longest-running first. Not narrowed by the filters above.
+            </p>
+            {shown.length === 0 ? (
+              <p className="text-sm text-[var(--otari-muted)]">
+                Nothing running right now. Newly settled requests join the log at the next refresh.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {shown.map((request) => (
+                  <li key={request.id} className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="min-w-0">
+                      <span className="block truncate">{request.model}</span>
+                      <span className="block truncate text-xs text-[var(--otari-muted)]">
+                        {request.user_id ?? "—"}
+                        {request.policy_name ? ` · ${request.policy_name}` : ""}
+                      </span>
+                    </span>
+                    <InFlightWait startedAtMs={updatedAt - request.elapsed_ms} />
+                  </li>
+                ))}
+              </ul>
+            )}
+            {/* Only when the endpoint's cap actually bit, which takes more
+                concurrency than a live list can usefully show anyway. */}
+            {hidden > 0 ? (
+              <p className="text-xs text-[var(--otari-muted)]">
+                {hidden.toLocaleString()} further {hidden === 1 ? "request is" : "requests are"} in flight beyond the{" "}
+                {shown.length.toLocaleString()} listed.
+              </p>
+            ) : null}
+          </div>
+        </Popover.Dialog>
+      </Popover.Content>
+    </Popover>
+  );
+}
+
 // Stable row-key getter and row class so DataTable's per-row cache holds
 // across re-renders (see the DataTable docstring); an inline arrow here would
 // rebuild every row on each selection click.
-const getActivityRowKey = (e: ActivityRow): string => e.id;
+const getActivityRowKey = (e: UsageEntry): string => e.id;
 
 // An absorbed attempt is a failure a routing policy recovered from, so the
 // request it belongs to succeeded. Styling it like an error would make a working
 // fallback chain read as an outage, which is the same reason the server keeps it
 // out of error_count. Amber says "something happened here" without saying "this
 // request failed".
-const activityRowClassName = (e: ActivityRow): string | undefined => {
-  if (isInFlightRow(e)) return "bg-[var(--otari-brand-tint)]";
+const activityRowClassName = (e: UsageEntry): string | undefined => {
   if (e.status === "error") return "bg-red-50";
   if (e.status === "absorbed") return "bg-amber-50";
   return undefined;
@@ -240,11 +291,6 @@ const TOOL_OPTIONS: { label: string; value: string }[] = [
 const TOOL_BREAKDOWN: SummaryDimension[] = ["tool"];
 
 const DEFAULT_PAGE_SIZE = 50;
-
-// Floor on how often a settled in-flight request may pull the log again. Matches
-// the log's own `staleTime` in `useUsageLogs`, so this never delays a refresh the
-// query would have served from cache anyway.
-const SETTLED_REFETCH_MIN_MS = 10_000;
 
 // The only breakdown this page reads: the in-window models behind the typeahead.
 // The typeahead reads `by_model`; the source picker's option list piggybacks on
@@ -331,16 +377,6 @@ function StatusPill({ status }: { status: string }) {
         : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]";
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
-      {/* The pulse is decorative: "in progress" beside it carries the same meaning
-          in text, so nothing here is encoded in motion alone. That is also why it
-          can stop outright under `prefers-reduced-motion`: this is the one element
-          on the page that would otherwise animate indefinitely. */}
-      {status === IN_FLIGHT_STATUS ? (
-        <span
-          className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--otari-brand-dark)] motion-reduce:animate-none"
-          aria-hidden="true"
-        />
-      ) : null}
       {status}
     </span>
   );
@@ -994,52 +1030,19 @@ export function ActivityPage() {
 
   // Requests in progress, read unfiltered: the endpoint has no filters, because a
   // request that has not finished has no outcome, cost, or token count to filter
-  // on. Which of them belong in the current view is decided below.
+  // on. Reported gateway-wide beside the refresh control, not as rows.
   const inFlight = useInFlightRequests();
 
-  // A tracked request that has left the in-flight list just settled, so its row
-  // exists in the log now. Pull it in, so the operator watches the live row turn
-  // into its settled one rather than vanish until they press refresh. Keyed on
-  // ids, not on the count: one request finishing while another starts leaves the
-  // count unchanged.
+  // How far behind the frozen page has fallen. Polled while the count it is
+  // compared against is not (see `useUsageCount`), so the difference is "rows that
+  // have landed since this page was drawn".
   //
-  // Rate-limited, because the registry is per-process: a deployment running
-  // several otari processes behind a load balancer answers consecutive polls from
-  // different processes, so a request that is still running reads as settled on
-  // every poll. Unthrottled that refetches the log and its `COUNT(*)` every two
-  // seconds for as long as the gateway has any traffic at all. The ceiling matches
-  // the log's own `staleTime`, so a genuine settle still refreshes promptly and
-  // the flapping case costs one extra pair of reads per interval instead of one
-  // per poll.
-  //
-  // Deferred rather than dropped when the throttle bites: a settle is remembered
-  // on `settlePending` and served by the first poll past the window. Discarding it
-  // instead lost the row entirely, because the id is gone from the next poll and
-  // nothing re-detects it: two requests landing inside one 10-second window left
-  // the second one's row missing from the log until an unrelated later settle or a
-  // manual refresh. The flapping case is unchanged (it re-flags every poll either
-  // way, and still costs one refetch per interval).
-  //
-  // Keyed on `dataUpdatedAt` as well as the payload, so a deferred settle is
-  // reconsidered on the next poll: an idle registry answers every poll with the
-  // same `{requests: [], total: 0}`, which structural sharing hands back as the
-  // same object, so `data` alone stops changing the moment the last request lands.
-  const seenInFlightIds = useRef<Set<string>>(new Set());
-  const lastSettledRefetch = useRef(0);
-  const settlePending = useRef(false);
-  useEffect(() => {
-    if (!inFlight.data) return;
-    const live = new Set((inFlight.data.requests ?? []).map((request) => request.id));
-    if ([...seenInFlightIds.current].some((id) => !live.has(id))) settlePending.current = true;
-    seenInFlightIds.current = live;
-    if (!settlePending.current) return;
-    const now = Date.now();
-    if (now - lastSettledRefetch.current < SETTLED_REFETCH_MIN_MS) return;
-    settlePending.current = false;
-    lastSettledRefetch.current = now;
-    void usage.refetch();
-    void count.refetch();
-  }, [inFlight.data, inFlight.dataUpdatedAt, usage.refetch, count.refetch]);
+  // Only asked for where it can be acted on. On page 2 onward, refreshing does not
+  // bring newer rows into view (they land at the top of page 1), so a badge
+  // offering to load them would be a promise the button does not keep; a window
+  // that ends in the past can gain no rows at all, so the poll would be pure cost.
+  const newRowsRelevant = page === 0 && !filters.end_date;
+  const liveCount = useLiveUsageCount(filters, newRowsRelevant);
 
   // Model suggestions: models with usage in the window (other filters applied, the
   // model filter omitted so the full list stays offered).
@@ -1187,66 +1190,14 @@ export function ActivityPage() {
 
   const rows = usage.data ?? [];
 
-  // The live rows to pin above this page, and how many the endpoint left out.
-  //
-  // Kept separate from `rows` throughout: `rows` is what the paginator counts and
-  // what the bulk actions target, and a request that has not been logged belongs
-  // in neither. Newest-first like the rest of the table, so the row an operator
-  // just triggered appears at the top and stays there as it resolves (the endpoint
-  // serves the longest-running first, which is the order the cap applies in).
-  //
-  // Suppressed rather than shown wherever the current view cannot honestly include
-  // them: page 2 onward (they are not part of any page's slice), a window that ends
-  // in the past, and any filter on something a request has not got yet (outcome,
-  // price, tools, provenance). The identity filters can be applied, so they are.
-  const { inFlightRows, inFlightHidden } = useMemo(() => {
-    const none = { inFlightRows: [] as ActivityRow[], inFlightHidden: 0 };
-    // A failed poll leaves the list unknown, not unchanged. TanStack keeps the last
-    // successful payload, so without the `isError` arm the rows would stay on
-    // screen with their waits still climbing against a frozen anchor, asserting
-    // that work is running which may have landed minutes ago. That is the state
-    // `useInFlightRequests` already refuses to cache across mounts, so it must not
-    // be reached by a different route either. The failure reaches the operator
-    // through the page's error banner rather than as rows quietly disappearing.
-    if (!inFlight.data || inFlight.isError || page > 0) return none;
-    if (filters.end_date || statusFilter || pricedFilter || toolFilter || sourceFilter || sessionFilter) return none;
-    const matching = inFlight.data.requests.filter(
-      (request) =>
-        (modelFilters.length === 0 || modelFilters.includes(request.model)) &&
-        (userFilters.length === 0 || (request.user_id !== null && userFilters.includes(request.user_id))) &&
-        (apiKeyFilters.length === 0 || (request.api_key_id !== null && apiKeyFilters.includes(request.api_key_id))) &&
-        (!endpointFilter || request.endpoint === endpointFilter) &&
-        (!providerFilter || request.provider === providerFilter),
-    );
-    return {
-      inFlightRows: matching
-        .map((request) => inFlightRow(request, inFlight.dataUpdatedAt - request.elapsed_ms))
-        .reverse(),
-      // Only meaningful when nothing was filtered out locally; a filtered view
-      // cannot say how many of the requests the endpoint dropped would have matched.
-      inFlightHidden: matching.length === inFlight.data.requests.length ? inFlight.data.total - matching.length : 0,
-    };
-  }, [
-    inFlight.data,
-    inFlight.dataUpdatedAt,
-    inFlight.isError,
-    page,
-    filters.end_date,
-    statusFilter,
-    pricedFilter,
-    toolFilter,
-    sourceFilter,
-    sessionFilter,
-    modelFilters,
-    userFilters,
-    apiKeyFilters,
-    endpointFilter,
-    providerFilter,
-  ]);
-
-  // What the table renders: live rows pinned above the logged page.
-  const tableRows = useMemo<ActivityRow[]>(() => [...inFlightRows, ...rows], [inFlightRows, rows]);
-  const inFlightIds = useMemo(() => new Set(inFlightRows.map((row) => row.id)), [inFlightRows]);
+  // What the live control may report. A failed poll leaves the list unknown, not
+  // unchanged: TanStack keeps the last successful payload, so without the
+  // `isError` arm the count would sit there with its waits climbing against a
+  // frozen anchor, asserting that work is running which may have landed minutes
+  // ago. That is the state `useInFlightRequests` already refuses to cache across
+  // mounts, so it must not be reachable by this route either. The failure reaches
+  // the operator through the page's error banner instead.
+  const liveNow = inFlight.isError ? undefined : inFlight.data;
 
   // What served each routed request on this page. Built from the page itself where
   // possible (a group's attempts are written milliseconds apart, so they are
@@ -1272,6 +1223,13 @@ export function ActivityPage() {
 
   const totalIsExact = count.isSuccess && !count.isPlaceholderData;
   const total = totalIsExact ? (count.data?.total ?? 0) : null;
+
+  // Rows that have landed since this page was drawn, as the gap between the polled
+  // count and the pinned one. Clamped at zero because the gap can close from the
+  // other side: a bulk delete, or a rolling window whose start has moved past rows
+  // the pinned count still includes, both make the live figure the smaller one, and
+  // "-14 new" is not a thing to show an operator.
+  const newRows = total != null && liveCount.data ? Math.max(0, liveCount.data.total - total) : 0;
   // Neither the default preset nor the unbounded "All" is itself a filter: only an
   // explicit sub-window or a bounded non-default preset narrows the window, so a
   // brand-new gateway reads "never used" on both its 24h default and on "All",
@@ -1345,10 +1303,9 @@ export function ActivityPage() {
   ];
 
   // Selection targets imported rows only; enforced gateway rows are disabled so
-  // bulk delete / set-price can never reach them. Over `tableRows`, so a live row
-  // is disabled too: it carries `counts_toward_budget` true for exactly that.
+  // bulk delete / set-price can never reach them.
   const selectableKeys = useMemo(() => rows.filter((r) => !r.counts_toward_budget).map((r) => r.id), [rows]);
-  const disabledKeys = useMemo(() => tableRows.filter((r) => r.counts_toward_budget).map((r) => r.id), [tableRows]);
+  const disabledKeys = useMemo(() => rows.filter((r) => r.counts_toward_budget).map((r) => r.id), [rows]);
   const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
   const pageSelectedCount = selectedIds.length;
   const hasSelection = selection.allMatching || pageSelectedCount > 0;
@@ -1476,6 +1433,12 @@ export function ActivityPage() {
   const refresh = () => {
     void usage.refetch();
     void count.refetch();
+    // Re-read alongside the count it is compared against, or the badge would keep
+    // offering rows the refresh just loaded. Guarded for the same reason as the
+    // source summary below: refetch() ignores `enabled`.
+    if (newRowsRelevant) {
+      void liveCount.refetch();
+    }
     void inFlight.refetch();
     void contextSummary.refetch();
     void modelSummary.refetch();
@@ -1511,7 +1474,7 @@ export function ActivityPage() {
   // Memoized on its per-render inputs (the key labels and the routing outcomes,
   // both themselves memoized) so DataTable's per-row cache holds: a fresh array
   // every render would rebuild all rows per click.
-  const columns = useMemo<DataTableColumn<ActivityRow>[]>(() => {
+  const columns = useMemo<DataTableColumn<UsageEntry>[]>(() => {
     const apiKeyLabel = (entry: UsageEntry): string =>
       entry.api_key_id === null ? "—" : (entry.api_key_name ?? `${entry.api_key_id.slice(0, 8)}…`);
     return [
@@ -1568,14 +1531,7 @@ export function ActivityPage() {
         id: "latency",
         header: "Total time",
         align: "end",
-        // A live row has no total yet, so the column carries the wait so far. Same
-        // column deliberately: it is the number an operator is already reading down.
-        cell: (e) =>
-          e.inFlightStartedAtMs === undefined ? (
-            formatLatency(e.latency_ms)
-          ) : (
-            <InFlightWait startedAtMs={e.inFlightStartedAtMs} />
-          ),
+        cell: (e) => formatLatency(e.latency_ms),
       },
       { id: "status", header: "Status", cell: (e) => <StatusPill status={e.status} /> },
     ];
@@ -1609,7 +1565,25 @@ export function ActivityPage() {
           windowEnd={win.end}
           loading={contextSummary.isLoading}
           ariaLabel="Activity request volume over the selected window"
-          action={<RefreshButton onRefresh={refresh} isFetching={usage.isFetching} updatedAt={usage.dataUpdatedAt} />}
+          action={
+            <span className="inline-flex items-center gap-2">
+              {/* Both live signals sit here, beside the control that acts on them:
+                  the table below never moves on its own, so this strip is the only
+                  place the page says anything is still happening. */}
+              {/* Rendered whenever the poll is answering at all, not only when it
+                  reports traffic: the control hides itself while idle, but has to
+                  stay mounted to keep an open list open across the moment the last
+                  request lands. It still goes on a failed poll, where `liveNow` is
+                  undefined, since there is nothing trustworthy left to report. */}
+              {liveNow ? <InFlightControl data={liveNow} updatedAt={inFlight.dataUpdatedAt} /> : null}
+              {newRows > 0 ? (
+                <Button size="sm" variant="outline" onPress={refresh} isDisabled={usage.isFetching}>
+                  {newRows.toLocaleString()} new · load
+                </Button>
+              ) : null}
+              <RefreshButton onRefresh={refresh} isFetching={usage.isFetching} updatedAt={usage.dataUpdatedAt} />
+            </span>
+          }
         />
         <FilterChips chips={filterChips} onClearAll={clearEntityFilters}>
           <FilterSelect id="filter-status" label="Status" value={statusFilter} onChange={(value) => url.patch({ status: value })}>
@@ -1705,7 +1679,7 @@ export function ActivityPage() {
       <DataTable
         ariaLabel="Activity log"
         columns={columns}
-        rows={tableRows}
+        rows={rows}
         getRowKey={getActivityRowKey}
         isLoading={usage.isLoading}
         emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
@@ -1713,26 +1687,11 @@ export function ActivityPage() {
         selectedKeys={selection.selectedKeys}
         onSelectionChange={selection.onSelectionChange}
         disabledKeys={disabledKeys}
-        // A live row has no detail to open: every field the panel reads (tokens,
-        // cost, the pricing breakdown, the attempt plan) is written when the
-        // request settles. Clicking it does nothing until it does.
-        onRowAction={(key) => {
-          if (inFlightIds.has(key)) return;
-          setExpandedId((current) => (current === key ? null : key));
-        }}
+        onRowAction={(key) => setExpandedId((current) => (current === key ? null : key))}
         rowClassName={activityRowClassName}
         detailKey={expandedId}
         renderDetail={renderDetail}
       />
-
-      {/* Only when the endpoint's cap actually bit, which takes more concurrency
-          than a live view can usefully list anyway. */}
-      {inFlightHidden > 0 ? (
-        <p className="text-xs text-[var(--otari-muted)]">
-          {inFlightHidden.toLocaleString()} further {inFlightHidden === 1 ? "request is" : "requests are"} in flight
-          beyond the {inFlightRows.length.toLocaleString()} listed; the longest-running are shown.
-        </p>
-      ) : null}
 
       <TablePagination
         page={page}

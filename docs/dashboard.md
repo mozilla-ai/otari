@@ -160,35 +160,39 @@ gateway.
 
 - **Activity**: the per-request log of what the gateway served, with filters.
   Use it to inspect individual requests, their models, and their outcomes.
-  A usage row is written when a request settles, so the log would otherwise only
-  describe the past. Requests still running appear in the same table, pinned above
-  the settled rows with the status **in progress** and, in place of a total time, a
-  wait that ticks up as you watch. When the request lands, the row resolves in
-  place into the success or error row it became, so a 30-second call to a local
-  model reads as progress rather than as nothing happening. Completions,
+  The table is a snapshot, and it holds still: it loads when you open the page and
+  reloads when you ask it to, by pressing refresh or by changing a filter, the
+  window, or the page. Nothing reorders itself while you are reading, which on a
+  busy gateway is the difference between a log you can inspect and a feed you
+  cannot. Two controls beside the refresh button carry what is happening
+  meanwhile.
+  **N in flight** counts the requests the gateway is serving right now, and opens
+  the list of them: what model, for which user, and a wait that ticks up as you
+  watch. A usage row is only written when a request settles, so without this a
+  30-second call to a local model would read as nothing happening. The control is
+  there only while something is running, with one exception: a list you have opened
+  stays open when the last request lands, reading **0 in flight**, rather than
+  vanishing at the moment you were waiting for. Close it and it goes. Completions,
   embeddings, image generations, audio, and searches all appear, each from the
   moment it clears the budget and access checks until its response has been fully
   sent (a streamed answer stays listed for as long as it is still producing
   tokens). Batches are the exception: the work runs on the provider's side after
   the submission returns, so there is no in-flight window to show. A request
-  refused on budget, access, or model-resolution grounds never appears as in
-  progress: it was never running, and it lands in the log with its reason. A
-  completion refused later, by an input guardrail or a bad tool declaration, can be
-  listed for as long as that check takes, since the gateway really is working on it
-  by then. An in-progress row is not part of any page of the
-  log, so it is never counted in the paginator, never selectable for a bulk delete
-  or reprice, and has no request detail to open until it settles. It is dropped
-  from view rather than shown misleadingly whenever the current view could not
-  honestly include it: on page 2 onward, in a window that ends in the past, and
-  under any filter on something the request has not got yet (status, priced, tool,
-  source, session). The model, user, key, endpoint, and provider filters do apply
-  to it. The log refreshes on its own as requests land, at most every 10 seconds,
-  so a busy gateway does not re-query it continuously. Live rows are read from the
-  process that answers the poll, so a deployment running several otari processes
-  behind a load balancer shows one process's traffic at a time, and which one it
-  shows can change between polls. There is no deployment-wide total: the
-  `gateway_active_requests` Prometheus metric is close but not the same number, as
-  it counts every HTTP request a process is handling, dashboard polls included.
+  refused on budget, access, or model-resolution grounds never appears here: it was
+  never running, and it lands in the log with its reason. A completion refused
+  later, by an input guardrail or a bad tool declaration, can be listed for as long
+  as that check takes, since the gateway really is working on it by then. The count
+  is gateway-wide and is not narrowed by the filters above it: a request in
+  progress has no outcome, cost, or token count for those filters to match on. It
+  is read from the process that answers the poll, so a deployment running several
+  otari processes behind a load balancer shows one process's traffic at a time, and
+  which one it shows can change between polls. There is no deployment-wide total:
+  the `gateway_active_requests` Prometheus metric is close but not the same number,
+  as it counts every HTTP request a process is handling, dashboard polls included.
+  **N new** appears once requests have landed since the page was drawn; press it to
+  load them. It is a count only, so the table stays where you left it until you say
+  otherwise. It is offered on the first page of a window that is still open, the
+  only place where loading newer rows would bring them into view.
   The **Routing** column names the policy a caller asked for, if any, plus where
   this row sits in that policy's plan and how it turned out: "served on attempt 2
   of 2 (a fallback candidate)", or, on an attempt a fallback recovered from,
