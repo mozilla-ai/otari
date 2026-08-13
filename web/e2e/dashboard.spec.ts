@@ -260,8 +260,11 @@ test.describe("dashboard core flows", () => {
     // Every row count must render in both shapes: the frame is fixed, so the rows
     // divide a height budget, and a band collapsing to zero is the regression.
     // Width is checked too, and for the same reason: a wide card once set its hero
-    // at the square card's size, which ran the number off both edges of the frame
-    // and printed it over the model rows. Only scrollWidth showed that.
+    // at the square card's size, which ran the number off both edges of the frame.
+    // This seed cannot reproduce that on its own (it prices nothing, so the hero is
+    // a two-digit request count), and the unit suite covers the sizing itself; the
+    // check is here so any future arrangement that spills sideways is caught in the
+    // one place the card is measured after a real layout.
     for (const shape of ["Square", "Wide"]) {
       await dialog.getByRole("button", { name: shape }).click();
       for (const rows of ["1", "9"]) {

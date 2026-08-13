@@ -130,6 +130,19 @@ describe("ShareCard height budget", () => {
     expect(screen.getByText("1,204")).toBeInTheDocument();
   });
 
+  it("reserves the title's second line before the estimator's own error can clip it", () => {
+    // The slot clips what it does not reserve, and emWidth undercounts prose by
+    // ~10% against the Arial-metric stacks the card falls back to. A 60-character
+    // title measures over one line of a wide card in those fonts, so a slot sized
+    // from the bare estimate published a title with its second line missing.
+    const title = "our whole team summer token spend, mostly on our own models";
+    const { container } = renderCard({ ratio: "landscape", title });
+    const slot = container.querySelector<HTMLElement>('[role="img"]')?.children[0] as HTMLElement;
+    // Two line boxes, plus the few pixels of ink slack the slot carries.
+    expect(Number.parseFloat(slot.style.height)).toBeGreaterThanOrEqual(2 * Math.round(36 * 1.2));
+    expect(Number.parseFloat(slot.style.height)).toBeLessThan(3 * Math.round(36 * 1.2));
+  });
+
   const heroPx = (container: HTMLElement) => {
     const node = container.querySelector<HTMLElement>('[style*="font-weight: 700"]');
     return Number.parseFloat(node?.style.fontSize ?? "");

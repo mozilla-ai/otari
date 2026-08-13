@@ -33,10 +33,12 @@ const FLOOR_PX = 28;
  *
  * The card is rendered off-screen and rasterized in the same tick, so there is
  * nothing to measure: a layout pass would have to happen between deciding the
- * type size and drawing it. These per-class averages land within ~2% of Inter and
- * of the system stacks it falls back to for the strings the card actually sets
- * (formatted numbers, and a title of ordinary prose), which is enough to choose a
- * size that fits. Callers add a safety factor rather than trusting it exactly.
+ * type size and drawing it. These per-class averages are tuned on the formatted
+ * numbers the hero sets, where they track Inter to within ~1%, but the card is
+ * rasterized in whatever the viewer's stack resolves and no font is bundled, so
+ * the error against a real frame runs to ~10% low on prose and ~19% high on digits
+ * for the common fallbacks. Callers own that margin: size *down* from this and the
+ * error is slack, size a clipping box from it and the error costs content.
  */
 export function emWidth(text: string): number {
   let em = 0;
@@ -62,9 +64,10 @@ export function emWidth(text: string): number {
 
 /**
  * Twice the legibility floor: the point past which a value has stopped reading as
- * the headline. It is set low enough that a value long enough to reach it still
- * fits the narrower of the two frames, since a floor that clamps *up* into an
- * overflow would reintroduce the bug this fitting exists to fix.
+ * the headline. It covers every value this card can actually be handed, including
+ * eleven digits of request count in the narrower wide column. A value long enough
+ * to be clamped *up* by this floor does overflow, so it is set as low as legibility
+ * allows: reaching it takes roughly $100T of spend, which no formatter here emits.
  */
 const MIN_HERO = FLOOR_PX * 2;
 
@@ -197,8 +200,21 @@ export function ShareCard(props: ShareCardProps) {
   // Reserved rather than measured: the title is free text (up to 60 characters),
   // and a slot that grew with it would push the hero down by a line. Two lines is
   // the cap in both shapes; a wide card fits 60 characters on one.
-  const titleLines = Math.min(2, Math.max(1, Math.ceil((emWidth(title) * titleSize) / contentWidth)));
-  const titleSlot = titleLines * Math.round(titleSize * 1.2);
+  //
+  // The wrap is decided at 0.85 of the real width because the slot clips what it
+  // does not reserve, and the estimator runs low on prose: its per-class averages
+  // are numeric-accurate but undercount lowercase-heavy text by ~10% against the
+  // Arial-metric stacks this falls back to, which on a wide card silently dropped
+  // the second line of a 60-character title. Reserving a line that goes unused
+  // costs the rows some height; clipping one loses the words.
+  const titleLines = Math.min(2, Math.max(1, Math.ceil((emWidth(title) * titleSize) / (contentWidth * 0.85))));
+  // An exact pixel line height, not a unitless 1.2, so the slot is a whole number
+  // of line boxes rather than of a value the browser resolved for itself. The 4px
+  // is for ink, not layout: a font whose descenders run past their own line box
+  // (Liberation Sans does, by 3px at this size) would otherwise have the tail of a
+  // second-line "g" clipped by the slot that hides a third line.
+  const titleLine = Math.round(titleSize * 1.2);
+  const titleSlot = titleLines * titleLine + 4;
   const footerSlot = 40;
   /** The "tokens per model" caption plus the gap above it. */
   const captionSlot = 42;
@@ -378,7 +394,7 @@ export function ShareCard(props: ShareCardProps) {
           height: titleSlot,
           fontSize: titleSize,
           fontWeight: 600,
-          lineHeight: 1.2,
+          lineHeight: `${titleLine}px`,
           overflow: "hidden",
         }}
       >
