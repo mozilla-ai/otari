@@ -95,6 +95,21 @@ export function formatUsd(value: number): string {
   return usdCompact.format(value);
 }
 
+const usdWhole = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+// Dollars set as a headline rather than read off a table. From $100 up the cents
+// are receipt detail: they add two of the widest glyphs on the line to carry a
+// precision nobody checks at a glance, and on the share card that width comes
+// straight out of the type size. Below $100 they still say something, since the
+// difference between $4.10 and $4.99 is a quarter of the number.
+export function formatUsdHeadline(value: number): string {
+  return Math.abs(value) >= 100 ? usdWhole.format(value) : usdCompact.format(value);
+}
+
 // Compact token counts for aggregate tiles: 12.4M / 84.2k / 512.
 export function formatTokens(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;

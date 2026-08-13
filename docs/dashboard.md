@@ -254,7 +254,9 @@ gateway.
   `otari.ai:fireworks/accounts/deepseek-v4-flash` reads as `deepseek-v4-flash`. A
   spend figure is marked with an asterisk whenever the window holds requests with
   no configured price, and a stat the window has no value for is left off rather
-  than published as a dash. Copy the image straight to the clipboard, or download
+  than published as a dash. From $100 up, a spend figure on the card is rounded to
+  whole dollars: at the size the lead figure is set, the cents cost more width than
+  they carry. The page's own tiles and tables keep them. Copy the image straight to the clipboard, or download
   it; copying needs a secure (https) origin, so on a plain-HTTP LAN address only
   the download is offered.
 

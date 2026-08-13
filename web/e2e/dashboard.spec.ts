@@ -259,6 +259,9 @@ test.describe("dashboard core flows", () => {
 
     // Every row count must render in both shapes: the frame is fixed, so the rows
     // divide a height budget, and a band collapsing to zero is the regression.
+    // Width is checked too, and for the same reason: a wide card once set its hero
+    // at the square card's size, which ran the number off both edges of the frame
+    // and printed it over the model rows. Only scrollWidth showed that.
     for (const shape of ["Square", "Wide"]) {
       await dialog.getByRole("button", { name: shape }).click();
       for (const rows of ["1", "9"]) {
@@ -270,9 +273,10 @@ test.describe("dashboard core flows", () => {
           if (node === null) {
             return { heights: [] as number[], overflows: false, missing: true };
           }
+          const box = node.getBoundingClientRect();
           return {
             heights: Array.from(node.children).map((c) => Math.round(c.getBoundingClientRect().height)),
-            overflows: node.scrollHeight > Math.round(node.getBoundingClientRect().height),
+            overflows: node.scrollHeight > Math.round(box.height) || node.scrollWidth > Math.round(box.width),
             missing: false,
           };
         });

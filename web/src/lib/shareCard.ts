@@ -1,6 +1,6 @@
 import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/api/types";
 
-import { formatNumber, formatPct, formatTokens, formatUsd } from "./format";
+import { formatNumber, formatPct, formatTokens, formatUsdHeadline } from "./format";
 import { billedTokenTotal, cacheHitRate, costNeedsCaveat, formatLatency } from "./usageTotals";
 
 // Derivations for the share card. Everything here is pure so the numbers the card
@@ -87,7 +87,10 @@ export function availableStats(inputs: StatInputs): CardStat[] {
   }
 
   if (!hideDollars && totals.cost > 0) {
-    stats.push({ id: "cost", label: "Spend", value: formatUsd(totals.cost), caveated: costNeedsCaveat(totals) });
+    // Headline dollars, not the page's tile format: the card sets this at up to
+    // 168px, where "$2,390.99" is a third wider than "$2,391" for two digits that
+    // carry nothing at that size.
+    stats.push({ id: "cost", label: "Spend", value: formatUsdHeadline(totals.cost), caveated: costNeedsCaveat(totals) });
   }
   if (totals.request_count > 0) {
     stats.push({ id: "requests", label: "Requests", value: formatNumber(totals.request_count) });

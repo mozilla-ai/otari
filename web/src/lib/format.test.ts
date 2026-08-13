@@ -9,6 +9,7 @@ import {
   formatReleaseDate,
   formatTokens,
   formatUsd,
+  formatUsdHeadline,
 } from "@/lib/format";
 
 describe("formatNumber", () => {
@@ -25,6 +26,19 @@ describe("formatUsd", () => {
     expect(formatUsd(1240.5)).toBe("$1,240.50");
     // No sub-cent precision here (unlike formatCost): tiles stay readable.
     expect(formatUsd(0.004)).toBe("$0.00");
+  });
+});
+
+describe("formatUsdHeadline", () => {
+  it("drops the cents once they stop carrying anything", () => {
+    expect(formatUsdHeadline(2390.99)).toBe("$2,391");
+    expect(formatUsdHeadline(100)).toBe("$100");
+    expect(formatUsdHeadline(-2390.99)).toBe("-$2,391");
+  });
+
+  it("keeps them below $100, where they are a quarter of the number", () => {
+    expect(formatUsdHeadline(99.99)).toBe("$99.99");
+    expect(formatUsdHeadline(4.2)).toBe("$4.20");
   });
 });
 

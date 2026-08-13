@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CardStat } from "@/lib/shareCard";
 
-import { CARD_SIZES, ShareCard, truncateModel } from "./ShareCard";
+import { CARD_SIZES, ShareCard, emWidth, fitHeroSize, truncateModel } from "./ShareCard";
 
 function renderCard(overrides: Partial<Parameters<typeof ShareCard>[0]> = {}) {
   return render(
@@ -130,15 +130,70 @@ describe("ShareCard height budget", () => {
     expect(screen.getByText("1,204")).toBeInTheDocument();
   });
 
+  const heroPx = (container: HTMLElement) => {
+    const node = container.querySelector<HTMLElement>('[style*="font-weight: 700"]');
+    return Number.parseFloat(node?.style.fontSize ?? "");
+  };
+
   it("gives the hero less height when the list is long, since nothing else can yield", () => {
     const short = renderCard({ models: models(3) });
-    const shortHero = short.container.querySelector<HTMLElement>('[style*="font-size: 200px"]');
-    expect(shortHero).not.toBeNull();
+    const shortHero = heroPx(short.container);
     short.unmount();
 
     const long = renderCard({ models: models(9) });
-    expect(long.container.querySelector('[style*="font-size: 200px"]')).toBeNull();
-    expect(long.container.querySelector('[style*="font-size: 150px"]')).not.toBeNull();
+    expect(heroPx(long.container)).toBeLessThan(shortHero);
+  });
+
+  it("sizes the hero to the value, so a four-figure spend does not run off the card", () => {
+    // The bug this replaces: a fixed 200px hero put "$2,390.99" 23px past the edge
+    // of a square card, and clean off a wide one.
+    const short = renderCard({ hero: { id: "cost", label: "Spend", value: "$412" } });
+    const shortHero = heroPx(short.container);
+    short.unmount();
+
+    const long = renderCard({ hero: { id: "cost", label: "Spend", value: "$1,234,567.89" } });
+    const longHero = heroPx(long.container);
+    expect(longHero).toBeLessThan(shortHero);
+    expect(emWidth("$1,234,567.89") * longHero).toBeLessThanOrEqual(CARD_SIZES.square.width - 72 * 2);
+  });
+
+  it("keeps the wide card's hero inside its own column", () => {
+    const { container } = render(
+      <ShareCard
+        ratio="landscape"
+        theme="dark"
+        title="Where my tokens went"
+        scope="s"
+        hero={{ id: "cost", label: "Spend", value: "$2,390.99" }}
+        models={models(5)}
+        stats={[{ id: "requests", label: "Requests", value: "12,204" }]}
+      />,
+    );
+    // 400 is the hero column; the wide card lays the claim beside the rows, so a
+    // hero sized against the full card width would print over them.
+    expect(emWidth("$2,390.99") * heroPx(container)).toBeLessThanOrEqual(400);
+  });
+});
+
+describe("fitHeroSize", () => {
+  it("gives a short value the full cap", () => {
+    expect(fitHeroSize("$412", 936, 168)).toBe(168);
+  });
+
+  it("steps a long value down until it fits", () => {
+    const size = fitHeroSize("$1,234,567.89", 400, 120);
+    expect(size).toBeLessThan(120);
+    expect(emWidth("$1,234,567.89") * size).toBeLessThanOrEqual(400);
+  });
+
+  it("stops shrinking rather than letting the headline disappear", () => {
+    expect(fitHeroSize("$123,456,789,012,345", 400, 120)).toBe(56);
+  });
+
+  it("estimates within a few percent of the real thing", () => {
+    // Measured in Chromium at 200px: "$2,390.99" is 959px wide and "12,204" is 660.
+    expect(emWidth("$2,390.99") * 200).toBeCloseTo(959, -2);
+    expect(emWidth("12,204") * 200).toBeCloseTo(660, -2);
   });
 });
 

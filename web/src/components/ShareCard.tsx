@@ -28,6 +28,65 @@ export type CardRatio = keyof typeof CARD_SIZES;
 /** Minimum type size at 1080 scale. Below this, the feed's downscale makes it noise. */
 const FLOOR_PX = 28;
 
+/**
+ * Approximate the width of `text`, in em, at the card's font.
+ *
+ * The card is rendered off-screen and rasterized in the same tick, so there is
+ * nothing to measure: a layout pass would have to happen between deciding the
+ * type size and drawing it. These per-class averages land within ~2% of Inter and
+ * of the system stacks it falls back to for the strings the card actually sets
+ * (formatted numbers, and a title of ordinary prose), which is enough to choose a
+ * size that fits. Callers add a safety factor rather than trusting it exactly.
+ */
+export function emWidth(text: string): number {
+  let em = 0;
+  for (const char of text) {
+    if (char === "," || char === "." || char === " " || char === "'" || char === "|") {
+      em += 0.28;
+    } else if (char === "-" || char === "*") {
+      em += 0.35;
+    } else if (char === "$") {
+      em += 0.58;
+    } else if (char >= "0" && char <= "9") {
+      em += 0.6;
+    } else if (char >= "A" && char <= "Z") {
+      em += 0.65;
+    } else if (char >= "a" && char <= "z") {
+      em += 0.52;
+    } else {
+      em += 0.6;
+    }
+  }
+  return em;
+}
+
+/**
+ * Twice the legibility floor: the point past which a value has stopped reading as
+ * the headline. It is set low enough that a value long enough to reach it still
+ * fits the narrower of the two frames, since a floor that clamps *up* into an
+ * overflow would reintroduce the bug this fitting exists to fix.
+ */
+const MIN_HERO = FLOOR_PX * 2;
+
+/**
+ * The largest type size at which `text` still fits `available` px, capped at `cap`.
+ *
+ * The hero is user data with no length bound: a hobby gateway's "$4.20" and a
+ * team's "1,204,881" go in the same slot. A single fixed size cannot serve both,
+ * and the one that was here (200px) put "$2,390.99" 23px past the edge of a square
+ * card and clean off a wide one. Size follows the value instead, so the cap is
+ * what a *short* value gets and a long one steps down from there.
+ */
+export function fitHeroSize(text: string, available: number, cap: number): number {
+  if (text.length === 0) {
+    return cap;
+  }
+  // 1.02 covers the estimator's error; MIN_HERO keeps a freak value legible rather
+  // than letting it shrink until it stops being the headline.
+  const fitted = Math.floor(available / (emWidth(text) * 1.02));
+  return Math.max(MIN_HERO, Math.min(cap, fitted));
+}
+
 /** Both palettes share this shape; `as const` alone would make them incompatible types. */
 export interface CardPalette {
   ground: string;
@@ -119,25 +178,69 @@ export function ShareCard(props: ShareCardProps) {
   const { width, height } = CARD_SIZES[ratio];
   const isLandscape = ratio === "landscape";
   const maxTokens = models.reduce((most, model) => Math.max(most, model.tokens), 0);
-  // The card is a fixed frame, so the row list has a fixed height budget and the
-  // rows divide it. Hard-coded row heights broke both ways: at three rows a square
-  // card left ~350px of blank space that read as a hole, and at nine rows the
-  // content overflowed and flex-shrink collapsed the title to zero height.
-  // Dividing a budget instead means every row count in the picker (1/3/5/9)
-  // renders, in both shapes, with the surplus staying ordinary margin.
+
+  // The two shapes are not one layout at two sizes. A wide card has 550px of usable
+  // height against a square card's 936, and the square's arrangement (hero, then
+  // rows, then a full-width stats band) needs about 800 of them, so the wide card
+  // ran its hero over the title above and its rows through the rule below. Wide
+  // splits into columns instead: the claim (hero plus its supporting stats) on the
+  // left, the evidence (the model rows) on the right, which gives the rows the
+  // whole middle height and gives the numbers a column narrow enough to size type
+  // against. Every constant below is one of the two shapes' real dimensions, and
+  // the row height is what is left after the fixed bands are subtracted, so a
+  // change to any of them moves the rows rather than silently overflowing.
+  const pad = isLandscape ? 40 : 72;
+  const contentWidth = width - pad * 2;
+  const contentHeight = height - pad * 2;
+  const bandGap = isLandscape ? 24 : 32;
+  const titleSize = isLandscape ? 36 : 40;
+  // Reserved rather than measured: the title is free text (up to 60 characters),
+  // and a slot that grew with it would push the hero down by a line. Two lines is
+  // the cap in both shapes; a wide card fits 60 characters on one.
+  const titleLines = Math.min(2, Math.max(1, Math.ceil((emWidth(title) * titleSize) / contentWidth)));
+  const titleSlot = titleLines * Math.round(titleSize * 1.2);
+  const footerSlot = 40;
+  /** The "tokens per model" caption plus the gap above it. */
+  const captionSlot = 42;
+
   const rowCount = Math.max(models.length, 1);
-  const rowsBudget = isLandscape ? 210 : 340;
+  const heroLabelSize = isLandscape ? 36 : 44;
+  // The wide card's hero column, sized so the widest supporting stat line
+  // ("$2,391  AVG LATENCY") still fits it.
+  const heroColumn = 400;
+  // A long list needs the hero to give up some height; nothing else on a square
+  // card can yield.
+  const heroCap = isLandscape ? 120 : rowCount > 5 ? 132 : 168;
+  const heroSize = fitHeroSize(hero?.value ?? "", isLandscape ? heroColumn : contentWidth, heroCap);
+  const heroBlock = Math.round(heroSize * 0.95) + 10 + Math.round(heroLabelSize * 1.1);
+
+  // Wide keeps its stats beside the hero, so only the square card spends a band on
+  // them. Both counts are subtracted here so the rows get exactly what is left.
+  const hasStatsBand = !isLandscape && stats.length > 0;
+  const statsBandHeight = hasStatsBand ? 2 + 32 + Math.round(64 * 1.05) + Math.round(FLOOR_PX * 1.2) : 0;
+  const bandCount = hasStatsBand ? 4 : 3;
+  const middleHeight = contentHeight - titleSlot - footerSlot - statsBandHeight - bandGap * (bandCount - 1);
+  // On a wide card the hero sits beside the rows and costs them no height at all.
+  const rowsArea = middleHeight - captionSlot - (isLandscape || hero === undefined ? 0 : heroBlock + 32);
+
   const rowGap = rowCount > 5 ? 8 : rowCount > 3 ? 12 : 18;
   // Floored at 34 so the 28px name still has room, capped so a single row does not
-  // become a band.
-  const rowHeight = Math.max(34, Math.min(isLandscape ? 40 : 56, Math.floor((rowsBudget - rowGap * (rowCount - 1)) / rowCount)));
-  // A long list needs the hero to give up some height; nothing else can yield.
-  // The 34px floor deliberately wins over rowsBudget: at nine rows the list needs
-  // 9*34 + 8*8 = 370px against a 340 budget, and the surplus comes out of the
-  // flexible middle block rather than shrinking a row below its own text. The e2e
-  // asserts no band collapses, which is what keeps that trade honest if heroSize
-  // or the padding ever moves.
-  const heroSize = rowCount > 5 ? 150 : 200;
+  // become a band. The floor deliberately wins over the budget: at the tightest
+  // combination the surplus comes out of the band gaps rather than shrinking a row
+  // below its own text. The e2e asserts no band collapses, which is what keeps that
+  // trade honest if these numbers ever move.
+  const rowHeight = Math.max(
+    34,
+    Math.min(isLandscape ? 44 : 56, Math.floor((rowsArea - rowGap * (rowCount - 1)) / rowCount)),
+  );
+  // The rows' fixed columns. Narrower on a wide card, where the row column is 680px
+  // rather than the square's 936 and the bar is what would otherwise vanish: it did,
+  // taking the token counts off the edge of the card with it.
+  const nameWidth = isLandscape ? 330 : 360;
+  const nameMax = isLandscape ? 22 : 28;
+  const valueWidth = isLandscape ? 100 : 120;
+  const rowInnerGap = isLandscape ? 16 : 20;
+
   // Only when a caveated stat is actually on the card, so the legend never
   // explains a mark the viewer cannot see.
   const showsCaveat = (hero?.caveated ?? false) || stats.some((stat) => stat.caveated);
@@ -148,6 +251,108 @@ export function ShareCard(props: ShareCardProps) {
         ? "* some requests unpriced"
         : undefined;
 
+  // On a wide card this column carries the whole claim: the hero and, under it,
+  // the stats a square card gives a band of its own.
+  const claimColumn = (
+    <div
+      style={{
+        // The fixed column is the hero's, so the empty state is not made to wrap
+        // inside a width chosen for a number that is not there.
+        flex: isLandscape && hero !== undefined ? `0 0 ${heroColumn}px` : "0 0 auto",
+        width: isLandscape && hero !== undefined ? heroColumn : undefined,
+      }}
+    >
+      {hero !== undefined ? (
+        <>
+          <div style={{ fontSize: heroSize, fontWeight: 700, lineHeight: 0.95 }}>{hero.value}</div>
+          <div
+            style={{ fontSize: heroLabelSize, fontWeight: 500, lineHeight: 1.1, color: palette.muted, marginTop: 10 }}
+          >
+            {hero.label}
+            {hero.caveated ? "*" : ""}
+          </div>
+        </>
+      ) : (
+        <div style={{ fontSize: 44, color: palette.muted }}>No usage in this range</div>
+      )}
+
+      {isLandscape && stats.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 28 }}>
+          {stats.map((stat) => (
+            <div key={stat.id} style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+              <span style={{ fontSize: 40, fontWeight: 600, lineHeight: 1.05 }}>
+                {stat.value}
+                {stat.caveated ? "*" : ""}
+              </span>
+              <span
+                style={{
+                  fontSize: FLOOR_PX,
+                  color: palette.muted,
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {stat.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const rowsColumn =
+    models.length === 0 ? null : (
+      <div
+        style={{
+          flex: isLandscape ? "1 1 0" : "0 0 auto",
+          minWidth: 0,
+          width: isLandscape ? undefined : "100%",
+          display: "flex",
+          flexDirection: "column",
+          gap: rowGap,
+        }}
+      >
+        {models.map((model) => (
+          <div
+            key={model.key ?? "__other__"}
+            data-share-row
+            style={{ display: "flex", alignItems: "center", gap: rowInnerGap, height: rowHeight }}
+          >
+            <span style={{ fontSize: FLOOR_PX, width: nameWidth, flexShrink: 0, whiteSpace: "nowrap" }}>
+              {truncateModel(model.label, nameMax)}
+            </span>
+            <span
+              style={{
+                flex: "1 1 0",
+                minWidth: 0,
+                height: Math.min(26, Math.round(rowHeight * 0.46)),
+                background: palette.track,
+                borderRadius: 13,
+              }}
+            >
+              <span
+                style={{
+                  display: "block",
+                  height: "100%",
+                  borderRadius: 10,
+                  width: maxTokens > 0 ? `${(model.tokens / maxTokens) * 100}%` : "0%",
+                  background: palette.bar,
+                }}
+              />
+            </span>
+            <span
+              style={{ fontSize: FLOOR_PX, color: palette.muted, width: valueWidth, flexShrink: 0, textAlign: "right" }}
+            >
+              {formatTokens(model.tokens)}
+            </span>
+          </div>
+        ))}
+        <div style={{ fontSize: FLOOR_PX, color: palette.muted }}>tokens per model</div>
+      </div>
+    );
+
   return (
     <div
       role="img"
@@ -155,83 +360,63 @@ export function ShareCard(props: ShareCardProps) {
       style={{
         width,
         height,
-        padding: 72,
+        padding: pad,
         boxSizing: "border-box",
         background: palette.ground,
         color: palette.ink,
         display: "flex",
         flexDirection: "column",
-        gap: 40,
+        gap: bandGap,
         fontFamily: "'Inter', system-ui, sans-serif",
       }}
     >
       {/* Fixed-height title slot so a one- or two-line title never shifts the
           hero below it. */}
-      <div style={{ flexShrink: 0, maxHeight: 96, fontSize: 40, fontWeight: 600, lineHeight: 1.2, overflow: "hidden" }}>{title}</div>
+      <div
+        style={{
+          flexShrink: 0,
+          height: titleSlot,
+          fontSize: titleSize,
+          fontWeight: 600,
+          lineHeight: 1.2,
+          overflow: "hidden",
+        }}
+      >
+        {title}
+      </div>
 
       {/* The hero and the model rows are one unit: the claim and its evidence.
           This block takes all the card's leftover height (flex: 1) and centres
           that unit inside it, so the slack collects above and below rather than
           being shared out between the number and the rows that explain it, which
-          is what `justify-content: space-between` on the card would otherwise do. */}
+          is what `justify-content: space-between` on the card would otherwise do.
+          The wide card's two columns live in one inner row, so they stay top
+          aligned with each other while the pair still centres as a unit: centring
+          each column on its own left a single model row floating in the middle of
+          an otherwise empty half. */}
       <div
         style={{
           flex: "1 1 auto",
           minHeight: 0,
           display: "flex",
-          flexDirection: isLandscape ? "row" : "column",
+          flexDirection: "column",
           justifyContent: "center",
-          gap: isLandscape ? 48 : 32,
-          alignItems: isLandscape ? "center" : "flex-start",
         }}
       >
-        {hero !== undefined ? (
-          <div style={{ flex: isLandscape ? "1 1 0" : "0 0 auto" }}>
-            <div style={{ fontSize: heroSize, fontWeight: 700, lineHeight: 0.82 }}>{hero.value}</div>
-            <div style={{ fontSize: 44, fontWeight: 500, lineHeight: 1.1, color: palette.muted, marginTop: 8 }}>
-              {hero.label}
-              {hero.caveated ? "*" : ""}
-            </div>
-          </div>
-        ) : (
-          <div style={{ fontSize: 44, color: palette.muted }}>No usage in this range</div>
-        )}
-
-        <div style={{ flex: isLandscape ? "1 1 0" : "0 0 auto", width: "100%", display: "flex", flexDirection: "column", gap: 32 }}>
-          {models.length > 0 ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: rowGap, width: "100%" }}>
-              {models.map((model) => (
-                <div
-                  key={model.key ?? "__other__"}
-                  data-share-row
-                  style={{ display: "flex", alignItems: "center", gap: 20, height: rowHeight }}
-                >
-                  <span style={{ fontSize: FLOOR_PX, width: 360, whiteSpace: "nowrap" }}>
-                    {truncateModel(model.label)}
-                  </span>
-                  <span style={{ flex: 1, height: Math.min(26, Math.round(rowHeight * 0.46)), background: palette.track, borderRadius: 13 }}>
-                    <span
-                      style={{
-                        display: "block",
-                        height: "100%",
-                        borderRadius: 10,
-                        width: maxTokens > 0 ? `${(model.tokens / maxTokens) * 100}%` : "0%",
-                        background: palette.bar,
-                      }}
-                    />
-                  </span>
-                  <span style={{ fontSize: FLOOR_PX, color: palette.muted, width: 120, textAlign: "right" }}>
-                    {formatTokens(model.tokens)}
-                  </span>
-                </div>
-              ))}
-              <div style={{ fontSize: FLOOR_PX, color: palette.muted }}>tokens per model</div>
-            </div>
-          ) : null}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: isLandscape ? "row" : "column",
+            alignItems: "flex-start",
+            gap: isLandscape ? 40 : 32,
+          }}
+        >
+          {claimColumn}
+          {rowsColumn}
         </div>
       </div>
 
-      {stats.length > 0 ? (
+      {hasStatsBand ? (
         <div style={{ flexShrink: 0, display: "flex", gap: 64, borderTop: `2px solid ${palette.rule}`, paddingTop: 32 }}>
           {stats.map((stat) => (
             <div key={stat.id}>
