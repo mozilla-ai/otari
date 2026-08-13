@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -50,32 +51,47 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
-# trafilatura is not safe to call from several threads at once. Extracting
-# concurrently corrupts the allocator's bookkeeping and aborts the whole
-# process with a glibc "double free or corruption" / "free(): invalid pointer";
-# a 24-search loop over real pages died about one run in three, with and without
-# the heap release below.
+# trafilatura is not safe to call from several threads at once: it parses through
+# lxml parsers held in its own module globals (``trafilatura.utils.HTML_PARSER``,
+# ``trafilatura.xml.CONTROL_PARSER``), and sharing an lxml parser across threads
+# corrupts the allocator's bookkeeping. Extracting a search's pages concurrently
+# aborted the process outright with a glibc "double free or corruption" in a
+# minority of runs over real pages, so every extraction is confined to one
+# dedicated worker.
 #
-# Serializing the parse is not free. lxml drops the GIL, so extraction really did
-# run in parallel: over five heavy pages a search went from roughly 520ms to
-# roughly 880ms in testing. That is the price of not aborting the process, which
-# would take every in-flight request with it. Only the parse is serialized; the
-# per-page fetches still overlap, and they dominate on a normal-sized page. The
-# lock is module-level rather than per backend instance because the unsafe state
-# is trafilatura's own module globals.
-_EXTRACT_LOCK = threading.Lock()
+# A dedicated executor rather than a lock around ``asyncio.to_thread``: the
+# default executor is shared with file extraction, PDF rasterizing and OCR
+# (:mod:`gateway.services.file_extractors`), and threads blocked waiting for a
+# lock still occupy their slot in that pool. Queued searches would then stall
+# unrelated uploads behind them for seconds. One worker gives the same
+# serialization while holding one thread total. Module-level, because the unsafe
+# state is trafilatura's own module globals and is shared across event loops.
+#
+# Serializing does cost throughput, since lxml drops the GIL and extraction
+# genuinely ran in parallel. Aborting the process takes every in-flight request
+# with it, so that is the better trade.
+_extract_executor: ThreadPoolExecutor | None = None
+_extract_executor_lock = threading.Lock()
+
+
+def _get_extract_executor() -> ThreadPoolExecutor:
+    """The single worker every page extraction runs on, created on first search."""
+    global _extract_executor
+    with _extract_executor_lock:
+        if _extract_executor is None:
+            _extract_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="otari-extract")
+    return _extract_executor
 
 
 def _extract_markdown(html: str) -> str | None:
-    """Extract Markdown from one page, serialized against every other caller."""
-    with _EXTRACT_LOCK:
-        result = trafilatura.extract(
-            html,
-            output_format="markdown",
-            include_comments=False,
-            include_tables=True,
-            favor_recall=True,
-        )
+    """Extract Markdown from one page. Only ever called on the extraction worker."""
+    result = trafilatura.extract(
+        html,
+        output_format="markdown",
+        include_comments=False,
+        include_tables=True,
+        favor_recall=True,
+    )
     return str(result) if result else None
 
 
@@ -420,10 +436,11 @@ class WebSearchBackend:
             return None
 
         # trafilatura.extract is synchronous and CPU-bound on large inputs; run
-        # in a thread so the event loop stays responsive while the other pages
-        # in this search are still being fetched.
+        # it off the loop so the loop stays responsive while the other pages in
+        # this search are still being fetched.
         try:
-            extracted = await asyncio.to_thread(_extract_markdown, html)
+            loop = asyncio.get_running_loop()
+            extracted = await loop.run_in_executor(_get_extract_executor(), _extract_markdown, html)
         except Exception as exc:  # noqa: BLE001 — trafilatura raises broad
             logger.debug("web_search: extract failed for %s: %s", url, exc)
             return None

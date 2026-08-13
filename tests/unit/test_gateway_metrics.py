@@ -1,5 +1,7 @@
 """Unit tests for gateway Prometheus metrics — no database required."""
 
+import os
+
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -260,6 +262,7 @@ def test_rate_limiter_records_metric_on_429() -> None:
     assert _sample("gateway_rate_limit_hits_total") - before == 1.0
 
 
+@pytest.mark.skipif(not os.path.exists("/proc/stat"), reason="ProcessCollector needs /proc")
 def test_metrics_expose_process_memory() -> None:
     """Without this the only way to read the resident set is a shell in the container."""
     body = generate_latest(REGISTRY).decode()

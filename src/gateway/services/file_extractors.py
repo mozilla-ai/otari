@@ -70,12 +70,12 @@ def _get_converter() -> Any | None:
     """Return the process-wide MarkItDown, building it on first use.
 
     Built once and shared. Constructing a ``MarkItDown`` initializes magika,
-    which loads an ONNX model and starts its own inference thread pool; none of
-    that is released when the instance is dropped, so building one per call grew
-    the resident set by several megabytes and nine threads *per extraction*. The
-    lock matters because extractions run concurrently in the default executor:
-    an unlocked check lets every racing caller build its own before the first
-    finishes, which is the leak this fixes.
+    which loads an ONNX model and starts its own inference thread pool, costing
+    several megabytes and nine threads. The threads go back when the instance is
+    collected but the memory does not, so building one per call grew the resident
+    set without bound. The lock matters because extractions run concurrently in
+    the default executor: an unlocked check lets every racing caller build its
+    own before the first finishes, which is the leak this fixes.
     """
     global _converter
     with _converter_lock:
@@ -89,7 +89,14 @@ def _get_converter() -> Any | None:
 
 
 def _extract_sync(data: bytes, extension: str) -> ExtractionResult:
-    converter = _get_converter()
+    # Building the converter initializes magika (ONNX model load), which can fail
+    # for reasons other than a missing package. Keep that a failed extraction so
+    # the caller still gets its PDF-rasterize / vision fallback.
+    try:
+        converter = _get_converter()
+    except Exception as exc:  # noqa: BLE001 — surface as a failed extraction, not a 500
+        logger.warning("markitdown converter unavailable: %s", exc)
+        return ExtractionResult("", False, f"extraction error: {exc}")
     if converter is None:
         return ExtractionResult("", False, "markitdown not installed")
 

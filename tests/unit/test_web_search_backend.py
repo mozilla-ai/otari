@@ -924,14 +924,13 @@ async def _raise_cancelled(_url: str) -> None:
 def test_extraction_is_serialized_across_threads() -> None:
     """Concurrent trafilatura.extract corrupts the heap and aborts the process.
 
-    Asserts on the observable contract (never two extractions in flight at once)
-    rather than on the lock object, so a different serialization strategy still
-    passes.
+    Asserts the observable contract (never two extractions in flight at once)
+    rather than the mechanism, so a different serialization strategy still passes.
     """
     import asyncio as _asyncio
     import threading as _threading
 
-    from gateway.services.web_search_backend import _extract_markdown
+    from gateway.services.web_search_backend import _extract_markdown, _get_extract_executor
 
     in_flight = 0
     overlaps = 0
@@ -951,11 +950,51 @@ def test_extraction_is_serialized_across_threads() -> None:
         return "body"
 
     async def main() -> None:
+        loop = _asyncio.get_running_loop()
         await _asyncio.gather(
-            *(_asyncio.to_thread(_extract_markdown, f"<html>{i}</html>") for i in range(8))
+            *(
+                loop.run_in_executor(_get_extract_executor(), _extract_markdown, f"<html>{i}</html>")
+                for i in range(8)
+            )
         )
 
     with patch("gateway.services.web_search_backend.trafilatura.extract", tracking_extract):
         _asyncio.run(main())
 
     assert overlaps == 0, "two extractions ran at once; this aborts the process under real load"
+
+
+def test_extraction_does_not_occupy_the_shared_executor() -> None:
+    """Queued extractions must not stall unrelated asyncio.to_thread work.
+
+    file_extractors' upload path shares the default executor, so a blocking wait
+    held there would put uploads behind the whole search queue.
+    """
+    import asyncio as _asyncio
+    import time as _time
+
+    from gateway.services.web_search_backend import _extract_markdown, _get_extract_executor
+
+    def slow_extract(_html: str, **_: Any) -> str:
+        _time.sleep(0.05)
+        return "body"
+
+    async def main() -> float:
+        loop = _asyncio.get_running_loop()
+        queued = [
+            _asyncio.ensure_future(
+                loop.run_in_executor(_get_extract_executor(), _extract_markdown, f"<html>{i}</html>")
+            )
+            for i in range(40)
+        ]
+        await _asyncio.sleep(0.1)
+        start = _time.perf_counter()
+        await _asyncio.to_thread(lambda: None)
+        elapsed = _time.perf_counter() - start
+        await _asyncio.gather(*queued)
+        return elapsed
+
+    with patch("gateway.services.web_search_backend.trafilatura.extract", slow_extract):
+        elapsed = _asyncio.run(main())
+
+    assert elapsed < 0.5, f"unrelated to_thread work waited {elapsed:.2f}s behind the extraction queue"

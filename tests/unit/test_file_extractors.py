@@ -75,6 +75,30 @@ def test_concurrent_callers_share_one_converter(monkeypatch: pytest.MonkeyPatch)
     assert all(c is converters[0] for c in converters)
 
 
+def test_failing_converter_build_degrades_instead_of_raising(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A magika/ONNX load failure must stay a failed extraction.
+
+    The caller relies on ``ok=False`` to reach its PDF-rasterize / vision
+    fallback; an exception escaping here skips the whole request's
+    normalization instead of just this one document.
+    """
+
+    class Exploding:
+        def __init__(self, **_: Any) -> None:
+            raise RuntimeError("magika model failed to load")
+
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "markitdown",
+        type("m", (), {"MarkItDown": Exploding}),
+    )
+
+    result = file_extractors._extract_sync(b"data", ".txt")
+
+    assert result.ok is False
+    assert "magika model failed to load" in result.detail
+
+
 def test_missing_markitdown_reports_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
     import builtins
 
