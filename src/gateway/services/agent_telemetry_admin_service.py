@@ -17,7 +17,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.sql import MAX_FILTER_VALUES, match_any
+from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.log_config import logger
 from gateway.models.entities import AgentTelemetry
 
@@ -74,9 +74,9 @@ def _selection_conditions(selection: AgentTelemetrySelection) -> list[ColumnElem
     if selection.name is not None:
         conditions.append(AgentTelemetry.name == selection.name)
     if selection.start_date is not None:
-        conditions.append(AgentTelemetry.timestamp >= selection.start_date)
+        conditions.append(AgentTelemetry.timestamp >= utc_bound(selection.start_date))
     if selection.end_date is not None:
-        conditions.append(AgentTelemetry.timestamp < selection.end_date)
+        conditions.append(AgentTelemetry.timestamp < utc_bound(selection.end_date))
     return conditions
 
 

@@ -6,6 +6,7 @@ agree exactly, because a bulk delete re-derives its target set server-side from 
 filters the operator was shown.
 """
 
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import ColumnElement
@@ -34,3 +35,19 @@ def match_any(column: Any, value: str | list[str]) -> ColumnElement[bool]:
     else:
         condition = column.in_(value)
     return cast("ColumnElement[bool]", condition)
+
+
+def utc_bound(value: datetime | None) -> datetime | None:
+    """Pin an offset-less window bound to UTC.
+
+    The date query params and selection bodies advertise ISO 8601, which parses to a
+    naive value when the caller omits the offset. The driver then resolves it against
+    the process's local timezone (asyncpg encodes ``timestamptz`` with
+    ``astimezone``, which reads a naive datetime as local), so the same bound would
+    select a different set of rows per deployment. Shared for the usual reason: a
+    count an operator confirms and the delete that re-derives its target set from the
+    same bound have to mean the same instant.
+    """
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)

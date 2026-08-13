@@ -36,7 +36,7 @@ from gateway.api.routes.usage import (
     _request_count_expr,
     _resolve_window,
 )
-from gateway.core.sql import MAX_FILTER_VALUES, match_any
+from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.models.entities import AgentTelemetry, UsageLog
 from gateway.services.agent_telemetry_admin_service import (
     AgentTelemetryDeleteRequest,
@@ -62,6 +62,13 @@ _SECONDS_PER_HOUR = 3600.0
 # How many tools the mix reports before the tail is dropped. A session uses a
 # handful; this only bounds a pathological one.
 _TOOL_MIX_TOP_N = 50
+
+# How many metric points `/summary` will diff in one read. The per-series delta
+# arithmetic happens in Python, so unlike the aggregates beside it this scan grows
+# with the number of exports in the window rather than with the window itself: one
+# agent exports a handful of series per interval, and past this ceiling the answer
+# is to narrow the range rather than to hold the whole read in memory.
+_MAX_METRIC_POINTS = 200_000
 
 _START_DESC = "Return rows with timestamp >= start_date (ISO 8601 or Unix epoch seconds)"
 _END_DESC = "Return rows with timestamp < end_date (ISO 8601 or Unix epoch seconds)"
@@ -231,9 +238,9 @@ def _telemetry_filters(
     """
     conditions: list[ColumnElement[bool]] = []
     if start_date is not None:
-        conditions.append(AgentTelemetry.timestamp >= start_date)
+        conditions.append(AgentTelemetry.timestamp >= utc_bound(start_date))
     if end_date is not None:
-        conditions.append(AgentTelemetry.timestamp < end_date)
+        conditions.append(AgentTelemetry.timestamp < utc_bound(end_date))
     if user_id:
         conditions.append(match_any(AgentTelemetry.user_id, user_id))
     if api_key_id:
@@ -268,10 +275,14 @@ def _usage_filters(
     return conditions
 
 
+def _aware(timestamp: datetime) -> datetime:
+    """A stored timestamp as UTC-aware; a dialect may hand one back naive."""
+    return timestamp if timestamp.tzinfo is not None else timestamp.replace(tzinfo=UTC)
+
+
 def _bucket_key(timestamp: datetime, bucket: Bucket) -> str:
     """The canonical UTC bucket a point falls in, matching the SQL bucket grid."""
-    aware = timestamp if timestamp.tzinfo is not None else timestamp.replace(tzinfo=UTC)
-    utc = aware.astimezone(UTC)
+    utc = _aware(timestamp).astimezone(UTC)
     fmt = "%Y-%m-%dT%H:00:00Z" if bucket == "hour" else "%Y-%m-%dT00:00:00Z"
     return utc.strftime(fmt)
 
@@ -281,7 +292,7 @@ def _ratio(numerator: float, denominator: float) -> float | None:
 
 
 async def _metric_increments(
-    db: AsyncSession, conditions: list[ColumnElement[bool]], bucket: Bucket
+    db: AsyncSession, conditions: list[ColumnElement[bool]], bucket: Bucket, start: datetime
 ) -> tuple[dict[str, float], dict[str, dict[str, float]]]:
     """Window increments per metric name, in total and per time bucket.
 
@@ -290,6 +301,15 @@ async def _metric_increments(
     walking its points in time order and diffing, split at each series generation
     (a changed ``series_start`` is a counter reset). The scan is bounded by the
     window and served by the ``(series_key, timestamp)`` index.
+
+    A generation that began inside the window is diffed from its own zero: a
+    cumulative counter reads zero at its series start, and an OTel counter exports
+    no point until its first measurement, so without that baseline the first
+    reading of every session's series is dropped.
+
+    Because the diff is in Python, the window bounds a span and not a row count, so
+    the scan carries its own ``_MAX_METRIC_POINTS`` ceiling and fails closed past it
+    rather than materializing an unbounded read, the way `/series` caps its grid.
     """
     rows = (
         await db.execute(
@@ -300,20 +320,32 @@ async def _metric_increments(
                 AgentTelemetry.temporality,
                 AgentTelemetry.timestamp,
                 AgentTelemetry.value,
-            ).where(*conditions, AgentTelemetry.kind == "metric", AgentTelemetry.value.is_not(None))
+            )
+            .where(*conditions, AgentTelemetry.kind == "metric", AgentTelemetry.value.is_not(None))
+            .limit(_MAX_METRIC_POINTS + 1)
         )
     ).all()
+    if len(rows) > _MAX_METRIC_POINTS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"window holds more than {_MAX_METRIC_POINTS} metric data points; narrow the range "
+                "or filter by user_id, api_key_id, or session_label"
+            ),
+        )
 
     generations: dict[tuple[str, str | None, datetime | None, str | None], list[tuple[datetime, float]]] = defaultdict(
         list
     )
     for name, series_key, series_start, temporality, timestamp, value in rows:
-        generations[(name, series_key, series_start, temporality)].append((timestamp, float(value)))
+        generations[(name, series_key, series_start, temporality)].append((_aware(timestamp), float(value)))
 
     totals: dict[str, float] = defaultdict(float)
     by_bucket: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    for (name, _series_key, _series_start, temporality), points in generations.items():
-        increments = series_point_increments(points, temporality or DELTA)
+    for (name, _series_key, generation_start, temporality), points in generations.items():
+        generation_start = _aware(generation_start) if generation_start is not None else None
+        baseline = generation_start if generation_start is not None and generation_start >= start else None
+        increments = series_point_increments(points, temporality or DELTA, series_start=baseline)
         totals[name] += compute_series_increment(increments, DELTA)
         for timestamp, increment in increments:
             by_bucket[_bucket_key(timestamp, bucket)][name] += increment
@@ -384,6 +416,12 @@ async def agent_telemetry_summary(
     Filterable by user, API key, and `session_label`, so cost per outcome can be
     read for one agent session as well as for a whole window.
 
+    The spend side is every usage row in scope, not only the agent's: unfiltered,
+    that includes traffic from clients that never reported telemetry, so a
+    per-outcome measure read over a whole deployment answers "what did this
+    deployment spend per commit", not "what did the agent spend per commit".
+    Filter by user, API key, or session to divide only the matching spend.
+
     Outcome metrics are stored exactly as the agent reported them, so a
     cumulative counter is converted to a window increment here, at read time,
     diffed per series generation: a re-exported total adds nothing, and a counter
@@ -397,7 +435,7 @@ async def agent_telemetry_summary(
         start=start, end=end, user_id=user_id, api_key_id=api_key_id, session_label=session_label
     )
 
-    outcome_totals, outcomes_by_bucket = await _metric_increments(db, conditions, bucket)
+    outcome_totals, outcomes_by_bucket = await _metric_increments(db, conditions, bucket, start)
     behavior = await _behavior(db, conditions)
     # Requests, not rows, the same way /v1/usage/summary counts them: a routed
     # request writes one row per recovered attempt, and counting those would

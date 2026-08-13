@@ -240,14 +240,21 @@ def test_summary_measures_are_null_without_a_denominator(
 def test_summary_counter_reset_never_yields_a_negative_increment(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
-    """A new ``series_start`` is a fresh generation, diffed from its own base."""
+    """A new ``series_start`` is a fresh generation, diffed from its own base.
+
+    The first generation began before the window, so its 40 is a level carried in
+    and only the 6 that follow are counted; the second began at the reset, inside
+    the window, so it is diffed from its own zero.
+    """
     reset_at = _T0 + timedelta(hours=2)
-    _metric_row(db_session, row_id="r-1", name="claude_code.commit.count", value=40.0)
+    carried_in = _NOW - timedelta(days=10)
+    _metric_row(db_session, row_id="r-1", name="claude_code.commit.count", value=40.0, series_start=carried_in)
     _metric_row(
         db_session,
         row_id="r-2",
         name="claude_code.commit.count",
         value=46.0,
+        series_start=carried_in,
         timestamp=_T0 + timedelta(hours=1),
     )
     _metric_row(
@@ -271,6 +278,63 @@ def test_summary_counter_reset_never_yields_a_negative_increment(
     response = client.get(SUMMARY_PATH, params={**_WINDOW, "user_id": "alice"}, headers=master_key_header)
     assert response.status_code == 200, response.text
     assert response.json()["outcomes"]["commits"] == 9.0
+
+
+def test_summary_counts_the_first_reading_of_a_generation_that_began_in_window(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A counter is zero at its series start, so its first reading is growth in full.
+
+    An OTel counter exports no data point until its first measurement, so a real
+    session's first point already carries work: three commits arrive as readings of
+    1 then 3, with no zero ahead of them. Diffing from the second reading on would
+    report 2, and a session whose only export carries one commit would report 0.
+    """
+    _metric_row(
+        db_session,
+        row_id="m-fresh-1",
+        name="claude_code.commit.count",
+        value=1.0,
+        series_key="series-fresh",
+        series_start=_T0,
+        timestamp=_T0 + timedelta(minutes=1),
+    )
+    _metric_row(
+        db_session,
+        row_id="m-fresh-2",
+        name="claude_code.commit.count",
+        value=3.0,
+        series_key="series-fresh",
+        series_start=_T0,
+        timestamp=_T0 + timedelta(minutes=2),
+    )
+    db_session.commit()
+
+    response = client.get(SUMMARY_PATH, params={**_WINDOW, "user_id": "alice"}, headers=master_key_header)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["outcomes"]["commits"] == 3.0
+
+
+def test_summary_reports_a_single_export_session(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """One export is a whole short session's report, not an uncountable level."""
+    _metric_row(
+        db_session,
+        row_id="m-only",
+        name="claude_code.commit.count",
+        value=1.0,
+        series_key="series-only",
+        series_start=_T0,
+        timestamp=_T0 + timedelta(minutes=1),
+    )
+    db_session.commit()
+
+    response = client.get(SUMMARY_PATH, params={**_WINDOW, "user_id": "alice"}, headers=master_key_header)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["outcomes"]["commits"] == 1.0
 
 
 def test_summary_scopes_cost_per_outcome_to_one_session(

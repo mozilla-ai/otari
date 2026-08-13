@@ -139,11 +139,13 @@ The **metrics** export (a separate exporter setting, see below) carries the
 outcome counters, and Otari records four of them at `POST /v1/metrics`: lines of
 code changed, commits, pull requests, and active time. Each is stored as a value,
 its OTLP series identity, and its timestamps, and nothing else: no attribute bag,
-no file or branch names. Three metrics Claude Code also emits are deliberately
+no file or branch names. The other metrics Claude Code emits are deliberately
 **not** recorded: `claude_code.token.usage` and `claude_code.cost.usage`, because
 the `api_request` log event already bills the same tokens (storing them again would
-double count spend), and `claude_code.code_edit_tool.decision`, because the
-`tool_decision` behavioral event above already carries that accept/reject signal.
+double count spend); `claude_code.code_edit_tool.decision`, because the
+`tool_decision` behavioral event above already carries that accept/reject signal;
+and `claude_code.session.count`, because the summary counts sessions from the
+behavioral rows instead.
 Metric capture answers to the same `capture_agent_telemetry` toggle as behavioral
 events.
 

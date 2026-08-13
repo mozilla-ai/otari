@@ -231,7 +231,7 @@ def map_metric_point(
     ingest) and content-free: its attributes are folded into ``series_key``, not
     stored.
     """
-    if name not in _METRICS:
+    if name in _SKIPPED_METRICS or name not in _METRICS:
         return None
     number = _bounded_number(value)
     if number is None:
@@ -252,7 +252,7 @@ def map_metric_point(
 
 
 def series_point_increments(
-    points: list[tuple[datetime, float]], temporality: str
+    points: list[tuple[datetime, float]], temporality: str, *, series_start: datetime | None = None
 ) -> list[tuple[datetime, float]]:
     """Each point's own contribution to its series generation, in time order.
 
@@ -265,21 +265,37 @@ def series_point_increments(
     carries running totals, so the growth between two readings is attributed to
     the later one, which is what makes a re-reported total add nothing and lets a
     caller bucket the increments by time.
+
+    Pass ``series_start`` when the generation is known to begin inside the read
+    window, which the caller establishes by comparing the stored ``series_start``
+    against the window start. A cumulative counter is zero at its series start, so
+    the first reading is growth in full: without that baseline the first reading of
+    every generation is dropped, and since an OTel counter emits no point at all
+    until its first measurement, that silently loses the work it recorded (a
+    session whose only export carries one commit reads as zero commits). When the
+    generation began before the window there is no known baseline, so leave it
+    unset and the first in-window reading stays a level rather than an increment.
     """
     if not points:
         return []
     ordered = sorted(points, key=lambda point: point[0])
     if temporality != CUMULATIVE:
         return ordered
+    if series_start is not None and series_start <= ordered[0][0]:
+        ordered = [(series_start, 0.0), *ordered]
     return [
         (later_time, max(later - earlier, 0.0))
         for (_earlier_time, earlier), (later_time, later) in zip(ordered, ordered[1:])
     ]
 
 
-def compute_series_increment(points: list[tuple[datetime, float]], temporality: str) -> float:
+def compute_series_increment(
+    points: list[tuple[datetime, float]], temporality: str, *, series_start: datetime | None = None
+) -> float:
     """How much one series generation grew across the points given, in total."""
-    return float(sum(increment for _, increment in series_point_increments(points, temporality)))
+    return float(
+        sum(increment for _, increment in series_point_increments(points, temporality, series_start=series_start))
+    )
 
 
 

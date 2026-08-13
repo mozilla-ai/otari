@@ -158,6 +158,10 @@ POST /v1/traces    spans (what most GenAI instrumentation emits)
 POST /v1/logs      log events (what Claude Code emits)
 ```
 
+A third receiver, `POST /v1/metrics`, takes the metrics signal. It carries no usage
+and bills nothing; it records a coding agent's content-free outcome counters. See
+[Use with Claude Code](use-with-claude-code.md).
+
 Point the exporter's endpoint at the Otari root; it appends `/v1/traces` or
 `/v1/logs` itself. Both **protobuf and JSON** are accepted (optionally gzip), over an
 **http** protocol (`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` or `http/json`; gRPC is

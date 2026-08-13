@@ -63,3 +63,23 @@ def test_single_point_and_empty_generations() -> None:
     assert compute_series_increment([(_at(0), 12.0)], "delta") == 12.0
     assert compute_series_increment([], "cumulative") == 0.0
     assert compute_series_increment([], "delta") == 0.0
+
+
+def test_cumulative_generation_starting_in_window_counts_its_first_reading() -> None:
+    """A counter is zero at its series start, so the first reading is growth in full.
+
+    An OTel counter exports no data point until its first measurement, so the first
+    point a session reports already carries work. Diffing from the second point on
+    would drop it: three commits would read as two, and a session whose only export
+    carries one commit would read as zero.
+    """
+    points = [(_at(1), 1.0), (_at(2), 2.0), (_at(3), 3.0)]
+    assert compute_series_increment(points, "cumulative", series_start=_T0) == 3.0
+    assert compute_series_increment([(_at(1), 1.0)], "cumulative", series_start=_T0) == 1.0
+
+
+def test_cumulative_generation_starting_before_window_keeps_its_level_uncounted() -> None:
+    """With no known baseline the first in-window reading is a level, not growth."""
+    points = [(_at(1), 40.0), (_at(2), 46.0)]
+    assert compute_series_increment(points, "cumulative") == 6.0
+    assert compute_series_increment(points, "cumulative", series_start=None) == 6.0

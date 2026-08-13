@@ -377,8 +377,16 @@ def _capture_telemetry(api_key: APIKey, config: GatewayConfig) -> bool:
 
 
 def _point_value(point: Any) -> Any:
-    """Read an OTLP NumberDataPoint's value, whichever arm it arrived on."""
-    return point.as_double if point.WhichOneof("value") == "as_double" else point.as_int
+    """Read an OTLP NumberDataPoint's value, whichever arm it arrived on.
+
+    None when neither arm is set: proto3 would report the unset ``as_int`` as 0,
+    and a spurious 0 inside a cumulative series reads as a reset the series start
+    never announced, clamping one diff and re-counting the whole total on the next.
+    """
+    arm = point.WhichOneof("value")
+    if arm is None:
+        return None
+    return point.as_double if arm == "as_double" else point.as_int
 
 
 async def _ingest(
