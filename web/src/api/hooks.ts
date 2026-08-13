@@ -827,13 +827,23 @@ export function useUsageLogs(filters: UsageFilters, page: number, pageSize: numb
       return apiFetch<UsageEntry[]>(`/v1/usage?${params.toString()}`);
     },
     placeholderData: keepPreviousData,
-    // A request log moves constantly; keep it fresh but don't refetch on every focus.
+    // The log is a snapshot an operator reads, not a feed. On a busy gateway rows
+    // arrive faster than anyone can inspect them, so a page that refetched on its
+    // own reshuffled the table out from under whoever was reading it. It refetches
+    // only when asked: a mount, the refresh button, or a change of filters, window,
+    // or page (all of which are in the key). Nothing here opts back into the
+    // provider's refetch-on-focus default, which is already off (`provider.tsx`).
+    // `useLiveUsageCount` is how the page still says that newer rows exist.
     staleTime: 10_000,
   });
 }
 
 // Total rows matching the same filters, for the paginator's "N of M". A separate
 // request so /v1/usage stays a bare array; run alongside the list.
+//
+// Deliberately as frozen as the log it counts (see `useUsageLogs`): the total
+// describes the page on screen, so a total that moved on its own would disagree
+// with the rows the operator can actually page through.
 export function useUsageCount(filters: UsageFilters, enabled = true) {
   return useQuery({
     queryKey: [USAGE, "count", filters],
@@ -844,6 +854,33 @@ export function useUsageCount(filters: UsageFilters, enabled = true) {
   });
 }
 
+// How often the live row count re-reads. Slow, because nothing on screen moves
+// when it changes: it only sizes the "N new" badge, which an operator glances at
+// rather than watches. TanStack does not poll a backgrounded tab, so an idle
+// dashboard costs nothing.
+const NEW_ROW_POLL_MS = 15_000;
+
+// The same count as `useUsageCount`, polled, so a frozen page can say how far
+// behind it has fallen without moving a single row.
+//
+// A separate cache entry rather than a `refetchInterval` on `useUsageCount`: the
+// two readings serve opposite purposes (one is pinned to the rendered page, the
+// other is deliberately ahead of it), and two observers of one query key cannot
+// disagree about how fresh their data is. The duplicate `COUNT(*)` at mount is
+// one indexed count, which is what makes polling it affordable in the first place.
+export function useLiveUsageCount(filters: UsageFilters, enabled = true) {
+  return useQuery({
+    queryKey: [USAGE, "count", "live", filters],
+    queryFn: () => apiFetch<UsageCount>(`/v1/usage/count?${usageParams(filters).toString()}`),
+    enabled,
+    refetchInterval: NEW_ROW_POLL_MS,
+    staleTime: 0,
+    // A failed count is not worth surfacing: it sits beside a refresh button that
+    // fetches the real thing, and the next poll retries anyway.
+    retry: false,
+  });
+}
+
 // How often the in-flight list re-reads. Tight, because it is the only view of a
 // request that has not settled yet and the reason to watch it is that something is
 // taking a while. TanStack does not poll a backgrounded tab
@@ -851,10 +888,12 @@ export function useUsageCount(filters: UsageFilters, enabled = true) {
 // costs nothing.
 const IN_FLIGHT_POLL_MS = 2_000;
 
-// Requests the gateway is serving right now, rendered as in-progress rows above
-// the activity log. The read takes no filters: a request in progress has no
-// outcome, cost, or token count for the log's filters to match on, so which of
-// them the current view may show is decided at the call site.
+// Requests the gateway is serving right now, rendered as a live count beside the
+// activity log's refresh control rather than as rows in it: the log is a frozen
+// snapshot, and rows that reordered themselves every two seconds were the reason
+// a busy gateway's activity page could not be read at all. The read takes no
+// filters: a request in progress has no outcome, cost, or token count for the
+// log's filters to match on, so it is reported gateway-wide.
 //
 // Never cached across mounts (`staleTime: 0`) and never kept as placeholder data:
 // a stale in-flight list is worse than none, since it claims work is running that

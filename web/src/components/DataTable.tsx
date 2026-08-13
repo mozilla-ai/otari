@@ -185,9 +185,10 @@ export function DataTable<Row extends object>({
   // element each time re-points the portal, and React answers that by
   // unmounting the panel and mounting it again into the new node. That replays
   // the reveal animation and throws away whatever state the panel held. The
-  // activity page hands this component a rebuilt rows array every two seconds
-  // while it polls for in-flight requests, so an expanded row sat there
-  // flashing and re-opening on a timer for as long as a request was running.
+  // activity page once rebuilt its rows array every two seconds, from a poll for
+  // requests in flight, and an expanded row sat there flashing and re-opening on
+  // a timer for as long as one was running. Any caller that re-derives its rows
+  // on a timer would do the same.
   const hostRef = useRef<{ row: HTMLTableRowElement; cell: HTMLTableCellElement } | null>(null);
   const ensureHost = () => {
     if (!hostRef.current) {

@@ -27,7 +27,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.sql import MAX_FILTER_VALUES, match_any
+from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing, UsageLog
@@ -179,9 +179,9 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
     if selection.source_label is not None:
         conditions.append(UsageLog.source_label == selection.source_label)
     if selection.start_date is not None:
-        conditions.append(UsageLog.timestamp >= selection.start_date)
+        conditions.append(UsageLog.timestamp >= utc_bound(selection.start_date))
     if selection.end_date is not None:
-        conditions.append(UsageLog.timestamp < selection.end_date)
+        conditions.append(UsageLog.timestamp < utc_bound(selection.end_date))
     if selection.priced is True:
         conditions.append(UsageLog.cost.is_not(None))
     elif selection.priced is False:
