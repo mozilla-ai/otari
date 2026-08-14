@@ -24,6 +24,11 @@ def _load_generate() -> ModuleType:
 generate = _load_generate()
 
 
+def test_typescript_targets_emit_node_compatible_imports() -> None:
+    for targets in (generate.TARGETS, generate.FULL_TARGETS):
+        assert "importFileExtension=.js" in targets["typescript"].additional_properties
+
+
 def _sample_spec() -> dict[str, Any]:
     return {
         "openapi": "3.1.0",

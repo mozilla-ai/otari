@@ -87,7 +87,7 @@ TARGETS: dict[str, LanguageTarget] = {
         # No npmName: that makes typescript-fetch emit a full npm project (sources
         # under src/). Without it the output is flat (runtime.ts, apis/, models/),
         # which is what the SDK imports from under src/_control_plane.
-        additional_properties="supportsES6=true",
+        additional_properties="supportsES6=true,importFileExtension=.js",
         sdk_repo="mozilla-ai/otari-sdk-ts",
         target_path="src/_control_plane",
     ),
@@ -116,7 +116,7 @@ FULL_TARGETS: dict[str, LanguageTarget] = {
     ),
     "typescript": LanguageTarget(
         generator="typescript-fetch",
-        additional_properties="supportsES6=true",
+        additional_properties="supportsES6=true,importFileExtension=.js",
         sdk_repo="mozilla-ai/otari-sdk-ts",
         target_path="src/_client",
     ),
