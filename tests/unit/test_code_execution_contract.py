@@ -35,6 +35,8 @@ _FILE_OPERATIONS = {"ListFiles", "GetFile", "PutFile"}
 
 _HTTP_METHODS = ("get", "put", "post", "delete", "patch", "head", "options", "trace")
 
+_SCHEMA_PREFIX = "#/components/schemas/"
+
 _CODE_SPAN = re.compile(r"`([^`]+)`")
 _TABLE_ROW = re.compile(r"^\|(?P<cells>.+)\|\s*$")
 
@@ -95,6 +97,21 @@ def _walk(node: Any) -> Iterator[Any]:
     elif isinstance(node, list):
         for value in node:
             yield from _walk(value)
+
+
+def _refs_in(node: Any) -> set[str]:
+    """Every `$ref` value at or below `node`."""
+    return {found["$ref"] for found in _walk(node) if isinstance(found, dict) and isinstance(found.get("$ref"), str)}
+
+
+def _resolve_ref(spec: dict[str, Any], ref: str) -> Any:
+    """What a local JSON pointer points at, or None when it points nowhere."""
+    target: Any = spec
+    for part in ref.removeprefix("#/").split("/"):
+        if not isinstance(target, dict) or part not in target:
+            return None
+        target = target[part]
+    return target
 
 
 def test_spec_is_openapi_31(spec: dict[str, Any]) -> None:
@@ -238,26 +255,35 @@ def test_response_schemas_tolerate_unknown_fields(spec: dict[str, Any]) -> None:
 
 def test_every_ref_resolves(spec: dict[str, Any]) -> None:
     broken = []
-    for node in _walk(spec):
-        if not isinstance(node, dict) or "$ref" not in node:
-            continue
-        ref = node["$ref"]
+    for ref in _refs_in(spec):
         assert ref.startswith("#/"), f"the spec must stay self-contained, found {ref}"
-        target: Any = spec
-        for part in ref.removeprefix("#/").split("/"):
-            if not isinstance(target, dict) or part not in target:
-                broken.append(ref)
-                break
-            target = target[part]
+        if _resolve_ref(spec, ref) is None:
+            broken.append(ref)
     assert not broken, f"unresolvable reference(s): {broken}"
 
 
 def test_no_orphan_schemas(spec: dict[str, Any]) -> None:
-    """Every schema is reachable from an operation, so none is dead spec."""
-    referenced = {
-        node["$ref"].removeprefix("#/components/schemas/")
-        for node in _walk(spec)
-        if isinstance(node, dict) and str(node.get("$ref", "")).startswith("#/components/schemas/")
-    }
-    orphans = set(spec["components"]["schemas"]) - referenced
-    assert not orphans, f"schema(s) nothing references: {orphans}"
+    """Every schema is reachable from an operation, so none is dead spec.
+
+    Reachability is traced outward from `paths`, not read off the set of `$ref`
+    values anywhere in the document: a schema that references itself, or an
+    unused pair that reference each other, would otherwise vouch for itself and
+    a dead branch of the contract would keep passing as live.
+    """
+    frontier = _refs_in(spec["paths"])
+    reached: set[str] = set()
+    while frontier:
+        ref = frontier.pop()
+        if ref in reached:
+            continue
+        reached.add(ref)
+        target = _resolve_ref(spec, ref)
+        # An unresolvable ref is test_every_ref_resolves' business, not this one.
+        if target is not None:
+            frontier |= _refs_in(target)
+
+    reachable = {ref.removeprefix(_SCHEMA_PREFIX) for ref in reached if ref.startswith(_SCHEMA_PREFIX)}
+    # A traversal that reaches nothing would pass this test for the wrong reason.
+    assert reachable, "no schema is reachable from paths; the traversal, not the spec, is broken"
+    orphans = set(spec["components"]["schemas"]) - reachable
+    assert not orphans, f"schema(s) no operation reaches: {orphans}"

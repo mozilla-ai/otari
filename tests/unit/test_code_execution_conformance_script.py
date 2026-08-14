@@ -260,14 +260,33 @@ def test_unreachable_backend_reports_a_failure_rather_than_raising() -> None:
     assert conformance.report(checks) == 1
 
 
-def test_a_non_positive_execution_budget_is_rejected_at_the_cli() -> None:
+def test_a_non_positive_execution_budget_is_rejected_at_the_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     """Rejected before a session is leased, and blamed on the invocation.
 
     The contract's minimum is 1 second, so a 0 would otherwise fail on the first
-    request as "this script built a non-conforming payload".
+    request as "this script built a non-conforming payload". Both halves are
+    asserted: a nonzero exit, since `SystemExit(0)` would be a success the CLI
+    never reached, and a backend that saw no traffic, since a session leased
+    before the argument was refused is one the run never releases.
     """
-    with pytest.raises(SystemExit):
+    seen: list[tuple[str, str]] = []
+    real_client = httpx.Client
+
+    def record(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        return httpx.Response(500)
+
+    def client_with_recording_transport(**kwargs: Any) -> httpx.Client:
+        kwargs["transport"] = httpx.MockTransport(record)
+        return real_client(**kwargs)
+
+    monkeypatch.setattr(conformance.httpx, "Client", client_with_recording_transport)
+
+    with pytest.raises(SystemExit) as exit_info:
         conformance.main(["--base-url", "http://sandbox", "--timeout-seconds", "0"])
+
+    assert exit_info.value.code != 0
+    assert seen == []
 
 
 def test_main_reports_and_exits_nonzero_on_a_broken_backend(
@@ -284,6 +303,9 @@ def test_main_reports_and_exits_nonzero_on_a_broken_backend(
     exit_code = conformance.main(["--base-url", "http://sandbox/", "--auth-token", "secret"])
 
     assert exit_code == 1
-    output = capsys.readouterr().out
-    assert "does not conform to code-execution contract version 1" in output
-    assert "secret" not in output
+    # Both streams: a credential that leaked into a traceback or a warning would
+    # go to stderr, which an stdout-only assertion would wave through.
+    captured = capsys.readouterr()
+    assert "does not conform to code-execution contract version 1" in captured.out
+    assert "secret" not in captured.out
+    assert "secret" not in captured.err
