@@ -51,14 +51,22 @@ class FakeBackend:
     serve_files: bool = True
     confine_paths: bool = True
     refuse_unknown_tool: bool = True
+    unknown_tool_status: int = 400
+    escape_status: int = 403
+    # Drops the session the moment the file operations are reached, which is the
+    # other thing a 404 on a file route can mean.
+    lose_session_at_files: bool = False
     reported_idle_timeout: int = 300
     download_body: bytes = _FILE_BODY
     calls: list[tuple[str, str]] = field(default_factory=list)
+    _session_lost: bool = False
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         self.calls.append((request.method, path))
 
+        if self._session_lost and _SESSION_ID in path:
+            return httpx.Response(404, json={"detail": "no such session"})
         if request.method == "POST" and path == "/sessions":
             return httpx.Response(
                 201,
@@ -84,7 +92,7 @@ class FakeBackend:
         tool = body["tool"]
         if tool not in ("code_execution", "bash_code_execution", "text_editor_code_execution"):
             if self.refuse_unknown_tool:
-                return httpx.Response(400, json={"detail": f"unknown tool: {tool}"})
+                return httpx.Response(self.unknown_tool_status, json={"detail": f"unknown tool: {tool}"})
             return httpx.Response(200, json=self._envelope(body, "ran it anyway"))
         # A text-editor `create` reports the write; every other call the script
         # makes echoes the marker, which is how it knows code actually ran.
@@ -114,6 +122,9 @@ class FakeBackend:
         return {"tool_use_id": tool_use_id, "execution_time_ms": 12, "result_block": block}
 
     def _upload(self) -> httpx.Response:
+        if self.lose_session_at_files:
+            self._session_lost = True
+            return httpx.Response(404, json={"detail": "no such session"})
         if not self.serve_files:
             return httpx.Response(404, json={"detail": "not implemented"})
         return httpx.Response(201, json={"path": "conformance.txt", "size_bytes": len(_FILE_BODY)})
@@ -140,7 +151,7 @@ class FakeBackend:
             return httpx.Response(404, json={"detail": "not implemented"})
         escaping = ".." in (request.url.params.get("path") or "")
         if escaping and self.confine_paths:
-            return httpx.Response(403, json={"detail": "path escapes the workspace"})
+            return httpx.Response(self.escape_status, json={"detail": "path escapes the workspace"})
         return httpx.Response(200, content=self.download_body)
 
 
@@ -191,6 +202,28 @@ def test_serving_a_path_outside_the_workspace_fails() -> None:
 def test_running_an_unknown_tool_kind_fails() -> None:
     failures = _failures(_run(FakeBackend(refuse_unknown_tool=False)))
     assert "Execute refuses an unknown tool kind" in failures
+
+
+def test_falling_over_on_an_unknown_tool_kind_is_not_a_refusal() -> None:
+    """A 500 means the backend broke on input it was supposed to reject."""
+    failures = _failures(_run(FakeBackend(unknown_tool_status=500)))
+    assert "Execute refuses an unknown tool kind" in failures
+
+
+def test_falling_over_on_a_traversal_attempt_fails() -> None:
+    failures = _failures(_run(FakeBackend(escape_status=500)))
+    assert "GetFile confines access to the session workspace" in failures
+
+
+def test_a_lost_session_is_not_reported_as_absent_file_operations() -> None:
+    """A 404 on a file route means one of two things, and only one is a skip.
+
+    A backend that dropped the session mid-run would otherwise pass as one that
+    simply does not implement the optional operations.
+    """
+    checks = _run(FakeBackend(lose_session_at_files=True))
+    assert "the session was gone" in _failures(checks)["File operations"]
+    assert conformance.SKIP not in set(_statuses(checks).values())
 
 
 def test_lifetime_hint_reported_above_the_request_fails() -> None:

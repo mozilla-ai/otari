@@ -219,10 +219,28 @@ def _check_unknown_tool_refused(client: httpx.Client, session_id: str, *, timeou
         return Check(name, PASS)
     if response.is_success:
         return Check(name, FAIL, f"ran an unknown tool kind and answered {response.status_code}")
+    if response.status_code >= 500:
+        # A server error is not a refusal: the backend fell over on input it was
+        # supposed to reject.
+        return Check(name, FAIL, f"failed with {response.status_code} instead of refusing the call")
     return Check(name, PASS, f"refused with {response.status_code}; the contract documents 400 or 422")
 
 
-def _check_files(client: httpx.Client, spec: dict[str, Any], session_id: str) -> list[Check]:
+def _session_survives(client: httpx.Client, spec: dict[str, Any], session_id: str, *, timeout_seconds: int) -> bool:
+    """Whether the session is still usable, which a 404 alone does not say."""
+    check = _check_exec(
+        client,
+        spec,
+        session_id,
+        name="session probe",
+        tool="code_execution",
+        tool_input={"code": f'print("{_MARKER}")'},
+        timeout_seconds=timeout_seconds,
+    )
+    return check.status == PASS
+
+
+def _check_files(client: httpx.Client, spec: dict[str, Any], session_id: str, *, timeout_seconds: int) -> list[Check]:
     """The optional file operations, skipped as a group when none are served."""
     body = f"{_MARKER}\n".encode()
     upload = client.post(
@@ -231,6 +249,11 @@ def _check_files(client: httpx.Client, spec: dict[str, Any], session_id: str) ->
         data={"path": _UPLOADED_FILE},
     )
     if upload.status_code in _UNSERVED_STATUSES:
+        # A 404 here is ambiguous: no such route, or no such session. Reporting a
+        # reclaimed session as "these operations are optional and absent" would
+        # pass a backend that dropped the session mid-run, so ask the session.
+        if not _session_survives(client, spec, session_id, timeout_seconds=timeout_seconds):
+            return [Check("File operations", FAIL, "the session was gone before they could be checked")]
         reason = "backend does not serve the optional file operations"
         return [Check(name, SKIP, reason) for name in ("PutFile", "ListFiles", "GetFile")]
 
@@ -269,6 +292,8 @@ def _check_workspace_confinement(client: httpx.Client, session_id: str) -> Check
         return Check(name, FAIL, "served a path outside the session workspace")
     if escape.status_code == 403:
         return Check(name, PASS)
+    if escape.status_code >= 500:
+        return Check(name, FAIL, f"failed with {escape.status_code} instead of refusing the path")
     return Check(name, PASS, f"refused with {escape.status_code}; the contract documents 403")
 
 
@@ -361,7 +386,7 @@ def run_checks(
             )
         )
         checks.append(_check_unknown_tool_refused(client, session_id, timeout_seconds=timeout_seconds))
-        checks.extend(_check_files(client, spec, session_id))
+        checks.extend(_check_files(client, spec, session_id, timeout_seconds=timeout_seconds))
     except httpx.HTTPError as exc:
         checks.append(Check("Execute", FAIL, f"backend stopped answering: {exc}"))
     finally:
