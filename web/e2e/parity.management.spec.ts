@@ -54,10 +54,15 @@ test.describe("standalone provider setup", () => {
     // config.yml, which is what decides whether it can be edited here at all.
     await expect(provider).toContainText("stored");
 
-    // Testing has to report a result rather than sit on its spinner. The endpoint
-    // refuses the connection, so the one thing it must not say is that it worked.
+    // Testing has to come back with a reported outcome, not just stop spinning:
+    // an assertion that it merely does not say "Connected." would also pass if the
+    // check never ran at all. Nothing is listening, so the outcome is a failure,
+    // and the alternation covers the shapes TestOutcome can render (the sanitized
+    // provider error, its own fallback, and the no-model-listing branch).
     await provider.getByRole("button", { name: "Test" }).click();
-    await expect(provider.getByText("Testing…")).toBeHidden({ timeout: 30_000 });
+    await expect(
+      provider.getByText(/Connection error\.|Connection failed\.|Could not list models/),
+    ).toBeVisible({ timeout: 30_000 });
     await expect(provider).not.toContainText("Connected.");
 
     await provider.getByRole("button", { name: "Edit" }).click();
@@ -66,7 +71,11 @@ test.describe("standalone provider setup", () => {
     await expect(page.getByRole("button", { name: "Save changes" })).toBeHidden();
 
     // Reopening is what proves the edit was persisted rather than only echoed
-    // back into a form that never closed.
+    // back into a form that never closed. Reload first: the form seeds its fields
+    // from the provider on mount only, so reopening it while the invalidated
+    // provider query is still refetching would seed the stale value and then never
+    // correct itself, which no amount of retrying the assertion can recover.
+    await page.reload();
     await row(page, "Providers", PROVIDER).getByRole("button", { name: "Edit" }).click();
     await expect(page.getByLabel("API base")).toHaveValue("http://127.0.0.1:9/v2");
     await page.getByRole("button", { name: "Cancel" }).click();

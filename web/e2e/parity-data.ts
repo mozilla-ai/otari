@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 import { authHeaders, expectOk } from "./helpers";
 
@@ -184,4 +184,18 @@ export async function seedParityUsage(page: Page): Promise<void> {
     data: { source: PARITY.source, events },
   });
   await expectOk(seeded, "seed parity usage");
+
+  // A per-event rejection is reported inside a 200, so the status alone does not
+  // say the fixture landed: an event the ingest could not attribute leaves the
+  // counts short and surfaces three files later as an unexplained off-by-N.
+  const result = (await seeded.json()) as {
+    accepted: number;
+    duplicate: number;
+    rejected: number;
+    errors: unknown[];
+  };
+  expect(result.rejected, `rejected events: ${JSON.stringify(result.errors)}`).toBe(0);
+  expect(result.accepted + result.duplicate, "every seeded event has to be stored or already present").toBe(
+    events.length,
+  );
 }

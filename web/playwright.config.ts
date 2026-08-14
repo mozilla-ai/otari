@@ -14,7 +14,11 @@ export default defineConfig({
   // retries. A retry would re-run the block against state left by the first
   // attempt (the provider/alias already exist) and fail deterministically.
   retries: 0,
-  reporter: process.env.CI ? "list" : "line",
+  // "list" everywhere, not "line" locally: the gateway's own request log is piped
+  // into this stream (see `webServer.stdout`), and the line reporter rewrites its
+  // single status line with carriage returns, so interleaving the two shreds the
+  // failure detail exactly when it is needed.
+  reporter: "list",
   use: {
     baseURL: "http://127.0.0.1:8000",
     trace: "on-first-retry",
@@ -38,7 +42,11 @@ export default defineConfig({
     },
     {
       name: "parity",
-      testMatch: /parity\..*\.spec\.ts/,
+      // Everything that is not the onboarding spec, rather than a `parity.*`
+      // pattern: a project's testMatch is the only thing that collects a file, so
+      // a spec named outside every pattern here runs in no project at all and is
+      // dropped from the run silently, with no warning and a green exit.
+      testIgnore: /dashboard\.spec\.ts/,
       dependencies: ["seed"],
       use: { ...devices["Desktop Chrome"] },
     },
