@@ -119,13 +119,14 @@ providers:
 #     options:
 #       type: fast
 #   # A SearXNG-shaped backend (the bundled container, or a Brave/Tavily
-#   # adapter) needs no api_key, and inherits web_search_url when it declares
-#   # no api_base, so the in-loop web_search backend is served here too.
+#   # adapter) needs no api_key, and inherits web_search_url and
+#   # web_search_engines when it declares neither, so the in-loop web_search
+#   # backend is served here too.
 #   local:
 #     provider: searxng
 #     # api_base: "http://searxng:8080"  # optional; defaults to web_search_url
-#     options:
-#       engines: duckduckgo,mojeek
+#     # options:
+#     #   engines: duckduckgo,mojeek     # optional; defaults to web_search_engines
 
 # Model aliases (optional): expose a friendly display name that maps to a real
 # selector, hiding the underlying provider/model. Format: name -> target

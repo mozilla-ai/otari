@@ -18,6 +18,7 @@ import pytest_asyncio
 
 from gateway.core.config import GatewayConfig
 from gateway.services.search_backend import (
+    DEFAULT_MAX_TOKENS_PER_PAGE,
     SearchProviderError,
     SearchQuery,
     SearchTool,
@@ -130,6 +131,33 @@ def test_searxng_tool_api_base_wins_over_the_web_search_url() -> None:
         web_search_url="http://searxng:8080",
     )
     assert resolve_search_tool(config, "local").api_base == "http://adapter:9000"
+
+
+def test_searxng_tool_inherits_the_configured_engines() -> None:
+    """Both surfaces query the same engines on the same backend."""
+    config = GatewayConfig(
+        search_tools={"local": {"provider": "searxng"}},
+        web_search_url="http://searxng:8080",
+        web_search_engines="duckduckgo,mojeek",
+    )
+    assert resolve_search_tool(config, "local").options["engines"] == "duckduckgo,mojeek"
+
+
+def test_searxng_tool_engines_option_wins_over_the_configured_engines() -> None:
+    config = GatewayConfig(
+        search_tools={"local": {"provider": "searxng", "options": {"engines": "wikipedia"}}},
+        web_search_url="http://searxng:8080",
+        web_search_engines="duckduckgo,mojeek",
+    )
+    assert resolve_search_tool(config, "local").options["engines"] == "wikipedia"
+
+
+def test_configured_engines_do_not_leak_into_an_exa_tool() -> None:
+    config = GatewayConfig(
+        search_tools={"exa": {"api_key": "k"}},
+        web_search_engines="duckduckgo,mojeek",
+    )
+    assert "engines" not in resolve_search_tool(config, "exa").options
 
 
 def test_searxng_tool_without_any_base_url_is_a_tool_error() -> None:
@@ -331,7 +359,7 @@ async def test_run_search_raises_when_the_provider_is_unreachable(monkeypatch: p
 
 def test_searxng_params_defaults() -> None:
     params = build_searxng_params(_SEARXNG_TOOL, SearchQuery(query="otari gateway"))
-    assert params == {"q": "otari gateway", "format": "json"}
+    assert params == {"q": "otari gateway", "format": "json", "max_results": 10}
 
 
 def test_searxng_params_forward_scalar_tool_options() -> None:
@@ -357,6 +385,18 @@ def test_searxng_params_never_let_options_displace_the_query() -> None:
 def test_searxng_params_forward_the_country() -> None:
     params = build_searxng_params(_SEARXNG_TOOL, SearchQuery(query="q", country="US"))
     assert params["country"] == "US"
+
+
+def test_searxng_params_forward_the_result_count() -> None:
+    """An adapter that reads it would otherwise cap the page at its own default."""
+    assert build_searxng_params(_SEARXNG_TOOL, SearchQuery(query="q", max_results=7))["max_results"] == 7
+    assert build_searxng_params(_SEARXNG_TOOL, SearchQuery(query="q"))["max_results"] == 10
+
+
+def test_searxng_params_result_count_is_not_overridable_by_options() -> None:
+    """The count is the gateway's: an option cannot ask upstream for more."""
+    tool = replace(_SEARXNG_TOOL, options={"max_results": 500})
+    assert build_searxng_params(tool, SearchQuery(query="q", max_results=5))["max_results"] == 5
 
 
 # --------------------------------------------------------------------------- #
@@ -397,7 +437,7 @@ async def test_searxng_search_normalizes_results(monkeypatch: pytest.MonkeyPatch
     _patch_transport(monkeypatch, handler)
     outcome = await run_search(_SEARXNG_TOOL, SearchQuery(query="otari"))
 
-    assert seen["url"] == "http://searxng:8080/search?q=otari&format=json"
+    assert seen["url"] == "http://searxng:8080/search?max_results=10&q=otari&format=json"
     # A self-hosted SearXNG has no credential to send.
     assert seen["token"] is None
     # SearXNG reports no charge, so the tool's configured flat rate bills.
@@ -442,6 +482,19 @@ async def test_searxng_search_caps_the_result_count(monkeypatch: pytest.MonkeyPa
     # With no max_results the module default applies rather than the whole page.
     defaulted = await run_search(_SEARXNG_TOOL, SearchQuery(query="q"))
     assert len(defaulted.results) == 10
+
+
+@pytest.mark.asyncio
+async def test_searxng_search_caps_extracted_page_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An adapter can return a whole page, so the caller's per-page cap applies."""
+    body = {"results": [{"url": "https://example.com/1", "extracted_content": "x" * 50_000}]}
+    _patch_transport(monkeypatch, lambda _r: httpx.Response(200, json=body))
+
+    requested = await run_search(_SEARXNG_TOOL, SearchQuery(query="q", max_tokens_per_page=100))
+    assert requested.results[0].snippet == "x" * 400
+    # With no request field the module default bounds it rather than nothing at all.
+    defaulted = await run_search(_SEARXNG_TOOL, SearchQuery(query="q"))
+    assert len(defaulted.results[0].snippet or "") == DEFAULT_MAX_TOKENS_PER_PAGE * 4
 
 
 @pytest.mark.asyncio
@@ -534,7 +587,9 @@ async def test_closing_the_pooled_client_lets_the_next_search_rebuild_it(monkeyp
         ({"exa": {}}, "api_key is required for provider 'exa'"),
         ({"searxng": {"api_base": "http://searxng:8080"}}, None),
         ({"local": {"provider": "searxng", "api_base": "http://searxng:8080"}}, None),
-        ({"searxng": {}}, "api_base is required for provider 'searxng'"),
+        # A missing backend URL is reported as a startup warning, not raised: see
+        # the search_tools_without_backend_url tests below.
+        ({"searxng": {}}, None),
         ({"exa": {"api_key": "k", "options": "nope"}}, "options must be a mapping"),
         ({"exa": {"api_key": "k", "timeout": "soon"}}, "timeout must be a number"),
         ({"exa": {"api_key": "k", "timeout": 0}}, "timeout must be greater than 0"),
@@ -559,3 +614,15 @@ def test_validate_accepts_a_searxng_tool_that_inherits_the_web_search_url() -> N
         web_search_url="http://searxng:8080",
     )
     config.validate_search_tools()
+    assert config.search_tools_without_backend_url() == []
+
+
+def test_a_searxng_tool_with_no_backend_url_anywhere_is_reported() -> None:
+    """Startup warns instead of failing: a dashboard-stored URL lands after load."""
+    config = GatewayConfig(search_tools={"local": {"provider": "searxng"}, "exa": {"api_key": "k"}})
+    assert config.search_tools_without_backend_url() == ["local"]
+
+
+def test_a_searxng_tool_with_its_own_api_base_is_not_reported() -> None:
+    config = GatewayConfig(search_tools={"local": {"provider": "searxng", "api_base": "http://adapter:9000"}})
+    assert config.search_tools_without_backend_url() == []

@@ -336,21 +336,28 @@ Set `api_base` to point a tool at a different backend than the in-loop tool
 uses, and `api_key` only when the backend authenticates the gateway (it is sent
 as `X-Gateway-Token`, the header the in-loop backend already sends); a
 self-hosted SearXNG ignores it. `options` become extra `/search` query params,
-so backend-native knobs (`engines`, `language`, `time_range`) go there, and
-`q` / `format` stay the gateway's.
+so backend-native knobs (`language`, `time_range`) go there, and `q`, `format`
+and `max_results` stay the gateway's. A tool that pins no `engines` option
+inherits `web_search_engines`, so both surfaces query the same engines on the
+same backend.
 
-Three request fields behave differently on this provider, because SearXNG has no
-equivalent param: `max_results` and `search_domain_filter` are applied by the
-gateway to the returned hits rather than upstream, `country` is forwarded as a
-query param that a fronting adapter can honor and a plain SearXNG ignores, and
-`max_tokens_per_page` does not apply, since each result carries the engine's
-snippet rather than fetched page content. SearXNG reports no cost either, so a
-search is billed at the flat rate configured for the tool (below).
+Two request fields are honored by the gateway rather than upstream, because
+SearXNG has no equivalent param: `search_domain_filter` and
+`max_tokens_per_page` are applied to the returned hits. A plain SearXNG hit
+carries the engine's short snippet, so the per-page cap usually does not bite; an
+adapter that returns whole extracted pages (the bundled Tavily one does) is where
+it does. `max_results` and `country` are forwarded, for a backend that reads them
+(Tavily's adapter caps its page at 5 without the former), and a plain SearXNG
+ignores an unknown param. SearXNG reports no cost either, so a search is billed at
+the flat rate configured for the tool (below).
 
-Every entry is validated at startup, so an unsupported provider, a missing
-`api_key`, or a `searxng` tool with no backend URL fails before the first
-request. Search tools are standalone mode only: in hybrid mode, search is the
-platform's to configure.
+Every entry is validated at startup, so an unsupported provider or a missing
+`api_key` fails before the first request. A `searxng` tool with no backend URL
+anywhere is a startup warning instead of a failure, since the web-search URL can
+also come from the dashboard's Tools page, which is read after the config loads;
+until one is set, `POST /v1/search` refuses that tool with a 400 and the rest of
+the gateway serves. Search tools are standalone mode only: in hybrid mode, search
+is the platform's to configure.
 
 To price search, add a flat per-request rate under the model key
 `<provider>:<tool>` (for example `exa:exa-search`), following the same

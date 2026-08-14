@@ -28,7 +28,9 @@ The other provider is ``searxng``, which speaks the SearXNG-shaped
 :mod:`gateway.services.web_search_backend` already dispatches the in-loop tool
 to. It needs no API key, so the bundled SearXNG container and the Brave and
 Tavily fronting adapters are reachable from this endpoint too, and a tool that
-declares no ``api_base`` inherits ``web_search_url``::
+declares no ``api_base`` inherits ``web_search_url`` (and, with no ``engines``
+option of its own, ``web_search_engines``), so the two surfaces query the same
+backend the same way::
 
     search_tools:
       local:
@@ -62,8 +64,9 @@ _DEFAULT_API_BASE = {EXA_PROVIDER: "https://api.exa.ai"}
 _DEFAULT_TIMEOUT_S = 30.0
 
 # Query params the gateway owns on a SearXNG request, so a tool's ``options``
-# cannot displace the caller's query or ask for a non-JSON response.
-_RESERVED_SEARXNG_PARAMS = frozenset({"q", "format"})
+# cannot displace the caller's query, ask for a non-JSON response, or widen the
+# result count past what the request asked for and the route caps.
+_RESERVED_SEARXNG_PARAMS = frozenset({"q", "format", "max_results"})
 
 # Result-count defaults and the ceiling the route also enforces on the request
 # field. Applied again here because a tool's ``options`` can carry its own
@@ -204,14 +207,21 @@ def resolve_search_tool(config: GatewayConfig, name: str | None) -> SearchTool:
         msg = f"Search tool '{name}' is not configured correctly."
         raise SearchToolError(msg)
 
-    options = entry.get("options")
+    raw_options = entry.get("options")
+    options = dict(raw_options) if isinstance(raw_options, dict) else {}
+    # A searxng tool that pins no engines takes the operator's configured set, so
+    # the two search surfaces query the same engines on the same backend instead
+    # of this one silently falling back to whatever the instance defaults to.
+    if provider == SEARXNG_PROVIDER and "engines" not in options and config.web_search_engines:
+        options["engines"] = config.web_search_engines
+
     return SearchTool(
         name=name,
         provider=provider,
         api_key=str(api_key) if api_key else None,
         api_base=api_base,
         timeout_s=float(entry.get("timeout") or _DEFAULT_TIMEOUT_S),
-        options=dict(options) if isinstance(options, dict) else {},
+        options=options,
     )
 
 
@@ -377,12 +387,14 @@ def build_searxng_params(tool: SearchTool, query: SearchQuery) -> dict[str, str 
     (bools as lowercase ``true`` / ``false``); ``q`` and ``format`` are the
     gateway's, so no option can displace the caller's query.
 
-    ``country`` is forwarded for an adapter that can localize; a plain SearXNG
-    ignores an unknown param. The remaining request fields have no SearXNG
-    equivalent and are honored after the response instead: ``max_results`` and
-    ``search_domain_filter`` are applied to the hits, and
-    ``max_tokens_per_page`` does not apply because a SearXNG result carries the
-    engine's snippet rather than fetched page content.
+    ``max_results`` and ``country`` are forwarded for a backend that reads them
+    (the bundled Tavily adapter honors ``max_results``, and would otherwise cap
+    the page at its own default of 5 whatever the caller asked for); a plain
+    SearXNG ignores an unknown param. ``search_domain_filter`` has no equivalent
+    on either, so it is applied to the hits after the response, as is
+    ``max_tokens_per_page``, since an adapter fronting a commercial API can
+    return a whole page in ``extracted_content`` rather than the engine's short
+    snippet.
     """
     params: dict[str, str | int | float] = {}
     for key, value in tool.options.items():
@@ -393,12 +405,20 @@ def build_searxng_params(tool: SearchTool, query: SearchQuery) -> dict[str, str 
         elif isinstance(value, (str, int, float)):
             params[key] = value
 
+    # The same bound the hits are sliced to, so a backend that reads it is asked
+    # for what the caller will actually be given and no more.
+    params["max_results"] = _result_limit(query)
     if query.country:
         params["country"] = query.country
 
     params["q"] = query.query
     params["format"] = "json"
     return params
+
+
+def _result_limit(query: SearchQuery) -> int:
+    """How many hits a search returns, under the ceiling the route also enforces."""
+    return max(1, min(query.max_results or DEFAULT_MAX_RESULTS, MAX_RESULTS_CAP))
 
 
 async def _search_searxng(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
@@ -419,13 +439,19 @@ async def _search_searxng(tool: SearchTool, query: SearchQuery) -> SearchOutcome
         raise SearchProviderError(msg) from exc
 
     body = _json_object(SEARXNG_PROVIDER, response)
-    hits = _apply_domain_filter(_searxng_hits(body), query.domain_filter)
-    limit = max(1, min(query.max_results or DEFAULT_MAX_RESULTS, MAX_RESULTS_CAP))
+    # A backend that fronts a commercial API can put a whole extracted page in
+    # ``extracted_content`` (the bundled Tavily adapter always does), so the
+    # caller's per-page cap is applied here rather than dropped. Same conversion
+    # the Exa path hands upstream as ``contents.text.maxCharacters``.
+    max_chars = max(1, (query.max_tokens_per_page or DEFAULT_MAX_TOKENS_PER_PAGE) * _CHARS_PER_TOKEN)
+    hits = _apply_domain_filter(_searxng_hits(body, max_chars), query.domain_filter)
+    # Sliced again on this side: a plain SearXNG ignores the count param, and the
+    # domain filter above can only have been applied here.
     # SearXNG reports no cost, so the tool's configured flat rate is what bills.
-    return SearchOutcome(results=hits[:limit], cost_usd=None)
+    return SearchOutcome(results=hits[: _result_limit(query)], cost_usd=None)
 
 
-def _searxng_hits(body: dict[str, Any]) -> list[SearchHit]:
+def _searxng_hits(body: dict[str, Any], max_chars: int) -> list[SearchHit]:
     raw = body.get("results")
     if not isinstance(raw, list):
         msg = "searxng search response has no 'results' list"
@@ -438,14 +464,16 @@ def _searxng_hits(body: dict[str, Any]) -> list[SearchHit]:
         url = item.get("url")
         if not isinstance(url, str) or not url:
             continue
+        # ``extracted_content`` is the page text an adapter already had, the same
+        # optional field the in-loop backend prefers; otherwise the engine's own
+        # snippet. Bounded by the caller's per-page budget, because the former can
+        # be a whole page and nothing upstream applied the cap.
+        snippet = _text_or_none(item.get("extracted_content")) or _text_or_none(item.get("content"))
         hits.append(
             SearchHit(
                 url=url,
                 title=_text_or_none(item.get("title")),
-                # ``extracted_content`` is the page text an adapter already had,
-                # the same optional field the in-loop backend prefers; otherwise
-                # the engine's own snippet.
-                snippet=_text_or_none(item.get("extracted_content")) or _text_or_none(item.get("content")),
+                snippet=snippet[:max_chars] if snippet else None,
                 # ``published_date`` is the adapter convention (the Brave one
                 # sets it); ``publishedDate`` is what SearXNG's own news engines
                 # return.

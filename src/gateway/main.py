@@ -217,6 +217,17 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 # knobs) win over config/env too; apply them so the running worker
                 # reflects a dashboard change made in a prior run.
                 await apply_tool_overrides_from_db(config, session)
+                # After the overrides, not at config load: the web-search URL a
+                # searxng search tool inherits can be the dashboard-stored one
+                # applied just above, and that tool is only broken if nothing
+                # supplied it at all.
+                if missing_backend_url := config.search_tools_without_backend_url():
+                    logger.warning(
+                        "No backend URL for search tool(s): %s. POST /v1/search refuses them with a 400 until "
+                        "each declares an 'api_base' or a web-search URL is set (web_search_url, "
+                        "OTARI_WEB_SEARCH_URL, or the dashboard's Tools page).",
+                        ", ".join(sorted(missing_backend_url)),
+                    )
                 # Generate + persist a master key on first run when none is set,
                 # so the dashboard is reachable without hand-editing config, and
                 # the management API is never left unauthenticated.
