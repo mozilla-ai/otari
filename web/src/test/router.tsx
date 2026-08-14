@@ -33,6 +33,13 @@ export interface TestRouterOptions {
  *
  * The router is built once per `withRouter()` call, so each test gets its own
  * history and a re-render never resets the location mid-test.
+ *
+ * Memory history, where the app runs on hash history, so a `Link` renders
+ * `/activity?status=error` here and `/#/activity?status=error` in the browser.
+ * That is deliberate: hash history in jsdom would share one global
+ * `window.location` across tests and make them order-dependent. It does mean an
+ * href assertion below pins the path and query but not the shipped hash prefix,
+ * so the hash form is asserted in `web/e2e` instead.
  */
 export function withRouter({ url = "/", routes = [], shell }: TestRouterOptions = {}) {
   const path = url.split("?")[0] || "/";

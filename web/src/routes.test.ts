@@ -18,7 +18,13 @@ const ROUTES_DIR = join(process.cwd(), "src", "routes");
 // platform pages arriving in this repo are written to, where page components live
 // in feature modules and reach their route through `getRouteApi`.
 describe("route files", () => {
-  const files = readdirSync(ROUTES_DIR).filter((name) => name.endsWith(".tsx"));
+  // Recursive, though every route is flat today: file-based routing nests a
+  // segment's routes under a directory, and that is how the incoming platform
+  // pages are laid out. A top-level-only scan would keep passing while quietly
+  // covering none of them, which is worse than having no guard at all.
+  const files = readdirSync(ROUTES_DIR, { recursive: true })
+    .map(String)
+    .filter((name) => name.endsWith(".tsx"));
 
   it("cover the route tree", () => {
     // A guard on the guard: an empty or moved directory would leave every
