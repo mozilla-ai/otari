@@ -23,6 +23,17 @@ the caller. Every entry is validated at startup by
 ``GatewayConfig.validate_search_tools``, so an unsupported provider or a
 missing API key fails before the first request.
 
+The other provider is ``searxng``, which speaks the SearXNG-shaped
+``GET {api_base}/search?format=json`` contract that
+:mod:`gateway.services.web_search_backend` already dispatches the in-loop tool
+to. It needs no API key, so the bundled SearXNG container and the Brave and
+Tavily fronting adapters are reachable from this endpoint too, and a tool that
+declares no ``api_base`` inherits ``web_search_url``::
+
+    search_tools:
+      local:
+        provider: searxng   # api_base defaults to web_search_url
+
 Provider calls go through one pooled ``httpx.AsyncClient`` for the process
 (:func:`get_search_client`), closed on shutdown by :func:`close_search_client`.
 A search is a single request, so a client per call would pay a fresh TCP and TLS
@@ -38,15 +49,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
-from gateway.core.config import SEARCH_PROVIDERS, GatewayConfig
+from gateway.core.config import SEARCH_PROVIDERS, SEARCH_PROVIDERS_REQUIRING_API_KEY, GatewayConfig
 
 EXA_PROVIDER = "exa"
+SEARXNG_PROVIDER = "searxng"
 
 _DEFAULT_API_BASE = {EXA_PROVIDER: "https://api.exa.ai"}
 _DEFAULT_TIMEOUT_S = 30.0
+
+# Query params the gateway owns on a SearXNG request, so a tool's ``options``
+# cannot displace the caller's query or ask for a non-JSON response.
+_RESERVED_SEARXNG_PARAMS = frozenset({"q", "format"})
 
 # Result-count defaults and the ceiling the route also enforces on the request
 # field. Applied again here because a tool's ``options`` can carry its own
@@ -106,9 +123,10 @@ class SearchTool:
 
     name: str
     provider: str
-    api_key: str
     api_base: str
     timeout_s: float
+    # None for a keyless backend, which is the usual self-hosted SearXNG case.
+    api_key: str | None = None
     options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -176,29 +194,46 @@ def resolve_search_tool(config: GatewayConfig, name: str | None) -> SearchTool:
 
     provider = str(entry.get("provider") or name)
     api_key = entry.get("api_key")
-    # Defense in depth: startup validation already guarantees both, so this only
-    # fires for a config built in-process. Refusing here beats calling an unknown
-    # provider or calling a known one unauthenticated.
-    if provider not in SEARCH_PROVIDERS or not api_key:
+    api_base = str(entry.get("api_base") or _default_api_base(config, provider) or "").strip().rstrip("/")
+    # Defense in depth: startup validation already guarantees all three, so this
+    # only fires for a config built in-process. Refusing here beats calling an
+    # unknown provider, calling a keyed one unauthenticated, or calling a backend
+    # whose address nothing supplied.
+    missing_key = provider in SEARCH_PROVIDERS_REQUIRING_API_KEY and not api_key
+    if provider not in SEARCH_PROVIDERS or missing_key or not api_base:
         msg = f"Search tool '{name}' is not configured correctly."
         raise SearchToolError(msg)
 
-    api_base = str(entry.get("api_base") or _DEFAULT_API_BASE[provider]).rstrip("/")
     options = entry.get("options")
     return SearchTool(
         name=name,
         provider=provider,
-        api_key=str(api_key),
+        api_key=str(api_key) if api_key else None,
         api_base=api_base,
         timeout_s=float(entry.get("timeout") or _DEFAULT_TIMEOUT_S),
         options=dict(options) if isinstance(options, dict) else {},
     )
 
 
+def _default_api_base(config: GatewayConfig, provider: str) -> str | None:
+    """The base URL a tool inherits when it declares no ``api_base``.
+
+    A ``searxng`` tool falls back to ``web_search_url``, the backend the in-loop
+    ``otari_web_search`` tool already speaks to over the same contract, so a
+    deployment that runs one exposes it on ``POST /v1/search`` with a single
+    ``provider: searxng`` line.
+    """
+    if provider == SEARXNG_PROVIDER:
+        return (config.web_search_url or "").strip() or None
+    return _DEFAULT_API_BASE.get(provider)
+
+
 async def run_search(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
     """Dispatch one search against the tool's provider."""
     if tool.provider == EXA_PROVIDER:
         return await _search_exa(tool, query)
+    if tool.provider == SEARXNG_PROVIDER:
+        return await _search_searxng(tool, query)
     # Unreachable via config: startup validation rejects unknown providers.
     msg = f"Unsupported search provider '{tool.provider}'."
     raise SearchProviderError(msg)
@@ -268,6 +303,12 @@ def build_exa_payload(tool: SearchTool, query: SearchQuery) -> dict[str, Any]:
 
 
 async def _search_exa(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
+    if not tool.api_key:
+        # Unreachable via config: exa is in SEARCH_PROVIDERS_REQUIRING_API_KEY, so
+        # both startup validation and tool resolution refuse a keyless entry.
+        msg = "exa search requires an api_key"
+        raise SearchProviderError(msg)
+
     payload = build_exa_payload(tool, query)
     client = get_search_client()
     try:
@@ -281,19 +322,7 @@ async def _search_exa(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
         msg = f"exa search request failed: {exc}"
         raise SearchProviderError(msg) from exc
 
-    if response.status_code >= 400:
-        msg = f"exa search returned HTTP {response.status_code}: {response.text[:_ERROR_BODY_CHARS]}"
-        raise SearchProviderError(msg)
-
-    try:
-        body = response.json()
-    except ValueError as exc:
-        msg = "exa search returned a body that is not JSON"
-        raise SearchProviderError(msg) from exc
-    if not isinstance(body, dict):
-        msg = f"exa search returned a {type(body).__name__} body, expected an object"
-        raise SearchProviderError(msg)
-
+    body = _json_object(EXA_PROVIDER, response)
     return SearchOutcome(results=_exa_hits(body), cost_usd=_exa_cost(body))
 
 
@@ -331,6 +360,158 @@ def _exa_cost(body: dict[str, Any]) -> float | None:
     if isinstance(total, bool) or not isinstance(total, (int, float)):
         return None
     return max(float(total), 0.0)
+
+
+# --------------------------------------------------------------------------- #
+# SearXNG
+# --------------------------------------------------------------------------- #
+
+
+def build_searxng_params(tool: SearchTool, query: SearchQuery) -> dict[str, str | int | float]:
+    """Build the SearXNG ``GET /search`` query params from the neutral request.
+
+    The tool's ``options`` are the base, so an operator can pin backend-native
+    knobs (``engines``, ``language``, ``time_range``, or whatever a commercial
+    API's fronting adapter reads) the same way ``provider_options`` does on the
+    in-loop path. These ride in a query string, so only scalars are forwarded
+    (bools as lowercase ``true`` / ``false``); ``q`` and ``format`` are the
+    gateway's, so no option can displace the caller's query.
+
+    ``country`` is forwarded for an adapter that can localize; a plain SearXNG
+    ignores an unknown param. The remaining request fields have no SearXNG
+    equivalent and are honored after the response instead: ``max_results`` and
+    ``search_domain_filter`` are applied to the hits, and
+    ``max_tokens_per_page`` does not apply because a SearXNG result carries the
+    engine's snippet rather than fetched page content.
+    """
+    params: dict[str, str | int | float] = {}
+    for key, value in tool.options.items():
+        if key in _RESERVED_SEARXNG_PARAMS or value is None:
+            continue
+        if isinstance(value, bool):
+            params[key] = "true" if value else "false"
+        elif isinstance(value, (str, int, float)):
+            params[key] = value
+
+    if query.country:
+        params["country"] = query.country
+
+    params["q"] = query.query
+    params["format"] = "json"
+    return params
+
+
+async def _search_searxng(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
+    client = get_search_client()
+    # A self-hosted SearXNG needs no credential and ignores the header. A tool
+    # that does carry an api_key is fronting something that authenticates the
+    # gateway, and gets the header the in-loop backend already sends.
+    headers = {"X-Gateway-Token": tool.api_key} if tool.api_key else None
+    try:
+        response = await client.get(
+            f"{tool.api_base}/search",
+            params=build_searxng_params(tool, query),
+            headers=headers,
+            timeout=tool.timeout_s,
+        )
+    except httpx.HTTPError as exc:
+        msg = f"searxng search request failed: {exc}"
+        raise SearchProviderError(msg) from exc
+
+    body = _json_object(SEARXNG_PROVIDER, response)
+    hits = _apply_domain_filter(_searxng_hits(body), query.domain_filter)
+    limit = max(1, min(query.max_results or DEFAULT_MAX_RESULTS, MAX_RESULTS_CAP))
+    # SearXNG reports no cost, so the tool's configured flat rate is what bills.
+    return SearchOutcome(results=hits[:limit], cost_usd=None)
+
+
+def _searxng_hits(body: dict[str, Any]) -> list[SearchHit]:
+    raw = body.get("results")
+    if not isinstance(raw, list):
+        msg = "searxng search response has no 'results' list"
+        raise SearchProviderError(msg)
+
+    hits: list[SearchHit] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        url = item.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        hits.append(
+            SearchHit(
+                url=url,
+                title=_text_or_none(item.get("title")),
+                # ``extracted_content`` is the page text an adapter already had,
+                # the same optional field the in-loop backend prefers; otherwise
+                # the engine's own snippet.
+                snippet=_text_or_none(item.get("extracted_content")) or _text_or_none(item.get("content")),
+                # ``published_date`` is the adapter convention (the Brave one
+                # sets it); ``publishedDate`` is what SearXNG's own news engines
+                # return.
+                date=_text_or_none(item.get("published_date")) or _text_or_none(item.get("publishedDate")),
+            )
+        )
+    return hits
+
+
+def _apply_domain_filter(hits: list[SearchHit], domain_filter: tuple[str, ...]) -> list[SearchHit]:
+    """Filter hits by host for a provider whose API has no domain filter.
+
+    Exa takes include and exclude lists in the request, so its adapter passes
+    them upstream; SearXNG has no equivalent, and dropping the filter would
+    silently widen the search the caller asked for. Perplexity's convention
+    holds either way: a leading '-' excludes rather than restricts.
+    """
+    include = tuple(d for d in (_normalize_domain(d) for d in domain_filter if not d.startswith("-")) if d)
+    exclude = tuple(d for d in (_normalize_domain(d[1:]) for d in domain_filter if d.startswith("-")) if d)
+    if not include and not exclude:
+        return hits
+
+    kept: list[SearchHit] = []
+    for hit in hits:
+        host = (urlparse(hit.url).hostname or "").lower()
+        if exclude and _host_matches(host, exclude):
+            continue
+        if include and not _host_matches(host, include):
+            continue
+        kept.append(hit)
+    return kept
+
+
+def _normalize_domain(domain: str) -> str:
+    return domain.strip().lower().lstrip(".")
+
+
+def _host_matches(host: str, domains: tuple[str, ...]) -> bool:
+    """Whether ``host`` is one of ``domains`` or a subdomain of one."""
+    return any(host == domain or host.endswith(f".{domain}") for domain in domains)
+
+
+# --------------------------------------------------------------------------- #
+# Shared
+# --------------------------------------------------------------------------- #
+
+
+def _json_object(provider: str, response: httpx.Response) -> dict[str, Any]:
+    """The provider's JSON body, or a :class:`SearchProviderError` explaining why not.
+
+    The upstream status and body stay in the message, which reaches the usage log
+    and the gateway log; the route never puts it in the response.
+    """
+    if response.status_code >= 400:
+        msg = f"{provider} search returned HTTP {response.status_code}: {response.text[:_ERROR_BODY_CHARS]}"
+        raise SearchProviderError(msg)
+
+    try:
+        body = response.json()
+    except ValueError as exc:
+        msg = f"{provider} search returned a body that is not JSON"
+        raise SearchProviderError(msg) from exc
+    if not isinstance(body, dict):
+        msg = f"{provider} search returned a {type(body).__name__} body, expected an object"
+        raise SearchProviderError(msg)
+    return body
 
 
 def _text_or_none(value: Any) -> str | None:

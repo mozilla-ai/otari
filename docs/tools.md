@@ -187,4 +187,6 @@ To search directly rather than as part of a completion, use
 same way, but the caller supplies the query instead of the model, it is
 configured separately under
 [`search_tools`](configuration.md#search-tools), and it is priced under its own
-key (see [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)).
+key (see [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A tool with
+`provider: searxng` runs against this same backend, so the endpoint needs no
+commercial search key when `OTARI_WEB_SEARCH_URL` is already set.

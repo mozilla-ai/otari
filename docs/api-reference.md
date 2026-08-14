@@ -168,6 +168,12 @@ rejected, so check that your client does not depend on one. Provider-native
 knobs with no request field, such as Exa's `type` or `category`, belong in the
 tool's `options`.
 
+The supported providers are `exa` and `searxng`, the latter being the same
+SearXNG-shaped backend the `otari_web_search` tool uses, so a deployment that
+already runs one can serve this endpoint from it without a commercial key. Which
+request fields a `searxng` tool honors differs slightly; see
+[serving the web-search backend you already run](configuration.md#serving-the-web-search-backend-you-already-run).
+
 Search bills per request rather than per token, so a usage
 row carries zero tokens and a cost taken from the provider's own reported charge
 when it reports one (Exa does); otherwise it uses the flat per-request rate

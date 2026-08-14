@@ -288,9 +288,9 @@ search_tools:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `provider` | string | the tool name | Search provider to dispatch to. Supported: `exa`. |
-| `api_key` | string | required | Credential for the provider. |
-| `api_base` | string | provider default | Override the provider's base URL. |
+| `provider` | string | the tool name | Search provider to dispatch to. Supported: `exa`, `searxng`. |
+| `api_key` | string | required for `exa` | Credential for the provider. A `searxng` backend is normally keyless; see below. |
+| `api_base` | string | provider default | Override the provider's base URL. Required for `searxng` unless `web_search_url` is set. |
 | `timeout` | number | `30` | Request timeout in seconds; must be greater than 0. |
 | `options` | dict | `{}` | Provider-native request fields used as defaults. |
 
@@ -316,9 +316,41 @@ search_tools:
 The opt-out is the operator's, so it holds even for a request that carries
 `max_tokens_per_page`.
 
-Every entry is validated at startup, so an unsupported provider or a missing
-`api_key` fails before the first request. Search tools are standalone mode only:
-in hybrid mode, search is the platform's to configure.
+### Serving the web-search backend you already run
+
+The `searxng` provider speaks the same
+`GET {api_base}/search?format=json` contract as the
+[`otari_web_search`](tools.md#web-search) tool's backend, so the bundled SearXNG
+container and the Brave and Tavily fronting adapters are reachable from
+`POST /v1/search` too, with no commercial key:
+
+```yaml
+web_search_url: "http://searxng:8080"
+
+search_tools:
+  local:
+    provider: searxng   # api_base defaults to web_search_url
+```
+
+Set `api_base` to point a tool at a different backend than the in-loop tool
+uses, and `api_key` only when the backend authenticates the gateway (it is sent
+as `X-Gateway-Token`, the header the in-loop backend already sends); a
+self-hosted SearXNG ignores it. `options` become extra `/search` query params,
+so backend-native knobs (`engines`, `language`, `time_range`) go there, and
+`q` / `format` stay the gateway's.
+
+Three request fields behave differently on this provider, because SearXNG has no
+equivalent param: `max_results` and `search_domain_filter` are applied by the
+gateway to the returned hits rather than upstream, `country` is forwarded as a
+query param that a fronting adapter can honor and a plain SearXNG ignores, and
+`max_tokens_per_page` does not apply, since each result carries the engine's
+snippet rather than fetched page content. SearXNG reports no cost either, so a
+search is billed at the flat rate configured for the tool (below).
+
+Every entry is validated at startup, so an unsupported provider, a missing
+`api_key`, or a `searxng` tool with no backend URL fails before the first
+request. Search tools are standalone mode only: in hybrid mode, search is the
+platform's to configure.
 
 To price search, add a flat per-request rate under the model key
 `<provider>:<tool>` (for example `exa:exa-search`), following the same

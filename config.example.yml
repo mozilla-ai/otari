@@ -107,9 +107,9 @@ providers:
 
 # Search tools (optional): what POST /v1/search can run against, keyed by the
 # name callers pass as `search_tool_name` (or in the /v1/search/{tool} path).
-# `provider` defaults to the tool name and must be one of: exa. `options` holds
-# provider-native request defaults for knobs the request body has no field for;
-# the caller's query always wins. Standalone-mode only.
+# `provider` defaults to the tool name and must be one of: exa, searxng.
+# `options` holds provider-native request defaults for knobs the request body has
+# no field for; the caller's query always wins. Standalone-mode only.
 # search_tools:
 #   exa-search:
 #     provider: exa
@@ -118,6 +118,14 @@ providers:
 #     # timeout: 30                      # optional, seconds
 #     options:
 #       type: fast
+#   # A SearXNG-shaped backend (the bundled container, or a Brave/Tavily
+#   # adapter) needs no api_key, and inherits web_search_url when it declares
+#   # no api_base, so the in-loop web_search backend is served here too.
+#   local:
+#     provider: searxng
+#     # api_base: "http://searxng:8080"  # optional; defaults to web_search_url
+#     options:
+#       engines: duckduckgo,mojeek
 
 # Model aliases (optional): expose a friendly display name that maps to a real
 # selector, hiding the underlying provider/model. Format: name -> target
