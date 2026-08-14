@@ -98,8 +98,9 @@ test.describe("api keys", () => {
     await page.getByLabel("Name").fill(KEY_NAME);
     // Owner is required: this is what keeps the dashboard from minting the
     // anonymous virtual users an omitted id would.
-    await page.getByPlaceholder("Pick a user, or type a new id…").fill(PARITY.users.heavy);
-    await page.keyboard.press("Escape");
+    const ownerBox = page.getByPlaceholder("Pick a user, or type a new id…");
+    await ownerBox.fill(PARITY.users.heavy);
+    await dismissComboBox(ownerBox);
     await page.getByRole("button", { name: "Create key" }).click();
 
     // The secret is shown exactly once, behind an explicit acknowledgement that
@@ -197,11 +198,22 @@ test.describe("fallback routing", () => {
     // Shrinking has to be possible too: a chain that could only grow would strand
     // an operator who added a candidate by mistake.
     await policy.getByRole("button", { name: "Edit" }).click();
-    await expect(page.getByRole("combobox", { name: /Fallback 2/ })).toBeVisible();
-    // One Remove per chain entry, in order. The form's other Remove controls
-    // belong to the conditions, candidate-pool and guardrail sections, none of
-    // which this policy has, so they are not rendered.
-    await page.getByRole("button", { name: "Remove" }).nth(1).click();
+    const fallbackTwo = page.getByRole("combobox", { name: /Fallback 2/ });
+    await expect(fallbackTwo).toBeVisible();
+    // Scoped to the row holding Fallback 2 rather than taken by index off the
+    // page: the form grows a Remove control per condition, per candidate in a
+    // pool and per guardrail, so an index would start removing the wrong thing
+    // the moment this policy grew one of those.
+    // Innermost element holding both the box and its Remove: the combobox sits in
+    // a wrapper of its own, so filtering on the box alone lands inside that
+    // wrapper, which has no button in it.
+    await page
+      .locator("div")
+      .filter({ has: fallbackTwo })
+      .filter({ has: page.getByRole("button", { name: "Remove" }) })
+      .last()
+      .getByRole("button", { name: "Remove" })
+      .click();
     await expect(page.getByRole("combobox", { name: /Fallback 2/ })).toHaveCount(0);
     await page.getByRole("button", { name: "Save" }).click();
     await expect(row(page, "Routing policies", POLICY)).toContainText(/\+1 on failure/);

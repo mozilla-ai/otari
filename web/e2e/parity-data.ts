@@ -150,10 +150,15 @@ async function ensureUsers(page: Page): Promise<void> {
   }
 }
 
-// Price one of the two models. `effective_at` is backdated because an imported
+// A fixed instant, well before any seeded row. Backdated because an imported
 // event is priced at the rate in force at *its* timestamp: a price effective from
 // now would leave every backdated row uncosted, and the Priced filter would then
-// have no positive case at all.
+// have no positive case at all. Fixed rather than derived from the clock because
+// a pricing row is keyed by `effective_at`, so a clock-derived value writes a new
+// revision on every run instead of reusing the one already there.
+const PRICE_EFFECTIVE_AT = "2020-01-01T00:00:00.000Z";
+
+// Price one of the two models.
 async function ensurePricing(page: Page): Promise<void> {
   const priced = await page.request.post("/v1/pricing", {
     headers: authHeaders,
@@ -163,7 +168,7 @@ async function ensurePricing(page: Page): Promise<void> {
       output_price_per_million: 15,
       cache_read_price_per_million: 0.3,
       cache_write_price_per_million: 3.75,
-      effective_at: new Date(Date.now() - 60 * 86_400_000).toISOString(),
+      effective_at: PRICE_EFFECTIVE_AT,
     },
   });
   await expectOk(priced, `price ${PRICED_MODEL_KEY}`);

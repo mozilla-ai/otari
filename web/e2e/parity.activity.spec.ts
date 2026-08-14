@@ -138,9 +138,13 @@ test.describe("activity log", () => {
     await expect(rows(page)).toHaveCount(ALL);
 
     // The fixture spans the last twenty hours, so an hour of it is a strict
-    // subset. The preset re-anchors the window and re-queries; a preset that only
-    // repainted the histogram would leave the count unchanged.
+    // subset: fewer rows than the whole window, but not none. Both bounds are
+    // asserted, because an empty result would satisfy the upper one while proving
+    // nothing at all. The lower bound holds because the densest set puts its
+    // newest row ~39 minutes back, which leaves the run twenty-odd minutes of
+    // headroom against a job that takes two.
     await page.getByRole("button", { name: "1h", exact: true }).click();
+    await expect.poll(() => rows(page).count()).toBeGreaterThan(0);
     await expect.poll(() => rows(page).count()).toBeLessThan(ALL);
 
     // "All" is unbounded rather than a wider preset, so every fixture row is back.
