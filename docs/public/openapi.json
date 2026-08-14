@@ -740,6 +740,17 @@
       },
       "BillingMeters": {
         "additionalProperties": true,
+        "description": "The meters a request was billed on.\n\nToken meters sit flat (``{\"input\": 1200}``), which is why extra keys are\nallowed: the names come from the provider and the endpoint, so the map is\ngenuinely open. Gateway-run tool counts are the one reserved key, nested\nunder ``tools`` because an MCP server can advertise a tool named after a\ntoken meter and a flat collision would corrupt the billed-token aggregates\nfor the whole window (see ``gateway.services.tool_usage``).\n\nA TypedDict for the reason above, and for one that cost a round trip to\nlearn: a model that suppressed its defaults with a ``model_serializer``\npublished an *empty* schema, because that serializer replaces the\nserialization JSON schema and that is the one FastAPI puts in the spec. The\nproperties below are the whole point, so they have to survive into\ndocs/public/openapi.json; ``tests/unit/test_billing_schemas.py`` asserts they\ndo.",
+        "properties": {
+          "tools": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ToolMeter"
+            },
+            "title": "Tools",
+            "type": "object"
+          }
+        },
+        "title": "BillingMeters",
         "type": "object"
       },
       "Body_create_file_v1_files_post": {
@@ -6326,6 +6337,29 @@
       },
       "ToolMeter": {
         "additionalProperties": true,
+        "description": "One gateway-run tool's call counts on a request.\n\nA TypedDict rather than a model, and every key optional, so a stored entry\nserializes back as it was written: a model with defaults would put\n``\"unit_rate\": null`` on every tool that has never been priced.",
+        "properties": {
+          "billed": {
+            "title": "Billed",
+            "type": "integer"
+          },
+          "errors": {
+            "title": "Errors",
+            "type": "integer"
+          },
+          "unit_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit Rate"
+          }
+        },
+        "title": "ToolMeter",
         "type": "object"
       },
       "ToolSettingField": {

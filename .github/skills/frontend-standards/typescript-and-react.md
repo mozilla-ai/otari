@@ -11,8 +11,9 @@ TypeScript runs in `strict` mode; `npm --prefix web run typecheck` must pass. Re
 - **Named exports**, not default exports, for components/hooks/helpers, consistent names
   across imports, better tooling and tree-shaking. (`web/` already does this throughout.)
 - **Named imports**, not namespace imports (`import * as …`).
-- Type the API surface in `web/src/api/types.ts` and thread those types through
-  `apiFetch<T>(…)`; don't fetch into `any`.
+- Take the API surface from the generated client (`import type { … } from "@/client"`,
+  regenerated from the OpenAPI spec) and thread those types through `apiFetch<T>(…)`;
+  don't fetch into `any` and don't hand-write a wire shape (see [web/AGENTS.md](../../../web/AGENTS.md)).
 - Let inference work for locals; annotate function signatures and exported values.
 
 ## React

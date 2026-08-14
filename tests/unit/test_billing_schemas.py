@@ -13,10 +13,13 @@ visible from the type annotations alone:
   alternative is one unrecognised row turning the whole usage page into a 500.
 """
 
+import json
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from gateway.api.routes._billing_schemas import BillingMeters, TokenChargeLine, UnitChargeLine
+from gateway.api.routes._billing_schemas import TokenChargeLine, UnitChargeLine
 from gateway.api.routes.usage import UsageEntry
 
 # Every charge line the gateway writes today, one per producer. Sourced from
@@ -110,9 +113,8 @@ def test_meters_keep_flat_token_names_and_typed_tool_counts() -> None:
         "tools": {"web_search": {"billed": 3, "errors": 1, "unit_rate": 0.01}},
     }
     row = entry(billing_meters=meters)
-    assert isinstance(row.billing_meters, BillingMeters)
-    assert row.billing_meters.tools is not None
-    assert row.billing_meters.tools["web_search"].billed == 3
+    assert isinstance(row.billing_meters, dict)
+    assert row.billing_meters["tools"]["web_search"]["billed"] == 3
     assert row.model_dump(mode="json")["billing_meters"] == meters
 
 
@@ -130,9 +132,10 @@ def test_meters_survive_a_tools_value_of_the_wrong_shape() -> None:
 def test_a_partial_tool_entry_still_validates() -> None:
     """Counts default, so an entry missing one is not a hard failure."""
     row = entry(billing_meters={"tools": {"code_execution": {"billed": 2}}})
-    assert isinstance(row.billing_meters, BillingMeters)
-    assert row.billing_meters.tools is not None
-    assert row.billing_meters.tools["code_execution"].errors == 0
+    assert isinstance(row.billing_meters, dict)
+    # Absent counts stay absent rather than defaulting to 0 on the wire, so the
+    # assertion is about what was stored, not what a model would have filled in.
+    assert row.billing_meters["tools"]["code_execution"] == {"billed": 2}
 
 
 def test_a_line_that_is_not_an_object_is_still_rejected() -> None:
@@ -164,3 +167,34 @@ def test_an_unpriced_tool_entry_does_not_grow_a_rate() -> None:
     """
     meters = {"tools": {"web_search": {"billed": 2, "errors": 0}}}
     assert entry(billing_meters=meters).model_dump(mode="json")["billing_meters"] == meters
+
+
+def test_the_shapes_reach_the_published_spec() -> None:
+    """The properties have to survive into docs/public/openapi.json.
+
+    The spec is the deliverable here: it is what every generated client and SDK
+    core is built from, so a shape that validates correctly at runtime but
+    publishes as a bare object has bought nothing.
+
+    This exists because that is precisely what happened. Suppressing the models'
+    defaults with a ``model_serializer`` replaced the *serialization* JSON schema,
+    which is the mode FastAPI publishes for a response, and both meter schemas
+    reached the spec with no properties at all while every runtime test above
+    still passed.
+    """
+    spec = json.loads((Path(__file__).resolve().parents[2] / "docs/public/openapi.json").read_text())
+    schemas = spec["components"]["schemas"]
+
+    assert "tools" in schemas["BillingMeters"]["properties"]
+    assert set(schemas["ToolMeter"]["properties"]) == {"billed", "errors", "unit_rate"}
+    # The charge lines carry the discriminator that says how to read a line, and
+    # unlike the meters above they require every field.
+    assert "rate_per_million" in schemas["TokenChargeLine"]["properties"]
+    assert "unit_rate" in schemas["UnitChargeLine"]["properties"]
+    assert set(schemas["TokenChargeLine"]["required"]) == {"meter", "units", "rate_per_million", "cost"}
+
+    # And the union is what a client narrows on, so a row's breakdown has to
+    # offer both named shapes rather than only the permissive arm.
+    breakdown = schemas["UsageEntry"]["properties"]["pricing_breakdown"]
+    refs = json.dumps(breakdown)
+    assert "TokenChargeLine" in refs and "UnitChargeLine" in refs

@@ -21,10 +21,9 @@ into a model that silently dropped an unrecognised key would delete data on the
 way out.
 """
 
-from typing import Annotated, Any
+from typing import Annotated, Any, TypedDict
 
-from pydantic import BaseModel, ConfigDict, Field, model_serializer
-from pydantic_core.core_schema import SerializerFunctionWrapHandler
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _OpenShape(BaseModel):
@@ -35,29 +34,6 @@ class _OpenShape(BaseModel):
     """
 
     model_config = ConfigDict(extra="allow")
-
-
-class _DefaultedShape(_OpenShape):
-    """An open shape whose declared fields have defaults, serialized as stored.
-
-    Declaring an optional field is what lets a client type it, but Pydantic would
-    then write that field onto every row: declaring ``tools`` alone put
-    ``"tools": null`` on every request that never ran a tool, which is a
-    wire-format change for nearly every row. These models describe stored data
-    rather than defining it, so a key that was not stored stays absent.
-
-    Only for models that have defaults. A model whose fields are all required
-    cannot omit anything, and inheriting this would cost it its ``required`` list
-    in the schema, which is exactly the precision the shapes exist to publish.
-    """
-
-    @model_serializer(mode="wrap")
-    def _only_what_was_stored(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
-        data: dict[str, Any] = handler(self)
-        for name in type(self).model_fields:
-            if name not in self.model_fields_set:
-                data.pop(name, None)
-        return data
 
 
 class TokenChargeLine(_OpenShape):
@@ -87,19 +63,25 @@ class UnitChargeLine(_OpenShape):
     cost: float = Field(description="USD charged for this line.")
 
 
-class ToolMeter(_DefaultedShape):
+class ToolMeter(TypedDict, total=False):
     """One gateway-run tool's call counts on a request.
 
-    Fields default rather than being required so a partial entry written by an
-    older gateway still validates; see the module docstring.
+    A TypedDict rather than a model, and every key optional, so a stored entry
+    serializes back as it was written: a model with defaults would put
+    ``"unit_rate": null`` on every tool that has never been priced.
     """
 
-    billed: int = Field(default=0, description="Successful calls, which are charged.")
-    errors: int = Field(default=0, description="Failed calls, which are counted but never charged.")
-    unit_rate: float | None = Field(default=None, description="USD per call at the time of the request.")
+    __pydantic_config__ = ConfigDict(extra="allow")  # type: ignore[misc]
+
+    #: Successful calls, which are charged.
+    billed: int
+    #: Failed calls, which are counted but never charged.
+    errors: int
+    #: USD per call at the time of the request.
+    unit_rate: float | None
 
 
-class BillingMeters(_DefaultedShape):
+class BillingMeters(TypedDict, total=False):
     """The meters a request was billed on.
 
     Token meters sit flat (``{"input": 1200}``), which is why extra keys are
@@ -108,11 +90,20 @@ class BillingMeters(_DefaultedShape):
     under ``tools`` because an MCP server can advertise a tool named after a
     token meter and a flat collision would corrupt the billed-token aggregates
     for the whole window (see ``gateway.services.tool_usage``).
+
+    A TypedDict for the reason above, and for one that cost a round trip to
+    learn: a model that suppressed its defaults with a ``model_serializer``
+    published an *empty* schema, because that serializer replaces the
+    serialization JSON schema and that is the one FastAPI puts in the spec. The
+    properties below are the whole point, so they have to survive into
+    docs/public/openapi.json; ``tests/unit/test_billing_schemas.py`` asserts they
+    do.
     """
 
-    tools: dict[str, ToolMeter] | None = Field(
-        default=None, description="Per-tool call counts, keyed by tool name."
-    )
+    __pydantic_config__ = ConfigDict(extra="allow")  # type: ignore[misc]
+
+    #: Per-tool call counts, keyed by tool name.
+    tools: dict[str, ToolMeter]
 
 
 # The permissive arms. Named rather than inlined so the fields that use them read

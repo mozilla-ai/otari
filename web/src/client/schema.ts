@@ -2568,7 +2568,31 @@ export interface components {
             /** Custom Id */
             custom_id: string;
         };
+        /**
+         * BillingMeters
+         * @description The meters a request was billed on.
+         *
+         *     Token meters sit flat (``{"input": 1200}``), which is why extra keys are
+         *     allowed: the names come from the provider and the endpoint, so the map is
+         *     genuinely open. Gateway-run tool counts are the one reserved key, nested
+         *     under ``tools`` because an MCP server can advertise a tool named after a
+         *     token meter and a flat collision would corrupt the billed-token aggregates
+         *     for the whole window (see ``gateway.services.tool_usage``).
+         *
+         *     A TypedDict for the reason above, and for one that cost a round trip to
+         *     learn: a model that suppressed its defaults with a ``model_serializer``
+         *     published an *empty* schema, because that serializer replaces the
+         *     serialization JSON schema and that is the one FastAPI puts in the spec. The
+         *     properties below are the whole point, so they have to survive into
+         *     docs/public/openapi.json; ``tests/unit/test_billing_schemas.py`` asserts they
+         *     do.
+         */
         BillingMeters: {
+            /** Tools */
+            tools?: {
+                [key: string]: components["schemas"]["ToolMeter"];
+            };
+        } & {
             [key: string]: unknown;
         };
         /** Body_create_file_v1_files_post */
@@ -4901,7 +4925,22 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * ToolMeter
+         * @description One gateway-run tool's call counts on a request.
+         *
+         *     A TypedDict rather than a model, and every key optional, so a stored entry
+         *     serializes back as it was written: a model with defaults would put
+         *     ``"unit_rate": null`` on every tool that has never been priced.
+         */
         ToolMeter: {
+            /** Billed */
+            billed?: number;
+            /** Errors */
+            errors?: number;
+            /** Unit Rate */
+            unit_rate?: number | null;
+        } & {
             [key: string]: unknown;
         };
         /**

@@ -64,6 +64,15 @@ class ModelPricingInfo(BaseModel):
     # dropping it would make Pydantic validate every stored tier against
     # PricingTier's rules on read, which is validation this field never used to
     # do, so a rule tightened later would turn old rows into a 500 on /v1/models.
+    #
+    # Deliberately left on pydantic's smart union, unlike the charge lines in
+    # _billing_schemas, which pin `union_mode="left_to_right"`. Smart mode takes
+    # the dict arm for a stored tier, which is what keeps the wire format clean.
+    # Do not "make it consistent" by adding left_to_right here: PricingTier is
+    # not one of the defaulted shapes, so it would write four null price keys per
+    # tier, and it would start rejecting the catalog-derived tiers that
+    # pricing_service._pricing_tiers emits (a `min_input_tokens` of 0 fails
+    # `gt=0`, and a tier with no rate override fails validate_has_rate_override).
     pricing_tiers: Sequence[PricingTier | dict[str, float | int]] = Field(default_factory=list)
 
 
