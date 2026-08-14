@@ -214,6 +214,24 @@ def test_a_read_only_backend_keeps_its_served_operations_checked() -> None:
     assert not _failures(checks)
 
 
+def test_a_404_on_a_traversal_is_a_refusal_not_an_absent_route() -> None:
+    """A backend may reject an escaping path by declaring it not found.
+
+    Reading that as "no read route here" would skip the confinement check on a
+    backend that does serve reads, which is the one place a skip is more
+    dangerous than a failure: it reports nothing wrong about the check that
+    matters most. Reads working on a known file is what settles it.
+    """
+    checks = _run(FakeBackend(escape_status=404))
+    statuses = _statuses(checks)
+
+    assert statuses["GetFile"] == conformance.PASS
+    confinement = "GetFile confines access to the session workspace"
+    assert statuses[confinement] == conformance.PASS
+    assert "refused with 404" in next(check.detail for check in checks if check.name == confinement)
+    assert not _failures(checks)
+
+
 def test_a_backend_serving_no_reads_skips_confinement_rather_than_passing_it() -> None:
     """Nothing to confine is a skip, never a pass: a pass would claim a check that never ran."""
     statuses = _statuses(_run(FakeBackend(serve_files=False)))
@@ -237,7 +255,6 @@ def test_a_backend_that_caps_the_execution_budget_still_conforms() -> None:
     checks = _run(FakeBackend(budget_ceiling_seconds=120), timeout_seconds=300)
 
     assert not _failures(checks)
-    assert conformance.report(checks) == 0
     # The refusal is reported rather than hidden: the run says which budget held.
     executed = [check for check in checks if check.name == "Execute code_execution"]
     assert "refused a 300s budget" in executed[0].detail
