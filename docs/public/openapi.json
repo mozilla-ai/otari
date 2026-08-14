@@ -1485,6 +1485,48 @@
         "title": "ConfigField",
         "type": "object"
       },
+      "ConfigSearchToolSchema": {
+        "description": "A search tool declared in the config file. Read-only: it cannot be edited here.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "has_api_key": {
+            "description": "Whether the config entry carries an API key. The key itself is not shown.",
+            "title": "Has Api Key",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "shadowed": {
+            "default": false,
+            "description": "True when a stored search tool of the same name overrides this entry.",
+            "title": "Shadowed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "has_api_key"
+        ],
+        "title": "ConfigSearchToolSchema",
+        "type": "object"
+      },
       "CountTokensRequest": {
         "description": "Anthropic ``/v1/messages/count_tokens`` request.\n\nA subset of :class:`MessagesRequest`: the input fields that affect the token\ncount, minus ``max_tokens`` and the streaming/sampling controls, since the\nendpoint only counts input tokens. ``context_management`` and ``betas`` are\naccepted for wire compatibility, but the local estimate does not apply\nprovider-side context edits. Clients such as Claude Code call this on every\nturn to keep their prompt within the model's context window.",
         "properties": {
@@ -1948,6 +1990,83 @@
           "metadata"
         ],
         "title": "CreateKeyResponse",
+        "type": "object"
+      },
+      "CreateSearchToolRequest": {
+        "description": "Create a stored search tool. ``api_key`` is write-only and requires OTARI_SECRET_KEY.",
+        "example": {
+          "api_base": "http://searxng:8080",
+          "name": "local",
+          "provider": "searxng"
+        },
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Backend endpoint. Omit to inherit the provider's default (searxng inherits web_search_url).",
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider API key. Stored encrypted; never returned.",
+            "title": "Api Key"
+          },
+          "name": {
+            "description": "Name callers pass as 'search_tool_name' or in /v1/search/{tool}.",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider-native request fields used as defaults (e.g. exa's 'type', searxng's 'engines').",
+            "title": "Options"
+          },
+          "provider": {
+            "description": "Search provider, one of: exa, searxng.",
+            "title": "Provider",
+            "type": "string"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-request timeout in seconds.",
+            "title": "Timeout"
+          }
+        },
+        "required": [
+          "name",
+          "provider"
+        ],
+        "title": "CreateSearchToolRequest",
         "type": "object"
       },
       "CreateSessionRequest": {
@@ -4836,6 +4955,27 @@
         "title": "ReencryptProviderCredentialsResponse",
         "type": "object"
       },
+      "ReencryptSearchToolsResponse": {
+        "description": "Result of re-encrypting stored search-tool keys with the primary secret key.",
+        "properties": {
+          "reencrypted": {
+            "description": "Number of stored search-tool keys re-encrypted.",
+            "title": "Reencrypted",
+            "type": "integer"
+          },
+          "unreadable": {
+            "description": "Number of encrypted keys left untouched because they could not be decrypted.",
+            "title": "Unreadable",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reencrypted",
+          "unreadable"
+        ],
+        "title": "ReencryptSearchToolsResponse",
+        "type": "object"
+      },
       "RerankRequest": {
         "description": "Rerank request.",
         "properties": {
@@ -5466,6 +5606,45 @@
         "title": "ScoredExample",
         "type": "object"
       },
+      "SearchProviderSchema": {
+        "description": "One search provider this build can dispatch to, for the add-tool picker.",
+        "properties": {
+          "default_api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The endpoint a tool on this provider uses when it declares no api_base. Null means nothing supplies one, so an api_base is required.",
+            "title": "Default Api Base"
+          },
+          "id": {
+            "description": "Value to send as 'provider'.",
+            "title": "Id",
+            "type": "string"
+          },
+          "requires_api_base": {
+            "description": "True when this provider has no endpoint of its own, so the tool must say where the backend is.",
+            "title": "Requires Api Base",
+            "type": "boolean"
+          },
+          "requires_api_key": {
+            "description": "True when a tool on this provider must carry an API key.",
+            "title": "Requires Api Key",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "requires_api_key",
+          "requires_api_base"
+        ],
+        "title": "SearchProviderSchema",
+        "type": "object"
+      },
       "SearchRequest": {
         "description": "A search request, following LiteLLM's ``/v1/search`` body.",
         "example": {
@@ -5641,6 +5820,31 @@
           "url"
         ],
         "title": "SearchResultItem",
+        "type": "object"
+      },
+      "SearchToolsResponse": {
+        "description": "Every search tool ``POST /v1/search`` can name, by where it came from.",
+        "properties": {
+          "config": {
+            "items": {
+              "$ref": "#/components/schemas/ConfigSearchToolSchema"
+            },
+            "title": "Config",
+            "type": "array"
+          },
+          "stored": {
+            "items": {
+              "$ref": "#/components/schemas/StoredSearchToolSchema"
+            },
+            "title": "Stored",
+            "type": "array"
+          }
+        },
+        "required": [
+          "stored",
+          "config"
+        ],
+        "title": "SearchToolsResponse",
         "type": "object"
       },
       "SessionResponse": {
@@ -5832,6 +6036,96 @@
           "instance"
         ],
         "title": "StoredProviderResponse",
+        "type": "object"
+      },
+      "StoredSearchToolSchema": {
+        "description": "A runtime-stored search tool. The API key is never returned, only ``last4``.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "decryptable": {
+            "default": true,
+            "title": "Decryptable",
+            "type": "boolean"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "shadows_config": {
+            "default": false,
+            "description": "True when a config-file search tool of the same name exists; the stored one is in effect.",
+            "title": "Shadows Config",
+            "type": "boolean"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "name",
+          "provider"
+        ],
+        "title": "StoredSearchToolSchema",
         "type": "object"
       },
       "TaskPool": {
@@ -6319,6 +6613,83 @@
           }
         },
         "title": "UpdateKeyRequest",
+        "type": "object"
+      },
+      "UpdateSearchToolRequest": {
+        "description": "Update a stored search tool. Omitted fields are unchanged; ``api_key`` rotates in place.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New API key. Omit to keep the existing one. Never returned.",
+            "title": "Api Key"
+          },
+          "expected_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.",
+            "title": "Expected Updated At"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout"
+          }
+        },
+        "title": "UpdateSearchToolRequest",
         "type": "object"
       },
       "UpdateSettingsRequest": {
@@ -12422,6 +12793,251 @@
         "summary": "Create Search",
         "tags": [
           "search"
+        ]
+      }
+    },
+    "/v1/search-tools": {
+      "get": {
+        "description": "List every search tool ``POST /v1/search`` can name.\n\n``stored`` are the editable rows written through this API; ``config`` are the\nconfig-file entries, which are still honored and are reported so the operator\ncan see the whole set. Keys are never returned, only ``last4``.",
+        "operationId": "list_all_search_tools_v1_search_tools_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchToolsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List All Search Tools",
+        "tags": [
+          "search-tools"
+        ]
+      },
+      "post": {
+        "description": "Add a search tool at runtime. Storing an API key requires OTARI_SECRET_KEY.",
+        "operationId": "create_search_tool_v1_search_tools_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSearchToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredSearchToolSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Search Tool",
+        "tags": [
+          "search-tools"
+        ]
+      }
+    },
+    "/v1/search-tools/providers": {
+      "get": {
+        "description": "List the search providers this build can dispatch to, for the add-tool form.\n\nReports per provider whether an API key is required and what endpoint a tool\ninherits when it declares none, so the form can ask for exactly what the\nchosen provider needs instead of taking a free-text provider name.",
+        "operationId": "list_search_providers_v1_search_tools_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SearchProviderSchema"
+                  },
+                  "title": "Response List Search Providers V1 Search Tools Providers Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Search Providers",
+        "tags": [
+          "search-tools"
+        ]
+      }
+    },
+    "/v1/search-tools/reencrypt": {
+      "post": {
+        "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /v1/provider-credentials/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+        "operationId": "reencrypt_stored_search_tool_keys_v1_search_tools_reencrypt_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReencryptSearchToolsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reencrypt Stored Search Tool Keys",
+        "tags": [
+          "search-tools"
+        ]
+      }
+    },
+    "/v1/search-tools/{name}": {
+      "delete": {
+        "description": "Delete a stored search tool. A config-file search tool cannot be deleted here.",
+        "operationId": "delete_stored_search_tool_v1_search_tools__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Stored Search Tool",
+        "tags": [
+          "search-tools"
+        ]
+      },
+      "patch": {
+        "description": "Update a stored search tool. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The\nrow is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the\nwrite it guards are atomic. The tool as it will be after the update is\nvalidated, so a change that would leave it unusable (clearing the key of a\nprovider that needs one) is refused rather than stored.",
+        "operationId": "update_search_tool_v1_search_tools__name__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSearchToolRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredSearchToolSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Search Tool",
+        "tags": [
+          "search-tools"
         ]
       }
     },

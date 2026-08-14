@@ -350,4 +350,28 @@ describe("ToolsGuardrailsPage how-to-call card", () => {
     const call = fetchMock.mock.calls.find(([, init]) => (init?.method ?? "") === "PATCH");
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ web_search_intercept: true });
   });
+
+  it("re-reads the search providers after the web-search URL is saved", async () => {
+    // A searxng search tool with no api_base inherits web_search_url, so the
+    // catalogue that tells the Search tools card what a blank box resolves to
+    // (and whether one is required at all) changes with this very PATCH. Without
+    // the invalidation the card keeps offering the old inherited URL, or keeps
+    // demanding one the gateway would now supply.
+    const fetchMock = mockApi();
+    const user = userEvent.setup();
+    renderWithClient(<ToolsGuardrailsPage />);
+    await screen.findByText("Web search");
+
+    const providerFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes("/v1/search-tools/providers")).length;
+    await waitFor(() => expect(providerFetches()).toBeGreaterThan(0));
+    const before = providerFetches();
+
+    const input = screen.getByLabelText("web_search_url");
+    await user.clear(input);
+    await user.type(input, "http://new-searxng:9000");
+    await user.click(screen.getByRole("button", { name: "Save web_search_url" }));
+
+    await waitFor(() => expect(providerFetches()).toBeGreaterThan(before));
+  });
 });

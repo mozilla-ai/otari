@@ -7,8 +7,12 @@ query and gets ranked results back, on the same auth, budget, and usage-logging
 path as a completion, which is what a sidecar proxying a search API through the
 gateway needs.
 
-Tools are declared in ``config.yml``, keyed by the name callers pass as
-``search_tool_name`` (or in the ``/v1/search/{tool}`` path)::
+Tools are keyed by the name callers pass as ``search_tool_name`` (or in the
+``/v1/search/{tool}`` path). They come from two places, merged into
+``config.search_tools``: ``config.yml`` entries, and rows written at runtime
+through ``/v1/search-tools`` and the dashboard (see
+:mod:`gateway.services.search_tool_store_service`), with a stored tool winning on
+a name collision. A config-file entry looks like::
 
     search_tools:
       exa-search:
@@ -19,9 +23,9 @@ Tools are declared in ``config.yml``, keyed by the name callers pass as
 
 ``options`` is a mapping of provider-native request fields used as defaults;
 fields derived from the request win over it, and ``query`` always comes from
-the caller. Every entry is validated at startup by
-``GatewayConfig.validate_search_tools``, so an unsupported provider or a
-missing API key fails before the first request.
+the caller. Every entry is validated by ``validate_search_tool_entry``, at
+startup for the config file and per write for a stored tool, so an unsupported
+provider or a missing API key fails before the first request.
 
 The other provider is ``searxng``, which speaks the SearXNG-shaped
 ``GET {api_base}/search?format=json`` contract that
@@ -178,7 +182,13 @@ def resolve_search_tool(config: GatewayConfig, name: str | None) -> SearchTool:
     """
     configured = config.search_tools
     if not configured:
-        msg = "No search tools are configured. Declare one under 'search_tools' in config.yml."
+        # Names every route in, because the message that named only config.yml
+        # was unfollowable on a deployment that has no config file (issue #601).
+        msg = (
+            "No search tools are configured. Add one on the dashboard's Tools & Guardrails page "
+            "(or POST /v1/search-tools), or declare one under 'search_tools' in your config file, "
+            "supplied directly or through OTARI_CONFIG_YAML / OTARI_CONFIG_B64."
+        )
         raise SearchToolError(msg)
 
     if name is None:
@@ -197,7 +207,7 @@ def resolve_search_tool(config: GatewayConfig, name: str | None) -> SearchTool:
 
     provider = str(entry.get("provider") or name)
     api_key = entry.get("api_key")
-    api_base = str(entry.get("api_base") or _default_api_base(config, provider) or "").strip().rstrip("/")
+    api_base = str(entry.get("api_base") or default_api_base(config, provider) or "").strip().rstrip("/")
     # Defense in depth: startup validation already guarantees all three, so this
     # only fires for a config built in-process. Refusing here beats calling an
     # unknown provider, calling a keyed one unauthenticated, or calling a backend
@@ -225,13 +235,16 @@ def resolve_search_tool(config: GatewayConfig, name: str | None) -> SearchTool:
     )
 
 
-def _default_api_base(config: GatewayConfig, provider: str) -> str | None:
+def default_api_base(config: GatewayConfig, provider: str) -> str | None:
     """The base URL a tool inherits when it declares no ``api_base``.
 
     A ``searxng`` tool falls back to ``web_search_url``, the backend the in-loop
     ``otari_web_search`` tool already speaks to over the same contract, so a
     deployment that runs one exposes it on ``POST /v1/search`` with a single
     ``provider: searxng`` line.
+
+    Public because the dashboard's add-a-search-tool form shows the same value as
+    the placeholder for an omitted ``api_base``.
     """
     if provider == SEARXNG_PROVIDER:
         return (config.web_search_url or "").strip() or None

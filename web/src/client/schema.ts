@@ -1580,6 +1580,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/search-tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List All Search Tools
+         * @description List every search tool ``POST /v1/search`` can name.
+         *
+         *     ``stored`` are the editable rows written through this API; ``config`` are the
+         *     config-file entries, which are still honored and are reported so the operator
+         *     can see the whole set. Keys are never returned, only ``last4``.
+         */
+        get: operations["list_all_search_tools_v1_search_tools_get"];
+        put?: never;
+        /**
+         * Create Search Tool
+         * @description Add a search tool at runtime. Storing an API key requires OTARI_SECRET_KEY.
+         */
+        post: operations["create_search_tool_v1_search_tools_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/search-tools/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Search Providers
+         * @description List the search providers this build can dispatch to, for the add-tool form.
+         *
+         *     Reports per provider whether an API key is required and what endpoint a tool
+         *     inherits when it declares none, so the form can ask for exactly what the
+         *     chosen provider needs instead of taking a free-text provider name.
+         */
+        get: operations["list_search_providers_v1_search_tools_providers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/search-tools/reencrypt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reencrypt Stored Search Tool Keys
+         * @description Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.
+         *
+         *     The search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it
+         *     alongside ``POST /v1/provider-credentials/reencrypt``. Rows that cannot be
+         *     decrypted are left untouched and must be recovered by replacing the affected
+         *     tool's key.
+         */
+        post: operations["reencrypt_stored_search_tool_keys_v1_search_tools_reencrypt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/search-tools/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Stored Search Tool
+         * @description Delete a stored search tool. A config-file search tool cannot be deleted here.
+         */
+        delete: operations["delete_stored_search_tool_v1_search_tools__name__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Search Tool
+         * @description Update a stored search tool. Omitted fields are left as-is; an explicit ``null`` clears them.
+         *
+         *     ``api_key`` follows the same rule: omit it to keep the stored key, send a new
+         *     one to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The
+         *     row is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the
+         *     write it guards are atomic. The tool as it will be after the update is
+         *     validated, so a change that would leave it unusable (clearing the key of a
+         *     provider that needs one) is refused rather than stored.
+         */
+        patch: operations["update_search_tool_v1_search_tools__name__patch"];
+        trace?: never;
+    };
     "/v1/search/{search_tool_name}": {
         parameters: {
             query?: never;
@@ -2690,6 +2798,29 @@ export interface components {
             value: boolean | number | string | string[] | null;
         };
         /**
+         * ConfigSearchToolSchema
+         * @description A search tool declared in the config file. Read-only: it cannot be edited here.
+         */
+        ConfigSearchToolSchema: {
+            /** Api Base */
+            api_base?: string | null;
+            /**
+             * Has Api Key
+             * @description Whether the config entry carries an API key. The key itself is not shown.
+             */
+            has_api_key: boolean;
+            /** Name */
+            name: string;
+            /** Provider */
+            provider: string;
+            /**
+             * Shadowed
+             * @description True when a stored search tool of the same name overrides this entry.
+             * @default false
+             */
+            shadowed: boolean;
+        };
+        /**
          * CountTokensRequest
          * @description Anthropic ``/v1/messages/count_tokens`` request.
          *
@@ -2867,6 +2998,49 @@ export interface components {
             reject_user_mismatch: boolean | null;
             /** User Id */
             user_id: string | null;
+        };
+        /**
+         * CreateSearchToolRequest
+         * @description Create a stored search tool. ``api_key`` is write-only and requires OTARI_SECRET_KEY.
+         * @example {
+         *       "api_base": "http://searxng:8080",
+         *       "name": "local",
+         *       "provider": "searxng"
+         *     }
+         */
+        CreateSearchToolRequest: {
+            /**
+             * Api Base
+             * @description Backend endpoint. Omit to inherit the provider's default (searxng inherits web_search_url).
+             */
+            api_base?: string | null;
+            /**
+             * Api Key
+             * @description Provider API key. Stored encrypted; never returned.
+             */
+            api_key?: string | null;
+            /**
+             * Name
+             * @description Name callers pass as 'search_tool_name' or in /v1/search/{tool}.
+             */
+            name: string;
+            /**
+             * Options
+             * @description Provider-native request fields used as defaults (e.g. exa's 'type', searxng's 'engines').
+             */
+            options?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Provider
+             * @description Search provider, one of: exa, searxng.
+             */
+            provider: string;
+            /**
+             * Timeout
+             * @description Per-request timeout in seconds.
+             */
+            timeout?: number | null;
         };
         /**
          * CreateSessionRequest
@@ -4164,6 +4338,22 @@ export interface components {
             unreadable: number;
         };
         /**
+         * ReencryptSearchToolsResponse
+         * @description Result of re-encrypting stored search-tool keys with the primary secret key.
+         */
+        ReencryptSearchToolsResponse: {
+            /**
+             * Reencrypted
+             * @description Number of stored search-tool keys re-encrypted.
+             */
+            reencrypted: number;
+            /**
+             * Unreadable
+             * @description Number of encrypted keys left untouched because they could not be decrypted.
+             */
+            unreadable: number;
+        };
+        /**
          * RerankRequest
          * @description Rerank request.
          */
@@ -4383,6 +4573,32 @@ export interface components {
             task_id?: string | null;
         };
         /**
+         * SearchProviderSchema
+         * @description One search provider this build can dispatch to, for the add-tool picker.
+         */
+        SearchProviderSchema: {
+            /**
+             * Default Api Base
+             * @description The endpoint a tool on this provider uses when it declares no api_base. Null means nothing supplies one, so an api_base is required.
+             */
+            default_api_base?: string | null;
+            /**
+             * Id
+             * @description Value to send as 'provider'.
+             */
+            id: string;
+            /**
+             * Requires Api Base
+             * @description True when this provider has no endpoint of its own, so the tool must say where the backend is.
+             */
+            requires_api_base: boolean;
+            /**
+             * Requires Api Key
+             * @description True when a tool on this provider must carry an API key.
+             */
+            requires_api_key: boolean;
+        };
+        /**
          * SearchRequest
          * @description A search request, following LiteLLM's ``/v1/search`` body.
          * @example {
@@ -4459,6 +4675,16 @@ export interface components {
             title?: string | null;
             /** Url */
             url: string;
+        };
+        /**
+         * SearchToolsResponse
+         * @description Every search tool ``POST /v1/search`` can name, by where it came from.
+         */
+        SearchToolsResponse: {
+            /** Config */
+            config: components["schemas"]["ConfigSearchToolSchema"][];
+            /** Stored */
+            stored: components["schemas"]["StoredSearchToolSchema"][];
         };
         /**
          * SessionResponse
@@ -4542,6 +4768,41 @@ export interface components {
             last4?: string | null;
             /** Provider Type */
             provider_type?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * StoredSearchToolSchema
+         * @description A runtime-stored search tool. The API key is never returned, only ``last4``.
+         */
+        StoredSearchToolSchema: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * Decryptable
+             * @default true
+             */
+            decryptable: boolean;
+            /** Last4 */
+            last4?: string | null;
+            /** Name */
+            name: string;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /** Provider */
+            provider: string;
+            /**
+             * Shadows Config
+             * @description True when a config-file search tool of the same name exists; the stored one is in effect.
+             * @default false
+             */
+            shadows_config: boolean;
+            /** Timeout */
+            timeout?: number | null;
             /** Updated At */
             updated_at?: string | null;
         };
@@ -4753,6 +5014,32 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+        };
+        /**
+         * UpdateSearchToolRequest
+         * @description Update a stored search tool. Omitted fields are unchanged; ``api_key`` rotates in place.
+         */
+        UpdateSearchToolRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /**
+             * Api Key
+             * @description New API key. Omit to keep the existing one. Never returned.
+             */
+            api_key?: string | null;
+            /**
+             * Expected Updated At
+             * @description Optimistic concurrency: if set, the update 412s unless it matches the stored updated_at.
+             */
+            expected_updated_at?: string | null;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            } | null;
+            /** Provider */
+            provider?: string | null;
+            /** Timeout */
+            timeout?: number | null;
         };
         /**
          * UpdateSettingsRequest
@@ -7721,6 +8008,163 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_all_search_tools_v1_search_tools_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchToolsResponse"];
+                };
+            };
+        };
+    };
+    create_search_tool_v1_search_tools_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateSearchToolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredSearchToolSchema"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_search_providers_v1_search_tools_providers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchProviderSchema"][];
+                };
+            };
+        };
+    };
+    reencrypt_stored_search_tool_keys_v1_search_tools_reencrypt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReencryptSearchToolsResponse"];
+                };
+            };
+        };
+    };
+    delete_stored_search_tool_v1_search_tools__name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_search_tool_v1_search_tools__name__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSearchToolRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredSearchToolSchema"];
                 };
             };
             /** @description Validation Error */

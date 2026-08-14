@@ -2442,6 +2442,165 @@
     {
       "item": [
         {
+          "name": "List All Search Tools",
+          "request": {
+            "description": "List every search tool ``POST /v1/search`` can name.\n\n``stored`` are the editable rows written through this API; ``config`` are the\nconfig-file entries, which are still honored and are reported so the operator\ncan see the whole set. Keys are never returned, only ``last4``.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "search-tools"
+              ],
+              "raw": "{{baseUrl}}/v1/search-tools"
+            }
+          }
+        },
+        {
+          "name": "Create Search Tool",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_base\": \"http://searxng:8080\",\n  \"name\": \"local\",\n  \"provider\": \"searxng\"\n}"
+            },
+            "description": "Add a search tool at runtime. Storing an API key requires OTARI_SECRET_KEY.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "search-tools"
+              ],
+              "raw": "{{baseUrl}}/v1/search-tools"
+            }
+          }
+        },
+        {
+          "name": "List Search Providers",
+          "request": {
+            "description": "List the search providers this build can dispatch to, for the add-tool form.\n\nReports per provider whether an API key is required and what endpoint a tool\ninherits when it declares none, so the form can ask for exactly what the\nchosen provider needs instead of taking a free-text provider name.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "search-tools",
+                "providers"
+              ],
+              "raw": "{{baseUrl}}/v1/search-tools/providers"
+            }
+          }
+        },
+        {
+          "name": "Reencrypt Stored Search Tool Keys",
+          "request": {
+            "description": "Re-encrypt stored search-tool keys with the primary OTARI_SECRET_KEY.\n\nThe search-tool half of the ``OTARI_SECRET_KEY`` rotation procedure; run it\nalongside ``POST /v1/provider-credentials/reencrypt``. Rows that cannot be\ndecrypted are left untouched and must be recovered by replacing the affected\ntool's key.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "search-tools",
+                "reencrypt"
+              ],
+              "raw": "{{baseUrl}}/v1/search-tools/reencrypt"
+            }
+          }
+        },
+        {
+          "name": "Update Search Tool",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"expected_updated_at\": \"string\",\n  \"options\": {},\n  \"provider\": \"string\",\n  \"timeout\": 0\n}"
+            },
+            "description": "Update a stored search tool. Omitted fields are left as-is; an explicit ``null`` clears them.\n\n``api_key`` follows the same rule: omit it to keep the stored key, send a new\none to rotate, or send ``null`` to clear it (a keyless SearXNG backend). The\nrow is locked ``FOR UPDATE`` so the ``expected_updated_at`` check and the\nwrite it guards are atomic. The tool as it will be after the update is\nvalidated, so a change that would leave it unusable (clearing the key of a\nprovider that needs one) is refused rather than stored.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "search-tools",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/v1/search-tools/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Stored Search Tool",
+          "request": {
+            "description": "Delete a stored search tool. A config-file search tool cannot be deleted here.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "search-tools",
+                ":name"
+              ],
+              "raw": "{{baseUrl}}/v1/search-tools/:name",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "search-tools"
+    },
+    {
+      "item": [
+        {
           "name": "Get Settings",
           "request": {
             "description": "Return non-secret runtime settings for the admin dashboard.",

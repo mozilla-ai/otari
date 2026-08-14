@@ -378,6 +378,12 @@ For how users, keys, and budgets fit together and the management endpoints behin
   `web_search_<date>`) to that list, which is what lets a client like Claude Code
   reach your search backend without knowing Otari's own tool name. See
   [Web-search interception](tools.md#web-search-interception).
+  The **Search tools** card on the same page configures what
+  [`POST /v1/search`](api-reference.md#search) can run against, which no longer
+  needs a config file: add a `searxng` tool with no backend URL and it uses the
+  web-search URL set just above it, so the backend you already run answers the
+  direct search endpoint too. Tools declared in a config file are listed here as
+  read-only; edit those where the file is defined.
 - **Settings**: search and toggle runtime settings, review and apply default
   pricing updates, and rotate the generated master key. Rotating the master key
   issues a fresh `otari-mk-…` value and keeps your current session signed in.

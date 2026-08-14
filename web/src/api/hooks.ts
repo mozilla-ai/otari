@@ -18,6 +18,7 @@ import type {
   CreateBudgetRequest,
   CreateKeyRequest,
   CreateKeyResponse,
+  CreateSearchToolRequest,
   CreateStoredProviderRequest,
   DashboardBuild,
   DiscoverableModelsResponse,
@@ -33,8 +34,11 @@ import type {
   ProvidersResponse,
   ReencryptProviderCredentialsResult,
   RotateMasterKeyResponse,
+  SearchProviderInfo,
+  SearchToolsResponse,
   SetPricingRequest,
   StoredProvider,
+  StoredSearchTool,
   SummaryDimension,
   TestProviderResult,
   TestServiceResponse,
@@ -42,6 +46,7 @@ import type {
   ToolsResponse,
   UpdateBudgetRequest,
   UpdateKeyRequest,
+  UpdateSearchToolRequest,
   UpdateSettingsRequest,
   UpdateToolSettingsRequest,
   UpdateStoredProviderRequest,
@@ -66,6 +71,8 @@ const PRICING = "pricing";
 const SETTINGS = "settings";
 const TOOL_SETTINGS = "tool-settings";
 const TOOLS = "tools";
+const SEARCH_TOOLS = "search-tools";
+const SEARCH_PROVIDERS = "search-providers";
 const ALIASES = "aliases";
 const ROUTING_POLICIES = "routing-policies";
 const ROUTER_STATUS = "router-status";
@@ -488,7 +495,60 @@ export function useUpdateToolSettings() {
       // Toggling interception or clearing a backend URL changes which
       // declarations the gateway accepts, so the "how to call" card must refetch.
       void queryClient.invalidateQueries({ queryKey: [TOOLS] });
+      // A searxng search tool with no api_base of its own inherits web_search_url,
+      // which this PATCH may have just changed, so the endpoint a blank box
+      // resolves to (and whether one is required at all) has to be re-read.
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] });
     },
+  });
+}
+
+// Search tools served by POST /v1/search: the editable rows plus the read-only
+// config-file entries, so the page can show every tool a caller could name.
+export function useSearchTools() {
+  return useQuery({
+    queryKey: [SEARCH_TOOLS],
+    queryFn: () => apiFetch<SearchToolsResponse>("/v1/search-tools"),
+    staleTime: 60_000,
+  });
+}
+
+// Which search providers this build supports, and what each one needs, so the
+// add form asks for a key or a backend URL only when the provider requires it.
+export function useSearchProviders() {
+  return useQuery({
+    queryKey: [SEARCH_PROVIDERS],
+    queryFn: () => apiFetch<SearchProviderInfo[]>("/v1/search-tools/providers"),
+    staleTime: 300_000,
+  });
+}
+
+export function useCreateSearchTool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CreateSearchToolRequest) =>
+      apiFetch<StoredSearchTool>("/v1/search-tools", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+  });
+}
+
+export function useUpdateSearchTool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, body }: { name: string; body: UpdateSearchToolRequest }) =>
+      apiFetch<StoredSearchTool>(`/v1/search-tools/${encodeURIComponent(name)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+  });
+}
+
+export function useDeleteSearchTool() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => apiFetch<void>(`/v1/search-tools/${encodeURIComponent(name)}`, { method: "DELETE" }),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
   });
 }
 

@@ -163,6 +163,16 @@ export type ToolSettingType = ToolSettingField["type"];
 export type ToolSettingsResponse = Schemas["ToolSettingsResponse"];
 export type UpdateToolSettingsRequest = Schemas["UpdateToolSettingsRequest"];
 export type TestServiceResponse = Schemas["TestServiceResponse"];
+
+// ---------------------------------------------------------------------------
+// Search tools
+// ---------------------------------------------------------------------------
+export type SearchProviderInfo = Schemas["SearchProviderSchema"];
+export type StoredSearchTool = Schemas["StoredSearchToolSchema"];
+export type ConfigSearchTool = Schemas["ConfigSearchToolSchema"];
+export type SearchToolsResponse = Schemas["SearchToolsResponse"];
+export type CreateSearchToolRequest = Schemas["CreateSearchToolRequest"];
+export type UpdateSearchToolRequest = Schemas["UpdateSearchToolRequest"];
 export type StreamMissingUsagePolicy = NonNullable<UpdateSettingsRequest["stream_missing_usage_policy"]>;
 export type VisionStrategy = NonNullable<UpdateSettingsRequest["vision_strategy"]>;
 
