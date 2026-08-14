@@ -1190,14 +1190,8 @@ class GatewayConfig(BaseSettings):
     def validate_search_tools(self) -> None:
         """Validate the ``search_tools`` map at startup so misconfig fails fast.
 
-        A tool on a provider that authenticates with an API key is rejected here
-        without one, rather than at request time as an opaque upstream 401; a
-        keyless provider (a self-hosted SearXNG or an adapter fronting one) is
-        allowed to declare none. The tool name doubles as a
-        ``/v1/search/{tool}`` path segment, so it must not contain a slash.
-
-        A missing backend URL is deliberately not fatal here; see
-        :meth:`search_tools_without_backend_url`.
+        Per-entry rules live in :func:`validate_search_tool_entry`, which the
+        runtime CRUD path applies to a dashboard-written tool as well.
         """
         for name, entry in self.search_tools.items():
             validate_search_tool_entry(name, entry)

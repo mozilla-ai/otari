@@ -495,6 +495,10 @@ export function useUpdateToolSettings() {
       // Toggling interception or clearing a backend URL changes which
       // declarations the gateway accepts, so the "how to call" card must refetch.
       void queryClient.invalidateQueries({ queryKey: [TOOLS] });
+      // A searxng search tool with no api_base of its own inherits web_search_url,
+      // which this PATCH may have just changed, so the endpoint a blank box
+      // resolves to (and whether one is required at all) has to be re-read.
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] });
     },
   });
 }
