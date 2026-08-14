@@ -1,5 +1,5 @@
 import { Button, Card } from "@heroui/react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
 import {
   usePricing,
@@ -10,6 +10,7 @@ import {
   useUpdateToolSettings,
 } from "@/api/hooks";
 import type { ManagedTool, ToolServiceName, ToolSettingField, UpdateToolSettingsRequest } from "@/api/types";
+import { SearchToolsCard } from "@/components/SearchToolsCard";
 import { ErrorBanner, FilterSelect, PageHeader, PageLoading, errorMessage } from "@/components/ui";
 
 // One settable field maps onto one key of the update request; cast at this one
@@ -618,40 +619,46 @@ export function ToolsGuardrailsPage() {
           ? (tools.data?.data ?? []).find((tool) => tool.id === service.toolId)
           : undefined;
         return (
-          <section key={service.key} className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold text-[var(--otari-ink)]">{service.label}</h2>
-            <p className="text-sm text-[var(--otari-muted)]">{service.blurb}</p>
-            <Card>
-              <Card.Content className="flex flex-col divide-y divide-[var(--otari-line)] px-5 py-1">
-                {service.pricingKey ? (
-                  <ToolPriceRow
-                    pricingKey={service.pricingKey}
-                    configured={currentRates.get(service.pricingKey) ?? null}
-                    onSave={(perCall) => savePrice(service.pricingKey as string, perCall)}
-                    saving={pricedTool === service.pricingKey}
-                    saveError={
-                      priceErrors[service.pricingKey] ||
-                      (pricing.error ? "Could not load the current price. Reload before editing." : undefined)
-                    }
-                    // Also disabled when the load failed: an errored query leaves
-                    // `configured` null, which renders as "Not priced" and would
-                    // invite an operator to overwrite a rate they cannot see.
-                    disabled={pricing.isLoading || Boolean(pricing.error)}
-                  />
-                ) : null}
-                {fields.map((field) => (
-                  <ServiceRow
-                    key={field.key}
-                    field={field}
-                    onSave={(value) => save(field, value)}
-                    saveError={errors[field.key]}
-                    disabled={disabled}
-                  />
-                ))}
-                {managed ? <HowToCallCard tool={managed} /> : null}
-              </Card.Content>
-            </Card>
-          </section>
+          <Fragment key={service.key}>
+            <section className="flex flex-col gap-2">
+              <h2 className="text-sm font-semibold text-[var(--otari-ink)]">{service.label}</h2>
+              <p className="text-sm text-[var(--otari-muted)]">{service.blurb}</p>
+              <Card>
+                <Card.Content className="flex flex-col divide-y divide-[var(--otari-line)] px-5 py-1">
+                  {service.pricingKey ? (
+                    <ToolPriceRow
+                      pricingKey={service.pricingKey}
+                      configured={currentRates.get(service.pricingKey) ?? null}
+                      onSave={(perCall) => savePrice(service.pricingKey as string, perCall)}
+                      saving={pricedTool === service.pricingKey}
+                      saveError={
+                        priceErrors[service.pricingKey] ||
+                        (pricing.error ? "Could not load the current price. Reload before editing." : undefined)
+                      }
+                      // Also disabled when the load failed: an errored query leaves
+                      // `configured` null, which renders as "Not priced" and would
+                      // invite an operator to overwrite a rate they cannot see.
+                      disabled={pricing.isLoading || Boolean(pricing.error)}
+                    />
+                  ) : null}
+                  {fields.map((field) => (
+                    <ServiceRow
+                      key={field.key}
+                      field={field}
+                      onSave={(value) => save(field, value)}
+                      saveError={errors[field.key]}
+                      disabled={disabled}
+                    />
+                  ))}
+                  {managed ? <HowToCallCard tool={managed} /> : null}
+                </Card.Content>
+              </Card>
+            </section>
+            {/* Directly below the in-loop web-search settings, because a searxng
+                search tool that declares no backend URL of its own inherits the
+                one set just above it. */}
+            {service.key === "web_search" ? <SearchToolsCard onSaved={showToast} /> : null}
+          </Fragment>
         );
       })}
 

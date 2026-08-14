@@ -122,7 +122,9 @@ Standalone-only. Connected to otari.ai the platform owns the per-workspace tool 
 | `POST` | `/v1/search/{search_tool_name}` | Same, with the tool named in the path. | API key or master key |
 
 Search tools are declared under [`search_tools`](configuration.md#search-tools)
-in `config.yml`. This is the direct counterpart to the `otari_web_search` tool:
+in `config.yml`, or added at runtime through the dashboard's Tools & Guardrails
+page and the `/v1/search-tools` endpoints below, which need no config file. This
+is the direct counterpart to the `otari_web_search` tool:
 the tool answers a model's search call mid-completion, while this endpoint takes
 a query from the caller and returns results. Both forms log
 `endpoint="/v1/search"`, so one Activity filter covers every search.
@@ -187,6 +189,23 @@ A search the gateway itself refuses, an unknown or ambiguous `search_tool_name`
 (400) or a tool the key's allowed-models list does not name (403), is written to
 the usage log too, with a null cost, so refused searches are visible in Activity
 and counted as failures rather than only in the caller's own logs.
+
+#### Search tool management
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `GET` | `/v1/search-tools` | List search tools: the stored ones plus the read-only config-file ones. | Master key |
+| `GET` | `/v1/search-tools/providers` | List the search providers this build supports, and what each one requires. | Master key |
+| `POST` | `/v1/search-tools` | Add a search tool at runtime. | Master key |
+| `PATCH` | `/v1/search-tools/{name}` | Update a stored search tool. Omitted fields are unchanged. | Master key |
+| `DELETE` | `/v1/search-tools/{name}` | Delete a stored search tool. | Master key |
+| `POST` | `/v1/search-tools/reencrypt` | Re-encrypt stored search-tool keys with the primary `OTARI_SECRET_KEY`. | Master key |
+
+These are the runtime counterpart of the `search_tools` config block, and behave
+the same way [runtime provider management](configuration.md#runtime-provider-management)
+does: a stored tool wins over a config-file tool of the same name, API keys are
+encrypted at rest and never returned (only `last4`), and a config-file tool
+cannot be edited or deleted here. Standalone mode only.
 
 ### Images
 

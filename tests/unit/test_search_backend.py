@@ -103,6 +103,21 @@ def test_no_configured_tools_is_a_tool_error() -> None:
         resolve_search_tool(_config(), None)
 
 
+def test_no_configured_tools_names_every_route_in() -> None:
+    """The message named only config.yml, which a file-less deployment cannot follow.
+
+    Regression for issue #601: an operator running from the dashboard and env
+    vars was told to edit a file that does not exist and that nothing in the UI
+    could create.
+    """
+    with pytest.raises(SearchToolError) as excinfo:
+        resolve_search_tool(_config(), None)
+    detail = str(excinfo.value)
+    assert "dashboard" in detail
+    assert "/v1/search-tools" in detail
+    assert "OTARI_CONFIG_YAML" in detail
+
+
 def test_unknown_tool_name_is_a_tool_error() -> None:
     with pytest.raises(SearchToolError, match="Unknown search tool 'nope'"):
         resolve_search_tool(_config(exa={"api_key": "k"}), "nope")

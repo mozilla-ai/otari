@@ -1036,3 +1036,61 @@ export interface ToolsResponse {
   object: "list";
   data: ManagedTool[];
 }
+
+// Search tools served by POST /v1/search. A tool can be stored (a row written
+// through /v1/search-tools, editable here) or declared in the config file (still
+// honored, read-only); a stored tool of the same name wins.
+export interface SearchProviderInfo {
+  id: string;
+  requires_api_key: boolean;
+  requires_api_base: boolean;
+  // The endpoint a tool inherits when it declares no api_base; null when nothing
+  // supplies one, so an api_base has to be given.
+  default_api_base: string | null;
+}
+
+export interface StoredSearchTool {
+  name: string;
+  provider: string;
+  api_base: string | null;
+  last4: string | null;
+  timeout: number | null;
+  options: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+  // False when the stored key can't be decrypted with the current OTARI_SECRET_KEY.
+  decryptable: boolean;
+  shadows_config: boolean;
+}
+
+export interface ConfigSearchTool {
+  name: string;
+  provider: string;
+  api_base: string | null;
+  has_api_key: boolean;
+  shadowed: boolean;
+}
+
+export interface SearchToolsResponse {
+  stored: StoredSearchTool[];
+  config: ConfigSearchTool[];
+}
+
+export interface CreateSearchToolRequest {
+  name: string;
+  provider: string;
+  api_base?: string | null;
+  api_key?: string | null;
+  timeout?: number | null;
+  options?: Record<string, unknown> | null;
+}
+
+// Omitted fields are left unchanged; `api_key` rotates the stored key in place.
+export interface UpdateSearchToolRequest {
+  provider?: string | null;
+  api_base?: string | null;
+  api_key?: string | null;
+  timeout?: number | null;
+  options?: Record<string, unknown> | null;
+  expected_updated_at?: string | null;
+}

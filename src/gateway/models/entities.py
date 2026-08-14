@@ -377,6 +377,50 @@ class ProviderCredential(Base):
         }
 
 
+class SearchToolCredential(Base):
+    """A ``POST /v1/search`` tool configured at runtime through the dashboard.
+
+    The database counterpart of a ``search_tools:`` entry in config.yml: it is
+    merged over the config-file tools at runtime (see
+    ``search_tool_store_service``), with the stored row winning on a name
+    collision, exactly as ``ProviderCredential`` does for providers. The API key
+    is held encrypted (``secret_box``) and is optional, because a ``searxng``
+    backend is normally keyless; ``last4`` is kept in clear only so the UI can
+    show which key is set without ever decrypting. Standalone mode only.
+    """
+
+    __tablename__ = "search_tool_credentials"
+
+    name: Mapped[str] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column()
+    api_base: Mapped[str | None] = mapped_column()
+    encrypted_api_key: Mapped[str | None] = mapped_column()
+    last4: Mapped[str | None] = mapped_column()
+    # Named for its unit; the config-file key it stands in for is plain ``timeout``,
+    # and ``to_public_dict`` / the overlay entry both use that name.
+    timeout_seconds: Mapped[float | None] = mapped_column()
+    options: Mapped[dict[str, Any]] = mapped_column("options", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    def to_public_dict(self) -> dict[str, Any]:
+        """Serialize for the API. Never includes the secret, only ``last4``."""
+        return {
+            "name": self.name,
+            "provider": self.provider,
+            "api_base": self.api_base,
+            "last4": self.last4,
+            "timeout": self.timeout_seconds,
+            "options": self.options or {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class ModelPricing(Base):
     """Model pricing configuration."""
 

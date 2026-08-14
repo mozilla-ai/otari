@@ -110,6 +110,9 @@ providers:
 # `provider` defaults to the tool name and must be one of: exa, searxng.
 # `options` holds provider-native request defaults for knobs the request body has
 # no field for; the caller's query always wins. Standalone-mode only.
+# A tool can also be added from the dashboard's Tools & Guardrails page (or
+# POST /v1/search-tools) with no config file at all; a tool stored that way wins
+# over a config-file entry of the same name.
 # search_tools:
 #   exa-search:
 #     provider: exa

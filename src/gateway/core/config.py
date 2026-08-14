@@ -102,6 +102,58 @@ SEARCH_PROVIDERS_REQUIRING_API_KEY = ("exa",)
 SEARCH_PROVIDERS_REQUIRING_API_BASE = ("searxng",)
 
 
+def validate_search_tool_entry(name: str, entry: Any) -> None:
+    """Validate one ``search_tools`` entry, raising ``ValueError`` on any problem.
+
+    Module-level rather than a method so the runtime CRUD path
+    (``/v1/search-tools``) can hold a dashboard-written tool to the same rules
+    the config file is held to at startup, instead of restating them.
+
+    A tool on a provider that authenticates with an API key is rejected here
+    without one, rather than at request time as an opaque upstream 401; a keyless
+    provider (a self-hosted SearXNG or an adapter fronting one) is allowed to
+    declare none. The tool name doubles as a ``/v1/search/{tool}`` path segment,
+    so it must not contain a slash.
+
+    A missing backend URL is deliberately not fatal here; see
+    :meth:`GatewayConfig.search_tools_without_backend_url`.
+    """
+    if not name:
+        msg = "search tool name must not be empty."
+        raise ValueError(msg)
+    if "/" in name:
+        msg = f"search tool name '{name}' must not contain '/' (it is used as a URL path segment)."
+        raise ValueError(msg)
+    if not isinstance(entry, dict):
+        msg = f"search_tools.{name} must be a mapping."
+        raise ValueError(msg)
+    provider = entry.get("provider") or name
+    if provider not in SEARCH_PROVIDERS:
+        msg = (
+            f"search_tools.{name}.provider '{provider}' is not a supported search provider "
+            f"(one of: {', '.join(SEARCH_PROVIDERS)})."
+        )
+        raise ValueError(msg)
+    if provider in SEARCH_PROVIDERS_REQUIRING_API_KEY and not entry.get("api_key"):
+        msg = f"search_tools.{name}.api_key is required for provider '{provider}'."
+        raise ValueError(msg)
+    timeout = entry.get("timeout")
+    if timeout is not None:
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            msg = f"search_tools.{name}.timeout must be a number of seconds."
+            raise ValueError(msg)
+        # A negative timeout would reach httpx and fail at request time, and a
+        # zero is silently swapped for the default when the tool is resolved.
+        # Both are misconfigurations worth failing on here.
+        if timeout <= 0:
+            msg = f"search_tools.{name}.timeout must be greater than 0 seconds, got {timeout}."
+            raise ValueError(msg)
+    options = entry.get("options")
+    if options is not None and not isinstance(options, dict):
+        msg = f"search_tools.{name}.options must be a mapping."
+        raise ValueError(msg)
+
+
 class _NonScalarField(Exception):
     """Raised when a config field is not a simple scalar settable from a plain env string."""
 
@@ -763,6 +815,10 @@ class GatewayConfig(BaseSettings):
     # between processes or tests.
     _provider_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
 
+    # The same idea for ``search_tools``: the config-file tools as loaded, before
+    # any dashboard-stored tool is overlaid by ``search_tool_store_service``.
+    _search_tool_baseline: dict[str, dict[str, Any]] | None = PrivateAttr(default=None)
+
     # SHA-256 hash of a master key generated on first run (see
     # ``master_key_service``). Set at startup when no ``master_key`` is
     # configured, so ``verify_master_key`` can authenticate the generated key
@@ -1144,40 +1200,7 @@ class GatewayConfig(BaseSettings):
         :meth:`search_tools_without_backend_url`.
         """
         for name, entry in self.search_tools.items():
-            if not name:
-                msg = "search tool name must not be empty."
-                raise ValueError(msg)
-            if "/" in name:
-                msg = f"search tool name '{name}' must not contain '/' (it is used as a URL path segment)."
-                raise ValueError(msg)
-            if not isinstance(entry, dict):
-                msg = f"search_tools.{name} must be a mapping."
-                raise ValueError(msg)
-            provider = entry.get("provider") or name
-            if provider not in SEARCH_PROVIDERS:
-                msg = (
-                    f"search_tools.{name}.provider '{provider}' is not a supported search provider "
-                    f"(one of: {', '.join(SEARCH_PROVIDERS)})."
-                )
-                raise ValueError(msg)
-            if provider in SEARCH_PROVIDERS_REQUIRING_API_KEY and not entry.get("api_key"):
-                msg = f"search_tools.{name}.api_key is required for provider '{provider}'."
-                raise ValueError(msg)
-            timeout = entry.get("timeout")
-            if timeout is not None:
-                if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-                    msg = f"search_tools.{name}.timeout must be a number of seconds."
-                    raise ValueError(msg)
-                # A negative timeout would reach httpx and fail at request time,
-                # and a zero is silently swapped for the default when the tool is
-                # resolved. Both are misconfigurations worth failing on here.
-                if timeout <= 0:
-                    msg = f"search_tools.{name}.timeout must be greater than 0 seconds, got {timeout}."
-                    raise ValueError(msg)
-            options = entry.get("options")
-            if options is not None and not isinstance(options, dict):
-                msg = f"search_tools.{name}.options must be a mapping."
-                raise ValueError(msg)
+            validate_search_tool_entry(name, entry)
 
     @field_validator("stream_missing_usage_policy")
     @classmethod

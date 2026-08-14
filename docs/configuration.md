@@ -165,7 +165,7 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 | Variable | Description |
 |----------|-------------|
 | `OTARI_MASTER_KEY` | Master key for management endpoints. When unset in standalone mode, one is generated on first run and printed to the logs (see [Runtime provider management](#runtime-provider-management)). |
-| `OTARI_SECRET_KEY` | Fernet key that encrypts provider credentials added through the dashboard. Required to store a provider key in the UI. Generate one with `otari gen-secret-key`. |
+| `OTARI_SECRET_KEY` | Fernet key that encrypts provider credentials and search-tool keys added through the dashboard. Required to store either in the UI. Generate one with `otari gen-secret-key`. |
 | `OTARI_DATABASE_URL` | Database connection URL |
 | `OTARI_HOST` | Server bind host |
 | `OTARI_PORT` | Server bind port |
@@ -218,11 +218,14 @@ nothing set and finish configuration in the browser.
   operator-set `OTARI_MASTER_KEY` always takes precedence and is never generated
   over.
 - **Encryption at rest.** Provider keys added in the dashboard are stored
-  encrypted with `OTARI_SECRET_KEY` (a Fernet key). Set it before adding a key;
-  generate one with `otari gen-secret-key`. Keep it safe and separate from the
-  database: losing it makes every stored provider key undecryptable, and a
-  database dump alone cannot decrypt them. Rotate by prepending a new key
-  (comma- or whitespace-separated); both old and new are tried on decrypt.
+  encrypted with `OTARI_SECRET_KEY` (a Fernet key), as are the API keys of
+  [search tools added at runtime](#adding-a-search-tool-at-runtime). Set it
+  before adding a key; generate one with `otari gen-secret-key`. Keep it safe and
+  separate from the database: losing it makes every stored key undecryptable, and
+  a database dump alone cannot decrypt them. Rotate by prepending a new key
+  (comma- or whitespace-separated); both old and new are tried on decrypt, then
+  run `POST /v1/provider-credentials/reencrypt` and
+  `POST /v1/search-tools/reencrypt` before retiring the old key.
 - **Precedence.** Dashboard-stored providers merge over `config.yml` providers.
   A stored provider with the same instance name as a config one takes precedence
   (the shadowing is logged at startup). In the dashboard, config providers are
@@ -273,7 +276,11 @@ The `credentials` field points to a Google Cloud service account JSON file.
 
 `search_tools` declares what [`POST /v1/search`](api-reference.md#search) can
 run against, keyed by the name callers pass as `search_tool_name` (or in the
-`/v1/search/{tool}` path):
+`/v1/search/{tool}` path). A tool can also be added at runtime from the
+dashboard's Tools & Guardrails page (or `POST /v1/search-tools`), which needs no
+config file at all; see [Adding a search tool at runtime](#adding-a-search-tool-at-runtime).
+The two sources are merged, and a stored tool wins over a config-file entry of
+the same name.
 
 ```yaml
 search_tools:
@@ -340,6 +347,32 @@ so backend-native knobs (`language`, `time_range`) go there, and `q`, `format`
 and `max_results` stay the gateway's. A tool that pins no `engines` option
 inherits `web_search_engines`, so both surfaces query the same engines on the
 same backend.
+
+### Adding a search tool at runtime
+
+Everything above is also settable without a config file. The dashboard's
+Tools & Guardrails page has a Search tools card that adds, edits, and removes
+tools, backed by `/v1/search-tools` (master-key gated, standalone mode only):
+
+```bash
+curl -X POST http://localhost:8000/v1/search-tools \
+  -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "local", "provider": "searxng", "api_base": "http://searxng:8080"}'
+```
+
+This works the same way runtime provider credentials do. The tool is a row in
+`search_tool_credentials`, the API key is encrypted at rest with
+`OTARI_SECRET_KEY` (so storing one requires that variable to be set) and is
+never returned, and the change reaches every worker and replica within 30
+seconds. `GET /v1/search-tools` lists the stored tools alongside the config-file
+ones, which stay honored and are read-only there; a config-file tool is edited
+where the file is defined, not through the API. Rotating `OTARI_SECRET_KEY`
+needs `POST /v1/search-tools/reencrypt` alongside the provider-credential call
+described in [Encryption at rest](#encryption-at-rest).
+
+An entry saved here is held to the same rules startup validation applies to the
+config file, so a tool that would refuse to boot cannot be stored.
 
 Two request fields are honored by the gateway rather than upstream, because
 SearXNG has no equivalent param: `search_domain_filter` and

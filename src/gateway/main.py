@@ -57,6 +57,11 @@ from gateway.services.provider_store_service import (
 )
 from gateway.services.runtime_settings_service import apply_overrides_from_db
 from gateway.services.search_backend import close_search_client
+from gateway.services.search_tool_store_service import (
+    load_search_tools_at_startup,
+    reset_search_tool_cache,
+    run_search_tool_refresher,
+)
 from gateway.services.secret_box import validate_secret_key
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
 from gateway.version import __version__
@@ -201,6 +206,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         alias_refresher: asyncio.Task[None] | None = None
         policy_refresher: asyncio.Task[None] | None = None
         provider_refresher: asyncio.Task[None] | None = None
+        search_tool_refresher: asyncio.Task[None] | None = None
         price_refresher: asyncio.Task[None] | None = None
         discovery_refresher: asyncio.Task[None] | None = None
         catalog_refresher: asyncio.Task[None] | None = None
@@ -217,6 +223,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 # knobs) win over config/env too; apply them so the running worker
                 # reflects a dashboard change made in a prior run.
                 await apply_tool_overrides_from_db(config, session)
+                # Overlay dashboard-stored search tools before the checks below,
+                # so a tool added through the dashboard is one the backend-URL
+                # warning and the flat-pricing warning can see.
+                await load_search_tools_at_startup(session, config)
                 # After the overrides, not at config load: the web-search URL a
                 # searxng search tool inherits can be the dashboard-stored one
                 # applied just above, and that tool is only broken if nothing
@@ -262,6 +272,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # config.providers synchronously, so the overlay is reloaded on a TTL
             # to converge sibling workers and replicas after a dashboard write.
             provider_refresher = asyncio.create_task(run_provider_refresher(config))
+            # Search tools are the provider overlay's twin: resolve_search_tool
+            # reads config.search_tools synchronously, so the overlay is reloaded
+            # on a TTL to converge sibling workers and replicas after a write.
+            search_tool_refresher = asyncio.create_task(run_search_tool_refresher(config))
             # An accepted pricing snapshot is applied in-memory by the worker that
             # served the confirm; reload it on a TTL so sibling workers and replicas
             # converge, the same way aliases and provider credentials do.
@@ -300,6 +314,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 (alias_refresher, "alias"),
                 (policy_refresher, "policy"),
                 (provider_refresher, "provider"),
+                (search_tool_refresher, "search tool"),
                 (price_refresher, "price snapshot"),
                 (discovery_refresher, "model discovery"),
                 (catalog_refresher, "models.dev catalog"),
@@ -311,6 +326,8 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 reset_policy_cache()
             if provider_refresher is not None:
                 reset_provider_cache()
+            if search_tool_refresher is not None:
+                reset_search_tool_cache()
             if discovery_refresher is not None:
                 reset_discovery_cache()
             if catalog_refresher is not None:
