@@ -35,6 +35,17 @@ const detailPanel = (page: Page) => page.locator(".otari-detail-reveal");
 // Open a row's inline detail. Clicking the row header (the Model cell) rather
 // than the row keeps the press off the selection checkbox, which would toggle
 // selection instead of firing the row action.
+//
+// This flow failed once on CI, at the "Price this model" click below, with the
+// dialog never opening. It has not been reproduced since, in roughly forty
+// attempts: twenty repetitions of the test alone, a dozen full-suite runs, and
+// nine runs under Chromium CPU throttling up to 20x. Two explanations were
+// tested and both are wrong: the panel's 180ms reveal does not move its controls
+// (they report the same position throughout, and clicking mid-reveal works even
+// with the animation stretched to three seconds), and slowing the main thread
+// does not reproduce it either. No wait is added here on purpose, because a wait
+// that does not fix a known cause is cargo. The next occurrence uploads a trace
+// (see .github/workflows/otari-dashboard.yml), which is what will settle it.
 async function openDetail(page: Page, row: ReturnType<typeof rows>): Promise<void> {
   await row.getByRole("rowheader").click();
   await expect(detailPanel(page).getByText("Request detail")).toBeVisible();
