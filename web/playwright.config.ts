@@ -21,7 +21,11 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://127.0.0.1:8000",
-    trace: "on-first-retry",
+    // Not "on-first-retry": retries are off by design (see above), so that mode
+    // never fires and a CI failure arrives with no trace to open. Retaining on
+    // failure keeps the artifact for the run that needs it and discards it for
+    // every run that passes.
+    trace: "retain-on-failure",
   },
   // Three ordered projects over one gateway, rather than one project relying on
   // the alphabetical order of filenames. `onboarding` needs the empty database

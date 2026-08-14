@@ -139,7 +139,11 @@ test.describe("budgets", () => {
     // with no users caps nothing.
     const owner = page.getByRole("combobox", { name: "Add a user" });
     await owner.fill(PARITY.users.heavy);
-    await page.getByRole("option", { name: new RegExp(PARITY.users.heavy) }).click();
+    // Plain string, not a RegExp built from the id: an address is full of regex
+    // metacharacters, so `.` would match any character and the pattern could pick
+    // a neighbouring option. Playwright matches an accessible name by substring
+    // here, which is what an aliased user's "id (alias)" label needs anyway.
+    await page.getByRole("option", { name: PARITY.users.heavy }).click();
     await dismissComboBox(owner);
     // The picked user becomes a removable chip, which is the form's own record of
     // who this budget will cap before it is submitted.

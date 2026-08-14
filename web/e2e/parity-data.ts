@@ -138,13 +138,17 @@ function scratchEvents(): SeedEvent[] {
 // Create the users the imported rows attribute to. Ingestion rejects usage for a
 // user that does not exist, and a re-run against a warm database must not fail on
 // its own leftovers, so an existing user is accepted.
+//
+// 409 only, never 400: the route answers 409 for "already exists" and keeps 400
+// for a rejected user_id, so accepting both would swallow a malformed id here and
+// re-report it as a row count that is short by half, three files later.
 async function ensureUsers(page: Page): Promise<void> {
   for (const userId of Object.values(PARITY.users)) {
     const created = await page.request.post("/v1/users", {
       headers: authHeaders,
       data: { user_id: userId },
     });
-    if (![200, 201, 400, 409].includes(created.status())) {
+    if (created.status() !== 409) {
       await expectOk(created, `create user ${userId}`);
     }
   }
