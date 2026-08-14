@@ -1,6 +1,5 @@
 import { Button, Card, Chip } from "@heroui/react";
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import type { Selection, SortDescriptor } from "react-aria-components";
 
 import {
@@ -29,6 +28,7 @@ import {
 import { formatContext, formatCost, formatReleaseDate } from "@/lib/format";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
+import { useUrlValue } from "@/lib/urlState";
 
 // `owned_by` the gateway stamps on a configured alias (ALIAS_OWNED_BY in
 // src/gateway/api/routes/models.py). Aliases are display names declared in
@@ -1050,7 +1050,6 @@ function DiscoveredErrors({
 }
 
 export function ModelsPage() {
-  const [searchParams] = useSearchParams();
   const models = useModels();
   const pricing = usePricing();
   const discoverable = useDiscoverableModels();
@@ -1082,11 +1081,12 @@ export function ModelsPage() {
     }
   }, [sort]);
 
+  const providerParam = useUrlValue("provider");
   // A provider clicked on the Providers page arrives as ?provider=<instance>,
   // pre-selecting that provider's filter so the list shows only their models.
   // An empty param (e.g. /models?provider=) collapses to "all"; an unknown one
   // is reset below once the catalogue loads.
-  const [providerFilter, setProviderFilter] = useState(searchParams.get("provider") || "all");
+  const [providerFilter, setProviderFilter] = useState(providerParam || "all");
   const [pricingFilter, setPricingFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
   const [capabilityFilter, setCapabilityFilter] = useState("all");

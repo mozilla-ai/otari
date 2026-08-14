@@ -1,6 +1,6 @@
+import { useNavigate } from "@tanstack/react-router";
 import { Button, Spinner } from "@heroui/react";
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 import { ApiError } from "@/api/client";
 import { NO_BREAKDOWNS, useUsageGroupedSeries, useUsageSummary } from "@/api/hooks";
@@ -28,6 +28,7 @@ import {
   StatCard,
 } from "@/components/ui";
 import { deltaFraction, formatNumber, formatPct, formatTokens, formatUsd } from "@/lib/format";
+import type { DashboardSearch } from "@/lib/search";
 import { billedTokenTotal, cacheSums, formatLatency } from "@/lib/usageTotals";
 import {
   bucketForWindow,
@@ -536,15 +537,16 @@ export function UsagePage() {
   // multi-value filter travels whole, as repeated params: Activity reads the same
   // sets, so the log opens on exactly the traffic the chart was showing.
   const drillTo = (params: Record<string, string | string[] | undefined>) => {
-    const search = new URLSearchParams();
-    if (winStart) search.set("start_date", winStart);
-    if (winEnd) search.set("end_date", winEnd);
+    const search: DashboardSearch = {};
+    if (winStart) search.start_date = winStart;
+    if (winEnd) search.end_date = winEnd;
     for (const [key, value] of Object.entries(params)) {
-      for (const one of typeof value === "string" ? [value] : (value ?? [])) {
-        if (one) search.append(key, one);
+      const values = (typeof value === "string" ? [value] : (value ?? [])).filter(Boolean);
+      if (values.length > 0) {
+        search[key] = values.length === 1 ? values[0] : values;
       }
     }
-    navigate(`/activity?${search.toString()}`);
+    navigate({ to: "/activity", search });
   };
 
   const errorRate = totals && totals.request_count > 0 ? totals.error_count / totals.request_count : 0;

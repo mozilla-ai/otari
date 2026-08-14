@@ -13,7 +13,7 @@ import {
   TextField,
 } from "@heroui/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 
 import {
   useCreateStoredProvider,
@@ -853,7 +853,7 @@ function OnboardingPanel({
           <Step n={3} title="Send your first request">
             Point your app at <code>/v1</code> on this gateway with the API key printed in the server logs
             (<code>gw-…</code>). See the{" "}
-            {/* /welcome is served by the gateway itself, not by a HashRouter route, so this
+            {/* /welcome is served by the gateway itself, not by a client route, so this
                 stays a plain path anchor: a router Link would resolve to /#/welcome, which
                 the catch-all route sends back to the overview. It leaves the SPA, so open a
                 new tab and the operator keeps the dashboard (as the guide's links do). */}
@@ -992,7 +992,8 @@ export function ProvidersPage() {
       isRowHeader: true,
       cell: (row) => (
         <Link
-          to={`/models?provider=${encodeURIComponent(row.instance)}`}
+          to="/models"
+          search={{ provider: row.instance }}
           className="font-medium text-[var(--otari-ink)] hover:text-[var(--otari-brand-dark)] hover:underline"
         >
           {row.instance}

@@ -27,7 +27,7 @@ export const authHeaders = {
   "Content-Type": "application/json",
 } as const;
 
-// Open a client route directly. Routing is react-router's HashRouter, so a
+// Open a client route directly. The router runs on hash history, so a
 // filtered view is a hash URL and its query string is what `useUrlState` reads.
 export async function gotoRoute(page: Page, route: string): Promise<void> {
   await page.goto(`/#${route}`);

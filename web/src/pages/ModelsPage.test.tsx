@@ -1,6 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +16,7 @@ import type {
   PricingResponse,
 } from "@/api/types";
 import { ModelsPage } from "@/pages/ModelsPage";
+import { withRouter } from "@/test/router";
 
 const PRICED: PricingResponse = {
   model_key: "openai:gpt-4o",
@@ -169,13 +169,9 @@ function panel(): HTMLElement {
   return screen.getByRole("complementary");
 }
 
-function renderWithClient(ui: ReactElement, initialEntries: string[] = ["/"]) {
+function renderWithClient(ui: ReactElement, url = "/") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <MemoryRouter initialEntries={initialEntries}>
-      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
-    </MemoryRouter>,
-  );
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, { wrapper: withRouter({ url }) });
 }
 
 function mockApi(
@@ -379,7 +375,7 @@ describe("ModelsPage", () => {
   it("reads the provider filter from the URL query parameter", async () => {
     mockApi();
 
-    renderWithClient(<ModelsPage />, ["/models?provider=anthropic"]);
+    renderWithClient(<ModelsPage />, "/models?provider=anthropic");
     await screen.findByText("anthropic:claude-sonnet-4");
 
     // The provider select is pre-set to the URL's provider, and only that
@@ -392,7 +388,7 @@ describe("ModelsPage", () => {
   it("falls back to all providers when the URL names an unknown provider", async () => {
     mockApi();
 
-    renderWithClient(<ModelsPage />, ["/models?provider=doesnotexist"]);
+    renderWithClient(<ModelsPage />, "/models?provider=doesnotexist");
     await screen.findByText("anthropic:claude-sonnet-4");
 
     // A stale/misspelled ?provider= resets to "all" once the catalogue loads,

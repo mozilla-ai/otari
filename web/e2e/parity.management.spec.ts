@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-import { dismissComboBox, login, nav, tableRows } from "./helpers";
+import { dismissComboBox, gotoRoute, login, nav, tableRows } from "./helpers";
 import { PARITY } from "./parity-data";
 
 // Each flow creates the object it acts on and removes it again, so the file can
@@ -225,5 +225,25 @@ test.describe("fallback routing", () => {
     await row(page, "Routing policies", POLICY).getByRole("button", { name: "Delete" }).click();
     await page.getByRole("button", { name: "Confirm" }).click();
     await expect(row(page, "Routing policies", POLICY)).toHaveCount(0);
+  });
+});
+
+// Two URL contracts the route table owes anyone holding an old link. Neither is
+// reachable from the UI, so nothing else in the suite would notice them
+// breaking, and both are one line in a route file: easy to drop in a refactor.
+test.describe("legacy routes", () => {
+  test("keeps the retired aliases path and unknown paths pointing somewhere real", async ({ page }) => {
+    await login(page);
+
+    // Aliases were folded into Routing, which lists them as the one-target
+    // policies they are; the old path is a bookmark that still has to land.
+    await gotoRoute(page, "/aliases");
+    await expect(page).toHaveURL(/#\/routing$/);
+    await expect(page.getByRole("heading", { name: "Routing" })).toBeVisible();
+
+    // An unrecognised path is a stale link from a route that has since moved,
+    // so it lands on the overview rather than a dead end.
+    await gotoRoute(page, "/no-such-page");
+    await expect(page).toHaveURL(/#\/$/);
   });
 });

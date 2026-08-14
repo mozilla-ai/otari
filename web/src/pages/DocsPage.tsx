@@ -26,7 +26,7 @@ function resolveDocHref(href: string | undefined): string | undefined {
     return href;
   }
   // In-page anchors ("#the-two-key-model", or remark-gfm's "#user-content-fn-*"
-  // footnotes) cannot resolve here: HashRouter owns location.hash, so following
+  // footnotes) cannot resolve here: hash routing owns location.hash, so following
   // one rewrites the route and the "*" fallback bounces the operator to
   // Overview. Send them to the rendered source on GitHub, like sibling docs.
   if (href.startsWith("#")) {

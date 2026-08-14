@@ -1,6 +1,6 @@
+import { Link } from "@tanstack/react-router";
 import { Button, Card, Chip } from "@heroui/react";
 import { useCallback, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
 
 import type { AliasResponse, PolicyGuardrail, PolicySpec, RoutingPolicyResponse } from "@/api/types";
 import {
@@ -19,6 +19,7 @@ import { Field } from "@/components/Field";
 import { ModelComboBox } from "@/components/ModelComboBox";
 import { UserComboBox } from "@/components/UserComboBox";
 import { ConfirmButton, CopyableValue, EmptyState, ErrorBanner, PageHeader } from "@/components/ui";
+import { useUrlValue } from "@/lib/urlState";
 
 /** A row on this page: either a routing policy or a stored/config alias.
  *
@@ -1026,8 +1027,7 @@ export function RoutingPage() {
   const deletePolicy = useDeleteRoutingPolicy();
   const deleteAlias = useDeleteAlias();
   // A deep link may pre-fill the add form with ?target=provider:model.
-  const [searchParams] = useSearchParams();
-  const initialTarget = searchParams.get("target") ?? "";
+  const initialTarget = useUrlValue("target");
   const [adding, setAdding] = useState(initialTarget !== "");
   const [editing, setEditing] = useState<RoutingRow | null>(null);
   // Readiness opens inline under its own row (DataTable's accordion), because it

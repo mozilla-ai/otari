@@ -2,11 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GatewaySettings } from "@/api/types";
 import { PricingWarning } from "@/components/PricingWarning";
+import { withRouter } from "@/test/router";
 
 const BASE: GatewaySettings = {
   mode: "standalone",
@@ -51,11 +51,7 @@ function countWindows(fetchMock: FetchMock): string[] {
 
 function renderPage(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <MemoryRouter>
-      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
-    </MemoryRouter>,
-  );
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, { wrapper: withRouter() });
 }
 
 describe("PricingWarning", () => {

@@ -1,6 +1,6 @@
 import { Button } from "@heroui/react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 
 import { useFailureCount, useSettings, useUpdateSettings } from "@/api/hooks";
 import { InfoBanner } from "@/components/ui";
@@ -51,7 +51,11 @@ export function PricingWarning() {
                 <strong className="font-semibold">
                   {failureCount.toLocaleString()} {failureCount === 1 ? "request" : "requests"} failed in the last hour.
                 </strong>{" "}
-                <Link to="/activity?status=error&range=1h&source=gateway" className="underline underline-offset-2">
+                <Link
+                  to="/activity"
+                  search={{ status: "error", range: "1h", source: "gateway" }}
+                  className="underline underline-offset-2"
+                >
                   View failed requests
                 </Link>
               </>

@@ -59,6 +59,11 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   enforces a conventional title. Visibility rules live in `RELEASE.md`
   ("Changelog visibility"). Do not hand-edit `CHANGELOG.md`; the release
   workflows regenerate it.
+- The dashboard's route tree (`web/src/routeTree.gen.ts`) **is** committed, unlike the
+  bundle below: `npm run typecheck` runs `tsc` alone and never invokes Vite, so without
+  it in the tree a type-check of a fresh clone fails on a missing module. Any
+  `npm test` or `npm run build` regenerates it from `web/src/routes/`, so adding a
+  route and not committing the regenerated file shows up as a dirty working tree.
 - The dashboard bundle (`src/gateway/static/dashboard/`) is **not** committed; it is
   gitignored and built on demand (`make dashboard`), and the Docker image builds it in
   its own Node stage. Vite content-hashes every asset filename, so committing it made

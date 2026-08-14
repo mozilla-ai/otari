@@ -1,6 +1,7 @@
 import { Button, Card } from "@heroui/react";
 import { useEffect, useMemo, useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
+import type { LinkProps } from "@tanstack/react-router";
 
 import {
   NO_BREAKDOWNS,
@@ -282,7 +283,7 @@ function GettingStartedPanel() {
           </p>
         </div>
         <div>
-          <Button variant="primary" onPress={() => navigate("/providers")}>
+          <Button variant="primary" onPress={() => navigate({ to: "/providers" })}>
             Add your first provider
           </Button>
         </div>
@@ -334,7 +335,7 @@ function SystemStatusStrip({
     return null;
   }
 
-  const problems: { text: string; to: string }[] = [];
+  const problems: { text: string; to: LinkProps["to"]; search?: LinkProps["search"] }[] = [];
   if ((providerHealth === "warn" || providerHealth === "alert") && total > 0) {
     // A degraded provider answers no model listing but is not down, so it is
     // reported separately rather than folded into "unreachable" (issue #447).
@@ -355,7 +356,7 @@ function SystemStatusStrip({
     problems.push({ text: `${budget.nearCount} budget${budget.nearCount === 1 ? "" : "s"} near limit`, to: "/budgets" });
   }
   if (errStatus === "alert" && errRate !== null) {
-    problems.push({ text: `error rate ${formatPct(errRate)}`, to: "/activity?status=error" });
+    problems.push({ text: `error rate ${formatPct(errRate)}`, to: "/activity", search: { status: "error" } });
   }
 
   if (problems.length === 0) {
@@ -369,11 +370,11 @@ function SystemStatusStrip({
     >
       <span className="font-medium">Needs attention:</span>
       {problems.map((p, i) => (
-        <span key={p.to + p.text} className="flex items-center gap-2">
+        <span key={p.text} className="flex items-center gap-2">
           {i > 0 ? <span aria-hidden className="text-amber-400">·</span> : null}
-          <NavLink to={p.to} className="underline underline-offset-2 hover:text-amber-950">
+          <Link to={p.to} search={p.search} className="underline underline-offset-2 hover:text-amber-950">
             {p.text}
-          </NavLink>
+          </Link>
         </span>
       ))}
     </div>
@@ -427,9 +428,9 @@ function RecentActivity({ entries, loading, error }: { entries: UsageEntry[]; lo
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-[var(--otari-ink)]">Recent activity</h2>
-        <NavLink to="/activity" className="text-sm text-[var(--otari-brand-dark)] hover:underline">
+        <Link to="/activity" className="text-sm text-[var(--otari-brand-dark)] hover:underline">
           View all →
-        </NavLink>
+        </Link>
       </div>
       <ErrorBanner error={error} />
       <DataTable

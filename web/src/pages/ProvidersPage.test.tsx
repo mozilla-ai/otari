@@ -2,7 +2,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PROVIDER_HEALTH_REFRESH_MS } from "@/api/hooks";
@@ -16,6 +15,7 @@ import type {
   TestProviderResult,
 } from "@/api/types";
 import { ProvidersPage } from "@/pages/ProvidersPage";
+import { withRouter } from "@/test/router";
 
 const CAPS = {
   streaming: false,
@@ -236,11 +236,7 @@ function mockApi(opts: MockOpts = {}) {
 }
 
 function renderPage(ui: ReactElement, client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
-  return render(
-    <MemoryRouter>
-      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
-    </MemoryRouter>,
-  );
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, { wrapper: withRouter() });
 }
 
 function healthRequestCount(fetchMock: ReturnType<typeof mockApi>): number {
@@ -460,7 +456,7 @@ describe("ProvidersPage", () => {
 
     await screen.findByText("Welcome to Otari");
     const quickstart = screen.getByRole("link", { name: "quickstart" });
-    // /welcome is a gateway-rendered page, not a HashRouter route: a router Link
+    // /welcome is a gateway-rendered page, not a client route: a router Link
     // (href "#/welcome") would hit the catch-all and redirect to the overview.
     expect(quickstart).toHaveAttribute("href", "/welcome");
     // Following it leaves the SPA, so it must not replace the dashboard tab.

@@ -1,10 +1,10 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
 import { Provider } from "@/provider";
+import { renderWithRouter } from "@/test/router";
 
 // jsdom has no layout engine, so `md:hidden` / responsive classes never take
 // effect. The mobile-vs-desktop branch keys off window.matchMedia instead, which
@@ -30,19 +30,19 @@ function mockMatchMedia(matches: boolean, options: { legacy?: boolean } = {}) {
   return { mql, listeners };
 }
 
+// AppShell is the root route's component in the real tree, so it renders its
+// page through an <Outlet>. Here it is the component under test and the pages
+// are the router's children, which is what makes clicking a nav link swap them.
 function renderShell() {
-  return render(
-    <Provider>
-      <MemoryRouter initialEntries={["/"]}>
-        <Routes>
-          <Route element={<AppShell />}>
-            <Route index element={<div>OVERVIEW PAGE</div>} />
-            <Route path="providers" element={<div>PROVIDERS PAGE</div>} />
-          </Route>
-        </Routes>
-      </MemoryRouter>
-    </Provider>,
-  );
+  return renderWithRouter(<div>OVERVIEW PAGE</div>, {
+    url: "/",
+    shell: (
+      <Provider>
+        <AppShell />
+      </Provider>
+    ),
+    routes: [{ path: "/providers", element: <div>PROVIDERS PAGE</div> }],
+  });
 }
 
 describe("AppShell responsive layout", () => {
@@ -55,7 +55,7 @@ describe("AppShell responsive layout", () => {
   it("keeps the sidebar an off-canvas drawer on mobile, toggled from the header", async () => {
     mockMatchMedia(true);
     const user = userEvent.setup();
-    const { container } = renderShell();
+    const { container } = await renderShell();
 
     const aside = container.querySelector("aside");
     // Off-canvas by default so it does not squash the page's content.
@@ -74,7 +74,7 @@ describe("AppShell responsive layout", () => {
   it("dismisses the mobile drawer after navigating to a destination", async () => {
     mockMatchMedia(true);
     const user = userEvent.setup();
-    renderShell();
+    await renderShell();
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }));
     await user.click(screen.getByRole("link", { name: "Providers" }));
@@ -84,9 +84,30 @@ describe("AppShell responsive layout", () => {
     expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("renders the resizable rail (not a drawer) on desktop", () => {
+  it("marks only the current page's nav link as active", async () => {
+    // Worth pinning because the router decides this, not the shell: a link is
+    // active when its route is in the current match chain, so the index link is
+    // lit only on the index. The react-router version needed an explicit `end`
+    // to get that, and it would be easy to reintroduce something equivalent.
     mockMatchMedia(false);
-    const { container } = renderShell();
+    const user = userEvent.setup();
+    await renderShell();
+
+    const overview = screen.getByRole("link", { name: "Overview" });
+    const providers = screen.getByRole("link", { name: "Providers" });
+    expect(overview).toHaveAttribute("aria-current", "page");
+    expect(providers).not.toHaveAttribute("aria-current");
+
+    await user.click(providers);
+
+    expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("renders the resizable rail (not a drawer) on desktop", async () => {
+    mockMatchMedia(false);
+    const { container } = await renderShell();
 
     const aside = container.querySelector("aside");
     // Desktop keeps the in-flow, inline-width-driven rail rather than a fixed overlay.
@@ -97,7 +118,7 @@ describe("AppShell responsive layout", () => {
   it("closes the drawer when the viewport grows past the mobile breakpoint", async () => {
     const { listeners } = mockMatchMedia(true);
     const user = userEvent.setup();
-    renderShell();
+    await renderShell();
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }));
     expect(screen.getByRole("button", { name: "Close navigation" })).toBeInTheDocument();
@@ -113,7 +134,7 @@ describe("AppShell responsive layout", () => {
   it("closes the drawer on Escape and restores focus to the toggle", async () => {
     mockMatchMedia(true);
     const user = userEvent.setup();
-    renderShell();
+    await renderShell();
 
     const toggle = screen.getByRole("button", { name: "Open navigation" });
     await user.click(toggle);
@@ -129,7 +150,7 @@ describe("AppShell responsive layout", () => {
   it("closes the drawer when the backdrop is clicked", async () => {
     mockMatchMedia(true);
     const user = userEvent.setup();
-    const { container } = renderShell();
+    const { container } = await renderShell();
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }));
     const backdrop = container.querySelector(".fixed.inset-0")!;
@@ -140,9 +161,9 @@ describe("AppShell responsive layout", () => {
     expect(screen.getByRole("button", { name: "Open navigation" })).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("marks the drawer inert while closed so its links leave the tab order", () => {
+  it("marks the drawer inert while closed so its links leave the tab order", async () => {
     mockMatchMedia(true);
-    const { container } = renderShell();
+    const { container } = await renderShell();
 
     // Off-canvas and inert by default: the nav is not reachable until opened.
     expect(container.querySelector("aside")).toHaveAttribute("inert");
@@ -152,7 +173,7 @@ describe("AppShell responsive layout", () => {
   it("makes the background (header + main) inert while the drawer is open", async () => {
     mockMatchMedia(true);
     const user = userEvent.setup();
-    const { container } = renderShell();
+    const { container } = await renderShell();
 
     const header = container.querySelector("header")!;
     const main = container.querySelector("main")!;
@@ -171,7 +192,7 @@ describe("AppShell responsive layout", () => {
   it("moves focus to the main region via the skip link without changing the route", async () => {
     mockMatchMedia(false);
     const user = userEvent.setup();
-    const { container } = renderShell();
+    const { container } = await renderShell();
 
     // The skip link is the first tab stop so keyboard users reach the page body
     // without traversing the whole nav.
@@ -190,7 +211,7 @@ describe("AppShell responsive layout", () => {
   it("makes the skip link inert while the drawer is open, matching its target", async () => {
     mockMatchMedia(true);
     const user = userEvent.setup();
-    renderShell();
+    await renderShell();
 
     const skip = screen.getByRole("button", { name: "Skip to main content" });
     // Live before the modal opens: it is the keyboard user's fast path to content.
@@ -204,9 +225,9 @@ describe("AppShell responsive layout", () => {
     expect(skip).toHaveAttribute("inert");
   });
 
-  it("hides the decorative nav icons from assistive tech", () => {
+  it("hides the decorative nav icons from assistive tech", async () => {
     mockMatchMedia(false);
-    const { container } = renderShell();
+    const { container } = await renderShell();
 
     // Each nav link carries a visible text label, so its leading glyph is
     // decorative and must not be announced twice. Every SVG in the shell is marked
@@ -216,9 +237,9 @@ describe("AppShell responsive layout", () => {
     icons.forEach((icon) => expect(icon).toHaveAttribute("aria-hidden"));
   });
 
-  it("links to the bundled user guide from the sidebar footer", () => {
+  it("links to the bundled user guide from the sidebar footer", async () => {
     mockMatchMedia(false);
-    renderShell();
+    await renderShell();
 
     // A footer link points operators at the guide bundled with this dashboard,
     // discoverable without hunting for a separate docs site.
@@ -226,11 +247,11 @@ describe("AppShell responsive layout", () => {
     expect(guideLink).toHaveAttribute("href", "/docs");
   });
 
-  it("subscribes via the legacy matchMedia API when addEventListener is absent", () => {
+  it("subscribes via the legacy matchMedia API when addEventListener is absent", async () => {
     // Safari < 14 exposes only addListener/removeListener; the shell must still
     // react to breakpoint changes rather than throwing on a missing method.
     const { listeners } = mockMatchMedia(true, { legacy: true });
-    renderShell();
+    await renderShell();
 
     // The component registered through addListener, so the captured set is live.
     expect(listeners.size).toBeGreaterThan(0);

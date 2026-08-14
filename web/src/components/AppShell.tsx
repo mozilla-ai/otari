@@ -7,7 +7,8 @@ import type {
   PointerEvent as ReactPointerEvent,
   ReactNode,
 } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { Link, Outlet } from "@tanstack/react-router";
+import type { LinkProps } from "@tanstack/react-router";
 
 import { useAuth } from "@/auth/AuthContext";
 import { ConnectionStatus } from "@/components/ConnectionStatus";
@@ -70,14 +71,21 @@ function readStoredCollapsed(): boolean {
 }
 
 interface NavItem {
-  to: string;
+  to: LinkProps["to"];
   label: string;
   section: string;
   icon: ReactNode;
-  // NavLink matches by prefix; the index route ("/") needs `end` or it stays
-  // highlighted on every page.
-  end?: boolean;
 }
+
+// Shared by the nav links and the user-guide link below them, so the two agree
+// on shape and only differ in what marks the current page.
+const navLinkClass = (collapsed: boolean) =>
+  clsx(
+    "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
+    collapsed ? "justify-center px-0" : "gap-3 px-3",
+  );
+const NAV_ACTIVE = "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]";
+const NAV_INACTIVE = "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]";
 
 // Sidebar groups, in display order. "Observability" is what the gateway did
 // (the request log today; usage analytics and an overview dashboard later) and
@@ -99,7 +107,6 @@ const NAV: NavItem[] = [
     section: "home",
     label: "Overview",
     // The index/home, so it leads the sidebar above the grouped sections.
-    end: true,
     icon: (
       // Four panes: an at-a-glance dashboard of the gateway.
       <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
@@ -354,8 +361,8 @@ export function AppShell() {
   }, []);
 
   // Move focus (and scroll) to the page's main region, past the header and the
-  // whole nav. A plain anchor to `#main-content` can't do this: HashRouter owns
-  // the URL hash, so that href would register as a route change instead. Focusing
+  // whole nav. A plain anchor to `#main-content` can't do this: the router runs
+  // on hash history, so that href would register as a route change. Focusing
   // the ref directly keeps the route intact; `main` carries tabIndex={-1} so it
   // can accept programmatic focus without joining the tab order.
   const skipToMain = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -508,28 +515,21 @@ export function AppShell() {
                   ) : null}
                   <div className="flex flex-col gap-1">
                     {items.map((item) => (
-                      <NavLink
+                      <Link
                         key={item.to}
                         to={item.to}
-                        end={item.end}
+                        activeProps={{ className: NAV_ACTIVE }}
+                        inactiveProps={{ className: NAV_INACTIVE }}
                         // Tapping a destination dismisses the mobile drawer so the
                         // page it navigated to is visible, not hidden behind it.
                         onClick={() => setMobileNavOpen(false)}
                         aria-label={effectiveCollapsed ? item.label : undefined}
                         title={effectiveCollapsed ? item.label : undefined}
-                        className={({ isActive }) =>
-                          clsx(
-                            "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
-                            effectiveCollapsed ? "justify-center px-0" : "gap-3 px-3",
-                            isActive
-                              ? "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
-                              : "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]",
-                          )
-                        }
+                        className={navLinkClass(effectiveCollapsed)}
                       >
                         {item.icon}
                         {effectiveCollapsed ? null : item.label}
-                      </NavLink>
+                      </Link>
                     ))}
                   </div>
                 </div>
@@ -540,21 +540,20 @@ export function AppShell() {
               dashboard's own docs, bundled with the running gateway (see DocsPage);
               otari.ai is a subtler pointer to the hosted product below it. */}
           <div className="mt-auto flex flex-col gap-1 pb-3">
-            <NavLink
+            <Link
               to="/docs"
+              activeProps={{ className: NAV_ACTIVE }}
+              inactiveProps={{ className: NAV_INACTIVE }}
               // Tapping dismisses the mobile drawer, like the primary nav above.
               onClick={() => setMobileNavOpen(false)}
               aria-label={effectiveCollapsed ? "User guide" : undefined}
               title={effectiveCollapsed ? "User guide" : undefined}
-              className={({ isActive }) =>
-                clsx(
-                  "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
-                  effectiveCollapsed ? "mx-2 justify-center px-0" : "mx-3 gap-3 px-3",
-                  isActive
-                    ? "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
-                    : "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]",
-                )
-              }
+              className={clsx(
+                navLinkClass(effectiveCollapsed),
+                // Indented by a margin rather than the nav's padding: this block
+                // sits outside <nav>, pinned to the bottom of the rail.
+                effectiveCollapsed ? "mx-2" : "mx-3",
+              )}
             >
               {/* An open book: the operator guide for this dashboard. Decorative;
                   the link is labelled by its text (or aria-label when collapsed). */}
@@ -563,7 +562,7 @@ export function AppShell() {
                 <path d="M12 6.5V20" strokeLinecap="round" />
               </svg>
               {effectiveCollapsed ? null : "User guide"}
-            </NavLink>
+            </Link>
             <a
               href="https://otari.ai"
               target="_blank"

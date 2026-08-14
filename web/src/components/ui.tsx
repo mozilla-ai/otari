@@ -1,7 +1,8 @@
 import { Button, Card, ComboBox, Input, Label, ListBox, ListBoxItem, Spinner, Tooltip } from "@heroui/react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
+import type { LinkProps } from "@tanstack/react-router";
 
 import { ApiError } from "@/api/client";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -38,7 +39,7 @@ export function StatCard({
   // for KPI tiles that have a bucketed series on the wire.
   chart?: ReactNode;
   // When set, the whole tile is a keyboard-focusable link to this route.
-  to?: string;
+  to?: LinkProps["to"];
 }) {
   const accent = status ? `border-l-4 ${STAT_STATUS[status].accent}` : "";
   const body = (
@@ -68,12 +69,12 @@ export function StatCard({
   if (to) {
     return (
       <Card className={`${cardClass} transition-colors hover:border-[var(--otari-brand)]`}>
-        <NavLink
+        <Link
           to={to}
           className="block rounded-[inherit] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)]"
         >
           {body}
-        </NavLink>
+        </Link>
       </Card>
     );
   }

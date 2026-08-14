@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 
+import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vitest/config";
@@ -47,7 +48,16 @@ const announceApiTarget = {
 
 export default defineConfig({
   base: "/",
-  plugins: [react(), tailwindcss(), announceApiTarget],
+  plugins: [
+    // Generates src/routeTree.gen.ts from src/routes/, and splits each route's
+    // component into its own chunk (autoCodeSplitting), which is why a route
+    // file may export nothing but `Route`. Must precede the React plugin: it
+    // rewrites the route modules that plugin then compiles.
+    tanstackRouter({ target: "react", autoCodeSplitting: true }),
+    react(),
+    tailwindcss(),
+    announceApiTarget,
+  ],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -73,8 +83,14 @@ export default defineConfig({
       output: {
         manualChunks: {
           heroui: ["@heroui/react"],
-          react: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react-router-dom"],
+          react: ["react", "react-dom", "react-dom/client", "react/jsx-runtime"],
           "tanstack-query": ["@tanstack/react-query"],
+          // Its own chunk rather than folded in with React. The router pulls in
+          // @tanstack/router-core, history and store, and putting that graph in
+          // the react chunk reorders the entry's imports enough that HeroUI
+          // evaluates before React's exports exist ("Cannot read properties of
+          // undefined (reading 'createContext')" at first paint).
+          "tanstack-router": ["@tanstack/react-router"],
           // recharts (and its d3 deps) is a large, self-contained vendor lib. Split
           // it out so it loads with the chart-bearing route bundles, not the shell.
           recharts: ["recharts"],

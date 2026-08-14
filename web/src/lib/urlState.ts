@@ -1,34 +1,31 @@
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
+
+import type { DashboardSearch } from "@/lib/search";
 
 // Keep table filter/pagination state in the URL query string, so a filtered view
 // is shareable and survives the back button. Values equal to their default are
-// removed to keep the URL clean, and every update is a single `setSearchParams`
-// call: react-router's functional updater is based on the current location, so
-// several separate calls in one tick would clobber each other rather than
-// compose. `patch` therefore takes all the keys to change at once.
+// removed to keep the URL clean, and every update is a single `navigate` call:
+// the router's functional updater is based on the current location, so several
+// separate calls in one tick would clobber each other rather than compose.
+// `patch` therefore takes all the keys to change at once.
 
-export function useUrlParam(key: string, defaultValue = ""): [string, (value: string) => void] {
-  const [params, setParams] = useSearchParams();
-  const value = params.get(key) ?? defaultValue;
-  const setValue = useCallback(
-    (next: string) => {
-      setParams(
-        (prev) => {
-          const updated = new URLSearchParams(prev);
-          if (!next || next === defaultValue) {
-            updated.delete(key);
-          } else {
-            updated.set(key, next);
-          }
-          return updated;
-        },
-        { replace: true },
-      );
-    },
-    [key, defaultValue, setParams],
-  );
-  return [value, setValue];
+// `strict: false` because these hooks are shared by every page rather than bound
+// to one route; the shape is the root route's, which every route inherits.
+function useSearchRecord(): DashboardSearch {
+  return useSearch({ strict: false }) as DashboardSearch;
+}
+
+// The first value of a key, whether it was written once or repeated. `undefined`
+// means the key is absent, which is what lets a default apply; a key present but
+// blank ("?source=") is a cleared filter and reads as "".
+function first(raw: string | string[] | undefined): string | undefined {
+  return Array.isArray(raw) ? raw[0] : raw;
+}
+
+/** Read one search param, for state that is only seeded from the URL. */
+export function useUrlValue(key: string, defaultValue = ""): string {
+  return first(useSearchRecord()[key]) ?? defaultValue;
 }
 
 export interface UrlState<K extends string> {
@@ -44,9 +41,10 @@ export interface UrlState<K extends string> {
 }
 
 export function useUrlState<K extends string>(defaults: Record<K, string>): UrlState<K> {
-  const [params, setParams] = useSearchParams();
+  const search = useSearchRecord();
+  const navigate = useNavigate();
 
-  const get = useCallback((key: K) => params.get(key) ?? defaults[key], [params, defaults]);
+  const get = useCallback((key: K) => first(search[key]) ?? defaults[key], [search, defaults]);
 
   // Values are trimmed and blanks dropped, so `?model=` or `?model=%20` reads as no
   // filter rather than a filter on whitespace (which would match nothing and look
@@ -54,59 +52,60 @@ export function useUrlState<K extends string>(defaults: Record<K, string>): UrlS
   // entirely: present-but-blank is a cleared filter, the same reading `get` gives it.
   const getAll = useCallback(
     (key: K) => {
-      if (!params.has(key)) {
+      const raw = search[key];
+      if (raw === undefined) {
         return defaults[key] ? [defaults[key]] : [];
       }
-      return params
-        .getAll(key)
-        .map((value) => value.trim())
-        .filter((value) => value !== "");
+      return (Array.isArray(raw) ? raw : [raw]).map((value) => value.trim()).filter((value) => value !== "");
     },
-    [params, defaults],
+    [search, defaults],
   );
 
   const getNumber = useCallback(
     (key: K) => {
       // A present but non-numeric param (e.g. a hand-edited `?size=abc`) must fall
       // back to the key's default, not 0: a 0 page size would send `limit=0` and 422.
-      const parsed = Number.parseInt(params.get(key) ?? "", 10);
+      const parsed = Number.parseInt(first(search[key]) ?? "", 10);
       if (!Number.isNaN(parsed)) {
         return parsed;
       }
       const fallback = Number.parseInt(defaults[key], 10);
       return Number.isNaN(fallback) ? 0 : fallback;
     },
-    [params, defaults],
+    [search, defaults],
   );
 
   const patch = useCallback(
     (updates: Partial<Record<K, string | number | string[]>>) => {
-      setParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
+      navigate({
+        to: ".",
+        search: (prev) => {
+          const next: DashboardSearch = { ...(prev as DashboardSearch) };
           for (const [key, raw] of Object.entries(updates)) {
             if (Array.isArray(raw)) {
               // Rewritten wholesale rather than appended to: the caller passes the
               // filter's complete value set, so a removed value has to disappear.
-              next.delete(key);
-              for (const value of raw) {
-                if (value !== "") next.append(key, value);
+              const values = raw.filter((value) => value !== "");
+              if (values.length === 0) {
+                delete next[key];
+              } else {
+                next[key] = values;
               }
               continue;
             }
             const value = String(raw);
             if (value === "" || value === defaults[key as K]) {
-              next.delete(key);
+              delete next[key];
             } else {
-              next.set(key, value);
+              next[key] = value;
             }
           }
           return next;
         },
-        { replace: true },
-      );
+        replace: true,
+      });
     },
-    [setParams, defaults],
+    [navigate, defaults],
   );
 
   return { get, getAll, getNumber, patch };

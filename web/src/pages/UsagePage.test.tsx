@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useLocation } from "@tanstack/react-router";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { UsageSummary } from "@/api/types";
 import { UsagePage } from "@/pages/UsagePage";
+import { withRouter } from "@/test/router";
 
 function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
   return {
@@ -109,22 +110,15 @@ function LocationProbe() {
   // A status role with an accessible name so tests query the probe by role
   // rather than a test id.
   return (
-    <div role="status" aria-label="Current location">{`${loc.pathname}${loc.search}`}</div>
+    <div role="status" aria-label="Current location">{`${loc.pathname}${loc.searchStr}`}</div>
   );
 }
 
 function renderPage(ui: ReactElement) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/usage"]}>
-        <Routes>
-          <Route path="/usage" element={ui} />
-          <Route path="/activity" element={<LocationProbe />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, {
+    wrapper: withRouter({ url: "/usage", routes: [{ path: "/activity", element: <LocationProbe /> }] }),
+  });
 }
 
 describe("UsagePage", () => {

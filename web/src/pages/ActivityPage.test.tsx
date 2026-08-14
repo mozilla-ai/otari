@@ -2,11 +2,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/api/types";
 import { ActivityPage } from "@/pages/ActivityPage";
+import { withRouter } from "@/test/router";
 
 function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
   return {
@@ -150,11 +150,9 @@ function mockApi(
 
 function renderPage(ui: ReactElement, route = "/activity") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[route]}>{ui}</MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, {
+    wrapper: withRouter({ url: route }),
+  });
 }
 
 // Only the list requests (not /count, /summary, /in-flight, or mutations) carry

@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useLocation } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { UsageSummary } from "@/api/types";
 import { localDayKey, OverviewIndex, OverviewPage } from "@/pages/OverviewPage";
+import { withRouter } from "@/test/router";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -84,16 +85,9 @@ function LocationProbe() {
 
 function renderPage(ui: ReactElement, initial = "/overview") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[initial]}>
-        <Routes>
-          <Route path="/overview" element={ui} />
-          <Route path="/providers" element={<LocationProbe />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, {
+    wrapper: withRouter({ url: initial, routes: [{ path: "/providers", element: <LocationProbe /> }] }),
+  });
 }
 
 describe("OverviewPage", () => {
@@ -183,6 +177,23 @@ describe("OverviewPage", () => {
     // the attention strip, each problem a link.
     expect(await screen.findByText("1 provider unreachable")).toBeInTheDocument();
     expect(screen.getByText("1 budget over limit")).toBeInTheDocument();
+  });
+
+  it("links each attention problem at the view that explains it", async () => {
+    mockApi({
+      // 20% errors, past the alert threshold, so the error-rate problem appears
+      // alongside the provider one and the strip carries both link shapes.
+      period: { request_count: 100, error_count: 20 },
+      health: { providers: [], healthy: 2, total: 3, checked_at: "2026-07-22T00:00:00Z" },
+    });
+    renderPage(<OverviewPage />);
+
+    // A bare destination, and one that has to carry a filter with it. The second
+    // is the one worth pinning: it is the only place the overview hands the
+    // activity log a query, so a link that dropped it would land on an unfiltered
+    // log and still look like it worked.
+    expect(await screen.findByRole("link", { name: "1 provider unreachable" })).toHaveAttribute("href", "/providers");
+    expect(screen.getByRole("link", { name: /^error rate/ })).toHaveAttribute("href", "/activity?status=error");
   });
 
   it("hides the status strip when nothing needs attention", async () => {
