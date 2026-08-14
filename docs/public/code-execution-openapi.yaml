@@ -89,12 +89,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/SessionHandle"
         "401":
-          description: |
-            Credential missing or rejected, where the deployment requires one.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
+          $ref: "#/components/responses/Unauthorized"
         "503":
           description: |
             At capacity, no session leased. Distinct from a malformed request:
@@ -122,6 +117,8 @@ paths:
       responses:
         "204":
           description: Session released, or already gone.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Unknown session.
           content:
@@ -167,6 +164,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           description: Unknown session.
           content:
@@ -207,6 +206,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Path outside the session workspace.
           content:
@@ -252,6 +253,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Path outside the session workspace.
           content:
@@ -296,6 +299,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FileUploadResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Path outside the session workspace.
           content:
@@ -319,6 +324,20 @@ components:
         In Otari's hybrid mode this is how the platform's authenticated proxy
         admits the request and derives tenancy from the caller's workspace, so
         the backend behind it never has to.
+
+  responses:
+    # Declared on every operation, not just session creation: the credential is a
+    # property of the deployment, so a stale or revoked one surfaces wherever the
+    # client happens to call next, most often on a repeated Execute. A generated
+    # client that models it on one operation only would treat the same answer
+    # elsewhere as an unrecognised failure.
+    Unauthorized:
+      description: |
+        Credential missing or rejected, where the deployment requires one.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
 
   parameters:
     SessionId:

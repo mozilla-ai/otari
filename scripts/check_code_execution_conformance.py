@@ -13,8 +13,9 @@ The three session operations are required of a backend, so a failure there means
 non-conforming. The file operations are optional, and a backend that does not
 serve them reports as skipped.
 
-Requests are validated on the way out as well as responses on the way in, which
-keeps this script from drifting from the spec it checks against.
+JSON requests are validated on the way out as well as responses on the way in,
+which keeps this script from drifting from the spec it checks against. The one
+request that is not JSON, the multipart file upload, is checked by its response.
 
 `jsonschema` is a dev dependency of this repo rather than a runtime one, since
 the gateway parses the contract with its own Pydantic models. Outside a synced
@@ -94,17 +95,29 @@ def schema_errors(spec: dict[str, Any], schema_name: str, payload: Any) -> list[
     ]
 
 
-def _exec_payload(spec: dict[str, Any], tool: str, tool_input: dict[str, Any], timeout_seconds: int) -> dict[str, Any]:
-    payload = {
-        "tool": tool,
-        "input": tool_input,
-        "timeout_seconds": timeout_seconds,
-        "tool_use_id": f"srvtoolu_{_MARKER}",
-    }
-    errors = schema_errors(spec, "ExecRequest", payload)
+def _validated_request(spec: dict[str, Any], schema_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Refuse to send a request the contract does not describe.
+
+    A checker that sends a malformed request reports the backend's rejection of
+    it as a backend fault, which is the one verdict it must never get wrong.
+    """
+    errors = schema_errors(spec, schema_name, payload)
     if errors:  # pragma: no cover - a bug in this script, not in a backend
-        raise AssertionError(f"conformance script built a non-conforming ExecRequest: {errors}")
+        raise AssertionError(f"conformance script built a non-conforming {schema_name}: {errors}")
     return payload
+
+
+def _exec_payload(spec: dict[str, Any], tool: str, tool_input: dict[str, Any], timeout_seconds: int) -> dict[str, Any]:
+    return _validated_request(
+        spec,
+        "ExecRequest",
+        {
+            "tool": tool,
+            "input": tool_input,
+            "timeout_seconds": timeout_seconds,
+            "tool_use_id": f"srvtoolu_{_MARKER}",
+        },
+    )
 
 
 def _checked(
@@ -135,7 +148,10 @@ def _check_create_session(
 ) -> tuple[list[Check], str | None]:
     check, handle = _checked(
         "CreateSession",
-        client.post("/sessions", json={"idle_timeout_seconds": idle_hint}),
+        client.post(
+            "/sessions",
+            json=_validated_request(spec, "CreateSessionRequest", {"idle_timeout_seconds": idle_hint}),
+        ),
         expected_status=201,
         spec=spec,
         schema_name="SessionHandle",
@@ -415,13 +431,26 @@ def report(checks: list[Check]) -> int:
     return 0
 
 
+def _execution_budget(value: str) -> int:
+    """An execution budget the contract allows, rejected at the CLI if not.
+
+    Without this, a zero or negative value only fails when the first request is
+    validated, after a session has already been leased, and reports as this
+    script being at fault rather than the invocation.
+    """
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1 second, as the contract requires")
+    return parsed
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base-url", required=True, help="Base URL of the backend, e.g. http://localhost:8080")
     parser.add_argument("--auth-token", default=None, help="Bearer credential, where the deployment requires one.")
     parser.add_argument(
         "--timeout-seconds",
-        type=int,
+        type=_execution_budget,
         default=_DEFAULT_TIMEOUT_SECONDS,
         help=f"Execution budget granted per call (default: {_DEFAULT_TIMEOUT_SECONDS}).",
     )

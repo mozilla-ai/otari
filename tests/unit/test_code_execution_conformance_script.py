@@ -260,6 +260,16 @@ def test_unreachable_backend_reports_a_failure_rather_than_raising() -> None:
     assert conformance.report(checks) == 1
 
 
+def test_a_non_positive_execution_budget_is_rejected_at_the_cli() -> None:
+    """Rejected before a session is leased, and blamed on the invocation.
+
+    The contract's minimum is 1 second, so a 0 would otherwise fail on the first
+    request as "this script built a non-conforming payload".
+    """
+    with pytest.raises(SystemExit):
+        conformance.main(["--base-url", "http://sandbox", "--timeout-seconds", "0"])
+
+
 def test_main_reports_and_exits_nonzero_on_a_broken_backend(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

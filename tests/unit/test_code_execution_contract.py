@@ -53,6 +53,7 @@ def spec() -> dict[str, Any]:
 
 def _table_rows(doc: str, *, after: str) -> list[list[str]]:
     """The rows of the first markdown table following a heading or line."""
+    assert after in doc, f"{_DOC_PATH.name} no longer contains {after!r}, so its table cannot be checked"
     body = doc.split(after, 1)[1]
     rows: list[list[str]] = []
     for line in body.splitlines():
@@ -166,6 +167,22 @@ def test_documented_status_codes_are_the_spec_status_codes(doc: str, spec: dict[
         for status in operation["responses"]
     }
     assert documented == declared
+
+
+def test_every_operation_declares_the_unauthorized_response(spec: dict[str, Any]) -> None:
+    """The credential is a deployment property, so any operation can answer 401.
+
+    Declaring it on one operation only would leave a generated client treating
+    the same answer elsewhere as an unrecognised failure.
+    """
+    missing = [
+        operation["operationId"]
+        for path_item in spec["paths"].values()
+        for method in _HTTP_METHODS
+        if (operation := path_item.get(method)) is not None
+        and operation["responses"].get("401", {}).get("$ref") != "#/components/responses/Unauthorized"
+    ]
+    assert not missing, f"operation(s) with no 401 declared: {missing}"
 
 
 def test_documented_example_is_the_spec_example(doc: str, spec: dict[str, Any]) -> None:
